@@ -54,7 +54,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			root, taskParts, err := runStorageTaskWithPlan(rawCtx, task, foldPlan{})
+			root, taskParts, err := runStorageTaskWithPlan(ctx, rawCtx, task, foldPlan{})
 			if err != nil {
 				return err
 			}
@@ -85,7 +85,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				if i >= len(storage) {
 					return nil
 				}
-				root, taskParts, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
+				root, taskParts, err := runStorageTaskWithPlan(gCtx, workerCtx, storage[i], taskPlan)
 				if err != nil {
 					return err
 				}
@@ -97,13 +97,24 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, fanOutMin int) ([32]byte, deltaParts, error) {
-	storageWorkers, accountWorkers := workers, workers
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-		storageWorkers = workers * storageOversubscribe
-		accountWorkers = min(workers, accountPlaneFanout)
+// storageWorkerCount is the storage phase's worker count: workers when set, else procs oversubscribed, at most maxWorkers when set.
+func storageWorkerCount(workers, procs, maxWorkers int) int {
+	n := workers
+	if n <= 0 {
+		n = procs * storageOversubscribe
 	}
+	if maxWorkers > 0 {
+		n = min(n, maxWorkers)
+	}
+	return n
+}
+
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, storageWorkersMax, fanOutMin int) ([32]byte, deltaParts, error) {
+	accountWorkers := workers
+	if workers <= 0 {
+		accountWorkers = min(runtime.GOMAXPROCS(0), accountPlaneFanout)
+	}
+	storageWorkers := storageWorkerCount(workers, runtime.GOMAXPROCS(0), storageWorkersMax)
 	storageRoots := make([][32]byte, len(storage))
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
@@ -130,11 +141,13 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			ready <- int(nib)
 		}
 	}
+	storageCtx, cancelStorage := context.WithCancel(ctx)
+	defer cancelStorage()
 	storageReady := make(chan struct{})
 	var storageErr error
 	collectStorage := func() {
 		defer close(storageReady)
-		storageErr = runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, taskDone)
+		storageErr = runStoragePhase(storageCtx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, taskDone)
 	}
 	nextReady := func() int {
 		select {
@@ -154,6 +167,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 	root, err := g.loadRoot(rawCtx)
 	if err != nil {
+		cancelStorage()
 		<-storageReady
 		return [32]byte{}, nil, err
 	}
@@ -193,7 +207,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupHashes [16][32]byte
 	var groupParts [16]deltaParts
 	var pending [16]*pendingRemoval
-	pipeline := func(ctx commitment.PatriciaContext, nib int, group []int) error {
+	pipeline := func(workerCtx commitment.PatriciaContext, nib int, group []int) error {
 		child := root.child(nib)
 		if len(root.path) != 0 || child == nil || len(child.path) != 1 {
 			return nil
@@ -221,20 +235,21 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 				}
 			}
 		}
-		hash, err := g.materialize(ctx, child, root, &groupParts[nib])
+		hash, err := g.materialize(ctx, workerCtx, child, root, &groupParts[nib])
 		if err != nil {
 			return err
 		}
 		groupHashes[nib], pipelined[nib] = hash, true
 		return nil
 	}
-	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, nextReady, pipeline)
+	if err := g.planAccounts(rawCtx, root, accounts, plans, accountFold, nextReady, pipeline); err != nil {
+		cancelStorage()
+		<-storageReady
+		return [32]byte{}, nil, err
+	}
 	<-storageReady
 	if storageErr != nil {
 		return [32]byte{}, nil, storageErr
-	}
-	if planErr != nil {
-		return [32]byte{}, nil, planErr
 	}
 
 	remaining := make([]int, 0, len(plans))
@@ -297,7 +312,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, nil, err
 		}
 	}
-	accountParts, hash, err := g.persistGraph(rawCtx, root, accountFold)
+	accountParts, hash, err := g.persistGraph(ctx, rawCtx, root, accountFold)
 	if err != nil {
 		return [32]byte{}, nil, err
 	}

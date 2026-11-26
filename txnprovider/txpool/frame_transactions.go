@@ -177,11 +177,22 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 	if err := frame.Validate(); err != nil {
 		return txpoolcfg.InvalidFrame
 	}
-	if !isLocal && frame.GetFeeCap().LtUint64(p.cfg.MinFeeCap) {
-		return txpoolcfg.UnderPriced
-	}
 	_, _, limits, err := frame.GasLimits()
-	if err != nil || limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
+	if err != nil {
+		return txpoolcfg.GasLimitTooHigh
+	}
+	if !isLocal {
+		// A frame pays for blobs and execution from the same signed fee budget.
+		minFee, blobFee := uint256.NewInt(p.cfg.MinFeeCap), uint256.NewInt(p.pendingBlobFee.Load())
+		_, blobCost, err := frame.Fees.RequiredCost(limits.Total(), frame.GetBlobGas(), minFee, blobFee)
+		if err != nil {
+			if frame.Fees.MaxFee.Lt(&blobCost) {
+				return txpoolcfg.FeeTooLow
+			}
+			return txpoolcfg.UnderPriced
+		}
+	}
+	if limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
 		return txpoolcfg.GasLimitTooHigh
 	}
 	return txpoolcfg.Success
@@ -235,7 +246,11 @@ func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, senderID uint64) fram
 // Head publication can precede pool updates. Waiting on the generation also
 // covers recovery and same-height reorgs without polling the backend.
 func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool {
-	return p.waitForCondition(ctx, func() bool { return generation != p.stateGeneration })
+	return p.waitForCondition(ctx, nil, func() bool {
+		p.lock.Lock()
+		defer p.lock.Unlock()
+		return generation != p.stateGeneration
+	})
 }
 
 // applyFrameValidation requires the pool lock. Stale batches and cleared sender
@@ -365,13 +380,14 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		return frameValidationResult{reason: reason}, nil
 	}
 	if reply.Payer.GetHi() == nil ||
-		reply.MaxCost.GetHi() == nil || reply.MaxCost.GetLo() == nil ||
 		reply.PayerBalance.GetHi() == nil || reply.PayerBalance.GetLo() == nil {
 		return frameValidationResult{}, errors.New("invalid frame validation reply")
 	}
 	v := &protocol.FrameValidation{
-		Payer: gointerfaces.ConvertH160toAddress(reply.Payer), Paymaster: reply.Paymaster, Deadline: reply.Deadline,
-		MaxCost: *gointerfaces.ConvertH256ToUint256Int(reply.MaxCost), PayerBalance: *gointerfaces.ConvertH256ToUint256Int(reply.PayerBalance),
+		Payer:        gointerfaces.ConvertH160toAddress(reply.Payer),
+		PayerBalance: *gointerfaces.ConvertH256ToUint256Int(reply.PayerBalance),
+		Paymaster:    reply.Paymaster,
+		Deadline:     reply.Deadline,
 	}
 	v.Dependencies = make([]common.Address, 0, len(reply.Dependencies)+2)
 	v.Dependencies = append(v.Dependencies, txn.Txn.(*types.FrameTransaction).SenderAddress, v.Payer)
@@ -430,13 +446,17 @@ func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.Dis
 	return p.checkFrameReservation(txn, v, found)
 }
 
+func frameMaxFee(txn *TxnSlot) *uint256.Int {
+	return &txn.Txn.(*types.FrameTransaction).Fees.MaxFee
+}
+
 // checkFrameReservation requires the pool lock. Replacements and revalidation
 // reuse the previous reservation, so only their net change counts against balance.
 func (p *TxPool) checkFrameReservation(txn *TxnSlot, v *protocol.FrameValidation, previous *metaTxn) txpoolcfg.DiscardReason {
 	reserved := p.frameReservations[v.Payer]
 	if previous != nil {
 		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == v.Payer {
-			reserved.cost.Sub(&reserved.cost, &previous.TxnSlot.Txn.(*types.FrameTransaction).Fees.MaxFee)
+			reserved.cost.Sub(&reserved.cost, frameMaxFee(previous.TxnSlot))
 			if old.Paymaster {
 				reserved.paymasters--
 			}
@@ -448,7 +468,7 @@ func (p *TxPool) checkFrameReservation(txn *TxnSlot, v *protocol.FrameValidation
 		return txpoolcfg.InvalidFrame
 	}
 	var total uint256.Int
-	if _, overflow := total.AddOverflow(&reserved.cost, &txn.Txn.(*types.FrameTransaction).Fees.MaxFee); overflow || total.Gt(&v.PayerBalance) {
+	if _, overflow := total.AddOverflow(&reserved.cost, frameMaxFee(txn)); overflow || total.Gt(&v.PayerBalance) {
 		return txpoolcfg.InsufficientFunds
 	}
 	// Ordinary transactions spend the same balance. Include their pooled costs,
@@ -519,7 +539,7 @@ func (p *TxPool) reserveFrame(txn *TxnSlot) {
 		p.frameReservations = make(map[common.Address]frameReservation)
 	}
 	r := p.frameReservations[v.Payer]
-	r.cost.Add(&r.cost, &txn.Txn.(*types.FrameTransaction).Fees.MaxFee)
+	r.cost.Add(&r.cost, frameMaxFee(txn))
 	if v.Paymaster {
 		r.paymasters++
 	}
@@ -533,7 +553,7 @@ func (p *TxPool) releaseFrame(txn *TxnSlot) {
 		return
 	}
 	r := p.frameReservations[v.Payer]
-	r.cost.Sub(&r.cost, &txn.Txn.(*types.FrameTransaction).Fees.MaxFee)
+	r.cost.Sub(&r.cost, frameMaxFee(txn))
 	if v.Paymaster {
 		r.paymasters--
 	}

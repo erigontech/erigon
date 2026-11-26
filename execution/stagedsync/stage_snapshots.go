@@ -425,6 +425,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution and before RPCDaemon reopens files — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
+		return err
+	}
+
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
 	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
@@ -443,12 +449,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
-		return err
-	}
-
-	// a state file missing its accessor is excluded from the visible set, so E3 accessors
-	// must be rebuilt before execution — there is no background rebuild path
-	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
@@ -551,7 +551,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPr
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
+func pruneCanonicalMarkers(tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -633,7 +633,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(tx, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil

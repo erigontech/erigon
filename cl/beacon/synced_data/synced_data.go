@@ -136,10 +136,23 @@ func (s *SyncedDataManager) OnOwnedHeadStateWithBlockRoot(newState *state.Cachin
 		return errors.New("owned head state is already managed")
 	}
 
+	if s.spareHeadState == nil {
+		s.spareHeadState = s.previousHeadState
+	}
 	s.previousHeadState = s.headState
 	s.headState = newState
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
+}
+
+// TakeSpareHeadState removes and returns the state the last head rotation dropped, or nil. The caller owns it and may
+// overwrite it.
+func (s *SyncedDataManager) TakeSpareHeadState() *state.CachingBeaconState {
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+	spare := s.spareHeadState
+	s.spareHeadState = nil
+	return spare
 }
 
 // publishHeadStateLocked materializes newState into a standalone copy and

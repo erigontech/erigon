@@ -108,7 +108,7 @@ func (b *witnessBed) hphWitness(t testing.TB, keys witnessKeys, exclusion bool) 
 	keys.touch(u)
 	byHash, proved, root, err := hph.WitnessesByHash(ctx, u, exclusion)
 	require.NoError(t, err)
-	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 	require.NoError(t, err)
 	return nodes
 }
@@ -124,7 +124,7 @@ func (b *witnessBed) v3Witness(t testing.TB, keys witnessKeys, exclusion bool) [
 	keys.touch(u)
 	byHash, proved, root, err := tr.WitnessesByHash(ctx, u, exclusion)
 	require.NoError(t, err)
-	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 	require.NoError(t, err)
 	return nodes
 }
@@ -606,7 +606,7 @@ func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
 		byHash, proved, gotRoot, err := tr.WitnessesByHash(ctx, u, false)
 		require.NoError(t, err)
 		require.Equal(t, root, gotRoot)
-		nodes, err := trie.WitnessNodesForKeysByHash(byHash, gotRoot, proved)
+		nodes, err := trie.WitnessNodesForKeysByHash(byHash, gotRoot, proved, false)
 		require.NoError(t, err)
 		requireSameNodes(t, want, nodes, "changed root")
 		require.NotEmpty(t, counting.reads)
@@ -645,7 +645,7 @@ func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
 			byHash, proved, root, err := tr.WitnessesByHash(ctx, u, false)
 			u.Close()
 			require.NoError(t, err)
-			got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+			got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, false)
 			require.NoError(t, err)
 			requireSameNodes(t, want, got, fmt.Sprintf("seed %d", seed))
 			for k := range counting.reads {

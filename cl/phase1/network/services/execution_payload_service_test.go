@@ -427,6 +427,50 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	requireEnvelopeImportKeptSeen(t, forkchoiceMock, blockRoot, 7)
 }
 
+func TestExecutionPayloadServiceNotifiesArrivalOfValidatedEnvelope(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter, nil)
+	service.(*executionPayloadService).pending.stopAndWait()
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
+	select {
+	case root := <-emitter.EnvelopeArrived():
+		require.Equal(t, blockRoot, root)
+	default:
+		t.Fatal("validated gossip envelope did not notify its arrival")
+	}
+	requireEnvelopeImportKeptSeen(t, forkchoiceMock, blockRoot, 7)
+}
+
+func TestExecutionPayloadServiceNotifiesArrivalOfPendingEnvelopeOnceItsBlockIsKnown(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter, nil)
+	impl := service.(*executionPayloadService)
+	impl.pending.stopAndWait()
+
+	blockRoot := common.Hash{1}
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)), ErrIgnore)
+	require.Empty(t, emitter.EnvelopeArrived())
+
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	impl.pending.processPending(t.Context())
+
+	select {
+	case root := <-emitter.EnvelopeArrived():
+		require.Equal(t, blockRoot, root)
+	default:
+		t.Fatal("validated pending envelope did not notify its arrival")
+	}
+}
+
 func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -519,6 +563,7 @@ func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.
 		t.Fatalf("emitted gossip event for invalid envelope: %#v", event)
 	default:
 	}
+	require.Empty(t, emitter.EnvelopeArrived())
 }
 
 func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) {

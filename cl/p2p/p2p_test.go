@@ -153,10 +153,10 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndQUICPortWhenQUICDisabled(t *testin
 
 	for range 10 {
 		discoveryPort, _, err := availableCaplinTestPorts()
-		if errors.Is(err, syscall.EADDRINUSE) {
+		if err != nil {
+			t.Logf("could not probe listener ports: %v", err)
 			continue
 		}
-		require.NoError(t, err)
 
 		cfg := &P2PConfig{
 			NetworkConfig: &networkConfigCopy,
@@ -235,10 +235,10 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 
 	for range 10 {
 		discoveryPort, quicPort, err := availableCaplinTestPorts()
-		if errors.Is(err, syscall.EADDRINUSE) {
+		if err != nil {
+			t.Logf("could not probe listener ports: %v", err)
 			continue
 		}
-		require.NoError(t, err)
 
 		cfg := &P2PConfig{
 			NetworkConfig: &networkConfigCopy,
@@ -270,17 +270,17 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 }
 
 func availableCaplinTestPorts() (int, int, error) {
-	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tcpProbe.Close()
-	discoveryPort := tcpProbe.Addr().(*net.TCPAddr).Port
-	discoveryProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: discoveryPort})
+	discoveryProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		return 0, 0, err
 	}
 	defer discoveryProbe.Close()
+	discoveryPort := discoveryProbe.LocalAddr().(*net.UDPAddr).Port
+	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: discoveryPort})
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tcpProbe.Close()
 	quicProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		return 0, 0, err

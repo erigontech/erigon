@@ -27,7 +27,7 @@ import (
 // maxColumnBitmaps bounds the cache at about the default retention window, one root per slot.
 const maxColumnBitmaps = 1 << 17
 
-// columnBitmaps caches which columns of a root have a file, so lookups need no stat. An
+// columnBitmaps caches which columns of a root are stored, so lookups need no stat. An
 // entry is built from a scan of the root's files and answers only for that bucket and column
 // count. Callers set a bit after its file is written and clear it after its file is removed,
 // both under the root's lock, and use entries only at or above the prune floor.

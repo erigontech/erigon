@@ -143,6 +143,11 @@ func (keys *FrameNonceKeys) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &values); err != nil {
 		return err
 	}
+	// Preserve null for the required-field check. An empty array selects the account nonce.
+	if values == nil {
+		*keys = nil
+		return nil
+	}
 	*keys = make(FrameNonceKeys, len(values))
 	for i := range values {
 		(*keys)[i] = uint256.Int(values[i])

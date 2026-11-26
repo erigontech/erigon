@@ -157,18 +157,18 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.C
 }
 
 // ImportColumnsFromBlobs mocks base method.
-func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
+func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte, claim func([]*cltypes.DataColumnSidecar)) ([]*cltypes.DataColumnSidecar, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ImportColumnsFromBlobs", ctx, block, blobs, cellProofs)
+	ret := m.ctrl.Call(m, "ImportColumnsFromBlobs", ctx, block, blobs, cellProofs, claim)
 	ret0, _ := ret[0].([]*cltypes.DataColumnSidecar)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ImportColumnsFromBlobs indicates an expected call of ImportColumnsFromBlobs.
-func (mr *MockPeerDasMockRecorder) ImportColumnsFromBlobs(ctx, block, blobs, cellProofs any) *MockPeerDasImportColumnsFromBlobsCall {
+func (mr *MockPeerDasMockRecorder) ImportColumnsFromBlobs(ctx, block, blobs, cellProofs, claim any) *MockPeerDasImportColumnsFromBlobsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ImportColumnsFromBlobs", reflect.TypeOf((*MockPeerDas)(nil).ImportColumnsFromBlobs), ctx, block, blobs, cellProofs)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ImportColumnsFromBlobs", reflect.TypeOf((*MockPeerDas)(nil).ImportColumnsFromBlobs), ctx, block, blobs, cellProofs, claim)
 	return &MockPeerDasImportColumnsFromBlobsCall{Call: call}
 }
 
@@ -184,13 +184,13 @@ func (c *MockPeerDasImportColumnsFromBlobsCall) Return(arg0 []*cltypes.DataColum
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
+func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte, func([]*cltypes.DataColumnSidecar)) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
+func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte, func([]*cltypes.DataColumnSidecar)) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

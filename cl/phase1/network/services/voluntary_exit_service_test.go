@@ -79,7 +79,7 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 		ctrl: t.gomockCtrl,
 	}
 	blsVerify = t.mockFuncs.BlsVerify
-	blsVerifyMultipleSignatures = t.mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(t.mockFuncs.BlsVerifyMultipleSignatures)
 }
 
 func (t *voluntaryExitTestSuite) TearDownTest() {
@@ -329,9 +329,9 @@ func (t *voluntaryExitTestSuite) TestVoluntaryExitGossipNotAcceptedBeforeSignatu
 		cfg.FarFutureEpoch,
 	))
 	t.Require().NoError(t.syncedData.OnHeadState(st))
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return false, nil
-	}
+	})
 
 	msg := &SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
@@ -531,10 +531,10 @@ func TestVoluntaryExitPendingWithdrawals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			saveSignatureGlobals(t)
 			verified := false
-			blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 				verified = true
 				return true, nil
-			}
+			})
 
 			cfg := clparams.MainnetBeaconConfig
 			st := state.New(&cfg)

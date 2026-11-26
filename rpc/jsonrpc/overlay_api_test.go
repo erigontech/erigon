@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -226,14 +227,13 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000, State: 5_000}},
 			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddFailedTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -628,6 +628,434 @@ func TestCallConstructorIntrinsicExecutionGasCap(t *testing.T) {
 	}
 }
 
+func TestCallConstructorTopLevelInitCodeLimits(t *testing.T) {
+	m, key, sender := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	initCode := program.New().Return(0, 1).Bytes()
+	txn, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 1_000_000, uint256.NewInt(2_000_000_000), initCode), *types.LatestSigner(m.ChainConfig), key)
+	require.NoError(t, err)
+	insertConstructorTx(t, m, txn)
+	target := types.CreateAddress(sender, 0)
+	base := newBaseApiForTest(m)
+	ots := NewOtterscanAPI(base, m.DB, 25)
+
+	// Padding after RETURN changes the size and intrinsic gas while keeping execution identical.
+	for _, tc := range []struct {
+		name        string
+		gasCap      uint64
+		replacement []byte
+		wantErr     error
+	}{
+		{"size limit", 2_000_000, common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
+		{"intrinsic gas", 100_000, append(initCode, bytes.Repeat([]byte{byte(vm.JUMPDEST)}, 10_000)...), protocol.ErrIntrinsicGas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, ots)
+			result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Nil(t, result)
+		})
+	}
+}
+
+func insertConstructorTx(t *testing.T, m *execmoduletester.ExecModuleTester, txn types.Transaction) *blockgen.ChainPack {
+	t.Helper()
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	return pack
+}
+
+func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		opcode        vm.OpCode
+		frameTx       bool
+		repeatCreate2 bool
+		emptyRuntime  bool
+	}{
+		{name: "ordinary CREATE", opcode: vm.CREATE},
+		{name: "ordinary CREATE2", opcode: vm.CREATE2},
+		{name: "frame CREATE", opcode: vm.CREATE, frameTx: true},
+		{name: "frame CREATE2", opcode: vm.CREATE2, frameTx: true},
+		{name: "ordinary repeated CREATE2", opcode: vm.CREATE2, repeatCreate2: true},
+		{name: "ordinary empty repeated CREATE2", opcode: vm.CREATE2, repeatCreate2: true, emptyRuntime: true},
+		{name: "frame empty repeated CREATE2", opcode: vm.CREATE2, frameTx: true, repeatCreate2: true, emptyRuntime: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			factory := common.HexToAddress("0x2000")
+			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE)
+			contract := types.CreateAddress(factory, 0)
+			if tc.opcode == vm.CREATE2 {
+				create = program.New().Create2(initCode, 0)
+				contract = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+			}
+			factoryCode := create.Op(vm.ISZERO).AssertEq(0)
+			if tc.repeatCreate2 {
+				factoryCode.Create2(initCode, 0).Op(vm.POP)
+			}
+			factoryCode.Op(vm.STOP)
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			var approval []byte
+			if tc.frameTx {
+				approval = program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:  {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval},
+					factory: {Code: factoryCode.Bytes()},
+				},
+			}), execmoduletester.WithKey(key))
+			var txn types.Transaction
+			if tc.frameTx {
+				frameTx := &types.FrameTransaction{
+					ChainID: *cfg.ChainID, SenderAddress: sender,
+					Frames: []types.Frame{
+						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+						{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+					},
+				}
+				frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
+				txn = frameTx
+			} else {
+				txn, err = types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), key)
+				require.NoError(t, err)
+			}
+			pack := insertConstructorTx(t, m, txn)
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
+			if tc.emptyRuntime {
+				want = nil
+			}
+			result, err := api.CallConstructor(m.Ctx, contract, program.New().ReturnData(want).Bytes())
+			require.NoError(t, err)
+			if tc.emptyRuntime {
+				require.Nil(t, result)
+				return
+			}
+			require.NotNil(t, result, "replay must return the deployed runtime code")
+			require.NotNil(t, result.Code)
+			require.Equal(t, want, *result.Code)
+		})
+	}
+}
+
+func TestCallConstructorRetryAfterRollback(t *testing.T) {
+	factory := common.HexToAddress("0x4000")
+	wrapper := common.HexToAddress("0x3000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+
+	checkRetry := func(t *testing.T, alloc types.GenesisAlloc, txn types.Transaction) {
+		t.Helper()
+		deploy := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLVALUE, vm.CREATE2, vm.POP)
+		alloc[factory] = types.GenesisAccount{Code: deploy.Bytes()}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Alloc: alloc,
+		}), execmoduletester.WithKey(testKey))
+		insertConstructorTx(t, m, txn)
+		base := newBaseApiForTest(m)
+		api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, NewOtterscanAPI(base, m.DB, 25))
+		result, err := api.CallConstructor(m.Ctx, target, initCode)
+		require.NoError(t, err)
+		require.Equal(t, &CreationCode{Code: &runtime}, result)
+
+		// Only the first, rolled-back deployment receives an endowment.
+		replacement := program.New().Op(vm.CALLVALUE).AssertEq(1).ReturnData(runtime)
+		result, err = api.CallConstructor(m.Ctx, target, replacement.Bytes())
+		require.Nil(t, result)
+		require.ErrorIs(t, err, vm.ErrExecutionReverted)
+	}
+
+	t.Run("ancestor revert", func(t *testing.T) {
+		entry := common.HexToAddress("0x2000")
+		// The prefunded account still exists after the deployment rolls back.
+		calls := program.New().Call(nil, target, 1, 0, 0, 0, 0).Op(vm.POP)
+		calls.Call(nil, wrapper, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+		rollback := program.New().Call(nil, factory, 1, 0, 0, 0, 0).Op(vm.POP, vm.PUSH0, vm.PUSH0, vm.REVERT)
+		txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 2_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), testKey)
+		require.NoError(t, err)
+		checkRetry(t, types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			entry:    {Balance: big.NewInt(1), Code: calls.Bytes()},
+			wrapper:  {Balance: big.NewInt(1), Code: rollback.Bytes()},
+		}, txn)
+	})
+	t.Run("atomic batch revert", func(t *testing.T) {
+		limits := mdgas.MdGas{Execution: 200_000, State: 1_000_000}
+		txn := &types.FrameTransaction{
+			ChainID: *cfg.ChainID, SenderAddress: testAddr,
+			Frames: []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Flags: types.FrameAtomicBatch, Target: &factory, Value: uint256.Int{1}, Limits: limits},
+				{Mode: types.FrameSender, Target: &wrapper, Limits: limits},
+				{Mode: types.FrameSender, Target: &factory, Limits: limits},
+			},
+		}
+		txn.Fees.MaxFee.SetUint64(txn.GetGasLimit())
+		approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+		checkRetry(t, types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()},
+			wrapper:  {Code: program.New().Push0().Push0().Op(vm.REVERT).Bytes()},
+		}, txn)
+	})
+}
+
+func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
+	entry := common.HexToAddress("0x2000")
+	factory := common.HexToAddress("0x3000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+
+	// The factory reverts unless the deployed code is one byte long. It uses the
+	// calldata length as the endowment, so the retry needs one wei from the unfunded factory.
+	create := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLDATASIZE, vm.CREATE2, vm.EXTCODESIZE)
+	factoryCode := create.AssertEq(1)
+	calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+	calls.Call(nil, factory, 0, 0, 1, 0, 0).Op(vm.POP)
+
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{"Osaka", chain.TestChainOsakaConfig},
+		{"Amsterdam", chain.AllProtocolChanges},
+	} {
+		t.Run(fork.name, func(t *testing.T) {
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: fork.config.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:    {Code: calls.Bytes()},
+					factory:  {Code: factoryCode.Bytes()},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 2_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			insertConstructorTx(t, m, txn)
+			base := newBaseApiForTest(m)
+			ots := NewOtterscanAPI(base, m.DB, 25)
+			creator, err := ots.GetContractCreator(m.Ctx, target)
+			require.NoError(t, err)
+			require.Equal(t, &ContractCreatorData{Tx: txn.Hash(), Creator: factory}, creator)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, ots)
+			result, err := api.CallConstructor(m.Ctx, target, initCode)
+			require.NoError(t, err)
+			require.Equal(t, &CreationCode{Code: &runtime}, result)
+
+			for _, tc := range []struct {
+				name        string
+				replacement []byte
+			}{
+				{"first deployment rolled back", program.New().Return(0, 2).Bytes()},
+				{"first constructor reverted", program.New().Push0().Push0().Op(vm.REVERT).Bytes()},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+					require.Nil(t, result)
+					require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+				})
+			}
+		})
+	}
+}
+
+func TestCallConstructorRetryOutOfGas(t *testing.T) {
+	entry := common.HexToAddress("0x2000")
+	factory := common.HexToAddress("0x3000")
+	otherFactory := common.HexToAddress("0x4000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	for _, tc := range []struct {
+		name        string
+		op          vm.OpCode
+		secondCall  common.Address
+		inputSize   int
+		retryTarget bool
+	}{
+		{"CREATE retry", vm.CREATE, factory, 0, true},
+		{"CREATE other factory", vm.CREATE, otherFactory, 0, false},
+		{"CREATE2 retry", vm.CREATE2, factory, 0, true},
+		{"CREATE2 other salt", vm.CREATE2, factory, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			create := program.New().Mstore(initCode, 0)
+			target := types.CreateAddress(factory, 0)
+			if tc.op == vm.CREATE2 {
+				create.Op(vm.CALLDATASIZE)
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+			}
+			create.Push(len(initCode)).Push0().Push0().Op(tc.op, vm.EXTCODESIZE)
+			factoryCode := create.AssertEq(1).Bytes()
+			calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+			calls.Call(uint256.NewInt(1_000), tc.secondCall, 0, 0, tc.inputSize, 0, 0).Op(vm.POP)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr:     {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:        {Code: calls.Bytes()},
+					factory:      {Code: factoryCode},
+					otherFactory: {Code: factoryCode},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			insertConstructorTx(t, m, txn)
+			client := newOverlayRPCClient(t, m)
+
+			var result *CreationCode
+			require.NoError(t, client.CallContext(t.Context(), &result, "overlay_callConstructor", target, hexutil.Bytes(initCode)))
+			require.Equal(t, &CreationCode{Code: &runtime}, result)
+			for _, first := range []struct {
+				name string
+				code []byte
+				err  error
+			}{
+				{"deployment rolled back", program.New().Return(0, 2).Bytes(), nil},
+				{"constructor reverted", program.New().Push0().Push0().Op(vm.REVERT).Bytes(), vm.ErrExecutionReverted},
+			} {
+				t.Run(first.name, func(t *testing.T) {
+					var result *CreationCode
+					err := client.CallContext(t.Context(), &result, "overlay_callConstructor", target, hexutil.Bytes(first.code))
+					require.Nil(t, result)
+					switch {
+					case tc.retryTarget:
+						require.EqualError(t, err, vm.ErrOutOfGas.Error())
+					case first.err != nil:
+						require.EqualError(t, err, first.err.Error())
+					default:
+						require.NoError(t, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
+	factory := common.HexToAddress("0x2000")
+	helper := types.CreateAddress(factory, 0)
+	target := types.CreateAddress(factory, 1)
+	initCode := program.New().ReturnData([]byte{byte(vm.ADD)}).Bytes()
+	create := program.New().Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).Append(create).Append(create)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			factory:  {Code: factoryCode.Bytes()},
+		},
+	}), execmoduletester.WithKey(testKey))
+	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+	require.NoError(t, err)
+	insertConstructorTx(t, m, txn)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+
+	replacement := program.New().ExtcodeCopy(helper, 0, 0, 1).Return(0, 2)
+	result, err := api.CallConstructor(m.Ctx, target, replacement.Bytes())
+	require.NoError(t, err)
+	want := hexutil.Bytes{byte(vm.ADD), byte(vm.STOP)}
+	require.Equal(t, &CreationCode{Code: &want}, result)
+}
+
+func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
+	entry, factory := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+		t.Run(op.String(), func(t *testing.T) {
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE)
+			target := types.CreateAddress(factory, 0)
+			if op == vm.CREATE2 {
+				create = program.New().Create2(initCode, 0)
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+			}
+			// The entry contract gives the factory enough gas for the original deployment.
+			// It discards the call result, so a factory failure can leave the transaction successful.
+			call := program.New().Call(uint256.NewInt(params.CreateGas+700), factory, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP)
+			factoryCode := create.Op(vm.ISZERO).AssertEq(0).Op(vm.STOP)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:    {Code: call.Bytes()},
+					factory:  {Code: factoryCode.Bytes()},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			insertConstructorTx(t, m, txn)
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			result, err := api.CallConstructor(m.Ctx, target, initCode)
+			require.NoError(t, err)
+			want := hexutil.Bytes{byte(vm.STOP)}
+			require.Equal(t, &CreationCode{Code: &want}, result)
+
+			for _, tc := range []struct {
+				name        string
+				replacement []byte
+				wantErr     error
+			}{
+				{"empty initcode", nil, nil},
+				{"size limit", common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
+				{"analysis gas", common.RightPadBytes(initCode, 32*1024), vm.ErrOutOfGas},
+				{"code deposit gas", program.New().Return(0, 100).Bytes(), vm.ErrCodeStoreOutOfGas},
+				{"constructor fault before factory failure", []byte{byte(vm.INVALID)}, &vm.ErrInvalidOpCode{}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+					require.Nil(t, result)
+					require.ErrorIs(t, err, tc.wantErr)
+				})
+			}
+		})
+	}
+}
+
+func TestCallConstructorSelfdestruct(t *testing.T) {
+	factory, destroyer := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.AllProtocolChanges.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			factory:   {Code: program.New().Create2ThenCall(initCode, 0).Bytes()},
+			destroyer: {Code: program.New().Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()},
+		},
+	}), execmoduletester.WithKey(testKey))
+	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 1_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+	require.NoError(t, err)
+	insertConstructorTx(t, m, txn)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	call := program.New().DelegateCall(nil, destroyer, 0, 0, 0, 0).Bytes()
+
+	t.Run("deletion survives", func(t *testing.T) {
+		result, err := api.CallConstructor(m.Ctx, target, program.New().ReturnData(call).Bytes())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+	t.Run("deletion is reverted", func(t *testing.T) {
+		runtime := hexutil.Bytes(program.New().Append(call).Push0().Push0().Op(vm.REVERT).Bytes())
+		result, err := api.CallConstructor(m.Ctx, target, program.New().ReturnData(runtime).Bytes())
+		require.NoError(t, err)
+		require.Equal(t, &CreationCode{Code: &runtime}, result)
+	})
+}
+
 func TestFrameCallConstructor(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
@@ -645,13 +1073,12 @@ func TestFrameCallConstructor(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameDefault, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -687,6 +1114,43 @@ func TestFrameCallConstructor(t *testing.T) {
 	}
 }
 
+func TestFrameCallConstructorPaymentApprovalError(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.EXTCODESIZE)
+	approval := create.AssertEq(1).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()}},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{
+			{Mode: types.FrameDefault, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 500_000, State: 1_000_000}},
+		},
+	}
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
+	insertConstructorTx(t, m, frameTx)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	target := types.CreateAddress(sender, 0)
+	for _, tc := range []struct {
+		op      vm.OpCode
+		wantErr string
+	}{
+		{vm.INVALID, "invalid opcode: INVALID"},
+		{vm.STOP, "frame transaction without payment approval"},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			result, err := api.CallConstructor(m.Ctx, target, hexutil.Bytes{byte(tc.op)})
+			require.EqualError(t, err, tc.wantErr)
+			require.Nil(t, result)
+		})
+	}
+}
+
 func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
@@ -713,13 +1177,12 @@ func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	}))
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 		},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -732,6 +1195,67 @@ func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotNil(t, result.Code)
 	require.Equal(t, hexutil.Bytes(want), *result.Code)
+}
+
+func TestFrameCallConstructorAssertionRollback(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		createInApproval bool
+	}{
+		{name: "body creation is reverted"},
+		{name: "payment approval creation survives", createInApproval: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			sender, factory, assertion := common.HexToAddress("0x1000"), common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+			contract := types.CreateAddress(factory, 0)
+			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP)
+			assertCode := program.New().Push(contract).Op(vm.EXTCODESIZE).AssertEq(1).Op(vm.STOP)
+			approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+			frames := []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+				{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+			}
+			if tc.createInApproval {
+				approval = program.New().Call(uint256.NewInt(200_000), factory, 0, 0, 0, 0, 0).Op(vm.POP).Append(approval.Bytes())
+				frames = append(frames[:1], frames[2:]...)
+				frames[0].Mode = types.FrameDefault
+				frames[0].Limits = mdgas.MdGas{Execution: 300_000, State: 1_000_000}
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()},
+					factory:   {Code: create.Bytes()},
+					assertion: {Code: assertCode.Bytes()},
+				},
+			}))
+			frameTx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, SenderAddress: sender, Frames: frames,
+			}
+			frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
+			pack := insertConstructorTx(t, m, frameTx)
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[len(frames)-1].Status)
+
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			// The replacement changes the code size, so the assertion fails and rolls back the body.
+			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
+			result, err := api.CallConstructor(m.Ctx, contract, program.New().ReturnData(want).Bytes())
+			require.NoError(t, err)
+			if tc.createInApproval {
+				require.NotNil(t, result)
+				require.NotNil(t, result.Code)
+				require.Equal(t, want, *result.Code)
+			} else {
+				require.Nil(t, result)
+			}
+		})
+	}
 }
 
 func TestCallConstructorRejectsNonContract(t *testing.T) {
@@ -751,30 +1275,41 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 	}
 }
 
-func TestCallConstructorRequiresCode(t *testing.T) {
-	m, _, contractAddress, _ := chainWithDeployedContract(t)
+func newOverlayRPCClient(t *testing.T, m *execmoduletester.ExecModuleTester) *rpc.Client {
+	t.Helper()
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(
-		base,
-		m.DB,
-		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
-		NewOtterscanAPI(base, m.DB, 25),
-	)
+	ots := struct{ OtterscanAPI }{NewOtterscanAPI(base, m.DB, 25)}
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, ots)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	t.Cleanup(server.Stop)
 	require.NoError(t, server.RegisterName("overlay", api))
 	client := rpc.DialInProc(server, log.New())
-	t.Cleanup(func() { client.Close(); server.Stop() })
+	t.Cleanup(client.Close)
+	return client
+}
 
-	for name, params := range map[string][]any{
-		"omitted": {contractAddress},
-		"null":    {contractAddress, nil},
+func TestCallConstructorRPCErrors(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	client := newOverlayRPCClient(t, m)
+	revert := hexutil.Bytes(program.New().Push(0).Push(0).Op(vm.REVERT).Bytes())
+	for _, tc := range []struct {
+		name        string
+		params      []any
+		wantCode    int
+		wantMessage string
+	}{
+		{"omitted code", []any{contractAddress}, rpc.ErrCodeInvalidParams, "missing value for required argument 1"},
+		{"null code", []any{contractAddress, nil}, rpc.ErrCodeInvalidParams, "missing value for required argument 1"},
+		{"invalid opcode", []any{contractAddress, hexutil.Bytes{byte(vm.INVALID)}}, rpc.ErrCodeDefault, "invalid opcode: INVALID"},
+		{"constructor revert", []any{contractAddress, revert}, rpc.ErrCodeDefault, "execution reverted"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var result json.RawMessage
-			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", params...)
+			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", tc.params...)
 			var rpcErr rpc.Error
 			require.ErrorAs(t, err, &rpcErr)
-			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, tc.wantMessage)
+			require.Equal(t, tc.wantCode, rpcErr.ErrorCode())
 		})
 	}
 }

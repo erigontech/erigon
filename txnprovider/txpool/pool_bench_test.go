@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -43,7 +42,6 @@ func BenchmarkCountContent(b *testing.B) {
 	for _, frames := range []int{0, 100, 10_000} {
 		b.Run(fmt.Sprintf("frames=%d", frames), func(b *testing.B) {
 			pool := &TxPool{
-				lock:    new(sync.Mutex),
 				pending: NewPendingSubPool(PendingSubPool, frames),
 				baseFee: NewSubPool(BaseFeeSubPool, frames),
 				queued:  NewSubPool(QueuedSubPool, frames),
@@ -70,7 +68,6 @@ func BenchmarkRejectRemoteTxns(b *testing.B) {
 	for _, reason := range []string{"duplicate", "byte budget"} {
 		b.Run(reason, func(b *testing.B) {
 			pool := &TxPool{
-				lock:                    new(sync.Mutex),
 				unprocessedRemoteTxns:   &TxnSlots{},
 				unprocessedRemoteByHash: make(map[string]*TxnSlot),
 			}
@@ -104,7 +101,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(err)
 	require.NotNil(pool)
 

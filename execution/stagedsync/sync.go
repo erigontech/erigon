@@ -41,16 +41,15 @@ type Sync struct {
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 
-	stages        []*Stage
-	unwindOrder   []*Stage
-	pruningOrder  []*Stage
-	currentStage  uint
-	timings       []Timing
-	logPrefixes   []string
-	logger        log.Logger
-	stagesIdsList []string
-	mode          stages.Mode
-	metricsCache  metricsCache
+	stages       []*Stage
+	unwindOrder  []*Stage
+	pruningOrder []*Stage
+	currentStage uint
+	timings      []Timing
+	logPrefixes  []string
+	logger       log.Logger
+	mode         stages.Mode
+	metricsCache metricsCache
 }
 
 type Timing struct {
@@ -183,13 +182,6 @@ func (s *Sync) LogPrefix() string {
 	return s.logPrefixes[s.currentStage]
 }
 
-func (s *Sync) StagesIdsList() []string {
-	if s == nil {
-		return []string{}
-	}
-	return s.stagesIdsList
-}
-
 func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
@@ -222,23 +214,20 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 
 	logPrefixes := make([]string, len(stagesList))
-	stagesIdsList := make([]string, len(stagesList))
 	for i := range stagesList {
 		logPrefixes[i] = fmt.Sprintf("%d/%d %s", i+1, len(stagesList), stagesList[i].ID)
-		stagesIdsList[i] = string(stagesList[i].ID)
 	}
 
 	return &Sync{
-		cfg:           cfg,
-		stages:        stagesList,
-		currentStage:  0,
-		unwindOrder:   unwindStages,
-		pruningOrder:  pruneStages,
-		logPrefixes:   logPrefixes,
-		logger:        logger,
-		stagesIdsList: stagesIdsList,
-		mode:          mode,
-		metricsCache:  newMetricsCache(),
+		cfg:          cfg,
+		stages:       stagesList,
+		currentStage: 0,
+		unwindOrder:  unwindStages,
+		pruningOrder: pruneStages,
+		logPrefixes:  logPrefixes,
+		logger:       logger,
+		mode:         mode,
+		metricsCache: newMetricsCache(),
 	}
 }
 
@@ -264,6 +253,13 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
+	// The request is consumed even on failure: the caller's tx is rolled back,
+	// and a reused Sync must not replay this unwind or resume at the failed stage.
+	defer func() {
+		s.unwindPoint = nil
+		s.unwindReason = UnwindReason{}
+		s.currentStage = 0
+	}()
 	for j := 0; j < len(s.unwindOrder); j++ {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
@@ -273,11 +269,6 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
-	s.unwindPoint = nil
-	s.unwindReason = UnwindReason{}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -299,23 +290,14 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			// RunUnwind clears the request, so keep its reason first.
+			reason := s.unwindReason
+			if err := s.RunUnwind(sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1

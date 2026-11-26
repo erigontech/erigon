@@ -99,7 +99,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			if block == nil {
 				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
 			}
-			blobFee, err = api.blobBaseFee(ctx, tx, block.HeaderNoCopy())
+			blobFee, err = api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()...)
 			if err != nil {
 				return nil, nil, false, err
 			}

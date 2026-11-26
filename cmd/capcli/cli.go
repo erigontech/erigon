@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -34,17 +33,15 @@ import (
 	"strings"
 	"time"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -191,16 +188,16 @@ type ChainEndpoint struct {
 }
 
 func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	log.Debug("[Checkpoint Sync] Requesting beacon block", "endpoint", redactEndpoint(uri))
+	log.Debug("[Checkpoint Sync] Requesting beacon block", "endpoint", blobfetch.RedactEndpoint(uri))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, redactURLError(err)
+		return nil, blobfetch.RedactURLError(err)
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, redactURLError(err)
+		return nil, blobfetch.RedactURLError(err)
 	}
 	defer func() {
 		err = r.Body.Close()
@@ -235,120 +232,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	return block, nil
 }
 
-// maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
-const maxBlobSidecarJSONSize = 512 << 10
-
-type blobStatusError int
-
-func (e blobStatusError) Error() string {
-	return fmt.Sprintf("blob retrieval failed, bad status code %d", int(e))
-}
-
-// retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
-// may carry a query such as an API key. A response with more than maxSidecars entries is refused
-// before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
-func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
-	data, err := getBeaconData(ctx, endpoint, fmt.Sprintf("eth/v1/beacon/blob_sidecars/0x%x", root), maxSidecars)
-	if err != nil {
-		return nil, err
-	}
-	sidecars := make([]*cltypes.BlobSidecar, len(data))
-	for i, raw := range data {
-		sidecars[i] = &cltypes.BlobSidecar{}
-		if err := sidecars[i].UnmarshalJSON(raw); err != nil {
-			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
-		}
-	}
-	return sidecars, nil
-}
-
-func retrieveSidecars(ctx context.Context, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
-	if block.Version() < clparams.GloasVersion {
-		return retrieveBlobsFromRemoteEndpoint(ctx, endpoint, root, blobCount(block))
-	}
-	commitments := block.Block.Body.GetBlobKzgCommitments()
-	data, err := getBeaconData(ctx, endpoint, fmt.Sprintf("eth/v1/beacon/blobs/0x%x", root), blobCount(block))
-	if err != nil {
-		return nil, err
-	}
-	header := block.SignedBeaconBlockHeader()
-	sidecars := make([]*cltypes.BlobSidecar, len(data))
-	for i, raw := range data {
-		var blob cltypes.Blob
-		if err := blob.UnmarshalJSON(raw); err != nil {
-			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
-		}
-		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), common.Bytes48(goethkzg.PointAtInfinity), header,
-			solid.NewHashVector(cltypes.CommitmentBranchSize))
-	}
-	return sidecars, nil
-}
-
-func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) ([]json.RawMessage, error) {
-	base, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, redactURLError(err)
-	}
-	log.Debug("[Blob Retrieval] Requesting", "endpoint", redactURL(base), "path", path)
-
-	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, base.JoinPath(path).String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	client := &retryablehttp.Client{
-		HTTPClient:   &http.Client{Timeout: fillRequestTimeout},
-		RetryWaitMin: fillRetryWait,
-		RetryWaitMax: 30 * time.Second,
-		RetryMax:     2,
-		CheckRetry:   retryablehttp.DefaultRetryPolicy,
-		Backoff: func(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
-			return min(retryablehttp.DefaultBackoff(lo, hi, attempt, resp), hi)
-		},
-		ErrorHandler: retryablehttp.PassthroughErrorHandler,
-	}
-	var raw []byte
-	req.SetResponseHandler(func(r *http.Response) (err error) {
-		if r.StatusCode == http.StatusOK {
-			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxEntries+1)*maxBlobSidecarJSONSize))
-		}
-		return err
-	})
-	r, err := client.Do(req)
-	if r != nil {
-		defer r.Body.Close()
-	}
-	if err != nil {
-		return nil, redactURLError(err)
-	}
-
-	if r.StatusCode == http.StatusNotFound {
-		// No blobs for this block (pre-Deneb or no blob transactions)
-		return nil, nil
-	}
-	if r.StatusCode != http.StatusOK {
-		return nil, blobStatusError(r.StatusCode)
-	}
-
-	var response struct {
-		Data []json.RawMessage `json:"data"`
-	}
-	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&response); err != nil {
-		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
-	}
-	if len(response.Data) > maxEntries {
-		return nil, fmt.Errorf("blob response has %d entries, the block has %d commitments", len(response.Data), maxEntries)
-	}
-	return response.Data, nil
-}
-
 func (c *ChainEndpoint) Run(ctx context.Context) error {
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
-	if !validEndpoint(c.Endpoint) {
+	if !blobfetch.ValidEndpoint(c.Endpoint) {
 		return errors.New("--endpoint is not an http or https URL with a host")
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
@@ -376,7 +265,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Hooked", "endpoint", redactEndpoint(c.Endpoint))
+	log.Info("Hooked", "endpoint", blobfetch.RedactEndpoint(c.Endpoint))
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
@@ -397,12 +286,13 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
-	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	child := currentBlock
 	previousLogBlock := currentBlock.Block.Slot
 
 	logInterval := time.NewTicker(30 * time.Second)
@@ -429,9 +319,10 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, child); err != nil {
 			return false, err
 		}
+		child = currentBlock
 
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
@@ -460,17 +351,16 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 
 				// Look the blobs up under the walked root: before Gloas the stored body has no execution
 				// transactions or withdrawals, so its own hash is not the block root.
-				kzgCommitments := 0
-				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
-					kzgCommitments = c.Len()
+				if n := expectedBlobsForChild(block, child); n > 0 {
+					stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, n)
+					if err != nil {
+						return false, err
+					}
+					if !stored {
+						break
+					}
 				}
-				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
-				if err != nil {
-					return false, err
-				}
-				if !stored {
-					break
-				}
+				child = block
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
@@ -891,12 +781,12 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	headResponse := map[string]any{}
 	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
-		return 0, redactURLError(err)
+		return 0, blobfetch.RedactURLError(err)
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, redactURLError(err)
+		return 0, blobfetch.RedactURLError(err)
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
@@ -922,12 +812,12 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	response := map[string]any{}
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
-		return common.Hash{}, redactURLError(err)
+		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return common.Hash{}, redactURLError(err)
+		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return common.Hash{}, nil
@@ -946,16 +836,16 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
-	log.Info("[Checkpoint Sync] Requesting beacon state", "endpoint", redactEndpoint(uri), "slot", slot)
+	log.Info("[Checkpoint Sync] Requesting beacon state", "endpoint", blobfetch.RedactEndpoint(uri), "slot", slot)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, redactURLError(err)
+		return nil, blobfetch.RedactURLError(err)
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, redactURLError(err)
+		return nil, blobfetch.RedactURLError(err)
 	}
 	defer func() {
 		err = r.Body.Close()
@@ -1085,7 +975,7 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, method, uri, nil)
 	if err != nil {
-		return 0, redactURLError(err)
+		return 0, blobfetch.RedactURLError(err)
 	}
 	if method == "POST" {
 		req.Body = io.NopCloser(strings.NewReader(body))
@@ -1094,7 +984,7 @@ func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Du
 	start := time.Now()
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, redactURLError(err)
+		return 0, blobfetch.RedactURLError(err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
@@ -1199,7 +1089,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if err != nil {
 			return mismatched, unresolved, err
 		}
-		wantBlobs, payloadUnresolved, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
+		wantBlobs, payloadUnresolved, err := blobfetch.ExpectedBlobs(ctx, tx, snr, blockRoot, blk)
 		if err != nil {
 			return mismatched, unresolved, err
 		}
@@ -1209,7 +1099,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 			continue
 		}
 		if wantBlobs == 0 && haveBlobs > 0 {
-			wantBlobs = blobCount(blk)
+			wantBlobs = blobfetch.BlobCount(blk)
 		}
 		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading
@@ -1774,44 +1664,4 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 	}
 	fmt.Println(string(depositJSON))
 	return nil
-}
-
-// redactURL keeps only the scheme and host of u for logs and errors: beacon API providers put the API key in
-// the user info, the path or the query.
-func redactURL(u *url.URL) string {
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
-}
-
-// redactURLError redacts the request URL that a *url.Error from net/http carries.
-func redactURLError(err error) error {
-	ue, ok := errors.AsType[*url.Error](err)
-	if !ok {
-		return err
-	}
-	if ue.Op == "parse" {
-		// The parse error quotes the malformed part of the URL, which can be the key.
-		return errors.New("malformed endpoint URL")
-	}
-	ue.URL = redactEndpoint(ue.URL)
-	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
-		// net/http quotes the header, and a server can repeat the request's path and query in it.
-		ue.Err = errors.New("malformed redirect Location header")
-	}
-	return err
-}
-
-// validEndpoint reports whether endpoint is an http or https URL with a host. Callers do not echo a rejected value: it
-// can carry an API key.
-func validEndpoint(endpoint string) bool {
-	u, err := url.Parse(endpoint)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
-}
-
-// redactEndpoint is redactURL for an --endpoint value.
-func redactEndpoint(endpoint string) string {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return "<invalid endpoint>"
-	}
-	return redactURL(u)
 }

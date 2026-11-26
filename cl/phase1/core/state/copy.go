@@ -46,21 +46,16 @@ func (b *CachingBeaconState) copyInto(bs *CachingBeaconState, totalActiveBalance
 	return nil
 }
 
-func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
-	return b.copy(nil)
-}
-
-// CopyWithTotalActiveBalance copies the state using total instead of rescanning the validators.
-// total must equal what a rescan of this state gives; a wrong value changes consensus computations.
-func (b *CachingBeaconState) CopyWithTotalActiveBalance(total uint64) (*CachingBeaconState, error) {
-	return b.copy(&total)
-}
-
-func (b *CachingBeaconState) copy(totalActiveBalance *uint64) (bs *CachingBeaconState, err error) {
+func (b *CachingBeaconState) Copy() (*CachingBeaconState, error) {
 	copied := New(b.BeaconConfig())
-	err = b.copyInto(copied, totalActiveBalance)
-	if err != nil {
+	if err := b.copyInto(copied, nil); err != nil {
 		return nil, err
 	}
 	return copied, nil
+}
+
+// CopyIntoWithTotalActiveBalance is CopyInto, but it uses total instead of rescanning the validators.
+// total must equal what a rescan of this state gives; a wrong value changes consensus computations.
+func (b *CachingBeaconState) CopyIntoWithTotalActiveBalance(bs *CachingBeaconState, total uint64) error {
+	return b.copyInto(bs, &total)
 }

@@ -18,6 +18,7 @@ package state_test
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -38,7 +39,11 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -328,9 +333,8 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 	}
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
-	c, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	_, err = state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
-	require.Zero(t, c.Orphans)
 }
 
 func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {
@@ -373,9 +377,8 @@ func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t
 	require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-	cnt, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	_, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
-	require.Zero(t, cnt.Orphans)
 }
 
 func commitmentFilesByEnd(t *testing.T, snapDomain string) []string {
@@ -457,9 +460,8 @@ func TestConvertCommitmentFiles_V3PrefixFoldMatchesStateRecord(t *testing.T) {
 
 func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator), mode string) {
 	db, agg := build(t, mode)
-	latest, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	_, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
-	require.Zero(t, latest.Orphans)
 	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	require.Greater(t, len(kvs), 1)
 	type result struct {
@@ -473,8 +475,12 @@ func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mod
 		require.GreaterOrEqual(t, idx, 0, "%s has no v3 state record", filepath.Base(path))
 		_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
 		require.NoError(t, err)
-		c, foldErr := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
-		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
+		checks, foldErr := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
+		var folded []byte
+		if foldErr == nil {
+			folded = checks[0].Root
+		}
+		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", folded), fmt.Sprintf("%x", recorded), foldErr})
 
 		agg.CloseFilesNoReopen()
 		base := strings.TrimSuffix(path, ".kv")
@@ -598,7 +604,7 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
 	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
@@ -606,7 +612,7 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 	require.GreaterOrEqual(t, idx, 0)
 	_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
 	require.NoError(t, err)
-	require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+	require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", checks[0].Root))
 }
 
 func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
@@ -671,7 +677,7 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 			require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 
 			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-			c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+			checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 			require.NoError(t, err)
 			kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 			keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
@@ -679,7 +685,7 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 			require.GreaterOrEqual(t, idx, 0)
 			_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
 			require.NoError(t, err)
-			require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+			require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", checks[0].Root))
 			require.Greater(t, len(kvs), 1)
 		})
 	}
@@ -710,7 +716,7 @@ func TestConvertCommitmentFiles_V3BranchRootSurvivesStateOnlyFile(t *testing.T) 
 	require.Equal(t, [][]byte{commitment.KeyCommitmentState}, keys)
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
 	kvs = commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
@@ -718,7 +724,7 @@ func TestConvertCommitmentFiles_V3BranchRootSurvivesStateOnlyFile(t *testing.T) 
 	require.GreaterOrEqual(t, idx, 0)
 	_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
 	require.NoError(t, err)
-	require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+	require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", checks[0].Root))
 }
 
 func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
@@ -766,33 +772,175 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	swapped := false
-	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{
-		TargetV3: true,
-		BeforeSwap: func() error {
-			swapped = true
-			return nil
-		},
-	}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
 	require.ErrorContains(t, err, "commitment state txNum 62 differs from file end txNum 63")
-	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
-	require.False(t, swapped)
+	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "rebuild"))
+}
+
+func TestConvertCommitmentFiles_V3FoldsTheTailAfterTheStoredState(t *testing.T) {
+	t.Run("plain", func(t *testing.T) { testV3FoldsTheTail(t, false) })
+	// A key the first file's tail fold changed, which the next file does not hold, is read
+	// back from the first file: its references resolve against that file's range.
+	t.Run("squeezed", func(t *testing.T) { testV3FoldsTheTail(t, true) })
+}
+
+func testV3FoldsTheTail(t *testing.T, squeeze bool) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	pairs, others := accountPairsByFirstNibble(t)
+	x, y, w, z := pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]
+	slot := append(slices.Clone(x), make([]byte, length.Hash)...)
+	write := func(txNum uint64, put func(kv.Domain, []byte, []byte), del func(kv.Domain, []byte)) {
+		switch txNum {
+		case 0:
+			put(kv.AccountsDomain, x, testAccount(0))
+		case 1:
+			put(kv.AccountsDomain, y, testAccount(1))
+		case 2:
+			put(kv.AccountsDomain, w, testAccount(2))
+		case 63:
+			put(kv.AccountsDomain, x, testAccount(63))
+			put(kv.StorageDomain, slot, []byte{1})
+		case 64:
+			put(kv.AccountsDomain, x, testAccount(0))
+			del(kv.StorageDomain, slot)
+		case 78:
+			put(kv.AccountsDomain, z, testAccount(78))
+		default:
+			put(kv.AccountsDomain, others[txNum%uint64(len(others))], testAccount(txNum))
+		}
+	}
+	_, _, rootAt := writeBlocks(t, write, true)
+	db, agg, _ := writeBlocks(t, write, false)
+	maxTxNums := make(maxTxNumByBlock, 29)
+	for block := range maxTxNums {
+		maxTxNums[block] = uint64(block)*3 + 2
+	}
+
+	if squeeze {
+		runOrchestrator(t, db, state.ConvertOpts{TargetSqueeze: true})
+		first := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)[0]
+		require.True(t, strings.HasPrefix(filepath.Base(first), "v2.1-"), "%s is squeezed", filepath.Base(first))
+		require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup")))
+	}
+	func() {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		empty := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
+		t.Cleanup(empty.Close)
+		emptyDB, err := temporal.New(empty, agg, nil)
+		require.NoError(t, err)
+		opts := state.ConvertOpts{TargetV3: true, DB: emptyDB, TxNums: rawdbv3.TxNums.WithCustomReadTxNumFunc(maxTxNums)}
+		require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at, opts, log.New()))
+	}()
+
+	func() {
+		tx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		for _, end := range []uint64{64, 80} {
+			v, found, _, fileEnd, err := state.AggTx(tx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, end-1)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, end, fileEnd)
+			blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(v)
+			require.NoError(t, err)
+			require.Equal(t, end-1, txNum)
+			require.Equal(t, (end-1)/3, blockNum, "file ending at %d", end)
+			require.Equal(t, rootAt[end-1], common.Hash(root), "file ending at %d", end)
+		}
+	}()
+
+	testPrefixFoldMatchesStateRecord(t, func(*testing.T, string) (kv.TemporalRwDB, *state.Aggregator) { return db, agg }, "converted")
+}
+
+type maxTxNumByBlock []uint64
+
+func (m maxTxNumByBlock) MaxTxNum(_ context.Context, _ kv.Tx, _ kv.Cursor, block uint64) (uint64, bool, error) {
+	if block >= uint64(len(m)) {
+		return 0, false, nil
+	}
+	return m[block], true, nil
+}
+
+func (m maxTxNumByBlock) BlockNumber(_ context.Context, _ kv.Tx, txNum uint64) (uint64, bool, error) {
+	block, _ := slices.BinarySearch(m, txNum)
+	return uint64(block), block < len(m), nil
+}
+
+func testAccount(seed uint64) []byte {
+	return accounts.SerialiseV3(&accounts.Account{Nonce: seed + 1, Balance: *uint256.NewInt(seed + 1), CodeHash: accounts.EmptyCodeHash})
+}
+
+func writeBlocks(t *testing.T, write func(txNum uint64, put func(kv.Domain, []byte, []byte), del func(kv.Domain, []byte)), everyTx bool) (kv.TemporalRwDB, *state.Aggregator, map[uint64]common.Hash) {
+	t.Helper()
+	db, agg, rwTx, domains := convertTestDomains(t, 16)
+	put, del, _ := domainWriter(t, domains, rwTx)
+	rootAt := map[uint64]common.Hash{}
+	for block := range uint64(29) {
+		last := (block+1)*3 - 1
+		for txNum := block * 3; txNum <= last; txNum++ {
+			write(txNum,
+				func(d kv.Domain, k, v []byte) { put(d, k, v, txNum) },
+				func(d kv.Domain, k []byte) { del(d, k, txNum) })
+			if everyTx || txNum == last {
+				root, err := domains.ComputeCommitment(t.Context(), rwTx, true, block, txNum, "", nil)
+				require.NoError(t, err)
+				rootAt[txNum] = common.Hash(root)
+			}
+		}
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, block, last))
+	}
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, 28))
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, 87, unboundedFinalityCtx))
+	return db, agg, rootAt
+}
+
+func accountPairsByFirstNibble(t *testing.T) (pairs [][2][]byte, others [][]byte) {
+	t.Helper()
+	var byNibble [16][][]byte
+	for i := range 64 {
+		addr := make([]byte, length.Addr)
+		binary.BigEndian.PutUint64(addr[length.Addr-8:], uint64(i+1))
+		n := crypto.Keccak256(addr)[0] >> 4
+		byNibble[n] = append(byNibble[n], addr)
+	}
+	for _, addrs := range byNibble {
+		if len(addrs) >= 2 && len(pairs) < 2 {
+			pairs = append(pairs, [2][]byte{addrs[0], addrs[1]})
+			continue
+		}
+		others = append(others, addrs...)
+	}
+	require.Len(t, pairs, 2)
+	return pairs, others
 }
 
 func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
-	state.SetConvertPhase5HookForTest(func() error {
-		paths := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
-		latest := paths[len(paths)-1]
+	dirs := agg.Dirs()
+	stagedDir := filepath.Join(dirs.Snap, "rebuild", "domain")
+	liveFiles := len(commitmentFilesByEnd(t, dirs.SnapDomain))
+	corrupted := false
+	state.SetConvertPhase1AfterFileHookForTest(func(int) {
+		staged := commitmentFilesByEnd(t, stagedDir)
+		if corrupted || len(staged) != liveFiles {
+			return
+		}
+		corrupted = true
+		latest := staged[len(staged)-1]
 		keys, values := readKVFile(t, agg, latest)
 		i := slices.IndexFunc(keys, func(key []byte) bool { return bytes.Equal(key, []byte{0x40, 0}) })
 		require.NotEqual(t, -1, i)
 		require.NotEmpty(t, values[i])
 		values[i][len(values[i])-1] ^= 1
 		tmp := latest + ".tmp"
-		comp, err := seg.NewCompressor(t.Context(), "corrupt-latest-v3", tmp, agg.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, log.New())
+		comp, err := seg.NewCompressor(t.Context(), "corrupt-latest-v3", tmp, dirs.Tmp, seg.DefaultCfg, log.LvlTrace, log.New())
 		require.NoError(t, err)
 		defer comp.Close()
 		writer := seg.NewWriter(comp, agg.Cfg(kv.CommitmentDomain).Compression)
@@ -806,7 +954,7 @@ func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 		comp.Close()
 		require.NoError(t, os.Rename(tmp, latest))
 		from, to := commitmentFileRange(t, latest)
-		siblings, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
+		siblings, err := filepath.Glob(filepath.Join(stagedDir, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
 		require.NoError(t, err)
 		for _, path := range siblings {
 			switch filepath.Ext(path) {
@@ -814,14 +962,32 @@ func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
 				require.NoError(t, dir.RemoveFile(path))
 			}
 		}
-		require.NoError(t, agg.ReloadFiles())
-		require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
-		agg.CloseFilesNoReopen()
-		return nil
+		require.NoError(t, state.BuildCommitmentAccessorsForTest(t.Context(), agg, latest, stagedDir, kv.Step(from), kv.Step(to)))
+	})
+	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.True(t, corrupted)
+	require.ErrorContains(t, err, "v3 verification")
+	requireDomainsNotSwapped(t, dirs)
+}
+
+func TestConvertCommitmentFiles_V3RejectsFilesMissingAfterReload(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	dirs := agg.Dirs()
+	removed := ""
+	state.SetConvertPhase5HookForTest(func() error {
+		bts, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*.bt"))
+		require.NoError(t, err)
+		require.NotEmpty(t, bts)
+		slices.Sort(bts)
+		removed = bts[len(bts)-1]
+		return dir.RemoveFile(removed)
 	})
 	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	err := state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
-	require.ErrorContains(t, err, "v3 verification")
+
+	err := convertErr(t, db, state.ConvertOpts{TargetV3: true})
+	require.NotEmpty(t, removed)
+	require.ErrorContains(t, err, "v3 file check")
 }

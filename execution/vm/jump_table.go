@@ -235,7 +235,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		dynamicGas:  gasCreate2,
 		numPop:      4,
 		numPush:     1,
-		memorySize:  memoryCreate2,
+		memorySize:  memoryCreate,
 		string:      stCreate2,
 	}
 	validateAndFillMaxStack(&instructionSet)

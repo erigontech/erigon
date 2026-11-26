@@ -24,11 +24,13 @@ import (
 	"testing"
 	"time"
 
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -85,11 +87,14 @@ func TestStoreRemoteBlobsRejectsAnIncompleteInsert(t *testing.T) {
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
 
 	// A sidecar whose header hashes to some other root: the insert breaks on the first
-	// identifier mismatch, stores nothing, and reports no error.
+	// identifier mismatch, stores nothing, and reports no error. Its proof is a G1 point, so it
+	// is not taken for a placeholder to compute.
+	_, _, g1, _ := bls12381.Generators()
 	sidecar := &cltypes.BlobSidecar{
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
 			Header: &cltypes.BeaconBlockHeader{Slot: 1},
 		},
+		KzgProof: common.Bytes48(g1.Bytes()),
 	}
 
 	store := blob_mock_services.NewMockBlobStorage(ctrl)
@@ -101,7 +106,7 @@ func TestStoreRemoteBlobsRejectsAnIncompleteInsert(t *testing.T) {
 	// The block references this sidecar's commitment, so the identifier mismatch below is what
 	// stops the insert rather than the block/sidecar binding.
 	commitTo(t, block, sidecar.KzgCommitment)
-	err := storeRemoteBlobs(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block)
+	err := blobfetch.Store(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block)
 
 	require.Error(t, err, "a zero insert must not be reported as success")
 	require.ErrorContains(t, err, "not readable after insert")
@@ -117,7 +122,7 @@ func TestStoreRemoteBlobsRejectsAnEmptyResponse(t *testing.T) {
 	store.EXPECT().ReadBlobSidecars(gomock.Any(), uint64(testBlobSlot), common.HexToHash("0xaa")).
 		Return(nil, false, nil).AnyTimes()
 
-	err := storeRemoteBlobs(t.Context(), store, ids, nil, denebTestBlock())
+	err := blobfetch.Store(t.Context(), store, ids, nil, denebTestBlock())
 
 	require.Error(t, err, "an empty response must not be reported as success")
 	require.ErrorContains(t, err, "not readable after insert")
@@ -141,7 +146,7 @@ func TestStoreRemoteBlobsAcceptsAStoreThatIsAlreadyComplete(t *testing.T) {
 		&cltypes.BlobIdentifier{BlockRoot: root, Index: 0},
 		&cltypes.BlobIdentifier{BlockRoot: root, Index: 1})
 
-	require.NoError(t, storeRemoteBlobs(t.Context(), reopened, ids, nil, denebTestBlock()),
+	require.NoError(t, blobfetch.Store(t.Context(), reopened, ids, nil, denebTestBlock()),
 		"sidecars already durable must not be reported as a shortfall")
 }
 
@@ -159,7 +164,7 @@ func TestStoreRemoteBlobsRejectsAPartiallyPopulatedStore(t *testing.T) {
 		&cltypes.BlobIdentifier{BlockRoot: root, Index: 0},
 		&cltypes.BlobIdentifier{BlockRoot: root, Index: 1})
 
-	err := storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, fs), ids, nil, denebTestBlock())
+	err := blobfetch.Store(t.Context(), blob_storage.NewBlobStore(db, fs), ids, nil, denebTestBlock())
 
 	require.Error(t, err, "a store missing index 1 must not be reported as complete")
 	require.ErrorContains(t, err, "got 1 of 2")
@@ -181,7 +186,7 @@ func TestStoreRemoteBlobsRejectsFilesWithoutTheirMetadataRow(t *testing.T) {
 	}))
 
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
-	err := storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, fs), ids, nil, denebTestBlock())
+	err := blobfetch.Store(t.Context(), blob_storage.NewBlobStore(db, fs), ids, nil, denebTestBlock())
 
 	require.Error(t, err, "sidecar files with no count row must not be reported as complete")
 	require.ErrorContains(t, err, "not readable")
@@ -199,7 +204,7 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	}
 
 	endpoint := &ChainEndpoint{Blobs: true}
-	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block)
+	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block, nil)
 
 	require.Error(t, err, "a block whose commitments exceed the request cap must not pass silently")
 	require.ErrorContains(t, err, "identifier")
@@ -228,7 +233,7 @@ func TestStoreRemoteBlobsAcceptsAProoflessGloasSidecar(t *testing.T) {
 
 	block := testBlock(clparams.GloasVersion, testBlobSlot)
 	commitTo(t, block, sidecar.KzgCommitment)
-	require.NoError(t, storeRemoteBlobs(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block))
+	require.NoError(t, blobfetch.Store(t.Context(), store, ids, []*cltypes.BlobSidecar{sidecar}, block))
 
 	stored, found, err := blob_storage.NewBlobStore(db, fs).ReadBlobSidecars(t.Context(), testBlobSlot, root)
 	require.NoError(t, err)
@@ -279,7 +284,7 @@ func TestStoreRemoteBlobsRejectsASidecarCommittingToAnotherBlob(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
 
-	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
+	err = blobfetch.Store(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
 		[]*cltypes.BlobSidecar{sidecar}, block)
 
 	require.Error(t, err, "a sidecar committing to a blob the block does not reference must be rejected")
@@ -301,7 +306,7 @@ func TestStoreRemoteBlobsRejectsAPreGloasSidecarWithABadInclusionProof(t *testin
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
 
-	err = storeRemoteBlobs(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
+	err = blobfetch.Store(t.Context(), blob_storage.NewBlobStore(db, afero.NewMemMapFs()), ids,
 		[]*cltypes.BlobSidecar{sidecar}, block)
 
 	require.Error(t, err, "a pre-Gloas sidecar with a zero inclusion proof must be rejected")
@@ -316,21 +321,21 @@ func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := retrieveBlobsFromRemoteEndpoint(t.Context(), srv.URL, common.Hash{1}, 2)
+	_, err := blobfetch.RetrieveBlobSidecars(t.Context(), srv.URL, common.Hash{1}, 2)
 	require.ErrorContains(t, err, "blob response has 3 entries, the block has 2 commitments")
 }
 
 // Beacon API providers put the key in the path, the query or the user info, so errors and logs carry only the
 // scheme and host of an endpoint.
 func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
-	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
-	fillRetryWait = time.Millisecond
+	defer func(wait time.Duration) { blobfetch.RetryWait = wait }(blobfetch.RetryWait)
+	blobfetch.RetryWait = time.Millisecond
 	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	host := closed.Addr().String()
 	require.NoError(t, closed.Close())
 
-	_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), "http://user:pw-secret@"+host+"/path-secret/?apikey=query-secret", common.Hash{1}, 1)
+	_, err = blobfetch.RetrieveBlobSidecars(t.Context(), "http://user:pw-secret@"+host+"/path-secret/?apikey=query-secret", common.Hash{1}, 1)
 	require.Error(t, err)
 	for _, secret := range []string{"pw-secret", "path-secret", "query-secret", "user"} {
 		require.NotContains(t, err.Error(), secret)
@@ -338,7 +343,7 @@ func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
 	require.Contains(t, err.Error(), host)
 
 	for _, malformed := range []string{"http://h/%zz?apikey=query-secret", "http://user:Ab3x/query-secret@h/"} {
-		_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), malformed, common.Hash{1}, 1)
+		_, err = blobfetch.RetrieveBlobSidecars(t.Context(), malformed, common.Hash{1}, 1)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "query-secret")
 		require.NotContains(t, err.Error(), "Ab3x")
@@ -346,6 +351,23 @@ func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
 }
 
 func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
-	require.Equal(t, "https://beacon.example:5052", redactEndpoint("https://u:p@beacon.example:5052/key/eth?apikey=k"))
-	require.Equal(t, "<invalid endpoint>", redactEndpoint("http://h/%zz"))
+	require.Equal(t, "https://beacon.example:5052", blobfetch.RedactEndpoint("https://u:p@beacon.example:5052/key/eth?apikey=k"))
+	require.Equal(t, "<invalid endpoint>", blobfetch.RedactEndpoint("http://h/%zz"))
+}
+
+func TestChainEndpointWalkStoresAroundASkippedGloasPayload(t *testing.T) {
+	f, before, after := newSkippedPayloadFixture(t, 1)
+	skipped := blockRootOf(t, f.blocks.blocks[fillTestSlot+1])
+	url, requests := f.endpoint(false)
+	endpoint := &ChainEndpoint{Blobs: true, Endpoint: url}
+
+	var child *cltypes.SignedBeaconBlock
+	for _, slot := range []uint64{fillTestSlot + 2, fillTestSlot + 1, fillTestSlot} {
+		require.NoError(t, endpoint.storeBlobsForBlock(t.Context(), f.store, &clparams.MainnetBeaconConfig, f.blocks.blocks[slot], child))
+		child = f.blocks.blocks[slot]
+	}
+
+	require.True(t, f.storedValid(fillTestSlot, before))
+	require.True(t, f.storedValid(fillTestSlot+2, after))
+	require.Zero(t, requestsFor(requests, skipped))
 }

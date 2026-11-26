@@ -54,9 +54,9 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a destroyed pre-existing contract must project as absent")
@@ -75,9 +75,9 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
@@ -96,16 +96,16 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		destroyed, err := destroyer.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
-		require.NoError(t, destroyer.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
+		destroyer.EndTransaction()
+		vm.FlushWrites(finalizedWrites(t, destroyer, sd), true)
 
 		recreator := newAmsterdamIBS(reader, vm, 1)
 		t.Cleanup(recreator.Close)
 		require.NoError(t, recreator.CreateAccount(addr, true))
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
-		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+		recreator.EndTransaction()
+		vm.FlushWrites(finalizedWrites(t, recreator, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
@@ -124,14 +124,14 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		recreator := newAmsterdamIBS(reader, vm, 1)
 		t.Cleanup(recreator.Close)
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeAuthorization))
-		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+		recreator.EndTransaction()
+		vm.FlushWrites(finalizedWrites(t, recreator, sd), true)
 
 		toucher := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(toucher.Close)
 		require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
-		require.NoError(t, toucher.FinalizeTx(sd, NewNoopWriter()))
-		vm.FlushVersionedWrites(finalizedWrites(t, toucher, sd), true)
+		toucher.EndTransaction()
+		vm.FlushWrites(finalizedWrites(t, toucher, sd), true)
 
 		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "the recreated account must project as live")
@@ -147,9 +147,9 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		t.Cleanup(ibs.Close)
 
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
+		ibs.EndTransaction()
 		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		acc, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.True(t, ok, "a funded account must project as live")
@@ -223,7 +223,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 		return func(vm *VersionMap) {
 			ws := &WriteSet{}
 			ws.SetEmptyRemoval(addr, v(0))
-			vm.FlushVersionedWrites(ws, complete)
+			vm.FlushWrites(ws, complete)
 		}
 	}
 
@@ -306,19 +306,21 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 		{name: "EIP-161 removal at the view's txIdx is not visible", setup: func(vm *VersionMap) {
 			ws := &WriteSet{}
 			ws.SetEmptyRemoval(addr, v(2))
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 		}, base: &committed, acc: committed, ok: true, baseReads: 1},
 		{
+			// SELFDESTRUCT means deleted: a lone SD cell with no preserving balance cell
+			// is a full wipe, so the account is gone — not kept at its committed balance.
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
-			base: &committed, acc: committed, ok: true, wasDeleted: true, baseReads: 1,
+			base: &committed, wasDeleted: true, baseReads: 1,
 		},
-		{name: "EIP-8246 destruct keeps raw floors below it", setup: func(vm *VersionMap) {
+		{name: "self-destruct wipes nonce and code hash below it", setup: func(vm *VersionMap) {
 			vm.WriteNonce(addr, v(0), 9, true)
 			vm.WriteCodeHash(addr, v(0), cellCode, true)
 			vm.WriteSelfDestruct(addr, v(1), true, true)
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(3), true)
 		}, base: &committed, acc: with(committed, func(a *accounts.Account) {
-			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 9, cellCode
+			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 0, accounts.EmptyCodeHash
 		}), ok: true, wasDeleted: true, baseReads: 1},
 		{name: "BAL marker over base", setup: func(vm *VersionMap) {
 			vm.WriteAddressExists(addr, v(0), &marker)

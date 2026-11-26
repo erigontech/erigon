@@ -51,7 +51,7 @@ func seedBlobKZGTestPool(t testing.TB, ctx context.Context) *TxPool {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"],
-		nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 
 	change := &remoteproto.StateChangeBatch{
@@ -342,7 +342,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil)
+		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
 		assert.Len(t, goodTxns.Txns, 1)

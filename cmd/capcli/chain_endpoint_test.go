@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -243,6 +244,153 @@ func TestChainEndpointRunFetchesALocalBlockOnlyWhenItsBlobsAreMissing(t *testing
 				require.ErrorContains(t, err, fmt.Sprintf("0x%x", local.Block.ParentRoot))
 				require.Zero(t, localRequests.Load())
 			}
+		})
+	}
+}
+
+func gloasBlock(t *testing.T, beaconConfig *clparams.BeaconChainConfig, slot uint64, parent common.Hash, parentPayload, payload common.Hash, commitments int) *cltypes.SignedBeaconBlock {
+	t.Helper()
+	require.Equal(t, clparams.GloasVersion, beaconConfig.GetCurrentStateVersion(slot/beaconConfig.SlotsPerEpoch))
+	block := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parent
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.ParentBlockHash, bid.BlockHash = parentPayload, payload
+	for range commitments {
+		block.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	return block
+}
+
+func writeLocalBlocks(t *testing.T, dirs datadir.Dirs, blocks ...*cltypes.SignedBeaconBlock) {
+	t.Helper()
+	indexDB, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	defer indexDB.Close()
+	require.NoError(t, indexDB.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, block := range blocks {
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
+func blockEndpoint(t *testing.T, served ...*cltypes.SignedBeaconBlock) (url string, blocks, blobs *sync.Map) {
+	t.Helper()
+	encoded := map[string][]byte{"head": encodeBlock(t, served[0])}
+	for _, block := range served {
+		encoded[fmt.Sprintf("0x%x", blockRootOf(t, block))] = encodeBlock(t, block)
+	}
+	blocks, blobs = &sync.Map{}, &sync.Map{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		requests := blobs
+		if strings.Contains(r.URL.Path, "/eth/v2/beacon/blocks/") {
+			requests = blocks
+		}
+		counter, _ := requests.LoadOrStore(id, &atomic.Int32{})
+		counter.(*atomic.Int32).Add(1)
+		if data, ok := encoded[id]; ok && requests == blocks {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(data)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, blocks, blobs
+}
+
+func runSepoliaWalk(t *testing.T, datadirPath, url string) error {
+	t.Helper()
+	endpoint := &ChainEndpoint{
+		Endpoint:     url,
+		Blobs:        true,
+		chainCfg:     chainCfg{Chain: networkname.Sepolia},
+		outputFolder: outputFolder{Datadir: datadirPath},
+	}
+	return endpoint.Run(t.Context())
+}
+
+func TestChainEndpointRunWalksPastASkippedGloasPayload(t *testing.T) {
+	for name, tc := range map[string]struct {
+		local, stored, headIsChild bool
+	}{
+		"served":                {},
+		"served under the head": {headIsChild: true},
+		"local without blobs":   {local: true},
+		"local with its blobs":  {local: true, stored: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Sepolia)
+			require.NoError(t, err)
+			slot := beaconConfig.GloasForkEpoch * beaconConfig.SlotsPerEpoch
+			skipped := gloasBlock(t, beaconConfig, slot, common.HexToHash("0xbeef"), common.HexToHash("0x01"), common.HexToHash("0x02"), 2)
+			skippedRoot := blockRootOf(t, skipped)
+			child := gloasBlock(t, beaconConfig, slot+1, skippedRoot, common.HexToHash("0x01"), common.HexToHash("0x03"), 0)
+			head := gloasBlock(t, beaconConfig, slot+2, blockRootOf(t, child), common.HexToHash("0x03"), common.HexToHash("0x04"), 0)
+
+			datadirPath := t.TempDir()
+			dirs := datadir.New(datadirPath)
+			served := []*cltypes.SignedBeaconBlock{head, child}
+			if tc.headIsChild {
+				served = served[1:]
+			}
+			if tc.local {
+				writeLocalBlocks(t, dirs, skipped)
+			} else {
+				served = append(served, skipped)
+			}
+			if tc.stored {
+				blobDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(filepath.Join(dirs.CaplinBlobs, "chaindata")).
+					WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+				store := blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+				sidecars := make([]*cltypes.BlobSidecar, 2)
+				for i := range sidecars {
+					sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, skipped.SignedBeaconBlockHeader(), solid.NewHashVector(cltypes.CommitmentBranchSize))
+				}
+				err = store.WriteBlobSidecars(t.Context(), skippedRoot, sidecars)
+				blobDB.Close()
+				require.NoError(t, err)
+			}
+			url, blocks, blobs := blockEndpoint(t, served...)
+
+			require.ErrorContains(t, runSepoliaWalk(t, datadirPath, url), fmt.Sprintf("0x%x", skipped.Block.ParentRoot))
+			require.Zero(t, requestsFor(blobs, skippedRoot))
+			if tc.local {
+				require.Zero(t, requestsFor(blocks, skippedRoot))
+			}
+		})
+	}
+}
+
+func TestChainEndpointRunFetchesThePayloadBlobsTheWalkedChildBuiltOn(t *testing.T) {
+	for name, localChild := range map[string]bool{"local child": true, "served child": false} {
+		t.Run(name, func(t *testing.T) {
+			_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Sepolia)
+			require.NoError(t, err)
+			slot := beaconConfig.GloasForkEpoch * beaconConfig.SlotsPerEpoch
+			full := gloasBlock(t, beaconConfig, slot, common.HexToHash("0xbeef"), common.HexToHash("0x01"), common.HexToHash("0x02"), 2)
+			fullRoot := blockRootOf(t, full)
+			orphan := gloasBlock(t, beaconConfig, slot+1, fullRoot, common.HexToHash("0x01"), common.HexToHash("0x05"), 0)
+			child := gloasBlock(t, beaconConfig, slot+2, fullRoot, common.HexToHash("0x02"), common.HexToHash("0x03"), 0)
+			grandchild := gloasBlock(t, beaconConfig, slot+3, blockRootOf(t, child), common.HexToHash("0x03"), common.HexToHash("0x04"), 0)
+			head := gloasBlock(t, beaconConfig, slot+4, blockRootOf(t, grandchild), common.HexToHash("0x04"), common.HexToHash("0x06"), 0)
+
+			datadirPath := t.TempDir()
+			local, served := []*cltypes.SignedBeaconBlock{full, orphan}, []*cltypes.SignedBeaconBlock{head, grandchild, full}
+			if localChild {
+				local = append(local, child)
+			} else {
+				served = append(served, child)
+			}
+			writeLocalBlocks(t, datadir.New(datadirPath), local...)
+			url, _, blobs := blockEndpoint(t, served...)
+
+			require.ErrorContains(t, runSepoliaWalk(t, datadirPath, url), fmt.Sprintf("slot %d", slot))
+			require.Positive(t, requestsFor(blobs, fullRoot))
 		})
 	}
 }

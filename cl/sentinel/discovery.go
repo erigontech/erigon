@@ -43,8 +43,8 @@ import (
 const (
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	// Subscribers wanted per attestation subnet before the proactive search stops: the mesh low watermark, so
-	// gossipsub can fill a subnet's mesh.
+	// Subscribers wanted per attestation subnet before the proactive search stops, and kept by pruning when possible:
+	// the mesh low watermark, so gossipsub can fill a subnet's mesh.
 	minimumPeersPerSubnet = gossip.GossipSubDlo
 	subnetSearchTimeout   = 30 * time.Second
 	subnetSearchInterval  = 12 * time.Second // Check every slot
@@ -226,6 +226,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 		case <-pruneTicker.C:
 			// Prune excess peers periodically
 			s.pruneExcessPeers()
+			s.evictIdlePeers(time.Now())
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
 			underserved := underservedSubnets(&coverage)
@@ -321,6 +322,35 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+// subnetsOfConnectedPeers returns the attestation subnets of each connected peer and how many connected
+// peers each subnet has. Gossipsub forgets a closed peer asynchronously, so its topic peers can include
+// peers that are gone.
+func subnetsOfConnectedPeers(subnetToPeers *[attestationSubnetCount][]peer.ID, connected []peer.ID) (coverage [attestationSubnetCount]int, peerToSubnets map[peer.ID][]int) {
+	peerToSubnets = make(map[peer.ID][]int, len(connected))
+	for _, pid := range connected {
+		peerToSubnets[pid] = nil
+	}
+	for subnet, pids := range subnetToPeers {
+		for _, pid := range pids {
+			if subnets, ok := peerToSubnets[pid]; ok {
+				peerToSubnets[pid] = append(subnets, subnet)
+				coverage[subnet]++
+			}
+		}
+	}
+	return coverage, peerToSubnets
+}
+
+// MarkPeerUseful records that pid answered one of our data requests with data that decoded.
+func (s *Sentinel) MarkPeerUseful(pid peer.ID) {
+	s.p2p.MarkPeerUseful(pid)
+}
+
+// ConsumeDuplicateLoss is p2p.P2PManager.ConsumeDuplicateLoss for a peer that is still connected.
+func (s *Sentinel) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return s.p2p.Host().Network().Connectedness(pid) == network.Connected && s.p2p.ConsumeDuplicateLoss(pid)
+}
+
 func (s *Sentinel) closePeer(pid peer.ID) {
 	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
 		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
@@ -348,6 +378,7 @@ func peerCountToPrune(counts peerCounts, maxPeers int) int {
 	return toRemove
 }
 
+// selectPeersToPrune prefers peers whose removal keeps every subnet at minimumPeersPerSubnet, and otherwise never empties a subnet.
 func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnetCount]int, toRemove, outboundReserve int) []peer.ID {
 	slices.SortFunc(candidates, func(a, b pruneCandidate) int {
 		if bySubnets := cmp.Compare(len(a.subnets), len(b.subnets)); bySubnets != 0 {
@@ -370,22 +401,29 @@ func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnet
 	}
 
 	selected := make([]peer.ID, 0, min(toRemove, len(candidates)))
-	for _, candidate := range candidates {
-		if len(selected) == toRemove {
-			break
-		}
-		if !candidate.inbound && outboundCount <= outboundReserve {
-			continue
-		}
-		if slices.ContainsFunc(candidate.subnets, func(subnet int) bool { return coverage[subnet] <= 1 }) {
-			continue
-		}
-		selected = append(selected, candidate.pid)
-		if !candidate.inbound {
-			outboundCount--
-		}
-		for _, subnet := range candidate.subnets {
-			coverage[subnet]--
+	taken := make([]bool, len(candidates))
+	for _, floor := range []int{minimumPeersPerSubnet, 1} {
+		for i, candidate := range candidates {
+			if len(selected) == toRemove {
+				return selected
+			}
+			if taken[i] {
+				continue
+			}
+			if !candidate.inbound && outboundCount <= outboundReserve {
+				continue
+			}
+			if slices.ContainsFunc(candidate.subnets, func(subnet int) bool { return coverage[subnet] <= floor }) {
+				continue
+			}
+			taken[i] = true
+			selected = append(selected, candidate.pid)
+			if !candidate.inbound {
+				outboundCount--
+			}
+			for _, subnet := range candidate.subnets {
+				coverage[subnet]--
+			}
 		}
 	}
 	return selected
@@ -394,13 +432,15 @@ func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnet
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peers := s.p2p.Host().Network().Peers()
+	connected := make([]peer.ID, 0, len(peers))
 	candidates := make([]pruneCandidate, 0, len(peers))
 	var counts peerCounts
 	for _, pid := range peers {
-		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		conns := openConns(s.p2p.Host().Network(), pid)
 		if len(conns) == 0 {
 			continue
 		}
+		connected = append(connected, pid)
 		candidate := pruneCandidate{pid: pid, inbound: peerIsInbound(conns), opened: conns[0].Stat().Opened}
 		if candidate.inbound {
 			counts.inbound++
@@ -417,13 +457,8 @@ func (s *Sentinel) pruneExcessPeers() {
 	}
 	log.Debug("[Sentinel] Pruning excess peers", "current", counts.total(), "inbound", counts.inbound, "outbound", counts.outbound, "toRemove", toRemove)
 
-	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
-	peerToSubnets := make(map[peer.ID][]int)
-	for i := range attestationSubnetCount {
-		for _, pid := range subnetToPeers[i] {
-			peerToSubnets[pid] = append(peerToSubnets[pid], i)
-		}
-	}
+	_, subnetToPeers := s.getSubnetCoverageWithPeers()
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, connected)
 	for i := range candidates {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}
@@ -609,7 +644,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 		counts := s.peerCountsByDirection(peerId)
 		maxPeers := int(s.cfg.MaxPeerCount)
 		inbound := direction != network.DirOutbound
-		if conns := s.p2p.Host().Network().ConnsToPeer(peerId); len(conns) > 0 {
+		if conns := openConns(s.p2p.Host().Network(), peerId); len(conns) > 0 {
 			inbound = peerIsInbound(conns)
 		}
 		allowed := wantsOutbound(counts, maxPeers)
@@ -625,6 +660,9 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	valid, err := validate()
+	if !valid && s.ConsumeDuplicateLoss(peerId) {
+		valid, err = validate()
+	}
 	if !valid && err != nil {
 		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
 		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
@@ -640,7 +678,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	if !valid {
-		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// The peer's status did not decode or is for another fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 		s.p2p.Host().Peerstore().RemovePeer(peerId)

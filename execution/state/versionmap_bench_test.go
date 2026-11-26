@@ -8,10 +8,86 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func BenchmarkSeedEmptyRemovals(b *testing.B) {
+	for _, tc := range []struct{ balances, storage, slots, balanceStep, zeroEvery int }{
+		{balances: 32, balanceStep: 2, zeroEvery: 2},
+		{balances: 256, balanceStep: 2, zeroEvery: 2},
+		{balances: 1024, balanceStep: 2, zeroEvery: 2},
+		{balances: 2, storage: 256, slots: 1, balanceStep: 2, zeroEvery: 2},
+		{balances: 256, storage: 256, slots: 1, balanceStep: 2, zeroEvery: 2},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 385},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 257},
+		{balances: 768, storage: 3200, slots: 1, balanceStep: 1, zeroEvery: 170},
+		{balances: 256, storage: 1024, slots: 1024, balanceStep: 4, zeroEvery: 256},
+		{balances: 256, storage: 1024, slots: 1024, balanceStep: 4, zeroEvery: 128},
+	} {
+		removals := tc.balances / tc.zeroEvery
+		b.Run(fmt.Sprintf("balances=%d/storage=%d/removals=%d/slots=%d", tc.balances, tc.storage, removals, tc.slots), func(b *testing.B) {
+			bal := types.BlockAccessList{{
+				Address:      common.Address{19: 1},
+				NonceChanges: []*types.NonceChange{{Index: uint32(2*max(tc.balances, tc.storage) + 1), Value: 1}},
+			}}
+			for i := range tc.balances {
+				bal[0].BalanceChanges = append(bal[0].BalanceChanges, &types.BalanceChange{
+					Index: uint32(tc.balanceStep*i + 1), Value: *uint256.NewInt(uint64((i + 1) % tc.zeroEvery)),
+				})
+			}
+			for slot := range tc.slots {
+				changes := make([]*types.StorageChange, 0, tc.storage/tc.slots)
+				for i := slot; i < tc.storage; i += tc.slots {
+					changes = append(changes, &types.StorageChange{Index: uint32(2*i + 2), Value: *uint256.NewInt(uint64(i + 1))})
+				}
+				key := accounts.InternKey(common.BigToHash(big.NewInt(int64(slot + 1))))
+				bal[0].StorageChanges = append(bal[0].StorageChanges, types.SlotChanges{Slot: key, Changes: changes})
+			}
+			benchmarkSeedEmptyRemovals(b, bal, removals)
+		})
+	}
+}
+
+func BenchmarkSeedEmptyRemovalsWithNonzeroNonce(b *testing.B) {
+	const balances = 256
+	ac := types.AccountChanges{
+		Address:      common.Address{19: 1},
+		NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}},
+	}
+	for i := range balances {
+		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
+			Index: uint32(2*i + 1), Value: *uint256.NewInt(uint64(i % 2)),
+		})
+	}
+	for i := range 16 {
+		slot := types.SlotChanges{Slot: accounts.InternKey(common.Hash{31: byte(i + 1)})}
+		for j := range balances - 1 {
+			slot.Changes = append(slot.Changes, &types.StorageChange{
+				Index: uint32(2*j + 2), Value: *uint256.NewInt(uint64(j + 1)),
+			})
+		}
+		ac.StorageChanges = append(ac.StorageChanges, slot)
+	}
+	benchmarkSeedEmptyRemovals(b, types.BlockAccessList{ac}, 1)
+}
+
+func benchmarkSeedEmptyRemovals(b *testing.B, bal types.BlockAccessList, wantRemovals int) {
+	b.Helper()
+	require.NoError(b, bal.Validate())
+	base := &emptyReader{}
+	var vm *VersionMap
+	for b.Loop() {
+		b.StopTimer()
+		vm = NewVersionMap(bal)
+		b.StartTimer()
+		require.NoError(b, vm.SeedEmptyRemovals(true, false, base))
+	}
+	require.Len(b, vm.derivedRemovals, wantRemovals)
+}
 
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 	mvh2 := NewVersionMap(nil)
@@ -62,7 +138,7 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 		ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
 		ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Key: accounts.NilKey, Version: v}, Val: uint64(i)})
 		ws.SetBalance(recipient, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: recipient, Path: BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		writes[i] = ws
 		addrs = append(addrs, sender, recipient)
 	}
@@ -91,6 +167,58 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 			}
 			close(stop)
 			wg.Wait()
+		})
+	}
+}
+
+// BenchmarkValidateAccountReads validates 200 account reads of a block with an access list: reads
+// of accounts that the list's existence marker records, reads of accounts that the list does not
+// change, absent reads of accounts without cells, and absent reads of accounts that a later tx
+// creates.
+func BenchmarkValidateAccountReads(b *testing.B) {
+	const n = 200
+	present, unchanged, absent, created := make([]accounts.Address, n), make([]accounts.Address, n), make([]accounts.Address, n), make([]accounts.Address, n)
+	bal := make(types.BlockAccessList, 2*n)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	for i := range n {
+		present[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		unchanged[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(n + i + 1))))
+		absent[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(2*n + i + 1))))
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1)
+		reader.accounts[present[i]] = &acc
+		reader.accounts[unchanged[i]] = &acc
+		bal[i] = types.AccountChanges{Address: present[i].Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(2)}}}
+		created[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(3*n + i + 1))))
+		bal[n+i] = types.AccountChanges{Address: created[i].Value(), BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(2)}}}
+	}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	for _, tc := range []struct {
+		name  string
+		addrs []accounts.Address
+	}{
+		{"present from the marker", present},
+		{"present from the base", unchanged},
+		{"absent without cells", absent},
+		{"absent with cells", created},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 2)
+			for _, addr := range tc.addrs {
+				_, err := ibs.Exist(addr)
+				require.NoError(b, err)
+			}
+			rs := ReadSet{address: ibs.Reads().address}
+			require.Len(b, rs.address, n)
+			b.ReportAllocs()
+			for b.Loop() {
+				if vm.ValidateReadSet(2, rs, validateEqualVersion, false, "") != VersionValid {
+					b.Fatal("read set is invalid")
+				}
+			}
 		})
 	}
 }

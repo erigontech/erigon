@@ -72,7 +72,7 @@ type DependencyIntegrityChecker struct {
 type DependentInfo struct {
 	entity      UniversalEntity
 	filesGetter DirtyFilesGetter
-	accessors   statecfg.Accessors
+	accessors   *statecfg.Accessors // the dependent's own field: a v3 commitment conversion changes it at run time
 }
 
 // dependency/referred: account/storage
@@ -140,7 +140,7 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 		if allOrAny.All() {
 			// ALL: used for visibleFilesCalc
 			// all dependent (e.g. commitment) file should be present as well as visible-able
-			if !found || !checkForVisibility(file, dependent.accessors, d.trace) {
+			if !found || !checkForVisibility(file, *dependent.accessors, d.trace) {
 				if d.trace {
 					d.logger.Warn("[dbg: Depic]", "dependent", dependent.entity.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", found)
 				}

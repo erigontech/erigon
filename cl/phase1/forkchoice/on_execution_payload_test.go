@@ -1013,7 +1013,7 @@ func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesZeroBlobEnvelo
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
-	retryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	retryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	require.NoError(t, err)
 	dataGraph := dataAvailabilityForkGraph{state: blockState, block: block}
 	f := newPayloadVoteTestStore(t, blockRoot, false, false)
@@ -1047,7 +1047,7 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
-	retryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	retryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	require.NoError(t, err)
 	f = newPayloadVoteTestStore(t, blockRoot, false, false)
 	f.beaconCfg = cfg
@@ -1056,6 +1056,7 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	f.pendingEnvelopes = pending
 	f.pendingLocalSelfBuildEnvelopes = local
 	f.dataAvailableEnvelopeRetryAt = retryAt
+	f.emitters = beaconevents.NewEventEmitter()
 	available, probes = new(bool), new(int)
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).DoAndReturn(func(uint64, common.Hash) (bool, error) {
@@ -1067,6 +1068,22 @@ func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityF
 	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, true, true), ErrEIP7594ColumnDataNotAvailable)
 	require.True(t, pending.Contains(blockRoot))
 	return f, block, available, probes
+}
+
+func TestOnExecutionPayloadWakesRetryWhenParkingForColumns(t *testing.T) {
+	f, block, _, _ := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		return &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: g}
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	wake := f.PendingEnvelopeRetryWake()
+
+	require.Len(t, wake, 1, "parking for missing columns wakes the retry")
+	<-wake
+
+	f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "columns are still missing")
+	require.Empty(t, wake, "a retry does not wake itself")
 }
 
 func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesOnceColumnsArrive(t *testing.T) {
@@ -1089,6 +1106,41 @@ func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesOnceColumnsArr
 	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot)
 	require.False(t, f.pendingEnvelopes.Contains(blockRoot))
 	require.True(t, graph.HasEnvelope(blockRoot))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredIgnoresProbeBooking(t *testing.T) {
+	graph := &persistedEnvelopeForkGraph{}
+	f, block, available, _ := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		graph.dataAvailabilityForkGraph = g
+		return graph
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot) // books a probe
+
+	*available = true
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot+1)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "blocks before minSlot are left to the poll")
+
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
+	require.False(t, f.pendingEnvelopes.Contains(blockRoot))
+	require.True(t, graph.HasEnvelope(blockRoot))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredHonoursAttemptBooking(t *testing.T) {
+	f, block, available, probes := newColumnWaitingEnvelopeStore(t, func(g dataAvailabilityForkGraph) fork_graph.ForkGraph {
+		return &failingEnvelopeDumpForkGraph{persistedEnvelopeForkGraph{dataAvailabilityForkGraph: g}}
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	*available = true
+	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "a storage failure keeps the envelope queued")
+	attemptProbes := *probes
+
+	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
+	require.True(t, f.pendingEnvelopes.Contains(blockRoot))
+	require.Equal(t, attemptProbes, *probes, "a column wake must not probe or repeat a failed attempt")
 }
 
 func TestRetryDataAvailablePendingExecutionPayloadEnvelopesPacesMissingDataProbes(t *testing.T) {

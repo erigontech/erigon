@@ -24,44 +24,14 @@ import (
 // with a missing cell and lifecycle checks treat it as an inert baseline.
 const originIndex = -2
 
-func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
-	if so == nil || so.deleted {
-		return 0, nil
-	}
-	if so.code.Bytes != nil {
-		ibs.callCodeAccessHook(addr, so.code.Bytes)
-		return so.code.Len(), nil
-	}
-	if so.data.CodeHash.IsEmpty() {
-		return 0, nil
-	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	// Size-only read for stateless-witness correctness: a witness node has the
-	// size but not the bytes, so ReadAccountCode would report EXTCODESIZE 0.
-	size, err := ibs.stateReader.ReadAccountCodeSize(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.codeReadDuration += time.Since(readStart)
-		ibs.codeReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
-	ibs.RecordStateReadError(err)
-	return size, err
-}
-
 // originStorageDirect reads a storage slot's pre-block origin value straight from the
 // state reader, no stateObject. A contract this tx created (own CreateContract cell)
 // has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
 func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+	if cc, ok := ibs.ownCreateContract(addr); ok && cc {
 		return uint256.Int{}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -88,7 +58,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 // state reader, no stateObject. A contract this tx created has no code until SetCode
 // runs, so it reads empty rather than a prior incarnation's bytes.
 func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Code, error) {
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+	if cc, ok := ibs.ownCreateContract(addr); ok && cc {
 		return accounts.EmptyCode, nil
 	}
 	codeHash, err := ibs.originCodeHash(addr)
@@ -114,23 +84,29 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
-// codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode on the
-// rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
+// codeSeed returns the code this tx sees at addr: its own Code write if any, else the
+// version-map value below txIndex, else the pre-block value. Its own write is returned
+// without recording a read; a value from a lower tx or the committed state is resolved
+// through the tracked code reader, so the comparison SetCode makes against it is covered
+// by an OCC read and resolves estimate cells like a normal read.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
-		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
+		if vw, ok := ibs.writes.GetCode(addr); ok {
 			return vw.Val, nil
 		}
 	}
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	code, err := ibs.originCodeDirect(addr)
+	// An earlier tx in this block may have installed the code; its bytes live in the
+	// version map, not the pre-block origin. Reading it untracked lets a withdrawal of
+	// that earlier write validate stale, and drops the bytes that distinguish an
+	// identical SetCode from a real change — so resolve through the tracked reader.
+	code, _, _, err := readCode(ibs, addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
+	return code, nil
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
@@ -151,7 +127,7 @@ func (ibs *IntraBlockState) originCodeHash(addr accounts.Address) (accounts.Code
 // state reader, no stateObject. Size-only for stateless-witness correctness (a witness
 // node carries the size but not the bytes).
 func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, error) {
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+	if cc, ok := ibs.ownCreateContract(addr); ok && cc {
 		return 0, nil
 	}
 	codeHash, err := ibs.originCodeHash(addr)
@@ -164,7 +140,7 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 	if code, ok := ibs.sharedCode(codeHash); ok {
 		return len(code), nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -187,17 +163,16 @@ type readPathOutcome uint8
 const (
 	_ readPathOutcome = iota // unset (zero value)
 
-	outcomeLegacyStorage // versionMap == nil: typed wrapper does direct storage read on r.so
 	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
 	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
 	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
-	outcomeStorageRead   // r.so resolved; wrapper does typed storage read + records r.hdr
+	outcomeStorageRead   // cold origin resolved into the path's typed map*Val field; wrapper records r.hdr
 	outcomeReturnZero    // typed wrapper returns the path-typed zero value (account absent)
 	outcomeReturnEmpty   // typed wrapper returns the path-typed empty value (account exists, field wiped): EmptyCodeHash for CodeHashPath, otherwise the zero value
 	outcomeReturnDefault // typed wrapper returns its caller-supplied defaultV
 )
 
-// readPathResult communicates the outcome of versionedReadCore to a typed wrapper.
+// readPathResult communicates the outcome of readCore to a typed wrapper.
 // Exactly one source field is populated for the tier-hit outcomes; the wrapper does
 // the typed extraction and records the read via ReadSet.SetX when r.recordVR is true.
 type readPathResult struct {
@@ -216,8 +191,6 @@ type readPathResult struct {
 	vwCodeSize       *VersionedWrite[int]
 	vwStorage        *VersionedWrite[uint256.Int]
 
-	so *stateObject // outcomeStorageRead / outcomeLegacyStorage
-
 	// account carries the composed base account for the four account-field paths
 	// (Balance/Nonce/Incarnation/CodeHash) when it resolved from the versionMap, so
 	// the wrapper extracts the field with no stateObject alloc. Set only for a live
@@ -226,7 +199,7 @@ type readPathResult struct {
 
 	// Typed map-read values let the wrapper read its path's field directly, avoiding the
 	// any-box a generic value would impose. Value, not *WriteCell, so reads are race-free
-	// against a concurrent FlushVersionedWrites mutating cell.Value.
+	// against a concurrent FlushWrites mutating cell.Value.
 	mapAddressVal        *accounts.Account
 	mapBalanceVal        uint256.Int
 	mapNonceVal          uint64
@@ -269,68 +242,30 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 	return outcomeReturnZero
 }
 
-// versionedReadCore drives the type-independent part of a versionMap-aware read
+// readCore drives the type-independent part of a versionMap-aware read
 // (writeSet/versionMap/readSet tier probes plus destruct/revival logic); typed
 // wrappers consume the result. skipStorage suppresses the storage-read fallback on a
 // miss, for callers that resolve the value themselves. Result is written into *r
 // (caller stack, passed pre-zeroed) to avoid a return-value copy per read.
 func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
-	_, created := ibs.versionedWrites.GetCreateContract(addr)
-	_, destructed := ibs.versionedWrites.GetSelfDestruct(addr)
-	_, recorded := ibs.versionedWrites.GetAddress(addr)
+	_, created := ibs.writes.GetCreateContract(addr)
+	_, destructed := ibs.writes.GetSelfDestruct(addr)
+	_, recorded := ibs.writes.GetAddress(addr)
 	return created || destructed || recorded
 }
 
-func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil {
-			r.err = err
-			r.source = StorageRead
-			r.version = UnknownVersion
-			return
-		}
-		r.outcome = outcomeLegacyStorage
-		r.so = so
-		r.source = StorageRead
-		r.version = UnknownVersion
-		return
-	}
-
-	if so, ok := s.stateObjects[addr]; ok && so.deleted {
-		// When the deletion reflects a prior tx's selfdestruct, surface the SD version
-		// rather than UnknownVersion so records match later SD-zero-path reads and
-		// don't force a version conflict.
-		if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
-			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
-			if !commited {
-				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
-					Val:        true,
-				})
-			}
-			r.outcome = wipedFieldOutcome(s, addr)
-			r.source = MapRead
-			r.version = sdVer
-			return
-		}
-		r.outcome = outcomeReturnDefault
-		r.source = StorageRead
-		r.version = UnknownVersion
-		return
-	}
-
+func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
 	// Block-STM read-once: a value already recorded for (addr, path, key) this attempt
 	// must be returned unchanged. Re-resolving and re-recording would let a later-diverged
 	// writer overwrite the recorded read, so seal-time re-validation would compare the
 	// re-resolved version against itself and miss the divergence. Per-cell, not per-address:
-	// only the tx's own write to this exact cell takes precedence (via versionedWriteHit below).
+	// only the tx's own write to this exact cell takes precedence (via writeHit below).
 	// A committed read wants the pre-tx value, which is what the tx's first read of the cell
 	// recorded: a read after the tx's own write is served from the write set and not recorded.
-	// A tx that created or destroyed the account, or holds its state object, answers otherwise.
-	if !commited && !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) ||
-		commited && path == StoragePath && s.stateObjects[addr] == nil && !s.wroteAccountLifecycle(addr) {
-		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
+	// A tx that created or destroyed the account answers otherwise.
+	if !commited && !s.writes.Has(WriteHeader{Address: addr, Path: path, Key: key}) ||
+		commited && path == StoragePath && !s.wroteAccountLifecycle(addr) {
+		if prHeader, ok := s.reads.getHeader(addr, path, key); ok &&
 			(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 			r.outcome = outcomeReadSetHit
 			r.source = prHeader.Source
@@ -349,7 +284,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		destructTxIndex := sdRes.DepIdx()
 		// A tx always observes its own same-tx write, even after a prior tx's self-destruct.
 		if !commited {
-			if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
+			if hasWrite := s.writeHit(addr, path, key, r); hasWrite {
 				r.outcome = outcomeWriteSetHit
 				r.source = WriteSetRead
 				r.version = Version{TxIndex: s.txIndex, Incarnation: s.version}
@@ -371,7 +306,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// stamped ValueDeleted); code, nonce and incarnation clear as in a normal
 				// destruct (they take the wiped path below). Branch-agnostic: a burn stamps
 				// the balance ValueDeleted and takes the wiped path.
-				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+				s.reads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,
 				})
@@ -388,10 +323,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// own-write; a same-tx SelfDestructPath=false there means revived.
 				sd, sdOK := false, false
 				if key == accounts.NilKey {
-					sd, sdOK = s.versionedWriteSelfDestruct(addr)
+					sd, sdOK = s.ownSelfDestruct(addr)
 				}
 				if !sdOK || sd {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					s.reads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
@@ -400,13 +335,13 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					hdr := ReadHeader{Source: MapRead, Version: sdVersion}
 					switch path {
 					case StoragePath:
-						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+						s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case BalancePath:
-						s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+						s.reads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case NoncePath:
-						s.versionedReads.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+						s.reads.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
 					case CodeSizePath:
-						s.versionedReads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+						s.reads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
 					}
 					r.outcome = wipedFieldOutcome(s, addr)
 					r.source = MapRead
@@ -454,23 +389,23 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}
 
 	if !commited {
-		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
+		if hasWrite := s.writeHit(addr, path, key, r); hasWrite {
 			if res.Status() == MVReadResultDone {
-				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
+				if prHeader, prOK := s.reads.getHeader(addr, path, key); prOK {
 					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version {
 						s.dep = max(s.dep, hdr.Version.TxIndex)
-						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
 								prHeader.Version.TxIndex, prHeader.Version.Incarnation,
 								hdr.Version.TxIndex, hdr.Version.Incarnation,
 								addr, AccountKey{path, key})
 						}
-						s.versionedReads.SetHeader(addr, path, key, hdr)
+						s.reads.SetHeader(addr, path, key, hdr)
 					}
 				}
 			}
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 				fmt.Printf("%d (%d.%d) RD (%s) %x %s\n",
 					s.blockNum, s.txIndex, s.version, WriteSetRead,
 					addr, AccountKey{path, key})
@@ -485,13 +420,13 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	switch res.Status() {
 	case MVReadResultDone, MVReadResultValidated:
 		hdr.Source = MapRead
-		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
+		if prHeader, ok := s.reads.getHeader(addr, path, key); ok {
 			// Base-state read-once PIN: a slot already read this execution returns the
 			// SAME pinned dependency even if the floor has since moved. Re-resolving would
 			// rewrite the recorded dep to the surviving version and hide a consumed-but-
 			// abandoned value from seal validation; pinning lets validation catch the
 			// version change and re-execute.
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 				fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s\n",
 					s.blockNum, s.txIndex, s.version, MapRead, res.DepString(),
 					addr, AccountKey{path, key})
@@ -537,6 +472,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		if path == StoragePath {
+			if storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+				readClearedByCreate(s, hdr, r)
+				return
+			}
+			// A value below this tx is older than a creation in it.
+			if created, ok := s.ownCreateContract(addr); ok && created {
+				r.mapStorageVal = uint256.Int{}
+			}
+		}
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
@@ -545,7 +490,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		return
 
 	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n",
 				s.blockNum, s.txIndex, s.version,
 				res.DepIdx(), res.Incarnation(),
@@ -555,7 +500,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// and fall back to the in-flight value.
 		s.dep = max(s.dep, res.DepIdx())
 		hdr.Source = MapRead
-		s.versionedReads.SetHeader(addr, path, key, hdr)
+		s.reads.SetHeader(addr, path, key, hdr)
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
@@ -565,9 +510,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 	case MVReadResultNone:
 		if !commited {
-			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
+			if prHeader, ok := s.reads.getHeader(addr, path, key); ok {
 				if prHeader.Version == hdr.Version {
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s\n",
 							s.blockNum, s.txIndex, s.version, ReadSetRead,
 							addr, AccountKey{path, key})
@@ -587,7 +532,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 							return
 						}
 					}
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n",
 							s.blockNum, s.txIndex, s.version,
 							prHeader.Version.TxIndex, prHeader.Version.Incarnation,
@@ -619,11 +564,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// The destruct may have been flushed after the field probe
 				// above, together with a field cell it keeps.
 				if s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
-					versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+					readCore(s, addr, path, key, commited, skipStorage, r)
 					return
 				}
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					s.reads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
@@ -638,7 +583,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
 		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		// against liveStorageValue. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
@@ -649,6 +594,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.version = r.life.canonicalVer
 			return
 		}
+		if path == StoragePath && storageClearedByCreate(r.life, false, UnknownDep) {
+			readClearedByCreate(s, hdr, r)
+			return
+		}
 
 		// A prior tx that bumped Incarnation cleared the old incarnation's storage and
 		// code; read empty when no newer cell exists (a revival writes its own cell,
@@ -656,13 +605,13 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if path == StoragePath || path == CodePath || path == CodeSizePath {
 			if inc, incRes, incOK := s.versionMap.ReadIncarnation(addr, s.txIndex); incOK && incRes.resolved() {
 				hdr.Source = StorageRead
-				s.versionedReads.SetHeader(addr, path, key, hdr)
+				s.reads.SetHeader(addr, path, key, hdr)
 				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
-				s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{
+				s.reads.SetIncarnation(addr, VersionedRead[uint64]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: incVersion},
 					Val:        inc,
 				})
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
 						s.blockNum, s.txIndex, s.version, StorageRead,
 						addr, AccountKey{path, key}, incRes.DepIdx())
@@ -685,7 +634,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			return
 		}
 
-		var so *stateObject
 		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
 			readAccount, accSource, accVersion, err := readAccountInternal(s, addr)
 			if err != nil {
@@ -698,7 +646,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			// The record may have been flushed after the field probe above,
 			// together with a field cell that supersedes the record's field.
 			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
-				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+				readCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
 			if readAccount != nil {
@@ -709,99 +657,28 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.account = readAccount
 			}
 		}
-		// Cold origin storage read: resolve directly from the state reader without
-		// materializing a stateObject, reusing one only if a write this tx already made it.
-		if path == StoragePath {
-			hdr.Source = StorageRead
-			if cached, ok := s.stateObjects[addr]; ok {
-				so = cached
-			} else {
-				// A cold slot depends only on its own StoragePath cell — recording an
-				// AddressPath dependency would be a false dep. The origin is resolved by
-				// ReadStorage's origin fallback; this cold path is the first reader (not yet
-				// published), which reads the origin base from the state reader.
-				val, err := s.originStorageDirect(addr, key)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				r.mapStorageVal = val
-				r.outcome = outcomeStorageRead
-				r.hdr = hdr
-				r.recordVR = true
-				r.source = hdr.Source
-				r.version = hdr.Version
-				return
-			}
+		// Cold storage / code reads resolve straight from the state reader and record only
+		// their own path: an AddressPath dependency would be a false dep.
+		var err error
+		switch path {
+		case StoragePath:
+			r.mapStorageVal, err = s.originStorageDirect(addr, key)
+		case CodePath:
+			r.mapCodeVal, err = s.originCodeDirect(addr)
+		case CodeSizePath:
+			r.mapCodeSizeVal, err = s.originCodeSizeDirect(addr)
 		}
-		// Cold code / code-size read: resolve directly from the state reader without
-		// materializing a stateObject, reusing a cached one when present. Code paths
-		// record only their own dependency (no false AddressPath dep).
-		if (path == CodePath || path == CodeSizePath) && so == nil {
-			hdr.Source = StorageRead
-			if cached, ok := s.stateObjects[addr]; ok {
-				so = cached
-			} else {
-				if path == CodePath {
-					code, err := s.originCodeDirect(addr)
-					if err != nil {
-						r.err = err
-						r.outcome = outcomeReturnDefault
-						r.source = StorageRead
-						r.version = UnknownVersion
-						return
-					}
-					r.mapCodeVal = code
-				} else {
-					size, err := s.originCodeSizeDirect(addr)
-					if err != nil {
-						r.err = err
-						r.outcome = outcomeReturnDefault
-						r.source = StorageRead
-						r.version = UnknownVersion
-						return
-					}
-					r.mapCodeSizeVal = size
-				}
-				r.outcome = outcomeStorageRead
-				r.hdr = hdr
-				r.recordVR = true
-				r.source = hdr.Source
-				r.version = hdr.Version
-				return
-			}
-		}
-		if so == nil && r.account == nil {
-			hdr.Source = StorageRead
-			// An absent account's field is its default. readAccountInternal already
-			// resolved the committed base (seedOrigin); a nil result means the account
-			// is in neither the map nor the base, so a materialized stateObject could
-			// add nothing. Record the absent read and return the default — the
-			// noMaterialize flow must never resolve through a stateObject.
-			if !s.noMaterialize {
-				obj, err := s.getStateObject(addr, true)
-				if err != nil {
-					r.err = err
-					r.outcome = outcomeReturnDefault
-					r.source = StorageRead
-					r.version = UnknownVersion
-					return
-				}
-				so = obj
-			}
-		}
-		if s.noMaterialize && so != nil {
-			r.err = fmt.Errorf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key})
+		if err != nil {
+			r.err = err
 			r.outcome = outcomeReturnDefault
 			r.source = StorageRead
 			r.version = UnknownVersion
 			return
 		}
+		if r.account == nil {
+			hdr.Source = StorageRead
+		}
 		r.outcome = outcomeStorageRead
-		r.so = so
 		r.hdr = hdr
 		// A field resolved from this tx's own AddressPath write (WriteSetRead) carries no
 		// cross-tx dependency; recording it would make the validator (floored below the
@@ -817,11 +694,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.version = UnknownVersion
 }
 
-// readAccountInternal performs an AddressPath versionedReadCore + typed extraction
+// readAccountInternal performs an AddressPath readCore + typed extraction
 // of *accounts.Account, for sibling-account reads that take no typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetAddress(addr); ok && warmSource(tr.Source) {
 			if tr.Val != nil {
 				return tr.Val.Account(), tr.Source, tr.Version, nil
 			}
@@ -829,7 +706,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return nil, r.source, r.version, r.err
 	}
@@ -837,7 +714,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 	case outcomeWriteSetHit:
 		return r.vwAddress.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetAddress(addr)
+		tr, _ := s.reads.GetAddress(addr)
 		if tr.Val != nil {
 			return tr.Val.Account(), r.source, r.version, nil
 		}
@@ -874,7 +751,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 			}
 		}
 		if r.recordVR {
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
+			s.reads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
 		}
 		return acc, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty:
@@ -883,8 +760,8 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// same-tx create+destruct cross-check (same hazard the outcomeMapDone gate above
 		// avoids). The absence is recorded at the destruct, so later loads in this tx
 		// keep it and a re-creation flushed since invalidates it.
-		if _, ok := s.versionedReads.GetAddress(addr); !ok && s.versionMap.IsNetAbsent(addr, s.txIndex) {
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: r.version}})
+		if _, ok := s.reads.GetAddress(addr); !ok && s.versionMap.IsNetAbsent(addr, s.txIndex) {
+			s.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: r.version}})
 		}
 		return nil, r.source, r.version, nil
 	case outcomeReturnDefault:
@@ -895,7 +772,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		// The skipStorage branch may carry recordVR=true; AddressPath defaultV is nil.
 		if r.recordVR {
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
+			s.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
 		}
 		return nil, r.source, r.version, nil
 	default:
@@ -922,7 +799,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 // StorageRead is version-only-validated). Only a genuine cold committed read seeds; a
 // versionMap or write-set hit is untouched. Mutates r so the seeded cell and read agree.
 func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
-	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
+	if r.source != StorageRead || r.version != UnknownVersion {
 		return
 	}
 	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
@@ -948,9 +825,6 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 // base, and records the read at originIndex so the tx's own re-reads agree. seeded=false
 // means the account does not exist committed, so the caller falls back to the miss record.
 func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Account, src ReadSource, ver Version, seeded bool, err error) {
-	if s.versionMap == nil {
-		return nil, UnknownSource, UnknownVersion, false, nil
-	}
 	// The origin is resolved by ReadAddress's origin fallback once published; this is the first
 	// reader (not yet published), which reads the committed base from the state reader and records
 	// it for publish to the origin map at flush.
@@ -970,7 +844,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	if !gateOriginAccount(s, addr, &origin) {
 		return nil, MapRead, ver, true, nil
 	}
-	s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: MapRead, Version: ver}, NewAccountView(&origin)})
+	s.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: MapRead, Version: ver}, NewAccountView(&origin)})
 	return &origin, MapRead, ver, true, nil
 }
 
@@ -980,7 +854,7 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 
 // warmReadable reports whether addr has no own write this tx, so a recorded read
 // of it is a stable snapshot the read-once fast path can serve (own writes take
-// precedence and must go through the full path). Same gate as versionedWriteHit.
+// precedence and must go through the full path). Same gate as writeHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	_, dirty := ibs.journal.dirties[addr]
 	return !dirty
@@ -994,11 +868,8 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
 		}
 	}
-	// A resident deleted object outranks the read set, as in versionedReadCore.
-	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
-		if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, true
-		}
+	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+		return tr.Val, tr.Source, tr.Version, true
 	}
 	var zero T
 	return zero, UnknownSource, UnknownVersion, false
@@ -1008,12 +879,12 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetBalance(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
+	readCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return uint256.Int{}, r.source, r.version, r.err
@@ -1022,30 +893,23 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	case outcomeWriteSetHit:
 		return r.vwBalance.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetBalance(addr)
+		tr, _ := s.reads.GetBalance(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapBalanceVal
 		if r.recordVR {
-			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint256.Int
 		if r.account != nil {
 			v = r.account.Balance
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.Balance()
 		}
 		if r.recordVR {
-			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		return r.so.Balance(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
@@ -1058,12 +922,12 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 // recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetBalance(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return currentBalance, r.source, r.version, r.err
 	}
@@ -1071,12 +935,12 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 	case outcomeWriteSetHit:
 		return r.vwBalance.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetBalance(addr)
+		tr, _ := s.reads.GetBalance(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		// Record so a repeat (e.g. the next Empty()) hits the read-once fast path.
 		if r.recordVR {
-			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, r.mapBalanceVal})
+			s.reads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, r.mapBalanceVal})
 		}
 		return r.mapBalanceVal, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty:
@@ -1085,7 +949,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 		return uint256.Int{}, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
-			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, currentBalance})
+			s.reads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, currentBalance})
 		}
 		return currentBalance, r.source, r.version, nil
 	default:
@@ -1096,12 +960,12 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 // readNonce returns the nonce using the version-aware read pipeline.
 func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
 	if committed || s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
+	readCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1110,33 +974,23 @@ func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint6
 	case outcomeWriteSetHit:
 		return r.vwNonce.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetNonce(addr)
+		tr, _ := s.reads.GetNonce(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapNonceVal
 		if r.recordVR {
-			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
+			s.reads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint64
 		if r.account != nil {
 			v = r.account.Nonce
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.Nonce()
 		}
 		if r.recordVR {
-			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
+			s.reads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return 0, StorageRead, UnknownVersion, nil
-		}
-		if committed {
-			return r.so.original.Nonce, StorageRead, UnknownVersion, nil
-		}
-		return r.so.Nonce(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1146,12 +1000,12 @@ func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint6
 
 func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, NoncePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return currentNonce, r.source, r.version, r.err
 	}
@@ -1159,18 +1013,18 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 	case outcomeWriteSetHit:
 		return r.vwNonce.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetNonce(addr)
+		tr, _ := s.reads.GetNonce(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		if r.recordVR {
-			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, r.mapNonceVal})
+			s.reads.SetNonce(addr, VersionedRead[uint64]{r.hdr, r.mapNonceVal})
 		}
 		return r.mapNonceVal, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty:
 		return 0, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
-			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, currentNonce})
+			s.reads.SetNonce(addr, VersionedRead[uint64]{r.hdr, currentNonce})
 		}
 		return currentNonce, r.source, r.version, nil
 	default:
@@ -1181,12 +1035,12 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 // readIncarnation returns the incarnation counter.
 func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetIncarnation(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetIncarnation(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, IncarnationPath, accounts.NilKey, false, false, &r)
+	readCore(s, addr, IncarnationPath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return 0, r.source, r.version, r.err
 	}
@@ -1194,30 +1048,23 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 	case outcomeWriteSetHit:
 		return r.vwIncarnation.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetIncarnation(addr)
+		tr, _ := s.reads.GetIncarnation(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapIncarnationVal
 		if r.recordVR {
-			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
+			s.reads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint64
 		if r.account != nil {
 			v = r.account.Incarnation
-		} else if r.so != nil && !r.so.deleted {
-			v = r.so.data.Incarnation
 		}
 		if r.recordVR {
-			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
+			s.reads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return 0, StorageRead, UnknownVersion, nil
-		}
-		return r.so.data.Incarnation, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1227,7 +1074,7 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 
 func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarnation uint64) (uint64, ReadSource, Version, error) {
 	var r readPathResult
-	versionedReadCore(s, addr, IncarnationPath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, IncarnationPath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return currentIncarnation, r.source, r.version, r.err
 	}
@@ -1235,7 +1082,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	case outcomeWriteSetHit:
 		return r.vwIncarnation.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetIncarnation(addr)
+		tr, _ := s.reads.GetIncarnation(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapIncarnationVal, r.source, r.version, nil
@@ -1243,7 +1090,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		return 0, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
-			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, currentIncarnation})
+			s.reads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, currentIncarnation})
 		}
 		return currentIncarnation, r.source, r.version, nil
 	default:
@@ -1254,16 +1101,33 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 // recordWipedSelfDestruct records the SelfDestruct cell a wiped read resolves
 // through; after a revival that cell holds false.
 func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lifecycleVerdict) {
-	s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+	s.reads.SetSelfDestruct(addr, VersionedRead[bool]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: life.canonicalVer},
 		Val:        life.state == LifecycleAbsent,
 	})
 }
 
+// readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
+// anchored on the creation, as liveStorageValue validates it. While the creation is in flight, the
+// read depends on it.
+func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
+	if r.life.createInc < 0 {
+		s.dep = max(s.dep, r.life.createdAt)
+	}
+	hdr.Source = MapRead
+	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
+	r.mapStorageVal = uint256.Int{}
+	r.outcome = outcomeMapDone
+	r.hdr = hdr
+	r.recordVR = true
+	r.source = MapRead
+	r.version = hdr.Version
+}
+
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
-// as liveStorage resolves it, so a later store above the destruct invalidates it.
+// as liveStorageValue resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
-	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+	s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},
 	})
 }
@@ -1275,9 +1139,9 @@ func recordWipedCodeRead(s *IntraBlockState, addr accounts.Address, path Account
 	hdr := ReadHeader{Source: MapRead, Version: destructVer}
 	switch path {
 	case CodePath:
-		s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
+		s.reads.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
 	case CodeSizePath:
-		s.versionedReads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+		s.reads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
 	}
 }
 
@@ -1298,13 +1162,13 @@ type codeSegment struct {
 // the whole code once and keeps it in the record, so later copies do not decode it again.
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetCode(addr); ok && warmSource(tr.Source) {
 			code, err := s.recordedCode(addr, tr)
 			return code, tr.Source, tr.Version, err
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, seg != nil, &r)
+	readCore(s, addr, CodePath, accounts.NilKey, false, seg != nil, &r)
 	if seg != nil && r.err == nil && r.outcome == outcomeReturnDefault && r.hdr.Source == StorageRead {
 		codeHash, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst)
 		if err != nil {
@@ -1312,11 +1176,11 @@ func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment
 		}
 		if copied {
 			seg.copied = true
-			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: codeHash}})
+			s.reads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: codeHash}})
 			return accounts.Code{Hash: codeHash}, StorageRead, r.hdr.Version, nil
 		}
 		r = readPathResult{}
-		versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
+		readCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	}
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
@@ -1326,38 +1190,21 @@ func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment
 	case outcomeWriteSetHit:
 		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCode(addr)
+		tr, _ := s.reads.GetCode(addr)
 		code, err := s.recordedCode(addr, tr)
 		return code, r.source, r.version, err
 	case outcomeMapDone:
 		v := r.mapCodeVal
 		if r.recordVR {
-			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
+			s.reads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v accounts.Code
-		if r.so != nil {
-			if !r.so.deleted {
-				code, err := r.so.CodeTyped()
-				if err != nil {
-					return accounts.Code{}, StorageRead, UnknownVersion, err
-				}
-				v = code
-			}
-		} else {
-			v = r.mapCodeVal
-		}
+		v := r.mapCodeVal
 		if r.recordVR {
-			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
+			s.reads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return accounts.Code{}, StorageRead, UnknownVersion, nil
-		}
-		code, err := r.so.CodeTyped()
-		return code, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return accounts.Code{}, r.source, r.version, nil
 	default:
@@ -1389,14 +1236,14 @@ func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead
 		return accounts.Code{}, err
 	}
 	tr.Val = code
-	ibs.versionedReads.SetCode(addr, tr)
+	ibs.reads.SetCode(addr, tr)
 	return code, nil
 }
 
 // measureCodeRead runs a committed code read with the code-read tracing and metrics. A read that reports false
 // was declined and is not counted, so the read that replaces it counts once.
 func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() (bool, error)) error {
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -1416,10 +1263,10 @@ func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() (
 // when the code is already on a state object, absent, or in the shared code cache.
 func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (accounts.CodeHash, bool, error) {
 	segmentReader, ok := ibs.stateReader.(codeSegmentReader)
-	if !ok || ibs.stateObjects[addr] != nil {
+	if !ok {
 		return accounts.CodeHash{}, false, nil
 	}
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+	if cc, ok := ibs.ownCreateContract(addr); ok && cc {
 		return accounts.CodeHash{}, false, nil
 	}
 	codeHash, err := ibs.originCodeHash(addr)
@@ -1442,44 +1289,13 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 	return codeHash, true, nil
 }
 
-// refreshCode re-reads CodePath from the versioned IO; a read-set hit recorded without bytes reads the committed code
-// again. CodePath is never recorded via the skipStorage branch (the `path != CodePath` guard), so the default case
-// records nothing.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
-	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
-	if r.err != nil {
-		return accounts.Code{}, r.err
-	}
-	var code accounts.Code
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		code = r.vwCode.Val
-	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCode(addr)
-		var err error
-		if code, err = s.recordedCode(addr, tr); err != nil {
-			return accounts.Code{}, err
-		}
-	case outcomeMapDone:
-		code = r.mapCodeVal
-	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-	default:
-		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
-	}
-	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
-		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
-	}
-	return code, nil
-}
-
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeSize, s.versionedReads.codeSize); ok {
+	if v, src, ver, ok := warmField(s, addr, s.writes.codeSize, s.reads.codeSize); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
+	readCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1488,35 +1304,20 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 	case outcomeWriteSetHit:
 		return r.vwCodeSize.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCodeSize(addr)
+		tr, _ := s.reads.GetCodeSize(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapCodeSizeVal
 		if r.recordVR {
-			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
+			s.reads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v int
-		if r.so != nil {
-			sz, err := codeSizeFromStateObject(s, r.so, addr)
-			if err != nil {
-				return 0, r.source, r.version, err
-			}
-			v = sz
-		} else {
-			v = r.mapCodeSizeVal
-		}
+		v := r.mapCodeSizeVal
 		if r.recordVR {
-			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
+			s.reads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		v, err := codeSizeFromStateObject(s, r.so, addr)
-		if err != nil {
-			return 0, StorageRead, UnknownVersion, err
-		}
-		return v, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
@@ -1527,12 +1328,12 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 // readCodeHash returns the contract code hash.
 func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.CodeHash, ReadSource, Version, error) {
 	if !commited && s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetCodeHash(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
+	readCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err
@@ -1541,37 +1342,27 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 	case outcomeWriteSetHit:
 		return r.vwCodeHash.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCodeHash(addr)
+		tr, _ := s.reads.GetCodeHash(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapCodeHashVal
 		if r.recordVR {
-			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
+			s.reads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v accounts.CodeHash
-		switch {
-		case r.account != nil:
+		v := accounts.NilCodeHash
+		if r.account != nil {
 			// Match newObject: an empty CodeHash normalizes to EmptyCodeHash.
 			v = r.account.CodeHash
 			if v.IsEmpty() {
 				v = accounts.EmptyCodeHash
 			}
-		case r.so != nil && !r.so.deleted:
-			v = r.so.data.CodeHash
-		default:
-			v = accounts.NilCodeHash
 		}
 		if r.recordVR {
-			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
+			s.reads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return accounts.NilCodeHash, StorageRead, UnknownVersion, nil
-		}
-		return r.so.data.CodeHash, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return accounts.NilCodeHash, r.source, r.version, nil
 	case outcomeReturnEmpty:
@@ -1584,12 +1375,12 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 // refreshCodeHash is the in-memory-only variant for CodeHashPath.
 func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash accounts.CodeHash) (accounts.CodeHash, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetCodeHash(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, CodeHashPath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return currentHash, r.source, r.version, r.err
 	}
@@ -1597,11 +1388,11 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 	case outcomeWriteSetHit:
 		return r.vwCodeHash.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetCodeHash(addr)
+		tr, _ := s.reads.GetCodeHash(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		if r.recordVR {
-			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, r.mapCodeHashVal})
+			s.reads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, r.mapCodeHashVal})
 		}
 		return r.mapCodeHashVal, r.source, r.version, nil
 	case outcomeReturnZero:
@@ -1610,7 +1401,7 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 		return accounts.EmptyCodeHash, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
-			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, currentHash})
+			s.reads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, currentHash})
 		}
 		return currentHash, r.source, r.version, nil
 	default:
@@ -1630,27 +1421,16 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil || so == nil || so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, err
-		}
-		v, clean, err := so.GetState(key)
-		return v, StorageRead, UnknownVersion, clean, err
-	}
 	if !s.warmReadable(addr) {
-		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
+		if vw, ok := s.writes.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
 		}
 	}
-	// A resident deleted object outranks the read set, as in versionedReadCore.
-	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
-		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, true, nil
-		}
+	if tr, ok := s.reads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+		return tr.Val, tr.Source, tr.Version, true, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
+	readCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
 		return uint256.Int{}, r.source, r.version, false, r.err
 	}
@@ -1658,36 +1438,23 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	case outcomeWriteSetHit:
 		return r.vwStorage.Val, r.source, r.version, false, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetStorage(addr, key)
+		tr, _ := s.reads.GetStorage(addr, key)
 		return tr.Val, r.source, r.version, true, nil
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, false, nil
 	case outcomeStorageRead:
-		var v uint256.Int
-		var clean bool
-		if r.so != nil {
-			if !r.so.deleted {
-				var err error
-				if v, clean, err = r.so.GetState(key); err != nil {
-					return uint256.Int{}, r.source, r.version, false, err
-				}
-			}
-		} else {
-			// Cold origin read resolved by originStorageDirect: no dirty
-			// value exists on the parallel path, so it is always clean.
-			v, clean = r.mapStorageVal, true
-		}
-		if clean {
-			seedStorageOrigin(s, addr, key, v, &r)
-		}
+		// Cold origin read resolved by originStorageDirect: no dirty value exists on
+		// the parallel path, so it is always clean.
+		v := r.mapStorageVal
+		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
-		return v, r.source, r.version, clean, nil
+		return v, r.source, r.version, true, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
@@ -1697,16 +1464,8 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil || so == nil || so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, err
-		}
-		v, err := so.GetCommittedState(key)
-		return v, StorageRead, UnknownVersion, err
-	}
 	var r readPathResult
-	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
+	readCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
 		return uint256.Int{}, r.source, r.version, r.err
 	}
@@ -1714,30 +1473,19 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	case outcomeWriteSetHit:
 		return r.vwStorage.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetStorage(addr, key)
+		tr, _ := s.reads.GetStorage(addr, key)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v uint256.Int
-		if r.so != nil {
-			if !r.so.deleted {
-				cv, err := r.so.GetCommittedState(key)
-				if err != nil {
-					return uint256.Int{}, StorageRead, UnknownVersion, err
-				}
-				v = cv
-			}
-		} else {
-			v = r.mapStorageVal
-		}
+		v := r.mapStorageVal
 		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
@@ -1752,18 +1500,18 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	// A contract this tx recreated (own CreateContract cell) shadows a prior tx's
 	// SELFDESTRUCT in the version map, like the origin* readers above — unless this
 	// tx has since re-destroyed it, whose own SelfDestruct cell the path below returns.
-	if _, ownSD := s.versionedWrites.GetSelfDestruct(addr); !ownSD {
-		if cc, ok := s.versionedWriteCreateContract(addr); ok && cc {
+	if _, ownSD := s.writes.GetSelfDestruct(addr); !ownSD {
+		if cc, ok := s.ownCreateContract(addr); ok && cc {
 			return false, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
 	}
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.reads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, SelfDestructPath, accounts.NilKey, false, false, &r)
+	readCore(s, addr, SelfDestructPath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return false, r.source, r.version, r.err
 	}
@@ -1771,38 +1519,19 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	case outcomeWriteSetHit:
 		return r.vwSelfDestruct.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetSelfDestruct(addr)
+		tr, _ := s.reads.GetSelfDestruct(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapSelfDestructVal
 		if r.recordVR {
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
+			s.reads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v bool
-		if r.so != nil {
-			switch {
-			case r.so.deleted:
-				v = false
-			case r.so.createdContract:
-				v = false
-			default:
-				v = r.so.selfdestructed
-			}
-		}
 		if r.recordVR {
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
+			s.reads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, false})
 		}
-		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil {
-			return false, StorageRead, UnknownVersion, nil
-		}
-		if r.so.deleted || r.so.createdContract {
-			return false, StorageRead, UnknownVersion, nil
-		}
-		return r.so.selfdestructed, StorageRead, UnknownVersion, nil
+		return false, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return false, r.source, r.version, nil
 	default:
@@ -1813,7 +1542,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 // refreshSelfDestruct is the in-memory-only variant.
 func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSource, Version, error) {
 	var r readPathResult
-	versionedReadCore(s, addr, SelfDestructPath, accounts.NilKey, false, true, &r)
+	readCore(s, addr, SelfDestructPath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
 		return false, r.source, r.version, r.err
 	}
@@ -1821,14 +1550,14 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 	case outcomeWriteSetHit:
 		return r.vwSelfDestruct.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetSelfDestruct(addr)
+		tr, _ := s.reads.GetSelfDestruct(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapSelfDestructVal, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		if r.recordVR {
 			// SelfDestructPath defaultV is false — the zero value.
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: r.hdr})
+			s.reads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: r.hdr})
 		}
 		return false, r.source, r.version, nil
 	default:
@@ -1839,35 +1568,6 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 // readAccount returns the *accounts.Account for an address.
 func readAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
 	return readAccountInternal(s, addr)
-}
-
-// refreshAccount is the in-memory-only variant for AddressPath.
-func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	var r readPathResult
-	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
-	if r.err != nil {
-		return nil, r.source, r.version, r.err
-	}
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		return r.vwAddress.Val, r.source, r.version, nil
-	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetAddress(addr)
-		if tr.Val != nil {
-			return tr.Val.Account(), r.source, r.version, nil
-		}
-		return nil, r.source, r.version, nil
-	case outcomeMapDone:
-		return r.mapAddressVal, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-		if r.recordVR {
-			// AddressPath defaultV is nil.
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
-		}
-		return nil, r.source, r.version, nil
-	default:
-		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
-	}
 }
 
 // ReadStamp is the token the vm's frame slot cache uses to detect state changes

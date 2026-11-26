@@ -132,6 +132,23 @@ func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
 	}
 }
 
+func TestCustomConfigBoundsMaxValidatorsPerCommittee(t *testing.T) {
+	for _, validators := range []uint64{4096, MaxSupportedValidatorsPerCommittee, MaxSupportedValidatorsPerCommittee + 1, math.MaxUint64} {
+		t.Run(fmt.Sprint(validators), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, "MAX_VALIDATORS_PER_COMMITTEE: %d\n", validators), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if validators > MaxSupportedValidatorsPerCommittee {
+				require.EqualError(t, err, fmt.Sprintf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", validators, uint64(MaxSupportedValidatorsPerCommittee)))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, validators, beaconCfg.MaxValidatorsPerCommittee)
+		})
+	}
+}
+
 func TestCustomConfigGasLimitSchedule(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`GLOAS_FORK_EPOCH: 10

@@ -143,7 +143,7 @@ func newMinedBlobReorgPool(t *testing.T) *minedBlobReorgTest {
 	chainConfig := *testforks.Forks["Cancun"]
 	chainConfig.ChainID = uint256.NewInt(5)
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), &chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), &chainConfig, nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}}
 	require.NoError(t, pool.OnNewBlock(ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
@@ -256,7 +256,7 @@ func TestMinedBlobTxnKeepsRlpAfterReloadFlushAndUnwind(t *testing.T) {
 	require.NoError(t, err)
 
 	reloaded, err := New(r.ctx, make(chan Announcements, 5), r.pool.poolDB, r.pool._chainDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 	r.pool = reloaded
 	require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
@@ -291,7 +291,7 @@ func TestMinedBlobTxnMinedBeforeStartupRestore(t *testing.T) {
 			require.NoError(t, err)
 
 			reloaded, err := New(r.ctx, make(chan Announcements, 5), r.pool.poolDB, r.pool._chainDB, txpoolcfg.DefaultConfig,
-				kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+				kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New())
 			require.NoError(t, err)
 			r.pool = reloaded
 			require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
@@ -377,7 +377,7 @@ func TestUnwoundBlobTxnWithoutSidecarIsNotAdded(t *testing.T) {
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 
 	sender := common.Address{1}
@@ -422,7 +422,7 @@ func TestSecondSameHeightReorgReinjectsMinedBlobTxn(t *testing.T) {
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 
 	sender := common.Address{1}

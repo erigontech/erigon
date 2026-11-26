@@ -28,7 +28,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -335,7 +334,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -453,7 +452,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -521,7 +520,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -579,7 +578,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -632,13 +631,9 @@ type codeAndHash struct {
 	hash accounts.CodeHash
 }
 
-func NewCodeAndHash(code []byte) *codeAndHash {
-	return &codeAndHash{code: code}
-}
-
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.NewCode(c.code).Hash
 	}
 	return c.hash
 }
@@ -714,11 +709,6 @@ func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
 	return targetNonce != 0 || !targetCodeHash.IsEmpty(), nil
 }
 
-func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
-	ret, addr, gasRemaining, gasUsed, err := evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
-	return ret, addr, gasRemaining, gasUsed, err
-}
-
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
 	return evm.createWithPreparation(caller, codeAndHash, gas, value, address, typ, incrementNonce, bailout, nil)
@@ -730,6 +720,14 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
+	// With EIP-3860, nested creations select the replacement when calculating
+	// the initcode charge, before gas is forwarded to the constructor.
+	if override := evm.config.OverrideInitCode; override != nil && (preparation == nil || !evm.config.HasEip3860(evm.chainRules)) {
+		if replacement, matched := override(address); matched {
+			codeAndHash.code = replacement
+			codeAndHash.hash = accounts.NilCodeHash
+		}
+	}
 
 	depth := evm.depth
 	if depth == 0 {
@@ -960,7 +958,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
 	isCreate := typ == CREATE || typ == CREATE2
-	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Value()))
 }
 
 // Frame calls sit below a synthetic transaction root. Opcode depths

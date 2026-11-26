@@ -104,8 +104,6 @@ LABEL \
     "org.opencontainers.image.source"="https://github.com/erigontech/erigon" \
     "org.opencontainers.image.url"="https://github.com/erigontech/erigon/blob/main/Dockerfile"
 
-STOPSIGNAL 2
-
 SHELL ["/bin/bash", "-c"]
 
 # CA certificates the image must not trust while the base image still ships them, as listed in

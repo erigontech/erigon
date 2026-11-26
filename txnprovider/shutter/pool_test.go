@@ -455,7 +455,7 @@ func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
-		nil, stateChanges, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
+		nil, stateChanges, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 	runDone := make(chan struct{})
 	go func() {

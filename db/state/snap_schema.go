@@ -105,6 +105,10 @@ func NewE2SnapSchemaWithStepAndDir(dir string, dataFileTag string, indexFileTags
 	}
 }
 
+func (s *E2SnapSchema) Versions() E2SnapSchemaVersion {
+	return s.currentVersion
+}
+
 func (s *E2SnapSchema) DataTag() string {
 	return s.dataFileTag
 }

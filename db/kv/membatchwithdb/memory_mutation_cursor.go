@@ -44,6 +44,8 @@ type memoryMutationCursor struct {
 	memCursor kv.RwCursorDupSort
 	// we keep the mining mutation so that we can insert new elements in db
 	mutation        *MemoryMutation
+	deletions       *tableDeletions
+	deletionTables  *map[string]*tableDeletions
 	table           string
 	currentPair     cursorEntry
 	currentDbEntry  cursorEntry
@@ -52,15 +54,26 @@ type memoryMutationCursor struct {
 	pureDupSort     bool
 }
 
+func (m *memoryMutationCursor) tableDeletions() *tableDeletions {
+	if m.deletions == nil {
+		tables := m.mutation.deletions.Load()
+		if tables != nil && tables != m.deletionTables {
+			m.deletionTables = tables
+			m.deletions = (*tables)[m.table]
+		}
+	}
+	return m.deletions
+}
+
 func (m *memoryMutationCursor) isTableCleared() bool {
-	return m.mutation.isTableCleared(m.table)
+	return m.tableDeletions().isTableCleared()
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
 	if m.pureDupSort {
-		return m.mutation.isDupDeleted(m.table, key, value)
+		return m.tableDeletions().isDupDeleted(key, value)
 	}
-	return m.mutation.isEntryDeleted(m.table, key)
+	return m.tableDeletions().isEntryDeleted(key)
 }
 
 // First move cursor to first position and return key and value accordingly.
@@ -509,7 +522,11 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 		return nil, nil, err
 	}
 
-	if dbKey != nil && !m.mutation.isDupDeleted(m.table, key, value) {
+	// isEntryDeleted already checks pair markers for tables classified as pure DupSort.
+	// Other tables, including custom DupSort tables, need the extra pair check.
+	if dbKey != nil &&
+		!m.isEntryDeleted(key, value) &&
+		(m.pureDupSort || !m.tableDeletions().isDupDeleted(key, value)) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key = key

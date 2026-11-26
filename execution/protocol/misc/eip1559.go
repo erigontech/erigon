@@ -25,9 +25,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,46 +41,6 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) err
 			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
 	}
 	return nil
-}
-
-var Eip1559FeeCalculator eip1559Calculator
-
-type eip1559Calculator struct{}
-
-func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
-	hash := rawdb.ReadHeadHeaderHash(db)
-
-	if hash == (common.Hash{}) {
-		return 0, 0, 0, 0, errors.New("can't get head header hash")
-	}
-
-	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)
-	if err != nil {
-		return 0, 0, 0, 0, err
-	}
-	if currentHeader == nil {
-		return 0, 0, 0, 0, nil
-	}
-
-	if chainConfig != nil {
-		if currentHeader.BaseFee != nil {
-			baseFee = CalcBaseFee(chainConfig, currentHeader).Uint64()
-		}
-
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + chainConfig.SecondsPerSlot()
-			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader, nextBlockTime)
-			b, err := GetBlobGasPrice(chainConfig, excessBlobGas, nextBlockTime)
-			if err != nil {
-				return 0, 0, 0, 0, err
-			}
-			blobFee = b.Uint64()
-		}
-	}
-
-	minBlobGasPrice = chainConfig.GetMinBlobGasPrice()
-
-	return baseFee, blobFee, minBlobGasPrice, currentHeader.GasLimit, nil
 }
 
 // CalcBaseFee calculates the basefee of the header.

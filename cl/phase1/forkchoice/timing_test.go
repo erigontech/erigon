@@ -86,7 +86,7 @@ func TestGetContributionDueMs(t *testing.T) {
 func TestGetPayloadAttestationDueMs(t *testing.T) {
 	// 12 * 7500 / 10 = 9000 ms
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs(10))
+	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs())
 }
 
 func TestGetTimingDueMsUsesConfiguredBps(t *testing.T) {
@@ -109,7 +109,7 @@ func TestGetTimingDueMsUsesConfiguredBps(t *testing.T) {
 	require.Equal(t, uint64(1800), f.getSyncMessageDueMs(10))
 	require.Equal(t, uint64(4800), f.getContributionDueMs(0))
 	require.Equal(t, uint64(3000), f.getContributionDueMs(10))
-	require.Equal(t, uint64(7200), f.getPayloadAttestationDueMs(10))
+	require.Equal(t, uint64(7200), f.getPayloadAttestationDueMs())
 }
 
 func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {

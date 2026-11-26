@@ -1072,6 +1072,15 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
 	var invalidFrame bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&invalidFrame))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyBlobHashes, err := types.SignTx(&types.BlobTx{
+		DynamicFeeTransaction: *types.NewEIP1559Transaction(u256.N1, 0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), uint256.NewInt(1e10), nil),
+		MaxFeePerBlobGas:      *uint256.NewInt(1),
+	}, *types.LatestSignerForChainID(&u256.N1), key)
+	require.NoError(t, err)
+	var emptyBlobHashesRlp bytes.Buffer
+	require.NoError(t, emptyBlobHashes.(*types.BlobTx).WithSidecar(&types.BlobTxWrapper{WrapperVersion: 1}).MarshalBinaryWrapped(&emptyBlobHashesRlp))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -1098,6 +1107,11 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "invalid frame signature PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
+		},
+		{
+			name: "empty blob hashes PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{emptyBlobHashesRlp.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
@@ -2428,31 +2442,32 @@ func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 }
 
 func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
-	t.Parallel()
-	a := newAnnounceFetchTest(t)
-	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
-	hashes := make([][32]byte, 257)
-	for i := range hashes {
-		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
-	}
-	a.blockSend = true
-	announcement := func() []byte {
-		var txTypes []byte
-		var sizes []uint32
-		var concat []byte
-		for _, h := range hashes {
-			txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+	synctest.Test(t, func(t *testing.T) {
+		a := newAnnounceFetchTest(t)
+		peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+		hashes := make([][32]byte, 257)
+		for i := range hashes {
+			binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
 		}
-		buf := make([]byte, announcementsLen(txTypes, sizes, concat))
-		return buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
-	}()
-	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
-		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
-	}, a.sentryClient)
-	a.requestedFrom, a.sentHashes = nil, nil
-	a.announce(t, peerB, hashes[256])
-	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "a hash left reserved for A would only gain B as an alternate")
-	require.Equal(t, []Hashes{hashes[256][:]}, a.sentHashes)
+		a.blockSend = true
+		announcement := func() []byte {
+			var txTypes []byte
+			var sizes []uint32
+			var concat []byte
+			for _, h := range hashes {
+				txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+			}
+			buf := make([]byte, announcementsLen(txTypes, sizes, concat))
+			return buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
+		}()
+		_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
+		}, a.sentryClient)
+		a.requestedFrom, a.sentHashes = nil, nil
+		a.announce(t, peerB, hashes[256])
+		require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "a hash left reserved for A would only gain B as an alternate")
+		require.Equal(t, []Hashes{hashes[256][:]}, a.sentHashes)
+	})
 }
 
 func TestReplyDuringTheRetrySendFreesItsSlot(t *testing.T) {

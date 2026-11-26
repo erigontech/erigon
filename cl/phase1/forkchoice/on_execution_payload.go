@@ -1422,6 +1422,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		if err := f.checkDataAvailability(block, common.Hash(beaconBlockRoot)); err != nil {
 			if missingMode == queueMissingEnvelope && errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+				f.emitters.WakePendingEnvelopeRetry()
 			}
 			return false, err
 		}

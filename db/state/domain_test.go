@@ -313,9 +313,9 @@ func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-	require.NoError(t, d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir(), false))
+	files, err := d.dumpStepRangeToPath(t.Context(), 0, 1, writer, t.TempDir())
+	require.NoError(t, err)
+	files.CleanupOnError()
 }
 
 func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
@@ -325,19 +325,22 @@ func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
-	require.NoError(t, writer.PutWithPrev([]byte("key1"), []byte("value1"), 1, nil))
+	// The compressor checks for cancellation in batches as it writes the keys and values.
+	for i := range uint64(2048) {
+		key := binary.BigEndian.AppendUint64(nil, i)
+		require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	}
 
-	vt := func([]byte, uint64, uint64) ([]byte, error) { return nil, fmt.Errorf("vt failed") }
-	_, err := d.collateETL(t.Context(), 0, 1, writer.valsCollector(), vt, "")
-	require.Error(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := d.collateETL(ctx, 0, 1, writer.valsCollector(), "")
+	require.ErrorIs(t, err, context.Canceled)
 	leftovers, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
 	require.Empty(t, leftovers, "the values compressor is closed when collateETL fails")
 }
 
-// TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
-// dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
-// directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
+// Dumping to another directory must not change the domain's live files.
 func TestDumpStepRangeToPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -360,22 +363,12 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
 	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
 
-	// Snapshot dirtyFiles count before invoking; integrate=false must leave it unchanged.
-	countDirty := func() int {
-		n := 0
-		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-			n += len(items)
-			return true
-		})
-		return n
-	}
-	beforeDirty := countDirty()
+	beforeDirty := d.dirtyFiles.Len()
 
 	dstDir := t.TempDir()
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-
-	require.NoError(t, d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir, false))
+	files, err := d.dumpStepRangeToPath(ctx, 0, 1, writer, dstDir)
+	require.NoError(t, err)
+	files.CleanupOnError()
 
 	// .kv must land in dstDir, not in d.dirs.SnapDomain.
 	expectedKV := d.kvNewFilePathIn(dstDir, 0, 1)
@@ -395,15 +388,13 @@ func TestDumpStepRangeToPath(t *testing.T) {
 		require.NoError(t, err, "expected .kvi at %s", kviPath)
 	}
 
-	// SnapDomain must be free of the new step file because integrate=false skips
-	// integrateDirtyFiles and dstDir overrides the write path.
+	// The output directory must not change the live snapshots directory.
 	snapKV := d.kvNewFilePath(0, 1)
 	_, err = os.Stat(snapKV)
 	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
-	// dirtyFiles count is unchanged: integrate=false skips integration.
-	require.Equal(t, beforeDirty, countDirty(), "dirtyFiles must not grow when integrate=false")
+	require.Equal(t, beforeDirty, d.dirtyFiles.Len(), "dumping files must not publish them")
 }
 
 func TestDomain_AfterPrune(t *testing.T) {
@@ -739,7 +730,7 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	if err != nil {
 		return err
 	}
-	d.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(d.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 
@@ -4322,6 +4313,89 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 	} {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
+}
+
+var (
+	equalHashSalt = uint32(0x34e93639)
+	equalHashKeyA = common.FromHex("0x1111111111111111111111111111111111111111" + "0000000000000000000000000000000000000000000000000000000000000001")
+	equalHashKeyB = common.FromHex("0x1111111111111111111111111111111111111111" + "a5a5a5a5a5a5a5a5a5a5a5a5f61ef864ba9c0d52e0955981d75680a900000001")
+)
+
+// storageDomainTxWithFileKey returns a read tx over a storage domain whose only file holds k=v at txNum 1.
+func storageDomainTxWithFileKey(tb testing.TB, salt uint32, k, v []byte) *DomainRoTx {
+	tb.Helper()
+	db, d := testDbAndDomainOfStep(tb, statecfg.Schema.StorageDomain, 16, log.New())
+	d.salt.Store(&salt)
+	tx, err := db.BeginRw(tb.Context())
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	require.NoError(tb, writer.PutWithPrev(k, v, 1, nil))
+	require.NoError(tb, writer.Flush(tb.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(tb, d.collateBuildIntegrate(tb.Context(), 0, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	tb.Cleanup(domainTx.Close)
+	return domainTx
+}
+
+func TestDomainFileCacheDistinctKeysWithEqualHashDoNotAlias(t *testing.T) {
+	t.Parallel()
+
+	keyA, keyB, valA := equalHashKeyA, equalHashKeyB, common.FromHex("0xdeadbeef")
+	hiA, loA := murmur3.Sum128WithSeed(keyA, equalHashSalt)
+	hiB, loB := murmur3.Sum128WithSeed(keyB, equalHashSalt)
+	require.Equal(t, [2]uint64{hiA, loA}, [2]uint64{hiB, loB})
+
+	newDomainTx := func(t *testing.T) *DomainRoTx { return storageDomainTxWithFileKey(t, equalHashSalt, keyA, valA) }
+	requireLatest := func(t *testing.T, dt *DomainRoTx, k, want []byte, wantFound bool) {
+		t.Helper()
+		v, found, _, _, err := dt.getLatestFromFiles(k, nil, kv.NoStepBound)
+		require.NoError(t, err)
+		require.Equal(t, wantFound, found)
+		require.Equal(t, want, v)
+	}
+
+	t.Run("A then B", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		requireLatest(t, dt, keyB, nil, false)
+	})
+	t.Run("B then A", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyB, nil, false)
+		requireLatest(t, dt, keyA, valA, true)
+	})
+	t.Run("value size", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		size, found, err := dt.getLatestFromFilesValSize(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, size)
+	})
+	t.Run("history seek", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, uint64(1), res.txNum)
+		found, _, err = dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+	t.Run("history seek, miss first", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, _, err := dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found, "a cached miss of an equal-hash key must not hide a present key")
+		require.Equal(t, uint64(1), res.txNum)
+	})
 }
 
 func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCopyWithTotalActiveBalanceMatchesRescannedCopy(t *testing.T) {
+func TestCopyIntoWithTotalActiveBalanceMatchesRescannedCopy(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
 	source := New(&cfg)
@@ -36,13 +36,13 @@ func TestCopyWithTotalActiveBalanceMatchesRescannedCopy(t *testing.T) {
 	rescanned, err := source.Copy()
 	require.NoError(t, err)
 	rescannedTotal := rescanned.GetTotalActiveBalance()
-	seeded, err := source.CopyWithTotalActiveBalance(rescannedTotal)
-	require.NoError(t, err)
+	seeded := New(&cfg)
+	require.NoError(t, source.CopyIntoWithTotalActiveBalance(seeded, rescannedTotal))
 	require.Equal(t, rescannedTotal, seeded.GetTotalActiveBalance())
 	require.Equal(t, rescanned.BaseRewardPerIncrement(), seeded.BaseRewardPerIncrement())
 
-	clamped, err := source.CopyWithTotalActiveBalance(cfg.EffectiveBalanceIncrement - 1)
-	require.NoError(t, err)
+	clamped := New(&cfg)
+	require.NoError(t, source.CopyIntoWithTotalActiveBalance(clamped, cfg.EffectiveBalanceIncrement-1))
 	require.Equal(t, cfg.EffectiveBalanceIncrement, clamped.GetTotalActiveBalance())
 }
 

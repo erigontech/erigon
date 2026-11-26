@@ -116,6 +116,10 @@ func (f *fakeSignatureAggregator) AddValidated(sig []byte) error {
 	return nil
 }
 
+func (f *fakeSignatureAggregator) Add(sig *bls.Signature) {
+	f.sigs = append(f.sigs, sig.Bytes())
+}
+
 func (f *fakeSignatureAggregator) Compressed() [96]byte {
 	if len(f.sigs) == 1 {
 		return [96]byte(f.sigs[0])
@@ -1124,4 +1128,35 @@ func (t *PoolTestSuite) TestAddAttestationElectraPrunesBeforeRefusingWhenFull() 
 	}
 	currentSlot = 100 // the entries above are now outside the inclusion window
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(100, 0, 1)))
+}
+
+// Votes with a decompressed signature are aggregated from it, not from their compressed bytes.
+func (t *PoolTestSuite) TestAddVerifiedAttestationAggregatesTheDecompressedSignatures() {
+	newSignatureAggregator = func() signatureAggregator { return &bls.SignatureAggregator{} }
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(2)
+	committeeBits := solid.NewBitVector(64)
+	t.Require().NoError(committeeBits.SetBitAt(10, true))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	var compressed [][]byte
+	for _, bits := range []byte{0b00001001, 0b00001100} {
+		key, err := bls.GenerateKey()
+		t.Require().NoError(err)
+		compressed = append(compressed, key.Sign([]byte("vote")).Bytes())
+		signature, err := bls.NewSignatureFromBytes(compressed[len(compressed)-1])
+		t.Require().NoError(err)
+		t.Require().NoError(pool.AddVerifiedAttestation(&solid.Attestation{
+			AggregationBits: solid.BitlistFromBytes([]byte{bits}, 2048*64),
+			Data:            attData1,
+			Signature:       [96]byte{0xff}, // not a point: decompressing it would fail
+			CommitteeBits:   committeeBits,
+		}, signature))
+	}
+
+	expected, err := bls.AggregateSignatures(compressed)
+	t.Require().NoError(err)
+	t.Equal(common.Bytes96(expected), pool.GetAggregatationByRootAndCommittee(attData1Root, 1, 10).Signature)
 }

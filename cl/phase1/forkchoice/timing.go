@@ -53,11 +53,9 @@ func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
 	return f.beaconCfg.BpsToMs(bps)
 }
 
-// getPayloadAttestationDueMs returns the PTC payload attestation deadline in milliseconds.
-// [New in Gloas:EIP7732] This deadline only exists post-GLOAS (75% of slot = 9000 ms on mainnet).
-// Callers should only invoke this for post-GLOAS epochs; the returned value is well-defined
-// regardless, but meaningless pre-GLOAS since PTC duties do not exist before GLOAS.
-func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
+// getPayloadAttestationDueMs returns the configured PTC payload attestation
+// deadline in milliseconds from slot start. PTC duties exist only from Gloas onward.
+func (f *ForkChoiceStore) getPayloadAttestationDueMs() uint64 {
 	return f.beaconCfg.PayloadAttestationDueMs()
 }
 
@@ -76,8 +74,8 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 // Post-GLOAS: stores [block_timely, block_before_ptc_deadline] in blockTimeliness.
 //
 // NOTE: Both elements are time-based checks on when the *block* was received.
-// PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
-// (75% of slot), NOT whether the PTC has voted the payload present.
+// PTC_TIMELINESS_INDEX records whether the block arrived before the configured PTC
+// deadline, not whether the PTC has voted the payload present.
 func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
 	currentSlot := f.slotAtTimeMs(timeMs)
@@ -86,7 +84,7 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 		timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
 		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
 		if epoch >= f.beaconCfg.GloasForkEpoch {
-			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs(epoch)
+			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs()
 		}
 	}
 

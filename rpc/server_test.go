@@ -22,6 +22,7 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"os"
@@ -178,4 +179,47 @@ func TestServerShortLivedConn(t *testing.T) {
 		}
 		conn.Close()
 	}
+}
+
+type waitService struct {
+	started chan struct{}
+	done    chan struct{}
+}
+
+func newWaitService() *waitService {
+	return &waitService{started: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (s *waitService) Wait(ctx context.Context) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.done)
+	return ctx.Err()
+}
+
+func (s *waitService) awaitDone(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("call context not canceled after the connection was closed")
+	}
+}
+
+// A call still running on a persistent connection is canceled when the client
+// disconnects.
+func TestServerCancelCallsOnDisconnect(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	svc := newWaitService()
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer server.Stop()
+	if err := server.RegisterName("test", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	go func() { _ = client.Call(nil, "test_wait") }()
+	<-svc.started
+	client.Close()
+	svc.awaitDone(t)
 }

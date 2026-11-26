@@ -18,6 +18,7 @@ package v3
 
 import (
 	"bytes"
+	"context"
 	"errors"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -123,13 +124,15 @@ func hashAddressPath(path []byte) [32]byte {
 
 const defaultStorageFanOutMin = 1024
 
-func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
+const storageCancelCheckEvery = 256
+
+func runStorageTaskWithPlan(runCtx context.Context, ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
 	if ctx == nil {
 		return [32]byte{}, nil, errors.New("commitment v3: nil phase A context")
 	}
 	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
 	if task.wipe {
-		records, err := enumerateStorageRecords(ctx, task.addrHash)
+		records, err := enumerateStorageRecords(runCtx, ctx, task.addrHash)
 		if err != nil {
 			return [32]byte{}, nil, err
 		}
@@ -150,6 +153,11 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	fanned := false
 	if len(task.entries) >= plan.fanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
+			if i%storageCancelCheckEvery == 0 {
+				if err := runCtx.Err(); err != nil {
+					return err
+				}
+			}
 			return g.ensurePath(ctx, root, task.entries[i].path)
 		}, nil, nil)
 		if err != nil {
@@ -160,7 +168,12 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		plan = foldPlan{}
 	}
 
-	for _, entry := range task.entries {
+	for i, entry := range task.entries {
+		if i%storageCancelCheckEvery == 0 {
+			if err := runCtx.Err(); err != nil {
+				return [32]byte{}, nil, err
+			}
+		}
 		if !fanned && bytes.HasPrefix(entry.path, root.path) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, nil, err
@@ -180,7 +193,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		}
 	}
 
-	parts, hash, err := g.persistGraph(ctx, root, plan)
+	parts, hash, err := g.persistGraph(runCtx, ctx, root, plan)
 	return hash, parts, err
 }
 
@@ -195,7 +208,7 @@ func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageE
 			return [32]byte{}, nil, err
 		}
 	}
-	parts, hash, err := g.persistGraph(wipedContext{ctx}, root, foldPlan{})
+	parts, hash, err := g.persistGraph(context.Background(), wipedContext{ctx}, root, foldPlan{})
 	if err != nil {
 		return [32]byte{}, nil, err
 	}

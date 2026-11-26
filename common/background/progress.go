@@ -103,21 +103,3 @@ func (s *ProgressSet) String() string {
 	})
 	return sb.String()
 }
-
-func (s *ProgressSet) DiagnosticsData() map[string]int {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	arr := make(map[string]int, s.list.Len())
-	s.list.Scan(func(_ int, p *Progress) bool {
-		if p == nil {
-			return true
-		}
-		namePtr := p.Name.Load()
-		if namePtr == nil {
-			return true
-		}
-		arr[*namePtr] = p.percent()
-		return true
-	})
-	return arr
-}

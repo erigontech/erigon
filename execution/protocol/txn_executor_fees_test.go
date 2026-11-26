@@ -53,7 +53,7 @@ func TestTransactionFeeDistribution(t *testing.T) {
 		{name: "AuRa after Prague", aura: true, feeCap: 11, gasPrice: 5, wantTip: 3, wantBurn: 2, wantBlobBurn: 7 * params.GasPerBlob},
 	} {
 		kinds := []string{"ordinary"}
-		if !test.berlin && !test.cancun {
+		if !test.berlin && !test.cancun && !test.free {
 			kinds = append(kinds, "frame")
 		}
 		for _, kind := range kinds {
@@ -100,21 +100,23 @@ func TestTransactionFeeDistribution(t *testing.T) {
 						tx := &types.FrameTransaction{
 							ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender.Value(),
 							Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-							Fees:                types.FrameFees{MaxFee: uint256.Int{test.feeCap}, TipCap: uint256.Int{tipCap}},
+							Fees:                types.FrameFees{TipCap: uint256.Int{test.wantTip}},
 							BlobVersionedHashes: blobs,
 						}
-						tx.Fees.TipCap.SetUint64(test.wantTip)
-						if !test.free {
-							tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*(2+test.wantTip) + 7*tx.GetBlobGas())
-						}
+						tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*(2+test.wantTip) + 7*tx.GetBlobGas())
 						var err error
 						msg, err = tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 						require.NoError(t, err)
-						msg.SetIsFree(test.free)
 					}
 					executor := NewTxnExecutor(evm, msg, NewGasPool(blockGas, params.GasPerBlob))
 					executor.noFeeBurnAndTip = deferred
 					result, err := executor.Execute(true, false)
+					if kind == "frame" && test.aura {
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						_, err = ValidateFrameTransaction(evm, msg.FrameTransaction())
+						require.ErrorIs(t, err, types.ErrTxTypeNotSupported)
+						return
+					}
 					require.NoError(t, err)
 					require.NoError(t, result.Err)
 					wantTip := result.ReceiptGasUsed * test.wantTip

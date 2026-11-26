@@ -19,6 +19,7 @@ package sentinel
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -110,14 +111,23 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	for range 8 {
 		connectInbound(t, local)
 	}
+	pid := connectBothWays(t, local)
+	require.True(t, s.handleNewConnection(pid, network.DirOutbound, nil, validate))
+
+	require.True(t, s.handleNewConnection(pid, network.DirInbound, nil, validate))
+	require.Equal(t, network.Connected, local.Network().Connectedness(pid))
+}
+
+// connectBothWays connects local to a new peer, which then dials local back, so local holds an outbound and an
+// inbound connection to it.
+func connectBothWays(t *testing.T, local host.Host) peer.ID {
+	t.Helper()
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	require.NoError(t, err)
 	listening, err := libp2p.New(libp2p.Identity(priv), libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, listening.Close()) })
 	require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: listening.ID(), Addrs: listening.Addrs()}))
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirOutbound, nil, validate))
-
 	dialing, err := libp2p.New(libp2p.Identity(priv), libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, dialing.Close()) })
@@ -125,9 +135,25 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(local.Network().ConnsToPeer(listening.ID())) == 2
 	}, 5*time.Second, 5*time.Millisecond)
+	return listening.ID()
+}
 
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirInbound, nil, validate))
-	require.Equal(t, network.Connected, local.Network().Connectedness(listening.ID()))
+func TestInboundRedialAfterAClosedOutboundConnectionRejectedAtInboundCap(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	s.cfg.MaxPeerCount = 10
+
+	for range 8 {
+		connectInbound(t, local)
+	}
+	pid := connectBothWays(t, local)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid, outboundOnly: true}}}
+
+	require.False(t, s.handleNewConnection(pid, network.DirInbound, nil, func() (bool, error) {
+		t.Error("a peer rejected at the inbound cap must not be handshaked")
+		return false, nil
+	}))
+	waitDisconnected(t, local, pid)
 }
 
 func TestInboundPeerGoneBeforeAdmissionRejectedAtInboundCap(t *testing.T) {
@@ -323,4 +349,81 @@ func TestSelectPeersToPrunePicksYoungestFirst(t *testing.T) {
 	}
 
 	require.Equal(t, []peer.ID{"younger"}, selectPeersToPrune(candidates, [attestationSubnetCount]int{}, 1, 0))
+}
+
+func TestSelectPeersToPruneKeepsSubnetsAtSearchTarget(t *testing.T) {
+	coverage := [attestationSubnetCount]int{minimumPeersPerSubnet, minimumPeersPerSubnet + 1}
+	candidates := []pruneCandidate{
+		{pid: "younger", inbound: true, subnets: []int{0}, opened: time.Unix(2, 0)},
+		{pid: "older", inbound: true, subnets: []int{1}, opened: time.Unix(1, 0)},
+	}
+
+	require.Equal(t, []peer.ID{"older"}, selectPeersToPrune(candidates, coverage, 1, 0))
+}
+
+func subnetCoverage(candidates []pruneCandidate) (coverage [attestationSubnetCount]int) {
+	for _, candidate := range candidates {
+		for _, subnet := range candidate.subnets {
+			coverage[subnet]++
+		}
+	}
+	return coverage
+}
+
+func TestSelectPeersToPruneReachesTargetBelowSearchTarget(t *testing.T) {
+	const (
+		maxPeers      = 128
+		inboundPeers  = 120
+		outboundPeers = 26
+	)
+	candidates := make([]pruneCandidate, 0, inboundPeers+outboundPeers)
+	for i := range inboundPeers + outboundPeers {
+		first := i % attestationSubnetCount
+		second := (first + attestationSubnetCount/2) % attestationSubnetCount
+		candidates = append(candidates, pruneCandidate{
+			pid:     peer.ID(fmt.Sprintf("peer-%d", i)),
+			inbound: i < inboundPeers,
+			opened:  time.Unix(int64(i), 0),
+			subnets: []int{first, second},
+		})
+	}
+	coverage := subnetCoverage(candidates)
+	for subnet, count := range coverage {
+		require.Less(t, count, minimumPeersPerSubnet, "subnet %d", subnet)
+	}
+	toRemove := peerCountToPrune(peerCounts{inbound: inboundPeers, outbound: outboundPeers}, maxPeers)
+	require.Positive(t, toRemove)
+
+	selected := selectPeersToPrune(candidates, coverage, toRemove, outboundReserve(maxPeers))
+
+	require.Len(t, selected, toRemove)
+	removed := make(map[peer.ID]bool, len(selected))
+	for _, pid := range selected {
+		removed[pid] = true
+	}
+	var kept []pruneCandidate
+	keptOutbound := 0
+	for _, candidate := range candidates {
+		if removed[candidate.pid] {
+			continue
+		}
+		kept = append(kept, candidate)
+		if !candidate.inbound {
+			keptOutbound++
+		}
+	}
+	for subnet, count := range subnetCoverage(kept) {
+		require.Positive(t, count, "subnet %d", subnet)
+	}
+	require.GreaterOrEqual(t, keptOutbound, outboundReserve(maxPeers))
+}
+
+func TestSelectPeersToPrunePrefersPeersOffSubnetsBelowSearchTarget(t *testing.T) {
+	coverage := [attestationSubnetCount]int{minimumPeersPerSubnet + 1, minimumPeersPerSubnet + 1, 2}
+	candidates := []pruneCandidate{
+		{pid: "belowTarget", inbound: true, subnets: []int{2}},
+		{pid: "wellCovered", inbound: true, subnets: []int{0, 1}},
+	}
+
+	require.Equal(t, []peer.ID{"wellCovered"}, selectPeersToPrune(candidates, coverage, 1, 0))
 }
