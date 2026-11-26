@@ -291,12 +291,12 @@
 **Files:**
 - Create: `rpc/jsonrpc/witness_build_bench_test.go`
 
-- [ ] `BenchmarkWitnessBuild/<method>/<variant>`: `debug_executionWitness` legacy and canonical, `eth_getWitness`, and
+- [x] `BenchmarkWitnessBuild/<method>/<variant>`: `debug_executionWitness` legacy and canonical, `eth_getWitness`, and
       `eth_getProof` on a fixed key set; variants `hph` and `v3`; each iteration builds every block of the chain once;
       report ns/op, B/op, allocs/op, and the output's nodes and bytes per block (`b.ReportMetric`)
-- [ ] two chains, built once per variant outside the timer: the Task 2 collapse chain, and a generated chain of 64 blocks
+- [x] two chains, built once per variant outside the timer: the Task 2 collapse chain, and a generated chain of 64 blocks
       with transfers, storage writes and deletes, and self-destructs
-- [ ] the file builds its own chains and uses only code present on main `2841804a8eb`, so `ab-bench.sh -f` runs the same
+- [x] the file builds its own chains and uses only code present on main `2841804a8eb`, so `ab-bench.sh -f` runs the same
       file in every arm
 - [ ] the supervisor runs `ab-bench.sh -f rpc/jsonrpc/witness_build_bench_test.go -n 12` on a quiet Linux box: base
       `2841804a8eb` (old pipeline: HPH with the erigon2 prune and trie, and v3 with the superset, the erigon2 prune and
