@@ -17,9 +17,6 @@
 package txpool
 
 import (
-	"math/big"
-	"slices"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
@@ -42,6 +39,10 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	}
 	if oldTxn.HasBlobs() && !newTxn.HasBlobs() {
 		return replacementDecision{reason: txpoolcfg.BlobTxReplace}
+	}
+	if newTxn.TxType() == FrameTxnType && oldTxn.TxType() == FrameTxnType {
+		// Frame replacements compare total budgets, not derived per-gas caps.
+		return replacementDecision{}
 	}
 	priceBump := p.cfg.PriceBump
 
@@ -82,23 +83,27 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	return replacementDecision{}
 }
 
-// Frame replacements must keep the same nonce keys and strictly increase fees,
-// even when the configured percentage would round down to no increase.
+// validateFrameReplacement checks replacements involving at least one frame.
+// Fees must increase even when the configured percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
-	previousKeys, replacementKeys := []uint256.Int{{}}, []uint256.Int{{}}
-	if frame, ok := previous.Txn.(*types.FrameTransaction); ok {
-		previousKeys = frame.NonceKeys
+	oldFrame, oldIsFrame := previous.Txn.(*types.FrameTransaction)
+	newFrame, newIsFrame := replacement.Txn.(*types.FrameTransaction)
+	bothHaveBlobs := previous.HasBlobs() && replacement.HasBlobs()
+	var oldCap, newCap *uint256.Int
+	switch {
+	case oldIsFrame && newIsFrame:
+		oldCap, newCap = &oldFrame.Fees.MaxFee, &newFrame.Fees.MaxFee
+	case bothHaveBlobs:
+		// Comparing a frame's budget with each type-3 fee cap separately would
+		// count the same wei toward both the execution and blob fee bumps.
+		return txpoolcfg.BlobReplacementTypeMismatch
+	default:
+		oldCap, newCap = previous.GetFeeCap(), replacement.GetFeeCap()
 	}
-	if frame, ok := replacement.Txn.(*types.FrameTransaction); ok {
-		replacementKeys = frame.NonceKeys
-	}
-	if !slices.Equal(previousKeys, replacementKeys) {
-		return txpoolcfg.InvalidFrame
-	}
-	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(previous.GetFeeCap(), replacement.GetFeeCap(), priceBump) {
+	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(oldCap, newCap, priceBump) {
 		return txpoolcfg.NotReplaced
 	}
-	if replacement.HasBlobs() && previous.HasBlobs() && !frameReplacementFee(previous.GetBlobFeeCap(), replacement.GetBlobFeeCap(), blobPriceBump) {
+	if bothHaveBlobs && !frameReplacementFee(oldCap, newCap, blobPriceBump) {
 		return txpoolcfg.ReplaceUnderpriced
 	}
 	return txpoolcfg.Success
@@ -108,10 +113,12 @@ func frameReplacementFee(previous, replacement *uint256.Int, bump uint64) bool {
 	if replacement.Cmp(previous) <= 0 {
 		return false
 	}
-	// Cross-products preserve the full percentage bump without division rounding
-	// or overflow at the uint256 boundary.
-	percent := new(big.Int).Add(new(big.Int).SetUint64(bump), big.NewInt(100))
-	required := new(big.Int).Mul(previous.ToBig(), percent)
-	offered := new(big.Int).Mul(replacement.ToBig(), big.NewInt(100))
-	return offered.Cmp(required) >= 0
+	var percent, threshold, remainder uint256.Int
+	percent.SetUint64(bump)
+	percent.AddUint64(&percent, 100)
+	_, _, overflow := threshold.MulDivOverflowRem(previous, &percent, &u256.N100, &remainder)
+	cmp := replacement.Cmp(&threshold)
+	// A fractional threshold requires a strictly higher fee. Comparing instead
+	// of rounding up also rejects a threshold just above MaxUint256.
+	return !overflow && (cmp > 0 || cmp == 0 && remainder.IsZero())
 }

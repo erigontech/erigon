@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 // A range wider than one shard is rebuilt in several shards, each made visible
@@ -58,9 +58,9 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		defer tx.Rollback()
 		ac := state.AggTx(tx)
 
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmenttest.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
+		_, _, rootInFiles, err = commitmenttest.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		var widest uint64
@@ -79,5 +79,5 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		agg.Close()
 	}
 
-	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false, false)
 }

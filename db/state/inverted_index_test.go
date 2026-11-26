@@ -889,7 +889,7 @@ func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step
 	if err != nil {
 		return err
 	}
-	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+	reclaimFiles(ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize)))
 	return nil
 }
 
@@ -2153,4 +2153,11 @@ func requireSeekEvery(t *testing.T, it stream.U64, want []uint64, asc order.By, 
 		}
 	}
 	require.Equal(t, len(want), i)
+}
+
+func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
+	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	iit := &InvertedIndexRoTx{}
+	ii.initFilesRo(iit, iv)
+	return iit
 }

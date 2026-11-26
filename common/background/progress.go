@@ -33,8 +33,12 @@ type Progress struct {
 }
 
 func (p *Progress) percent() int {
+	total := p.Total.Load()
+	if total == 0 {
+		return 0
+	}
 	return int(
-		(float64(p.Processed.Load()) / float64(p.Total.Load())) * 100,
+		(float64(p.Processed.Load()) / float64(total)) * 100,
 	)
 }
 

@@ -146,7 +146,15 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("incompatible ETHBACKEND versions: client %s, server %s", expectedVersion, gointerfaces.VersionFromProto(backendVersion))
 	}
 	kvClient := remoteproto.NewKVClient(coreConn)
-	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
+	kvVersion, err := kvClient.Version(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		return fmt.Errorf("could not get KV version: %w", err)
+	}
+	expectedKVVersion := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
+	if !gointerfaces.EnsureVersion(expectedKVVersion, kvVersion) {
+		return fmt.Errorf("incompatible KV versions: client %s, server %s", expectedKVVersion, gointerfaces.VersionFromProto(kvVersion))
+	}
+	coreDB, err := remotedb.NewRemote(expectedKVVersion, log.New(), kvClient).Open()
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}

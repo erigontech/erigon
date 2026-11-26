@@ -24,15 +24,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-func ConvertH2048ToBloom(h2048 *typesproto.H2048) [256]byte {
-	var bloom [256]byte
-	copy(bloom[:], ConvertH512ToBytes(h2048.Hi.Hi))
-	copy(bloom[64:], ConvertH512ToBytes(h2048.Hi.Lo))
-	copy(bloom[128:], ConvertH512ToBytes(h2048.Lo.Hi))
-	copy(bloom[192:], ConvertH512ToBytes(h2048.Lo.Lo))
-	return bloom
-}
-
 func ConvertH256ToHash(h256 *typesproto.H256) [32]byte {
 	var hash [32]byte
 	binary.BigEndian.PutUint64(hash[0:], h256.Hi.Hi)
@@ -114,11 +105,6 @@ func ConvertUint256IntToH256(i *uint256.Int) *typesproto.H256 {
 	a.hi = typesproto.H128{Lo: i[2], Hi: i[3]}
 	a.h = typesproto.H256{Lo: &a.lo, Hi: &a.hi}
 	return &a.h
-}
-
-func ConvertH512ToBytes(h512 *typesproto.H512) []byte {
-	b := ConvertH512ToHash(h512)
-	return b[:]
 }
 
 // h512Arena holds an H512 and all nested messages in one allocation.

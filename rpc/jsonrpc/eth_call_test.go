@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -642,11 +641,10 @@ func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.String())
 }
 
-// TestEthCallNoMaterializeParity pins that suppressing the stateObject cache
-// does not change what eth_call returns. The override code writes a slot and
-// reads it back in the same call, so the read must come from this call's own
-// write and not from committed state.
-func TestEthCallNoMaterializeParity(t *testing.T) {
+// TestEthCallReadsItsOwnWrite pins that eth_call reads a slot back from its own write.
+// The override code writes a slot and reads it back in the same call, so the read must
+// come from this call's own write and not from committed state.
+func TestEthCallReadsItsOwnWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -657,31 +655,23 @@ func TestEthCallNoMaterializeParity(t *testing.T) {
 	writeThenRead := hexutil.Bytes(hexutil.MustDecode("0x602a60005560005460005260206000f3"))
 	storeCall := hexutil.Bytes(contractInvocationData(7))
 
-	for _, noMaterialize := range []bool{false, true} {
-		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
-			prev := dbg.CallNoMaterialize
-			dbg.CallNoMaterialize = noMaterialize
-			defer func() { dbg.CallNoMaterialize = prev }()
+	result, err := api.Call(context.Background(), ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &writeThenRead,
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(contractAddr): {Code: &writeThenRead},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
 
-			result, err := api.Call(context.Background(), ethapi.CallArgs{
-				From: &bankAddr,
-				To:   &contractAddr,
-				Data: &writeThenRead,
-			}, nil, &ethapi.StateOverrides{
-				accounts.InternAddress(contractAddr): {Code: &writeThenRead},
-			}, nil)
-			require.NoError(t, err)
-			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
-
-			result, err = api.Call(context.Background(), ethapi.CallArgs{
-				From: &bankAddr,
-				To:   &contractAddr,
-				Data: &storeCall,
-			}, nil, nil, nil)
-			require.NoError(t, err)
-			require.Equal(t, "0x", result.String())
-		})
-	}
+	result, err = api.Call(context.Background(), ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &storeCall,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "0x", result.String())
 }
 
 func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester) *APIImpl {
@@ -911,6 +901,46 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, reader, (*res.Accesslist)[0].Address)
 	})
+}
+
+func TestCreateAccessListTimeoutCoversEveryRun(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and each new slot must stay affordable
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = 200 * time.Millisecond
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
+	reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	sloadGas := hexutil.Bytes(hexutil.MustDecode("0x5a5450")) // SLOAD(GAS): every run reads a new slot
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := api.CreateAccessList(ctx, ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(reader): {Code: &sloadGas},
+	}, nil)
+	require.ErrorContains(t, err, "execution aborted")
+	require.Less(t, time.Since(start), 10*time.Second, "the timeout must cover all runs of the request")
+}
+
+func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and the loop must outlast the timeout
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = time.Second
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
+	loop := common.HexToAddress("0x00000000000000000000000000000000000000cd")
+	jumpToStart := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+
+	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &loop, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(loop): {Code: &jumpToStart},
+	}, nil)
+	require.ErrorContains(t, err, "execution aborted")
 }
 
 // Init code that reads slot 0 of the contract being created and returns that contract's

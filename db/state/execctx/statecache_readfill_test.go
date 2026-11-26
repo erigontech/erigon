@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -93,16 +94,10 @@ func frontierAtStateVersion(t *testing.T, tx kv.Tx, frontier cache.Frontier) cac
 	return cache.FrontierWithStateVersion(frontier, stateVersion)
 }
 
-// seed places an entry with an exact txNum stamp through the public fill API
-// without moving the applied frontier. A positive passes admission at any
-// applied end; a negative is stamped frontier-1 by the fill path, so it must
-// be seeded while the applied end is at most txNum+1.
+// seed fills from a view through txNum without moving the applied frontier.
 func seed(t *testing.T, sc *cache.StateCache, tx kv.Tx, domain kv.Domain, k, v []byte, txNum uint64) {
 	t.Helper()
-	end := uint64(math.MaxUint64)
-	if len(v) == 0 {
-		end = txNum + 1
-	}
+	end := txNum + 1
 	sc.View(frontierAtStateVersion(t, tx, frontierAt(end))).Fill(domain, k, v, txNum)
 }
 
@@ -458,7 +453,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
 	// A live cache entry below the unwind floor: the restored (correct) value,
 	// as a post-unwind fill would insert it.
-	seed(t, sc, roTx, kv.AccountsDomain, key, v1, 5)
+	seed(t, sc, roTx, kv.AccountsDomain, key, v1, 9)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -937,7 +932,7 @@ func TestValidationUnwindPreservesCanonicalBranches(t *testing.T) {
 }
 
 func TestValidationUnwindAdoptionInvalidatesSharedCache(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -1021,7 +1016,7 @@ func TestValidationUnwindDoesNotRevokeCanonicalFills(t *testing.T) {
 }
 
 func TestValidationCachePublicationRequiresCommit(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, fail := range []bool{false, true} {
 		name := "commit"
 		if fail {
@@ -1195,7 +1190,7 @@ func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
 }
 
 func TestValidationCommitAppliesDeferredBranchUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

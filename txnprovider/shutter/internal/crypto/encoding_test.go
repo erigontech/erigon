@@ -74,6 +74,33 @@ func TestUnmarshalBroken(t *testing.T) {
 	assert.True(t, err != nil)
 }
 
+func TestUnmarshalInvalidPoint(t *testing.T) {
+	p1 := bytes.Repeat([]byte{0xff}, blst.BLST_P1_COMPRESS_BYTES)
+	p2 := bytes.Repeat([]byte{0xff}, blst.BLST_P2_COMPRESS_BYTES)
+	message := append(append([]byte{VersionIdentifier}, p2...), make([]byte, 2*BlockSize)...)
+
+	tests := []struct {
+		name      string
+		unmarshal func([]byte) error
+		inputs    [][]byte
+	}{
+		{"EncryptedMessage", new(EncryptedMessage).Unmarshal, [][]byte{message}},
+		{"EonPublicKeyShare", new(EonPublicKeyShare).Unmarshal, [][]byte{p2, p2[1:]}},
+		{"EonPublicKey", new(EonPublicKey).Unmarshal, [][]byte{p2, p2[1:]}},
+		{"EpochID", new(EpochID).Unmarshal, [][]byte{p1, p1[1:]}},
+		{"EpochSecretKeyShare", new(EpochSecretKeyShare).Unmarshal, [][]byte{p1, p1[1:]}},
+		{"EpochSecretKey", new(EpochSecretKey).Unmarshal, [][]byte{p1, p1[1:]}},
+		{"GammasGob", new(Gammas).GobDecode, [][]byte{p2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, input := range tt.inputs {
+				require.Error(t, tt.unmarshal(input))
+			}
+		})
+	}
+}
+
 func TestMarshal(t *testing.T) {
 	ask := (*EonSecretKeyShare)(big.NewInt(123))
 	ashM := ask.Marshal()

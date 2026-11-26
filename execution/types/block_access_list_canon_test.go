@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -73,4 +75,37 @@ func TestDecodeMinimalHashRejectsNonCanonical(t *testing.T) {
 			t.Fatalf("input %s: got key %d, want %d", c.hex, u.Uint64(), c.want)
 		}
 	}
+}
+
+func FuzzBlockAccessListDecodeIsCanonical(f *testing.F) {
+	for _, bal := range []BlockAccessList{
+		{},
+		{{Address: common.Address{1}}},
+		{{
+			Address:        common.Address{2},
+			StorageReads:   []common.Hash{{31: 1}, {0: 1}},
+			BalanceChanges: []*BalanceChange{{Index: 1}, {Index: 300, Value: *uint256.NewInt(1 << 40)}},
+			NonceChanges:   []*NonceChange{{Index: 2, Value: 7}},
+			CodeChanges:    []*CodeChange{{Index: 3, Bytecode: []byte{0x60}}, {Index: 4}},
+		}, {Address: common.Address{3}}},
+	} {
+		enc, err := EncodeBlockAccessListBytes(bal)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(enc)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		bal, err := DecodeBlockAccessListBytes(data)
+		if err != nil {
+			return
+		}
+		enc, err := EncodeBlockAccessListBytes(bal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, enc) {
+			t.Fatalf("decoded %x, re-encoded %x", data, enc)
+		}
+	})
 }

@@ -18,13 +18,16 @@ package tests
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
 	"strconv"
+	"sync"
 	"testing"
 
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -148,6 +151,14 @@ func (m *MockBlockReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.T
 	return m.U[slot], nil
 }
 
+func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	block := m.U[slot]
+	if block == nil {
+		return nil, nil
+	}
+	return block.Blinded()
+}
+
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	// do a linear search
 	for _, v := range m.U {
@@ -199,6 +210,23 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) *M
 	return m
 }
 
+var stateFixtureBytes sync.Map
+
+func decodeStateFixture(src []byte, version clparams.StateVersion) *state.CachingBeaconState {
+	cached, _ := stateFixtureBytes.LoadOrStore(sha256.Sum256(src), sync.OnceValues(func() ([]byte, error) {
+		return snappy.Decode(nil, src)
+	}))
+	decoded, err := cached.(func() ([]byte, error))()
+	if err != nil {
+		panic(err)
+	}
+	result := state.New(&clparams.MainnetBeaconConfig)
+	if err := result.DecodeSSZ(decoded, int(version)); err != nil {
+		panic(err)
+	}
+	return result
+}
+
 func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
@@ -211,14 +239,8 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 		panic(err)
 	}
 
-	preState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(preState, electra_pre_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
-		panic(err)
-	}
-	postState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
-		panic(err)
-	}
+	preState := decodeStateFixture(electra_pre_state_ssz_snappy, clparams.ElectraVersion)
+	postState := decodeStateFixture(electra_post_state_ssz_snappy, clparams.ElectraVersion)
 	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
 }
 
@@ -234,14 +256,8 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 		panic(err)
 	}
 
-	preState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
-		panic(err)
-	}
-	postState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
-		panic(err)
-	}
+	preState := decodeStateFixture(capella_pre_state_ssz_snappy, clparams.CapellaVersion)
+	postState := decodeStateFixture(capella_post_state_ssz_snappy, clparams.CapellaVersion)
 	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
 }
 
@@ -257,14 +273,8 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 		panic(err)
 	}
 
-	preState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(preState, phase0_pre_state_ssz_snappy, int(clparams.Phase0Version)); err != nil {
-		panic(err)
-	}
-	postState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(postState, phase0_post_state_ssz_snappy, int(clparams.Phase0Version)); err != nil {
-		panic(err)
-	}
+	preState := decodeStateFixture(phase0_pre_state_ssz_snappy, clparams.Phase0Version)
+	postState := decodeStateFixture(phase0_post_state_ssz_snappy, clparams.Phase0Version)
 	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
 }
 
@@ -283,21 +293,15 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 		}
 		ret = append(ret, block)
 	}
-	preState := state.New(&clparams.MainnetBeaconConfig)
 	b, err := bellatrixFS.ReadFile("test_data/bellatrix/pre.ssz_snappy")
 	if err != nil {
 		panic(err)
 	}
-	if err := utils.DecodeSSZSnappy(preState, b, int(clparams.BellatrixVersion)); err != nil {
-		panic(err)
-	}
-	postState := state.New(&clparams.MainnetBeaconConfig)
+	preState := decodeStateFixture(b, clparams.BellatrixVersion)
 	b, err = bellatrixFS.ReadFile("test_data/bellatrix/post.ssz_snappy")
 	if err != nil {
 		panic(err)
 	}
-	if err := utils.DecodeSSZSnappy(postState, b, int(clparams.BellatrixVersion)); err != nil {
-		panic(err)
-	}
+	postState := decodeStateFixture(b, clparams.BellatrixVersion)
 	return ret, preState, postState
 }

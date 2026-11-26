@@ -19,6 +19,9 @@ package jsonrpc
 import "github.com/erigontech/erigon/diagnostics/metrics"
 
 var (
+	witnessCacheParentStateHitCounter  = metrics.GetOrCreateCounter("witness_cache_parent_state_hit_total")
+	witnessCacheParentStateMissCounter = metrics.GetOrCreateCounter("witness_cache_parent_state_miss_total")
+	witnessCacheWarmRecordsCounter     = metrics.GetOrCreateCounter("witness_cache_warm_records_total")
 	witnessCacheHitCounter             = metrics.GetOrCreateCounter("witness_cache_hit_total")
 	witnessCacheMissCounter            = metrics.GetOrCreateCounter("witness_cache_miss_total")
 	witnessCacheAwaitCounter           = metrics.GetOrCreateCounter("witness_cache_await_total")
@@ -27,6 +30,7 @@ var (
 	witnessCacheBuildFailOtherCounter  = metrics.GetOrCreateCounter("witness_cache_build_fail_other_total")
 	witnessCacheStalePinSkipCounter    = metrics.GetOrCreateCounter("witness_cache_stale_pin_skip_total")
 	witnessCacheCoalesceDropCounter    = metrics.GetOrCreateCounter("witness_cache_coalesce_drop_total")
+	witnessCacheParentRecordsCounter   = metrics.GetOrCreateCounter("witness_cache_parent_records_total")
 
 	// Counts overflow events, not discarded witnesses: one overflow drops up to
 	// cap(ch)/2 queued pushes.

@@ -279,6 +279,8 @@ func (r *memBlockReader) Snapshots() dbservices.BlockSnapshots      { return nil
 func (r *memBlockReader) AllTypes() []snaptype.Type                 { return nil }
 func (r *memBlockReader) TxnumReader() rawdbv3.TxNumsReader         { return rawdbv3.TxNums }
 
+func (r *memBlockReader) IsFrozen(context.Context, uint64) (bool, error) { return false, nil }
+
 func (r *memBlockReader) Ready(ctx context.Context) <-chan error {
 	ch := make(chan error, 1)
 	ch <- nil

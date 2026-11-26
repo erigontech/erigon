@@ -46,11 +46,13 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
@@ -82,7 +84,7 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	require.NoError(t, m.InsertChain(c))
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}))
 	require.NoError(t, err)
 	require.Len(t, logs, len(topics))
 	for i, l := range logs {
@@ -91,33 +93,84 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	}
 }
 
+// TestGetReceiptAssertsBeforeStamping re-executes a persisted receipt with logs under ERIGON_ASSERT,
+// which compares it with the persisted one before the cache stamps its logs with the block time.
+func TestGetReceiptAssertsBeforeStamping(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+		execmoduletester.WithEnableDomain(kv.RCacheDomain),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	var receipt *ethutils.RPCReceipt
+	require.NotPanics(t, func() {
+		receipt, err = api.GetTransactionReceipt(m.Ctx, c.Blocks[0].Transactions()[0].Hash())
+	})
+	require.NoError(t, err)
+	require.Len(t, receipt.Logs, 1)
+}
+
 func TestGetLogs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	{
 		ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+		logs, err := logsOf(ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)}))
 		require.NoError(err)
 		assert.Equal(hexutil.Uint64(10), logs[0].BlockNumber)
 
 		// filter by wrong address
-		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		logs, err = logsOf(ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
 			Addresses: common.Addresses{common.Address{}},
-		})
+		}))
 		require.NoError(err)
 		assert.Empty(logs)
 
 		// filter by wrong address
-		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
+		logs, err = logsOf(ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
 			Topics:    [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
-		})
+		}))
 		require.NoError(err)
 		assert.Len(logs, 1)
+	}
+}
+
+func TestErigonGetLatestLogsWithCountStaysInsideTheRangeLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	const rangeLimit = 1
+	api := NewErigonAPI(newBaseApiWithLimits(m, rangeLimit, 0, 0), m.DB, nil)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	require.NoError(t, err)
+
+	logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{}, filters.LogFilterOptions{LogCount: 1_000_000})
+	require.NoError(t, err)
+	for _, l := range logs {
+		require.GreaterOrEqual(t, uint64(l.BlockNumber), latest-rangeLimit)
 	}
 }
 
@@ -187,13 +240,13 @@ func TestGetLatestLogsFrameFeeAccounting(t *testing.T) {
 		},
 	}))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{2}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(2 * frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -470,6 +523,28 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+// Logs in erigon_getBlockReceiptsByBlockHash carry blockTimestamp, as in eth_getBlockReceipts.
+func TestGetBlockReceiptsByBlockHashLogsHaveBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	var header *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		header = rawdb.ReadHeaderByNumber(tx, 10)
+		return nil
+	}))
+
+	receipts, err := api.GetBlockReceiptsByBlockHash(m.Ctx, header.Hash())
+	require.NoError(t, err)
+	var n int
+	for _, r := range receipts {
+		for _, l := range r.Logs {
+			require.Equal(t, new(hexutil.Uint64(header.Time)), l.BlockTimestamp)
+			n++
+		}
+	}
+	require.NotZero(t, n, "the block must have logs")
 }
 
 // TestGetLogs_RangeLimitExceeded verifies that eth_getLogs returns an error when the
@@ -884,7 +959,7 @@ func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
 			}
 			m := newLatestLogsTestChain(t)
 			crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
-			want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+			want, err := logsOf(newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit))
 			require.NoError(t, err)
 			require.Len(t, want, 3)
 			slices.Reverse(want)
@@ -948,7 +1023,7 @@ func TestErigonGetLatestLogsPinsOverlayView(t *testing.T) {
 		require.Len(t, got, 3)
 	})
 	t.Run("eth_getLogs", func(t *testing.T) {
-		got, err := newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit)
+		got, err := logsOf(newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit))
 		require.NoError(t, err)
 		require.Len(t, got, 3)
 	})
@@ -1052,4 +1127,23 @@ func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
 	require.NoError(t, err)
 	_, cached := gen.TryGetCachedReceipt(block.Hash(), txNum, 0)
 	require.False(t, cached)
+}
+
+// TestGetLogsServesCachedLogsWithoutCopy pins that receipts enter the cache with their logs
+// stamped, so a repeated eth_getLogs returns the cached logs themselves.
+func TestGetLogsServesCachedLogsWithoutCopy(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}
+
+	first, err := logsOf(api.GetLogs(m.Ctx, crit))
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+	second, err := logsOf(api.GetLogs(m.Ctx, crit))
+	require.NoError(t, err)
+	require.Len(t, second, len(first))
+	for i := range first {
+		require.Same(t, first[i], second[i])
+		require.NotNil(t, second[i].BlockTimestamp)
+	}
 }

@@ -54,7 +54,7 @@ func (task *workerTestTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, _ *ca
 }
 
 func (task *workerTestTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, _ *state.IntraBlockState,
-	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
+	_ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
 ) *TxResult {
 	return task.execute(evm)
 }
@@ -150,7 +150,6 @@ func TestWorkerCancellationStopsSystemCalls(t *testing.T) {
 				w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, engine, datadir.Dirs{}, log.New())
 				defer w.Close()
 				w.SetReader(state.NewNoopReader())
-				w.stateWriter = state.NewNoopWriter()
 				result := w.RunTxTask(&TxTask{Config: chain.AllProtocolChanges, TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}})
 				require.ErrorIs(t, result.Err, context.Canceled)
 				require.Equal(t, uint64(cancelAfter), engine.value.Uint64(), "cancelled system calls must not write storage")

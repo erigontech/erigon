@@ -69,6 +69,19 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+// Replaced files must be retired with the outgoing visible generation, without
+// deleting the paths now owned by their replacements.
+func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
+	if item == nil {
+		return nil
+	}
+	previous, replaced := df.Set(item)
+	if !replaced || previous == item {
+		return nil
+	}
+	return retiredFiles{previous}
+}
+
 func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 	for _, item := range items {
 		df.Delete(item)
@@ -129,8 +142,7 @@ type FilesItem struct {
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// version is the file's parsed on-disk version, used as a per-file regime marker.
-	version  version.Version
-	refcount atomic.Int32
+	version version.Version
 
 	canDelete atomic.Bool
 }
@@ -139,8 +151,7 @@ func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
 	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 }
 
-// retiredFiles will close in near future (or deleted from disk). `retiredFiles` already was removed from `dirtyFiles` list.
-// See `mvcc.RetireReason`
+// retiredFiles holds mappings detached from dirtyFiles and awaiting reclamation.
 type retiredFiles []*FilesItem
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
@@ -369,10 +380,8 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retire removes outs from dirtyFiles; the caller still owns outs and must attach it
-// to the outgoing visible generation itself. Physical reclaim happens once the last
-// reader of that generation closes — so readers still pinning these files are never
-// surprised.
+// retire detaches matching entries from dirtyFiles. The caller must attach the
+// returned files to the outgoing visible generation.
 func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) (detached []*FilesItem) {
 	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
 	var canDelete bool
@@ -790,14 +799,6 @@ func (files visibleFiles) String(stepSize uint64) string {
 
 func (files visibleFiles) Len() int {
 	return len(files)
-}
-
-func (files visibleFiles) VisibleFiles() []VisibleFile {
-	res := make([]VisibleFile, 0, len(files))
-	for _, file := range files {
-		res = append(res, file)
-	}
-	return res
 }
 
 // dirListing holds a directory path and its pre-read entry names.

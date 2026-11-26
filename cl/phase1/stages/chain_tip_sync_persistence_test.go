@@ -217,6 +217,19 @@ func TestForwardSyncRetainsAcceptedCopyForExecutionInsertion(t *testing.T) {
 	}))
 }
 
+// A by-range block at or below the finalized slot passes OnBlock without validation; its forged payload must not
+// replace the canonical row, which the collector keys by block number only.
+func TestForwardSyncDoesNotCollectABlockForkChoiceIgnored(t *testing.T) {
+	cfg, _, block, _ := newForwardSyncPersistenceFixture(t)
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	block.Block.Slot = cfg.forkChoice.AnchorSlot()
+
+	_, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true, []*cltypes.SignedBeaconBlock{block}, nil)
+	require.NoError(t, err)
+	require.Zero(t, collector.calls)
+}
+
 type cancelingBlockCollector struct {
 	gloasCollectorTest
 	cancel context.CancelFunc

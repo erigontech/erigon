@@ -395,10 +395,8 @@ Re-copy the instance when upstream `clients.yaml` changes; do not let this examp
 new required flags. Check every copied `extra_args` option against
 `"${DOCKER[@]}" run --rm "$LOCAL_IMAGE_ID" --help` before starting the long suite.
 
-For current Erigon, `--experimental.parallel-commitment` is the CLI equivalent of
-`COMMITMENT_PARALLEL=true`: it sets `ExperimentalParallelCommitment` and selects the parallel hex
-Patricia/`ParallelPatriciaHashed` commitment variant. Recheck that mapping in the exact source under
-test and confirm the persisted container command includes the flag.
+Current Erigon always computes commitment on `ParallelPatriciaHashed`; `--experimental.parallel-commitment`
+and `COMMITMENT_PARALLEL` have no effect. Older builds still read them, so recheck the source under test.
 
 Verify the configured CPU IDs map to the intended number of distinct physical cores:
 

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -88,7 +89,8 @@ func runHeadBench(b *testing.B, getHead func(b *testing.B), recordBlock func()) 
 	})
 }
 
-func BenchmarkGetHeadPreGloas(b *testing.B) {
+// newPreGloasHeadTestStore returns a pre-Gloas store whose justified checkpoint is epoch 10 at slot 320.
+func newPreGloasHeadTestStore() (*ForkChoiceStore, *headSnapshotForkGraph, solid.Checkpoint) {
 	f, graph := newHeadSnapshotTestStore()
 	cfg := *f.beaconCfg
 	cfg.GloasForkEpoch = math.MaxUint64
@@ -101,6 +103,12 @@ func BenchmarkGetHeadPreGloas(b *testing.B) {
 	f.justifiedCheckpoint.Store(justified)
 	graph.currentJustified = justified
 	f.unrealizedJustifications.Store(justified.Root, justified)
+	return f, graph, justified
+}
+
+func BenchmarkGetHeadPreGloas(b *testing.B) {
+	f, graph, justified := newPreGloasHeadTestStore()
+	cfg := *f.beaconCfg
 	parent := justified.Root
 	var roots []common.Hash
 	for i := range 96 {

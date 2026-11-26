@@ -558,6 +558,7 @@ func TestOnAttestationHeadStateTooOldUsesTargetState(t *testing.T) {
 					headRoot: checkpointBase,
 				},
 			}
+			linkHeadersToBlocks(graph)
 			store := newAttestationTestStore(t, cfg, headState, headRoot, attestationSlot, graph)
 			attestation := &solid.Attestation{
 				AggregationBits: aggregationBits(len(targetCommittee), int(cfg.MaxValidatorsPerCommittee), committeePosition),
@@ -621,6 +622,7 @@ func TestOnAttestationRandaoMixWrapUsesTargetState(t *testing.T) {
 			targetRoot: targetState,
 		},
 	}
+	linkHeadersToBlocks(graph)
 	store := newAttestationTestStore(t, cfg, headState, headRoot, attestationSlot, graph)
 	store.timeMs.Store((store.genesisTime + (headState.Slot()+1)*cfg.SecondsPerSlot) * 1000)
 	targetCommittee, err := targetState.GetBeaconCommitee(attestationSlot, committeeIndex)
@@ -836,6 +838,7 @@ func (f targetShufflingFixture) forkGraph(unresolvedAncestors bool) *getFinalize
 		graph.blocks[f.headDependentRoot] = testSignedBeaconBlock(f.cfg, f.dependentSlot, f.commonRoot)
 		graph.blocks[f.targetDependentRoot] = testSignedBeaconBlock(f.cfg, f.dependentSlot, f.commonRoot)
 	}
+	linkHeadersToBlocks(graph)
 	return graph
 }
 
@@ -911,4 +914,13 @@ func testSignedBeaconBlock(cfg *clparams.BeaconChainConfig, slot uint64, parentR
 	block.Block.Slot = slot
 	block.Block.ParentRoot = parentRoot
 	return block
+}
+
+// linkHeadersToBlocks gives each stored block's header the block's parent root, as the fork graph stores it.
+func linkHeadersToBlocks(graph *getFinalizedExecutionHashForkGraph) {
+	for root, block := range graph.blocks {
+		if header := graph.headers[root]; header != nil {
+			header.ParentRoot = block.Block.ParentRoot
+		}
+	}
 }

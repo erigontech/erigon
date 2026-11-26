@@ -18,7 +18,11 @@ package exec
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -33,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -149,6 +154,110 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 				require.False(t, done, "expected loop to continue past gas check")
 			}
 			require.Len(t, ba.Txns, tc.wantPacked)
+		})
+	}
+}
+
+func TestBlockAssemblerExplicitListLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		gasLimit uint64
+		dataSize int
+		wantErr  string
+	}{
+		{name: "gas", gasLimit: params.TxGas, wantErr: protocol.ErrGasLimitReached.Error()},
+		{name: "RLP size", gasLimit: 2 * params.TxGas, dataSize: params.MaxRlpBlockSize, wantErr: "exceeds block RLP size limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := chain.TestChainOsakaConfig.Copy()
+			header := &types.Header{Number: *uint256.NewInt(1), Time: 1000, GasLimit: tc.gasLimit}
+			engine := merge.NewFaker(ethash.NewFaker())
+			defer engine.Close()
+			ba := NewBlockAssembler(AssemblerCfg{
+				ChainConfig: config, Engine: engine, RequireAllTransactions: true,
+			}, &AssembledBlock{Header: header})
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.AddBalance(accounts.InternAddress(sender), *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+			signer := types.MakeSigner(config, header.Number.Uint64(), header.Time)
+			txns := make(types.Transactions, 2)
+			for i := range txns {
+				var data []byte
+				if i == 1 {
+					data = make([]byte, tc.dataSize)
+				}
+				txns[i], err = types.SignTx(types.NewTransaction(uint64(i), sender, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), data), *signer, key)
+				require.NoError(t, err)
+			}
+
+			_, done, err := ba.AddTransactions(t.Context(), nil, txns, accounts.NilAddress,
+				&vm.Config{NoBaseFee: true}, ibs, nil, "test", log.Root())
+			require.EqualError(t, err, fmt.Sprintf("transaction 1 (%s): %s", txns[1].Hash(), tc.wantErr))
+			require.True(t, done)
+			require.Equal(t, txns[:1], ba.Txns)
+		})
+	}
+}
+
+func TestBlockAssemblerInterrupt(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		requireAll  bool
+		cancel      bool
+		wantPacked  int
+		wantStopped bool
+	}{
+		{name: "explicit list finishes", requireAll: true, wantPacked: 2},
+		{name: "explicit list honors cancellation", requireAll: true, cancel: true, wantPacked: 1, wantStopped: true},
+		{name: "pool selection honors stop", wantPacked: 1, wantStopped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				config := chain.TestChainOsakaConfig.Copy()
+				header := &types.Header{Number: *uint256.NewInt(1), Time: 1000, GasLimit: 100_000}
+				engine := merge.NewFaker(ethash.NewFaker())
+				defer engine.Close()
+				ba := NewBlockAssembler(AssemblerCfg{
+					ChainConfig: config, Engine: engine, RequireAllTransactions: tc.requireAll,
+				}, &AssembledBlock{Header: header})
+				key, err := crypto.GenerateKey()
+				require.NoError(t, err)
+				sender := crypto.PubkeyToAddress(key.PublicKey)
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				require.NoError(t, ibs.AddBalance(accounts.InternAddress(sender), *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+				signer := types.MakeSigner(config, header.Number.Uint64(), header.Time)
+				txns := make(types.Transactions, 2)
+				for i := range txns {
+					txns[i], err = types.SignTx(types.NewTransaction(uint64(i), sender, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil), *signer, key)
+					require.NoError(t, err)
+				}
+				vmConfig := &vm.Config{NoBaseFee: true, Tracer: &tracing.Hooks{
+					OnTxEnd: func(_ *types.Receipt, err error) {
+						require.NoError(t, err)
+						time.Sleep(time.Second)
+						if tc.cancel {
+							cancel()
+						}
+					},
+				}}
+				var interrupt atomic.Bool
+				interrupt.Store(true)
+				_, stopped, err := ba.AddTransactions(ctx, nil, txns, accounts.NilAddress, vmConfig, ibs, &interrupt, "test", log.New())
+				if tc.cancel {
+					require.ErrorIs(t, err, common.ErrStopped)
+				} else {
+					require.NoError(t, ctx.Err())
+					require.NoError(t, err)
+				}
+				require.Equal(t, tc.wantStopped, stopped)
+				require.Equal(t, txns[:tc.wantPacked], ba.Txns)
+			})
 		})
 	}
 }

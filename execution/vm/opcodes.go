@@ -120,6 +120,8 @@ const (
 	FRAMEPARAM
 	SIGPARAM
 	SIGDATACOPY
+	TXTRACE
+	EVENTDATACOPY
 )
 
 // 0x50 range - 'storage' and execution.
@@ -238,6 +240,9 @@ const (
 	REVERT       OpCode = 0xfd
 	INVALID      OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
+	// SENDALL is Bogota's name for SELFDESTRUCT. The assembler accepts both
+	// names, and OpCode.String returns "SELFDESTRUCT" for trace compatibility.
+	SENDALL OpCode = SELFDESTRUCT
 )
 
 // Since the opcodes aren't all in order we can't use a regular slice.
@@ -314,6 +319,8 @@ var opCodeToString = map[OpCode]string{
 	FRAMEPARAM:    "FRAMEPARAM",
 	SIGPARAM:      "SIGPARAM",
 	SIGDATACOPY:   "SIGDATACOPY",
+	TXTRACE:       "TXTRACE",
+	EVENTDATACOPY: "EVENTDATACOPY",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -484,6 +491,8 @@ var stringToOp = map[string]OpCode{
 	"FRAMEPARAM":     FRAMEPARAM,
 	"SIGPARAM":       SIGPARAM,
 	"SIGDATACOPY":    SIGDATACOPY,
+	"TXTRACE":        TXTRACE,
+	"EVENTDATACOPY":  EVENTDATACOPY,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -597,6 +606,7 @@ var stringToOp = map[string]OpCode{
 	"REVERT":         REVERT,
 	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
+	"SENDALL":        SENDALL,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.

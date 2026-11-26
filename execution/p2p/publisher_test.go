@@ -402,3 +402,25 @@ func sendEvent[T any](ctx context.Context, t *testing.T, ch chan T, e T) {
 	case ch <- e: // no-op
 	}
 }
+
+func TestPublisherDropsTasksOnFullQueueWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	p := NewPublisher(log.Root(), nil, nil)
+	for range cap(p.tasks) {
+		p.PublishBlockRangeUpdate(eth.BlockRangeUpdatePacket{Latest: 1})
+	}
+	require.Len(t, p.tasks, cap(p.tasks))
+
+	// A block range update task has no block, so dropping it must not dereference one.
+	require.NotPanics(t, func() {
+		p.PublishBlockRangeUpdate(eth.BlockRangeUpdatePacket{Latest: 2})
+	})
+
+	// Dropping a block task still logs the block fields.
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+	require.NotPanics(t, func() {
+		p.PublishNewBlock(block, *uint256.NewInt(1))
+	})
+	require.Len(t, p.tasks, cap(p.tasks))
+}

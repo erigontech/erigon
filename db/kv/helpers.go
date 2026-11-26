@@ -233,8 +233,10 @@ func NextSubtree(in []byte) ([]byte, bool) {
 }
 
 type DomainEntryDiff struct {
-	Key   string
-	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
+	Key string
+	// Previous value to restore; a non-nil empty slice means absent.
+	// A nil value is a legacy delete-only entry.
+	Value []byte
 }
 
 // DomainDiff represents a domain of state changes.
@@ -253,10 +255,8 @@ func (d *DomainDiff) Len() int {
 	return len(d.prevValues)
 }
 
-// RecordDelta records a state change.
-// prevValue is the previous value at the key. If prevStep != step, the previous value lives
-// at a different step position in the DB and doesn't need restoring on unwind (just delete current).
-// We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
+// DomainUpdate keeps the first previous value recorded for each (key, step)
+// pair within this diff.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)

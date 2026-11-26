@@ -282,9 +282,8 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
-		if err := t.Validate(); err != nil {
-			return accounts.NilAddress, err
-		}
+		// Frame signatures are claims for contract validation, not the source of
+		// the explicit sender. Validate checks them at admission and execution.
 		return accounts.InternAddress(t.SenderAddress), nil
 	default:
 		if spec, ok := registeredTxType(txn.Type()); ok && spec.Sender != nil {

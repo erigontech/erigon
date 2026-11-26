@@ -10,12 +10,12 @@ import (
 )
 
 type CaplinSchema struct {
-	blockAndBlobs map[snaptype.Enum]state.SnapNameSchema
-	state         map[string]state.SnapNameSchema
+	blockAndBlobs map[snaptype.Enum]*state.E2SnapSchema
+	state         map[string]*state.E2SnapSchema
 }
 
 func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync.SnapshotTypes) CaplinSchema {
-	blockAndBlobs := make(map[snaptype.Enum]state.SnapNameSchema)
+	blockAndBlobs := make(map[snaptype.Enum]*state.E2SnapSchema)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
 		dataVer := snapt.Versions()
 		accessorVer := snapt.Indexes()[0].Version
@@ -23,7 +23,7 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync
 		blockAndBlobs[snapt.Enum()] = state.NewE2SnapSchemaWithStepAndDir(dirs.Snap, snapt.Name(), []string{snapt.Indexes()[0].Name}, stepSize, snaptSchemaVersion)
 	}
 
-	statemp := make(map[string]state.SnapNameSchema)
+	statemp := make(map[string]*state.E2SnapSchema)
 	for table := range stateTypes.KeyValueGetters {
 		enum, ok := snaptype.ParseEnum(table)
 		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MaxCaplinEnum {
@@ -45,7 +45,7 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync
 	return CaplinSchema{blockAndBlobs: blockAndBlobs, state: statemp}
 }
 
-func (s CaplinSchema) Get(snapt snaptype.Enum) state.SnapNameSchema {
+func (s CaplinSchema) Get(snapt snaptype.Enum) *state.E2SnapSchema {
 	v, ok := s.blockAndBlobs[snapt]
 	if !ok {
 		panic(fmt.Sprintf("Caplin schema: unknown snap type %s", snapt.Type().Name()))
@@ -53,7 +53,7 @@ func (s CaplinSchema) Get(snapt snaptype.Enum) state.SnapNameSchema {
 	return v
 }
 
-func (s CaplinSchema) GetState(table string) state.SnapNameSchema {
+func (s CaplinSchema) GetState(table string) *state.E2SnapSchema {
 	v, ok := s.state[table]
 	if !ok {
 		panic(fmt.Sprintf("Caplin schema: unknown state table %s", table))

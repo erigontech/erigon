@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Asserts both serial and parallel reject a block whose tx-gas exceeds
+// Asserts that many workers and one worker (serial order) both reject a block whose tx-gas exceeds
 // header.GasLimit. Regression for the parallel-only gap where preCheck's
 // gp-branch is a no-op against the per-tx pool built in trace_worker.
 func TestInsertChain_TxGasExceedsBlockGasLimit_RejectsOnBothPaths(t *testing.T) {
@@ -60,20 +60,18 @@ func TestInsertChain_TxGasExceedsBlockGasLimit_RejectsOnBothPaths(t *testing.T) 
 		TopBlock: badBlock,
 	}
 
-	cases := []struct {
-		name string
-		opts []execmoduletester.Option
+	for _, tc := range []struct {
+		name    string
+		workers int
 	}{
-		{"parallel", nil},
-		{"serial", []execmoduletester.Option{execmoduletester.WithoutExperimentalBAL()}},
-	}
-	for _, tc := range cases {
+		{"parallel", 0},
+		{"one worker", 1},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := append([]execmoduletester.Option{
-				execmoduletester.WithGenesisSpec(data.genesisSpec),
-				execmoduletester.WithKey(fromKey),
-			}, tc.opts...)
-			m := execmoduletester.New(t, opts...)
+			if tc.workers > 0 {
+				setExecWorkers(t, tc.workers)
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(data.genesisSpec), execmoduletester.WithKey(fromKey))
 			require.Error(t, m.InsertChain(badChain),
 				"%s exec must reject tx-gas > block-gas-limit", tc.name)
 		})

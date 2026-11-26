@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -53,7 +54,7 @@ import (
 )
 
 // createTestSegmentFile creates a minimal snapshot segment file for testing
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
+func createTestSegmentFile(t testing.TB, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
 	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
@@ -666,6 +667,29 @@ func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	failing := NewRemoteBlockReader(frozenBlocksBackendClient{err: errors.New("backend down")})
 	require.NotPanics(t, func() {
 		require.Zero(t, failing.FrozenBlocks())
+	})
+}
+
+func TestRemoteBlockReaderIsFrozenAfterOlderRefresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client := &countingFrozenBlocksClient{}
+		reader := NewRemoteBlockReader(client)
+		release := make(chan struct{})
+		reader.frozenBlocks.Go(func() (uint64, bool, error) {
+			<-release
+			return 10, true, nil
+		})
+		result := make(chan bool, 1)
+		go func() {
+			frozen, err := reader.IsFrozen(t.Context(), 20)
+			assert.NoError(t, err)
+			result <- frozen
+		}()
+		synctest.Wait()
+		close(release)
+		require.True(t, <-result, "the older refresh cannot rule out a newly frozen block")
+		require.EqualValues(t, 42, reader.FrozenBlocks(), "keep the fresh range for later lookups")
+		require.EqualValues(t, 1, client.calls.Load())
 	})
 }
 

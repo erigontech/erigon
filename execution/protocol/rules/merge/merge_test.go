@@ -40,6 +40,7 @@ import (
 
 type readerMock struct {
 	config *chain.Config
+	parent *types.Header
 }
 
 func (r readerMock) Config() *chain.Config {
@@ -58,7 +59,10 @@ func (r readerMock) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeader(common.Hash, uint64) *types.Header {
+func (r readerMock) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if r.parent != nil && r.parent.Number.Uint64() == number && r.parent.Hash() == hash {
+		return r.parent
+	}
 	return nil
 }
 
@@ -88,10 +92,7 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 
 	parent := &types.Header{}
 
-	var eth1Engine rules.Engine
-	mergeEngine := New(eth1Engine)
-
-	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
+	err := VerifyHeaderWithParent(nil, header, parent)
 	if !errors.Is(err, errInvalidDifficulty) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
@@ -110,10 +111,7 @@ func TestVerifyHeaderNonce(t *testing.T) {
 
 	parent := &types.Header{}
 
-	var eth1Engine rules.Engine
-	mergeEngine := New(eth1Engine)
-
-	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
+	err := VerifyHeaderWithParent(nil, header, parent)
 	if !errors.Is(err, errInvalidNonce) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
@@ -160,7 +158,7 @@ func TestVerifyHeaderRequiresSlotNumberAfterAmsterdam(t *testing.T) {
 		BlockAccessListHash:   &emptyHash,
 	}
 
-	err := New(nil).verifyHeader(readerMock{config: config}, header, parent)
+	err := VerifyHeaderWithParent(config, header, parent)
 	require.ErrorIs(t, err, rules.ErrMissingSlotNumber)
 }
 

@@ -111,6 +111,11 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", root))
 	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
+	finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
@@ -122,7 +127,8 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           forkEpoch,
-	}).WithOptimistic(isOptimistic), nil
+	}).WithOptimistic(isOptimistic).
+		WithFinalized(canonicalRoot == root && *slot <= finalizedSlot), nil
 }
 
 func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -201,7 +207,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 
 	state, err := a.forkchoiceStateAtBlockSlot(blockId, blockRoot, *slot)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	if state == nil {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -432,9 +438,13 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 	slot := *slotPtr
-	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	stateEpoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	epoch := stateEpoch
 	if epochReq != nil {
 		epoch = *epochReq
+	}
+	if epoch > stateEpoch || stateEpoch-epoch >= a.beaconChainCfg.EpochsPerHistoricalVector {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("epoch is out of range for the randao_mixes of the state"))
 	}
 	randaoMixes := a.randaoMixesPool.Get().(solid.HashListSSZ)
 	defer a.randaoMixesPool.Put(randaoMixes)
@@ -459,11 +469,19 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
 	if err != nil {
-		return nil, err
+		return nil, randaoReadError(err)
 	}
 	return newBeaconResponse(randaoResponse{Randao: mix}).
 		WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithOptimistic(isOptimistic), nil
+}
+
+func randaoReadError(err error) *beaconhttp.EndpointError {
+	status := http.StatusInternalServerError
+	if errors.Is(err, historical_states_reader.ErrRandaoMixUnavailable) {
+		status = http.StatusNotFound
+	}
+	return beaconhttp.NewEndpointError(status, fmt.Errorf("could not read randao mix: %w", err))
 }
 
 // Implements /eth/v1/beacon/states/{state_id}/pending_consolidations

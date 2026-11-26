@@ -107,7 +107,9 @@ func (r *apiEnvelopeRebuilder) Prepare(context.Context, kv.Tx, uint64, common.Ha
 
 func (r *apiEnvelopeRebuilder) Rebuild(ctx context.Context, _ *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if r.rebuild != nil {
-		return nil, r.rebuild(ctx)
+		if err := r.rebuild(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return r.envelope, nil
 }
@@ -179,6 +181,85 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 	require.Nil(t, response)
 	endpointErr := beaconhttp.WrapEndpointError(err)
 	require.Equal(t, http.StatusNotFound, endpointErr.Code)
+}
+
+func TestGetExecutionPayloadEnvelopeDoesNotRebuildRejectedRoot(t *testing.T) {
+	handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+	rebuilder := &apiEnvelopeRebuilder{envelope: envelope}
+	handler.envelopeRebuilder = rebuilder
+	fc.IsEnvelopeRejectedFunc = func(blockRoot common.Hash) bool { return blockRoot == root }
+
+	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+	require.Nil(t, response)
+	require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+	require.Zero(t, rebuilder.prepareCalls)
+}
+
+func TestGetExecutionPayloadEnvelopeRechecksRejectionAfterLookup(t *testing.T) {
+	for _, source := range []string{"fork graph", "history", "rebuild"} {
+		t.Run(source, func(t *testing.T) {
+			handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+			rejected := false
+			fc.IsEnvelopeRejectedFunc = func(blockRoot common.Hash) bool { return blockRoot == root && rejected }
+			if source == "rebuild" {
+				handler.envelopeRebuilder = &apiEnvelopeRebuilder{
+					envelope: envelope,
+					rebuild: func(context.Context) error {
+						rejected = true
+						return nil
+					},
+				}
+			} else {
+				fc.SetEnvelope(root, envelope)
+				if source == "fork graph" {
+					fc.Blocks[root] = handler.blockReader.(*tests.MockBlockReader).U[64]
+				}
+				fc.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					rejected = true
+					return envelope, nil
+				}
+			}
+
+			response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+			require.True(t, rejected)
+			require.Nil(t, response)
+			require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+		})
+	}
+}
+
+func TestGetExecutionPayloadEnvelopeReadError(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		rejected bool
+		wantCode int
+	}{
+		{name: "rejected during read", rejected: true, wantCode: http.StatusNotFound},
+		{name: "unrelated read error", wantCode: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+			rebuilder := &apiEnvelopeRebuilder{envelope: envelope}
+			handler.envelopeRebuilder = rebuilder
+			fc.SetEnvelope(root, envelope)
+			rejected := false
+			fc.IsEnvelopeRejectedFunc = func(blockRoot common.Hash) bool { return blockRoot == root && rejected }
+			readErr := errors.New("injected envelope read error")
+			fc.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				rejected = test.rejected
+				return nil, readErr
+			}
+
+			response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+			require.Nil(t, response)
+			require.Error(t, err)
+			require.Equal(t, test.wantCode, beaconhttp.WrapEndpointError(err).Code)
+			require.Zero(t, rebuilder.prepareCalls)
+			if !test.rejected {
+				require.ErrorIs(t, err, readErr)
+			}
+		})
+	}
 }
 
 func TestGetExecutionPayloadEnvelopeChecksGloasForkBeforeReadingBlock(t *testing.T) {

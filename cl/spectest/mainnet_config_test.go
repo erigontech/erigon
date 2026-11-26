@@ -66,29 +66,19 @@ func testMainnetConfig(t *testing.T) {
 	problems = append(problems, compareConfigFields(reference, builtInNetwork, specNetwork, matched)...)
 
 	hardcoded := map[string]any{
-		"ATTESTATION_DUE_BPS_GLOAS":      clparams.AttestationDueBpsGloas,
-		"AGGREGATE_DUE_BPS_GLOAS":        clparams.AggregateDueBpsGloas,
-		"PAYLOAD_ATTESTATION_DUE_BPS":    clparams.PayloadAttestationDueBps,
-		"REORG_HEAD_WEIGHT_THRESHOLD":    clparams.ReorgHeadWeightThreshold,
-		"REORG_PARENT_WEIGHT_THRESHOLD":  clparams.ReorgParentWeightThreshold,
-		"SLOT_DURATION_MS":               builtInBeacon.SecondsPerSlot * 1000,
-		"ATTESTATION_DUE_BPS":            clparams.AttestationDueBps,
-		"EPOCHS_PER_SUBNET_SUBSCRIPTION": builtInBeacon.EpochsPerRandomSubnetSubscription,
-		"MAXIMUM_GOSSIP_CLOCK_DISPARITY": time.Duration(builtInNetwork.MaximumGossipClockDisparity).Milliseconds(),
-		"MESSAGE_DOMAIN_INVALID_SNAPPY":  binary.BigEndian.Uint32(builtInNetwork.MessageDomainInvalidSnappy[:]),
-		"MESSAGE_DOMAIN_VALID_SNAPPY":    binary.BigEndian.Uint32(builtInNetwork.MessageDomainValidSnappy[:]),
+		"PROPOSER_REORG_CUTOFF_BPS":           clparams.ProposerReorgCutoffBps,
+		"REORG_MAX_EPOCHS_SINCE_FINALIZATION": clparams.ReorgMaxEpochsSinceFinalization,
+		"CONFIRMATION_BYZANTINE_THRESHOLD":    clparams.ConfirmationByzantineThreshold,
+		"ATTESTATION_SUBNET_EXTRA_BITS":       clparams.AttestationSubnetExtraBits,
+		"REORG_PARENT_WEIGHT_THRESHOLD":       clparams.ReorgParentWeightThreshold,
+		"SLOT_DURATION_MS":                    builtInBeacon.SecondsPerSlot * 1000,
+		"EPOCHS_PER_SUBNET_SUBSCRIPTION":      clparams.EpochsPerSubnetSubscription,
+		"MAXIMUM_GOSSIP_CLOCK_DISPARITY":      time.Duration(builtInNetwork.MaximumGossipClockDisparity).Milliseconds(),
+		"MESSAGE_DOMAIN_INVALID_SNAPPY":       binary.BigEndian.Uint32(builtInNetwork.MessageDomainInvalidSnappy[:]),
+		"MESSAGE_DOMAIN_VALID_SNAPPY":         binary.BigEndian.Uint32(builtInNetwork.MessageDomainValidSnappy[:]),
 	}
 	notCompared := map[string]struct{}{
-		"AGGREGATE_DUE_BPS":                   {},
-		"SYNC_MESSAGE_DUE_BPS":                {},
-		"CONTRIBUTION_DUE_BPS":                {},
-		"SYNC_MESSAGE_DUE_BPS_GLOAS":          {},
-		"CONTRIBUTION_DUE_BPS_GLOAS":          {},
-		"PROPOSER_REORG_CUTOFF_BPS":           {},
-		"REORG_MAX_EPOCHS_SINCE_FINALIZATION": {},
-		"CONFIRMATION_BYZANTINE_THRESHOLD":    {},
-		"ATTESTATION_SUBNET_EXTRA_BITS":       {},
-		"GAS_LIMIT_SCHEDULE":                  {},
+		"GAS_LIMIT_SCHEDULE": {},
 	}
 
 	for key, specNode := range reference {

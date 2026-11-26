@@ -3,17 +3,27 @@ package beaconevents
 import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
-	feed *ethevent.Feed
+	feed ethevent.Feed
+	// Like head on stateFeed, these two are also sent on feeds of their own.
+	payload, payloadAvailable ethevent.Feed
 }
 
 func newOpFeed() *operationFeed {
-	return &operationFeed{
-		feed: &ethevent.Feed{},
-	}
+	return &operationFeed{}
 }
 
 func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscription {
 	return f.feed.Subscribe(channel)
+}
+
+// SubscribeExecutionPayload subscribes channel to execution_payload events only.
+func (f *operationFeed) SubscribeExecutionPayload(channel chan *EventStream) ethevent.Subscription {
+	return f.payload.Subscribe(channel)
+}
+
+// SubscribeExecutionPayloadAvailable subscribes channel to execution_payload_available events only.
+func (f *operationFeed) SubscribeExecutionPayloadAvailable(channel chan *EventStream) ethevent.Subscription {
+	return f.payloadAvailable.Subscribe(channel)
 }
 
 func (f *operationFeed) SendAttestation(value *AttestationData) int {
@@ -97,14 +107,13 @@ func (f *operationFeed) SendExecutionPayloadBid(value *SignedExecutionPayloadBid
 
 // SendExecutionPayloadAvailable emits an execution_payload_available event. [New in Gloas:EIP7732]
 func (f *operationFeed) SendExecutionPayloadAvailable(value *ExecutionPayloadAvailableData) int {
-	return f.feed.TrySend(&EventStream{
-		Event: OpExecutionPayloadAvailable,
-		Data:  value,
-	})
+	e := &EventStream{Event: OpExecutionPayloadAvailable, Data: value}
+	return f.feed.TrySend(e) + f.payloadAvailable.TrySendOrFail(e)
 }
 
 func (f *operationFeed) SendExecutionPayload(value *ExecutionPayloadData) int {
-	return f.feed.TrySend(&EventStream{Event: OpExecutionPayload, Data: value})
+	e := &EventStream{Event: OpExecutionPayload, Data: value}
+	return f.feed.TrySend(e) + f.payload.TrySendOrFail(e)
 }
 
 func (f *operationFeed) SendExecutionPayloadGossip(value *ExecutionPayloadGossipData) int {

@@ -65,7 +65,7 @@ func ValidEip(eipNum int) bool {
 }
 
 func ActivateableEips() []string {
-	var nums []string //nolint:prealloc
+	nums := make([]string, 0, len(activators))
 	for k := range activators {
 		nums = append(nums, strconv.Itoa(k))
 	}

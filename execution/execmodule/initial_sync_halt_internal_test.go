@@ -31,8 +31,8 @@ import (
 )
 
 // TestHaltOnInitialSyncFailure pins the decision for a failed one-shot initial
-// sync: a real pipeline failure under the parallel executor halts the process,
-// while routine shutdown, post-sync errors, and serial execution keep it up.
+// sync: a real pipeline failure halts the process, while routine shutdown and
+// post-sync errors keep it up.
 func TestHaltOnInitialSyncFailure(t *testing.T) {
 	t.Parallel()
 
@@ -40,28 +40,24 @@ func TestHaltOnInitialSyncFailure(t *testing.T) {
 		errors.New("parallel exec finished with 1 scheduled block(s) that never reached apply-loop validation"))
 	verdict := fmt.Errorf("[Execution] %w", fmt.Errorf("%w: gas mismatch, block=12", rules.ErrInvalidBlock))
 
-	require.True(t, haltOnInitialSyncFailure(operational, true, false),
+	require.True(t, haltOnInitialSyncFailure(operational),
 		"a real failure must halt regardless of its class — the node would otherwise stay up but never sync")
-	require.True(t, haltOnInitialSyncFailure(verdict, true, false))
-	require.True(t, haltOnInitialSyncFailure(operational, false, true),
-		"experimental BAL also selects the parallel executor")
-	require.False(t, haltOnInitialSyncFailure(nil, true, false))
-	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled), true, false),
+	require.True(t, haltOnInitialSyncFailure(verdict))
+	require.False(t, haltOnInitialSyncFailure(nil))
+	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled)),
 		"shutdown must not halt the node")
 	stopped := fmt.Errorf("[Senders] %w", common.ErrStopped)
-	require.False(t, haltOnInitialSyncFailure(stopped, true, false),
+	require.False(t, haltOnInitialSyncFailure(stopped),
 		"ETL shutdown must not halt the node")
 	grpcCanceled := status.Error(codes.Canceled, context.Canceled.Error())
-	require.False(t, haltOnInitialSyncFailure(grpcCanceled, true, false),
+	require.False(t, haltOnInitialSyncFailure(grpcCanceled),
 		"remote downloader cancellation must not halt the node")
-	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Snapshots] %w", grpcCanceled), true, false))
-	require.False(t, haltOnInitialSyncFailure(errors.Join(context.Canceled, stopped, grpcCanceled), true, false),
+	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Snapshots] %w", grpcCanceled)))
+	require.False(t, haltOnInitialSyncFailure(errors.Join(context.Canceled, stopped, grpcCanceled)),
 		"joined shutdown signals must not halt the node")
-	require.True(t, haltOnInitialSyncFailure(errors.Join(stopped, grpcCanceled, operational), true, false),
+	require.True(t, haltOnInitialSyncFailure(errors.Join(stopped, grpcCanceled, operational)),
 		"a real failure must not be hidden by a shutdown signal")
 	publicationErr := &initialSyncPublicationError{err: errors.New("notification dispatch failed")}
-	require.False(t, haltOnInitialSyncFailure(publicationErr, true, false),
+	require.False(t, haltOnInitialSyncFailure(publicationErr),
 		"an error after initial sync completed must not halt the node")
-	require.False(t, haltOnInitialSyncFailure(operational, false, false),
-		"serial execution keeps the stay-up behavior")
 }

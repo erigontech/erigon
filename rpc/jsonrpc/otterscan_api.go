@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -178,7 +179,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		return nil, err
 	}
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
@@ -209,7 +210,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 
 	if tracer != nil && tracer.Hooks.HasTxEndHook() {
-		tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
+		tracer.Hooks.EmitTxEnd(result.ReceiptForTracing(), result.TxnGasUsage, nil)
 	}
 	return result, nil
 }
@@ -350,22 +351,24 @@ func delegateIssuance(block *types.Block, chainConfig *chain.Config, engine rule
 }
 
 func delegateBlockFees(block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
-	var fee, gasUsed, totalFees uint256.Int
-	isLondon := chainConfig.IsLondon(block.NumberU64())
+	var totalFees, blobBaseFee uint256.Int
 	baseFee := block.BaseFee()
-
+	if !chainConfig.IsLondon(block.NumberU64()) {
+		baseFee = nil
+	}
+	if excess := block.HeaderNoCopy().ExcessBlobGas; excess != nil {
+		var err error
+		blobBaseFee, err = misc.GetBlobGasPrice(chainConfig, *excess, block.Time())
+		if err != nil {
+			return totalFees, err
+		}
+	}
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		if !isLondon {
-			fee.Set(txn.GetTipCap())
-		} else {
-			effectiveTip := txn.GetEffectiveGasTip(baseFee)
-			fee.Add(baseFee, &effectiveTip)
+		fee, err := ethutils.GasFeePaid(txn, receipt.GasUsed, baseFee, &blobBaseFee)
+		if err != nil {
+			return totalFees, err
 		}
-
-		gasUsed.SetUint64(receipt.GasUsed)
-		fee.Mul(&fee, &gasUsed)
-
 		totalFees.Add(&totalFees, &fee)
 	}
 
@@ -436,22 +439,23 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
 
+	blobFee, err := api.frameBlobBaseFee(ctx, tx, b.HeaderNoCopy(), b.Transactions()[pageStart:pageEnd]...)
+	if err != nil {
+		return nil, err
+	}
 	blockHash, baseFee := b.Hash(), b.BaseFee()
 	txs := make([]*ethapi.RPCTransaction, 0, pageEnd-pageStart)
 	result := make([]*ethutils.RPCReceipt, 0, pageEnd-pageStart)
 	for _, receipt := range receipts[pageStart:pageEnd] {
 		txn := b.Transactions()[receipt.TransactionIndex]
 
-		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, b.Time(), b.NumberU64(), uint64(receipt.TransactionIndex), baseFee)
+		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, b.Time(), b.NumberU64(), uint64(receipt.TransactionIndex), baseFee, blobFee, receipt.GasUsed)
 		if len(rpcTx.Input) >= 4 {
 			rpcTx.Input = rpcTx.Input[:4]
 		}
 		txs = append(txs, rpcTx)
 
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), true, false)
-		marshalledRcpt.Logs = nil
-		marshalledRcpt.LogsBloom = nil
-		result = append(result, marshalledRcpt)
+		result = append(result, ethutils.MarshalReceiptWithoutLogs(receipt, txn, chainConfig, b.HeaderNoCopy()))
 	}
 
 	response := map[string]any{}

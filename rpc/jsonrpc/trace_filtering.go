@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -71,10 +70,8 @@ type withdrawalBalanceDiff struct {
 }
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
-	}
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -114,7 +111,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +131,8 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
-	traces, err := api.Transaction(ctx, txHash, gasBailOut, traceConfig)
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, traceConfig *config.TraceConfig) (*ParityTrace, error) {
+	traces, err := api.Transaction(ctx, txHash, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +178,10 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPendingNumber(blockNr); err != nil {
 		return nil, err
-	}
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
 	}
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
@@ -223,7 +218,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	var rewards []protocolrules.Reward
-	traces, wdiffs, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig,
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, cfg, traceConfig,
 		func(syscall protocolrules.SystemCall) error {
 			var err error
 			rewards, err = api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
@@ -303,7 +298,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) (err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
 		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}
@@ -316,10 +312,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		if err := rejectPendingNumber(*req.ToBlock); err != nil {
 			return err
 		}
-	}
-	if gasBailOut == nil {
-		//nolint
-		gasBailOut = new(bool) // false by default
 	}
 	dbtx, err1 := api.kv.BeginTemporalRo(ctx)
 	if err1 != nil {
@@ -365,7 +357,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 
-	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, traceConfig)
 }
 
 // resolveFilterBound resolves an explicit trace_filter bound. A bound past the
@@ -406,18 +398,29 @@ func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, h
 
 func unknownBlockAsResourceNotFound(err error) error {
 	var unresolvedTag *rpc.CustomError
-	if errors.As(err, &rpc.BlockNotFoundErr{}) || (errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+	if errors.As(err, &rpc.BlockNotFoundErr{}) || errors.As(err, &rpchelper.NonCanonicalHashError{}) ||
+		(errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
 		return &rpc.ResourceNotFoundError{Message: err.Error()}
 	}
 	return err
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
+// callBlockError maps a block selector failure of trace_call and trace_callMany.
+// A hash selects a non-canonical block unless requireCanonical is set, but its
+// state is not kept, so the block is known and its state unavailable.
+func callBlockError(err error, block rpc.BlockNumberOrHash) error {
+	if !block.RequireCanonical && errors.As(err, &rpchelper.NonCanonicalHashError{}) {
+		return &rpc.CustomError{Code: 4444, Message: err.Error()}
+	}
+	return unknownBlockAsResourceNotFound(err)
+}
+
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 
 	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit)}
 	}
 
 	if fromBlock > 0 {
@@ -517,9 +520,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.New(state.NewHistoryReaderV3(dbtx, txNum))
+		ibs := state.NewVersionedCall(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
-		transactions.VersionedCallState(ibs)
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -536,7 +538,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if api.evmCallTimeout > 0 {
 			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
 		}
-		execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if timer != nil {
 			timer.Stop()
 		}
@@ -721,7 +723,6 @@ func (api *TraceAPIImpl) callBlock(
 	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
-	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 	// withSyscall, when non-nil, runs against the block's state before it is
@@ -762,19 +763,18 @@ func (api *TraceAPIImpl) callBlock(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 	// The block-start system calls come before tx 0, as block execution runs them.
 	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -821,12 +821,13 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	var traces []*TraceCallResult
-	var cmErr error
-	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 {
-		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
-	} else {
+	cmErr := errNoReplayReadTx
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 && !api.remoteBlocks {
+		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, traceConfig)
+	}
+	if errors.Is(cmErr, errNoReplayReadTx) {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
+			header, true /* requireCanonical */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
 
 	if cmErr != nil {
@@ -875,19 +876,8 @@ func (api *TraceAPIImpl) callBlock(
 	return traces, wdiffs, nil
 }
 
-type blockTraceTxJob struct {
-	txIndex   int
-	txn       types.Transaction
-	msg       *types.Message
-	callParam TraceCallParam
-}
-
-// doCallBlockParallel traces all transactions in a block concurrently using a
-// worker pool of size min(GOMAXPROCS, len(txns)).  Each worker opens its own
-// read-only temporal transaction so that the underlying MDBX transaction is
-// never accessed from more than one goroutine.  Because the temporal DB stores
-// the exact pre-state for every txNum, each transaction can be replayed
-// independently without conflict detection or state forwarding.
+// doCallBlockParallel traces all transactions in a block concurrently, each on the
+// history state before it.
 //
 // Preconditions (checked by the caller):
 //   - stateReader is a HistoricalStateReader (historical block, not latest)
@@ -900,7 +890,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	msgs []*types.Message,
 	callParams []TraceCallParam,
 	header *types.Header,
-	gasBailout bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -919,116 +908,70 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	// Cap at 32 to bound memory from concurrent IntraBlockState instances and
-	// MDBX read transactions even on high-core-count machines.
-	const maxParallelWorkers = 32
-	numWorkers := min(runtime.GOMAXPROCS(0), len(txns), maxParallelWorkers)
+	replay, err := replayTxnsParallel(ctx, api.kv, dbtx, header.Number.Uint64(), baseTxNum, len(txns), replayWorkerCount(runtime.GOMAXPROCS(0), len(txns)), len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+		// blockCtx captures workerTx in its GetHash closure, so it cannot
+		// be shared across workers (each needs its own copy).
+		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			return nil, err
+		}
+		chainRules := blockCtx.Rules(chainConfig)
+		oeConfig, err := parseOeTracerConfig(traceConfig)
+		if err != nil {
+			return nil, err
+		}
 
-	// Pre-fill a buffered channel so the main goroutine never blocks.
-	jobs := make(chan blockTraceTxJob, len(txns))
-	for txIndex, msg := range msgs {
-		jobs <- blockTraceTxJob{txIndex: txIndex, txn: txns[txIndex], msg: msg, callParam: callParams[txIndex]}
-	}
-	close(jobs)
+		return func(txIndex int) error {
+			msg := msgs[txIndex]
+			workerIbs := state.NewVersionedCall(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
+			defer workerIbs.Close()
 
-	g, ctx := errgroup.WithContext(ctx)
+			traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: callParams[txIndex].txHash}
 
-	for range numWorkers {
-		g.Go(func() error {
-			workerTx, err := api.kv.BeginTemporalRo(ctx)
-			if err != nil {
+			var ot OeTracer
+			ot.config = oeConfig
+			ot.compat = api.compatibility
+			ot.r = traceResult
+			// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
+			ot.traceAddr = []int{}
+
+			tracer := ot.Tracer()
+			vmConfig := vm.Config{Tracer: tracer.Hooks}
+
+			workerIbs.SetTxContext(blockCtx.BlockNumber, txIndex)
+			workerIbs.SetHooks(tracer.Hooks)
+
+			txCtx := protocol.NewEVMTxContext(msg)
+			evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
+			gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+
+			if tracer.Hooks.OnTxStart != nil {
+				tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
+			}
+
+			execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+			if execErr != nil {
+				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
+				return fmt.Errorf("txIndex %d: %w", txIndex, execErr)
+			}
+
+			if tracer.Hooks.HasTxEndHook() {
+				tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
+			}
+
+			if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
 				return err
 			}
-			defer workerTx.Rollback()
 
-			// Workers pin their own history view. Check the first replay position
-			// here; all jobs in this block read at or after it.
-			startTxNum, err := state.StateHistoryStartTxNum(workerTx)
-			if err != nil {
-				return err
-			}
-			if baseTxNum < startTxNum {
-				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, header.Number.Uint64(), startTxNum)
-			}
-
-			// Per-worker constants: same for every job this worker processes.
-			// blockCtx captures workerTx in its GetHash closure, so it cannot
-			// be shared across workers (each needs its own copy).
-			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
-			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-				return err
-			}
-			chainRules := blockCtx.Rules(chainConfig)
-			oeConfig, err := parseOeTracerConfig(traceConfig)
-			if err != nil {
-				return err
-			}
-
-			// traceTxnJob traces one job's transaction, closing its state on every
-			// exit path. A non-nil error aborts this worker and cancels the rest.
-			traceTxnJob := func(job blockTraceTxJob) error {
-				// Copy is needed since each worker has its own independent state.
-				// workerReader reads state up to but not including the current transaction.
-				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
-				workerIbs := state.New(workerReader)
-				defer workerIbs.Close()
-				transactions.VersionedCallState(workerIbs)
-
-				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
-
-				var ot OeTracer
-				ot.config = oeConfig
-				ot.compat = api.compatibility
-				ot.r = traceResult
-				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
-				ot.traceAddr = []int{}
-
-				tracer := ot.Tracer()
-				vmConfig := vm.Config{Tracer: tracer.Hooks}
-
-				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
-				workerIbs.SetHooks(tracer.Hooks)
-
-				txCtx := protocol.NewEVMTxContext(job.msg)
-				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
-				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
-
-				if tracer.Hooks.OnTxStart != nil {
-					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
-				}
-
-				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
-				if execErr != nil {
-					tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
-					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
-				}
-
-				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
-				}
-
-				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
-					return err
-				}
-
-				traceResult.Output = bytes.Clone(execResult.ReturnData)
-				results[job.txIndex] = traceResult
-				return nil
-			}
-
-			for job := range jobs {
-				if err := common.Stopped(ctx.Done()); err != nil {
-					return err
-				}
-				if err := traceTxnJob(job); err != nil {
-					return err
-				}
-			}
+			traceResult.Output = bytes.Clone(execResult.ReturnData)
+			results[txIndex] = traceResult
 			return nil
-		})
+		}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if err := g.Wait(); err != nil {
+	if err := replay.Wait(); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -1040,7 +983,6 @@ func (api *TraceAPIImpl) callTransaction(
 	header *types.Header,
 	traceTypes []string,
 	txIndex int,
-	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1078,17 +1020,16 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedCall(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, logger, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 
@@ -1099,7 +1040,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
-		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, true /* requireCanonical */, txIndex, traceConfig)
 }
 
 // TraceFilterRequest represents the arguments for trace_filter. As in

@@ -44,16 +44,11 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 		},
 	}
 
-	// AllProtocolChanges enables Amsterdam (BAL). The parallel executor's BAL
-	// tracking can produce different access lists due to speculative execution,
-	// causing hash mismatches. Use serial execution until BAL tracking is
-	// deterministic across serial/parallel paths.
 	m := execmoduletester.New(
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
 		execmoduletester.WithStepSize(stepSize),
-		execmoduletester.WithoutExperimentalBAL(),
 	)
 	ctx := context.Background()
 	logger := log.New()
@@ -130,16 +125,11 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 		},
 	}
 
-	// AllProtocolChanges enables Amsterdam (BAL). The parallel executor's BAL
-	// tracking can produce different access lists due to speculative execution,
-	// causing hash mismatches. Use serial execution until BAL tracking is
-	// deterministic across serial/parallel paths.
 	m := execmoduletester.New(
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
 		execmoduletester.WithStepSize(stepSize),
-		execmoduletester.WithoutExperimentalBAL(),
 	)
 	ctx := context.Background()
 	logger := log.New()

@@ -30,7 +30,7 @@ import (
 
 func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 	req := &cltypes.BeaconBlocksByHeadRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 

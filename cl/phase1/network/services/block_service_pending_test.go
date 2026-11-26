@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -627,4 +628,299 @@ func TestPublishedBlockJobBackoffDoesNotExtendExpiry(t *testing.T) {
 	require.ErrorIs(t, handle.Wait(t.Context()), ErrPublishedBlockJobExpired)
 	_, queued := service.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
+}
+
+func newWakeTestService(t *testing.T) *blockService {
+	return newBlockService(nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, &clparams.MainnetBeaconConfig, nil)
+}
+
+func wakeTestBlock(t *testing.T, slot uint64) (*cltypes.SignedBeaconBlock, [32]byte) {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = slot
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return block, root
+}
+
+func TestPublishedBlockWakeProcessesBeforeTicker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		start := time.Now()
+
+		block, root := wakeTestBlock(t, 1)
+		var stores atomic.Int32
+		handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			stores.Add(1)
+			return nil
+		})
+		synctest.Wait()
+
+		require.Equal(t, int32(1), stores.Load(), "a published block must not wait for the ticker")
+		require.Equal(t, start, time.Now())
+		_, queued := service.blocksScheduledForLaterExecution.Load(root)
+		require.False(t, queued)
+		require.NoError(t, handle.Wait(t.Context()))
+
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(1), stores.Load())
+	})
+}
+
+func TestPublishedBlockWakeIgnoresCompletedJob(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		block, root := wakeTestBlock(t, 1)
+		var stores atomic.Int32
+		handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			stores.Add(1)
+			return nil
+		})
+		service.processScheduledBlock(t.Context(), root, serviceJob(t, service, root), time.Now())
+		_, queued := service.blocksScheduledForLaterExecution.Load(root)
+		require.False(t, queued)
+		require.Equal(t, int32(1), stores.Load())
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+
+		require.Equal(t, int32(1), stores.Load(), "a wake for a completed job must not run its store again")
+		require.NoError(t, handle.Wait(t.Context()))
+	})
+}
+
+func TestPublishedBlockWakeCoalescesSameRoot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		block, _ := wakeTestBlock(t, 1)
+		var stores atomic.Int32
+		for range 8 {
+			service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+				stores.Add(1)
+				return errors.New("transient")
+			})
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+
+		require.Equal(t, int32(1), stores.Load(), "wakes for one root must run its store once")
+
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(2), stores.Load(), "the ticker must keep retrying queued jobs")
+	})
+}
+
+func TestPublishedBlockWakeHonoursStorageBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
+		db.failing.Store(true)
+		service := newBlockService(db, mock_services.NewForkChoiceStorageMock(t), nil, nil, &clparams.MainnetBeaconConfig, nil)
+		pending, _ := wakeTestBlock(t, 1)
+		service.scheduleBlockForLaterProcessing(pending, nil, false, true)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(1), db.attempts.Load())
+		failedAt := time.Now()
+		db.failing.Store(false)
+
+		block, root := wakeTestBlock(t, 2)
+		var stores atomic.Int32
+		handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			stores.Add(1)
+			return nil
+		})
+		synctest.Wait()
+		require.Zero(t, stores.Load(), "a published block must wait for the storage retry backoff")
+		require.Equal(t, failedAt, time.Now())
+
+		time.Sleep(blockRetryInitialDelay - time.Nanosecond)
+		synctest.Wait()
+		require.Zero(t, stores.Load())
+
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(1), stores.Load())
+		require.NoError(t, handle.Wait(t.Context()))
+		_, queued := service.blocksScheduledForLaterExecution.Load(root)
+		require.False(t, queued)
+	})
+}
+
+func newAcceptedWriteOutageService(t *testing.T) (*blockService, *blockWriteOutageDB) {
+	db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
+	db.failing.Store(true)
+	return newBlockService(db, mock_services.NewForkChoiceStorageMock(t), nil, nil, &clparams.MainnetBeaconConfig, nil), db
+}
+
+func acceptedWriteFailure(block *cltypes.SignedBeaconBlock) func(context.Context) error {
+	return func(context.Context) error {
+		return &AcceptedBlockWriteError{Block: block, Err: errors.New("database unavailable")}
+	}
+}
+
+func TestPublishedBlockWakeBacksOffAfterAcceptedWriteFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, db := newAcceptedWriteOutageService(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+
+		block, root := wakeTestBlock(t, 1)
+		service.SchedulePublishedBlockForLaterProcessing(block, acceptedWriteFailure(block))
+		synctest.Wait()
+		job := serviceJob(t, service, root)
+		job.mu.Lock()
+		pending := job.pendingBlockWrite
+		job.mu.Unlock()
+		require.NotNil(t, pending, "the wake must run the store and keep the accepted block's write pending")
+
+		time.Sleep(blockRetryInitialDelay - time.Nanosecond)
+		synctest.Wait()
+		require.Zero(t, db.attempts.Load(), "a storage failure in a wake must delay the pending write like a ticker failure")
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, int32(1), db.attempts.Load())
+	})
+}
+
+func TestPublishedBlockWakeSuccessResetsStorageBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, db := newAcceptedWriteOutageService(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		start := time.Now()
+
+		// Both wakes run between ticks, so only the wake path can touch the backoff.
+		time.Sleep(blockJobsIntervalTick / 5)
+		failing, _ := wakeTestBlock(t, 1)
+		service.SchedulePublishedBlockForLaterProcessing(failing, acceptedWriteFailure(failing))
+		synctest.Wait()
+
+		time.Sleep(blockRetryInitialDelay + blockJobsIntervalTick/5)
+		synctest.Wait()
+		healthy, _ := wakeTestBlock(t, 2)
+		handle := service.SchedulePublishedBlockForLaterProcessing(healthy, func(context.Context) error { return nil })
+		synctest.Wait()
+		require.NoError(t, handle.Wait(t.Context()))
+		require.Zero(t, db.attempts.Load())
+
+		time.Sleep(time.Until(start.Add(blockRetryInitialDelay + blockJobsIntervalTick)))
+		synctest.Wait()
+		require.Equal(t, int32(1), db.attempts.Load(), "the pending write retries on the first tick after the backoff")
+
+		time.Sleep(blockRetryInitialDelay - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, int32(1), db.attempts.Load())
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, int32(2), db.attempts.Load(), "a successful wake must restart the delay from its initial value")
+	})
+}
+
+func TestPublishedBlockWakeRunsNewerStoreGeneration(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		start := time.Now()
+
+		block, _ := wakeTestBlock(t, 1)
+		release := make(chan struct{})
+		releaseFirst := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(releaseFirst)
+		var firstStores, secondStores atomic.Int32
+		first := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			firstStores.Add(1)
+			<-release
+			return nil
+		})
+		synctest.Wait()
+		require.Equal(t, int32(1), firstStores.Load())
+		second := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			secondStores.Add(1)
+			return nil
+		})
+		synctest.Wait()
+		require.Zero(t, secondStores.Load())
+
+		releaseFirst()
+		synctest.Wait()
+
+		require.Equal(t, int32(1), secondStores.Load(), "the newer store generation must not wait for the ticker")
+		require.Equal(t, start, time.Now())
+		require.NoError(t, first.Wait(t.Context()))
+		require.NoError(t, second.Wait(t.Context()))
+	})
+}
+
+func TestPublishedBlockWakeNeverBlocksScheduling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		var handles []PublishedBlockJob
+		for slot := range uint64(cap(service.publishedBlockScheduled) + 1) {
+			block, _ := wakeTestBlock(t, slot)
+			handles = append(handles, service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil }))
+		}
+
+		service.stopPublishedBlockJobs()
+
+		for _, handle := range handles {
+			require.ErrorIs(t, handle.Wait(t.Context()), ErrPublishedBlockJobStopped)
+		}
+		block, _ := wakeTestBlock(t, uint64(len(handles)))
+		late := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+		require.ErrorIs(t, late.Wait(t.Context()), ErrPublishedBlockJobStopped)
+	})
+}
+
+func TestPublishedBlockWakeOverflowFallsBackToTicker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newWakeTestService(t)
+		const overflow = 4
+		wakes := cap(service.publishedBlockScheduled)
+		var stores atomic.Int32
+		var handles []PublishedBlockJob
+		for slot := range uint64(wakes + overflow) {
+			block, _ := wakeTestBlock(t, slot)
+			handles = append(handles, service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+				stores.Add(1)
+				return nil
+			}))
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+
+		require.Equal(t, int32(wakes), stores.Load(), "only the retained wakes run before the ticker")
+
+		time.Sleep(blockJobsIntervalTick)
+		synctest.Wait()
+		require.Equal(t, int32(wakes+overflow), stores.Load())
+		for _, handle := range handles {
+			require.NoError(t, handle.Wait(t.Context()))
+		}
+	})
 }

@@ -17,7 +17,6 @@
 package forkchoice
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
@@ -28,16 +27,12 @@ import (
 func (f *ForkChoiceStore) GetExecutionHead(head ForkChoiceNode) (common.Hash, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	block, ok := f.forkGraph.GetBlock(head.Root)
-	if !ok || block == nil || block.Block.Body.Version < clparams.GloasVersion {
-		return common.Hash{}, false
-	}
-	bid := block.Block.Body.GetSignedExecutionPayloadBid()
-	if bid == nil || bid.Message == nil {
+	bid := f.executionPayloadBid(head.Root)
+	if bid == nil {
 		return common.Hash{}, false
 	}
 	if head.PayloadStatus == cltypes.PayloadStatusFull {
-		return bid.Message.BlockHash, true
+		return bid.BlockHash, true
 	}
-	return bid.Message.ParentBlockHash, true
+	return bid.ParentBlockHash, true
 }

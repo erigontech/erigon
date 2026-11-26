@@ -100,6 +100,7 @@ func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 		l.bytesPerElement = bytesPerElement
 	}
 	l.progressive = true
+	l.invalidateRoots()
 }
 
 // Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
@@ -236,6 +237,17 @@ func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error)
 	return
 }
 
+// DecodeDynamicSSZWithDecoder decodes a dynamic list with a context-aware
+// element decoder, preserving the list's configured limit and hashing mode.
+func (l *ListSSZ[T]) DecodeDynamicSSZWithDecoder(buf []byte, version int, strict bool, decode func(T, []byte, int) error) (err error) {
+	if l.static {
+		return errors.New("custom dynamic decoder used for static list")
+	}
+	l.list, err = ssz.DecodeDynamicListWithDecoder[T](buf, 0, uint32(len(buf)), uint64(l.limit), version, strict, decode)
+	l.invalidateRoots()
+	return
+}
+
 func (l *ListSSZ[T]) EncodingSizeSSZ() (size int) {
 	if l.static {
 		return len(l.list) * l.bytesPerElement
@@ -317,6 +329,11 @@ func (l *ListSSZ[T]) Clone() clonable.Clonable {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)
 	}
 	return NewDynamicListSSZ[T](l.limit)
+}
+
+func (l *ListSSZ[T]) CloneTo(dst *ListSSZ[T]) {
+	*dst = *l.Clone().(*ListSSZ[T])
+	dst.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Get(index int) T {
@@ -403,19 +420,26 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 }
 
 func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
-	cpy := &ListSSZ[T]{
-		list:            make([]T, len(l.list), cap(l.list)),
-		limit:           l.limit,
-		configured:      l.configured,
-		static:          l.static,
-		bytesPerElement: l.bytesPerElement,
-		progressive:     l.progressive,
-		root:            common.Hash(bytes.Clone(l.root[:])),
+	cpy := new(ListSSZ[T])
+	l.ShallowCopyTo(cpy)
+	return cpy
+}
+
+func (l *ListSSZ[T]) ShallowCopyTo(cpy *ListSSZ[T]) {
+	cache := l.ownedProgressiveRoot()
+	source := *l
+	*cpy = ListSSZ[T]{
+		list:            make([]T, len(source.list), cap(source.list)),
+		limit:           source.limit,
+		configured:      source.configured,
+		static:          source.static,
+		bytesPerElement: source.bytesPerElement,
+		progressive:     source.progressive,
+		root:            common.Hash(bytes.Clone(source.root[:])),
 	}
 	cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
-	if cache := l.ownedProgressiveRoot(); cache != nil {
+	if cache != nil {
 		cpy.progressiveRoot.root.Store(cache.root.Load())
 	}
-	copy(cpy.list, l.list)
-	return cpy
+	copy(cpy.list, source.list)
 }

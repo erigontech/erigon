@@ -1234,32 +1234,46 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 // chain. The returned handle reads through the pinned view and its Rollback
 // releases the underlying tx.
 func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	return beginPinned(ff, ctx, db.BeginTemporalRo, PinToOverlay)
+}
+
+// BeginRoWithOverlay is BeginTemporalRoWithOverlay for a plain kv read tx, which
+// pins no state or block files: only db tables and the overlay are readable.
+func (ff *Filters) BeginRoWithOverlay(ctx context.Context, db kv.RoDB) (kv.Tx, error) {
+	if raw, ok := db.(interface{ InternalDB() kv.RwDB }); ok {
+		db = raw.InternalDB()
+	}
+	return beginPinned(ff, ctx, db.BeginRo, pinKvToOverlay)
+}
+
+func beginPinned[T kv.Tx, P any](ff *Filters, ctx context.Context, begin func(context.Context) (T, error), pin func(T, *membatchwithdb.MemoryMutation) P) (P, error) {
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
-		tx, stable, err := ff.beginPinnedTemporalRo(ctx, db, attempt == maxAttempts)
+		pinned, stable, err := beginPinnedOnce(ff, ctx, begin, pin, attempt == maxAttempts)
 		if err != nil || stable {
-			return tx, err
+			return pinned, err
 		}
 	}
 }
 
-// beginPinnedTemporalRo reports stable=false, with no tx, when the publish
+// beginPinnedOnce reports stable=false, with no tx, when the publish
 // sequence moved around the open and last is false.
-func (ff *Filters) beginPinnedTemporalRo(ctx context.Context, db kv.TemporalRoDB, last bool) (kv.TemporalTx, bool, error) {
+func beginPinnedOnce[T kv.Tx, P any](ff *Filters, ctx context.Context, begin func(context.Context) (T, error), pin func(T, *membatchwithdb.MemoryMutation) P, last bool) (P, bool, error) {
+	var none P
 	overlay, seq := ff.OverlaySnapshot()
-	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	tx, err := begin(ctx)
 	if err != nil {
-		return nil, false, err
+		return none, false, err
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
 	if _, current := ff.OverlaySnapshot(); current != seq {
 		if !last {
-			return nil, false, nil
+			return none, false, nil
 		}
 		overlay = nil
 	}
-	pinned := PinToOverlay(tx, overlay)
+	pinned := pin(tx, overlay)
 	ok = true
 	return pinned, true, nil
 }

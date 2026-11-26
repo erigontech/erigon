@@ -26,7 +26,7 @@ verified against the Go code in this repository.
 | `types.go`: `LatestMessage`, `ForkChoiceNode` | Phase0 `LatestMessage`; Gloas modified `LatestMessage`, `ForkChoiceNode` |
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas`, `computeHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
-| `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree`, `isViableLeaf`, `hasCorrectJustification` | Phase0 `get_filtered_node_tree`, `filter_node_tree`, `get_voting_source`, `get_checkpoint_block` |
+| `get_head.go`: `getFilteredBlockTree`, `isViableLeaf`, `hasCorrectJustification` | Phase0 `get_filtered_node_tree`, `filter_node_tree` (via `markViableUncutBlocks` in `forkchoice.go`), `get_voting_source`, `get_checkpoint_block` |
 | `get_head.go`: `getFilteredNodeTree`, `hasCorrectJustification` | Gloas modified `get_filtered_node_tree`, `get_checkpoint_block`; inherited `filter_node_tree`, `get_voting_source` |
 | `utils.go`: `getUnslashedActiveBalance` | Phase0 `calculate_committee_fraction` |
 | `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |
@@ -37,7 +37,7 @@ verified against the Go code in this repository.
 | `payload_vote.go`: `ShouldExtendPayload`, `getPayloadStatusTiebreaker`, `getNodeChildren`, `validateParentPayloadPath` | Gloas `should_extend_payload`, `get_payload_status_tiebreaker`, `get_node_children`, modified `on_block` parent payload path checks |
 | `timing.go`: `getAttestationDueMs`, `getAggregateDueMs`, `getSyncMessageDueMs`, `getContributionDueMs`, `getPayloadAttestationDueMs` | Phase0 timing helpers; Gloas modified timing helpers and `get_payload_attestation_due_ms` |
 | `timing.go`: `recordBlockTimeliness`, `updateProposerBoostRoot`, `shouldApplyProposerBoostGloas` | Phase0 `record_block_timeliness`, `update_proposer_boost_root`; Gloas modified `record_block_timeliness`, `update_proposer_boost_root`, `should_apply_proposer_boost` |
-| `timing.go`: `isHeadLate`, `isHeadWeak`, `isParentStrong` | Phase0 proposer reorg helpers; Gloas modified `is_head_late`, `is_head_weak`, `is_parent_strong` |
+| `timing.go`: `isHeadWeak` | Phase0 proposer reorg helper; Gloas modified `is_head_weak` |
 | `on_tick.go`: `OnTick`, `onTickPerSlot` | Phase0 `on_tick`, `on_tick_per_slot`; Gloas inherits proposer-boost reset and unrealized checkpoint promotion |
 | `on_block.go`: `OnBlock` | Phase0 `on_block`; Bellatrix execution payload validation; Deneb blob availability; Electra execution requests; Gloas deferred payload/envelope processing; Fulu modified `on_block` data availability call |
 | `on_block.go`: `verifyKzgCommitmentsAgainstTransactions` | Deneb execution payload blob versioned-hash checks; Electra/Fulu maximum blob count plumbing |

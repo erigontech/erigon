@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -47,12 +48,25 @@ func (s *versionBackend) Version(context.Context, *emptypb.Empty) (*typesproto.V
 	return s.version, s.err
 }
 
-func TestTxpoolBackendVersion(t *testing.T) {
+type versionKV struct {
+	remoteproto.UnimplementedKVServer
+	version *typesproto.VersionReply
+	err     error
+}
+
+func (s *versionKV) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
+	return s.version, s.err
+}
+
+func TestTxpoolAPIVersions(t *testing.T) {
 	current := privateapi.EthBackendAPIVersion
+	currentKV := remotedbserver.KvServiceAPIVersion
 	for _, tc := range []struct {
 		name      string
 		version   *typesproto.VersionReply
 		err       error
+		kvVersion *typesproto.VersionReply
+		kvErr     error
 		cancelled bool
 		wantErr   string
 	}{
@@ -61,12 +75,20 @@ func TestTxpoolBackendVersion(t *testing.T) {
 		{name: "patch difference", version: &typesproto.VersionReply{Major: current.Major, Minor: current.Minor, Patch: current.Patch + 1}, wantErr: "label: txpool"},
 		{name: "version RPC failure", err: status.Error(codes.Unavailable, "backend unavailable"), wantErr: "could not get ETHBACKEND version"},
 		{name: "cancelled startup", version: current, cancelled: true, wantErr: "context canceled"},
+		{name: "legacy KV", version: current, kvVersion: &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 3}, wantErr: "incompatible KV versions"},
+		{name: "KV patch difference", version: current, kvVersion: &typesproto.VersionReply{Major: currentKV.Major, Minor: currentKV.Minor, Patch: currentKV.Patch + 1}, wantErr: "label: txpool"},
+		{name: "KV version RPC failure", version: current, kvErr: status.Error(codes.Unavailable, "KV unavailable"), wantErr: "could not get KV version"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 			require.NoError(t, err)
 			server := grpc.NewServer()
 			remoteproto.RegisterETHBACKENDServer(server, &versionBackend{version: tc.version, err: tc.err})
+			kvVersion := tc.kvVersion
+			if kvVersion == nil {
+				kvVersion = currentKV
+			}
+			remoteproto.RegisterKVServer(server, &versionKV{version: kvVersion, err: tc.kvErr})
 			grpcutil.StartServerOnListener(server, listener, false, log.New(), "test backend failed")
 			t.Cleanup(server.Stop)
 

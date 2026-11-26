@@ -23,18 +23,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-// StateChangeConsumer receives protobuf-encoded state changes for remote
-// (gRPC) distribution. Only the gRPC server (KvServer) implements this.
-// This interface exists for backward compatibility with the remote rpcdaemon
-// path. In-process consumers should use BlockBatchConsumer instead.
+// StateChangeConsumer receives protobuf-encoded state batches. In-process and
+// remote subscribers use the same messages.
 type StateChangeConsumer interface {
 	SendStateChanges(ctx context.Context, sc *remoteproto.StateChangeBatch)
-}
-
-// BlockBatchConsumer receives native-typed block notifications for local
-// (in-process) consumers like TxPool. No protobuf serialization involved.
-type BlockBatchConsumer interface {
-	OnNewBlock(ctx context.Context, notification *BlockBatchNotification) error
 }
 
 // ChainEventNotifier is the interface for delivering chain events (new headers,

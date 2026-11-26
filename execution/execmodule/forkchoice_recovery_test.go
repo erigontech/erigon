@@ -70,7 +70,7 @@ func updateForkChoice(t *testing.T, m *execmoduletester.ExecModuleTester, head, 
 
 func requireValid(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
 	t.Helper()
-	validation, err := m.ValidateChain(t.Context(), block.Header())
+	validation, err := m.ValidateChain(t.Context(), block)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }

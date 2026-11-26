@@ -36,7 +36,7 @@ func restoreOwner(src os.FileInfo, path string) error {
 	if !ok {
 		return nil
 	}
-	dst, err := os.Stat(path)
+	dst, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func restoreOwner(src os.FileInfo, path string) error {
 	if ok && owner.Uid == st.Uid && owner.Gid == st.Gid {
 		return nil
 	}
-	err = os.Chown(path, int(st.Uid), int(st.Gid))
+	err = os.Lchown(path, int(st.Uid), int(st.Gid))
 	if err != nil && ok {
 		if errors.Is(err, os.ErrPermission) {
 			err = fmt.Errorf("%w; if running in docker, use --user uid:gid matching the database ownership", err)

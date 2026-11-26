@@ -98,7 +98,7 @@ func TestFrameV2Recording(t *testing.T) {
 func TestOpcodeV2Recording(t *testing.T) {
 	gas := mdgas.MdGas{Execution: 100, State: 200}
 	cost := mdgas.MdGasCost{Execution: 10, State: 50}
-	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 	scope.Memory.Resize(2)
 	scope.Memory.Set(0, 2, []byte{0xab, 0xcd})
 	var receivedGas []mdgas.MdGas
@@ -130,7 +130,7 @@ func TestOpcodeV2Recording(t *testing.T) {
 func TestFaultV2Recording(t *testing.T) {
 	gas := mdgas.MdGas{Execution: 100, State: 200}
 	cost := mdgas.MdGasCost{Execution: 10, State: 50}
-	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 	var receivedGas []mdgas.MdGas
 	var receivedCost []mdgas.MdGasCost
 	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{

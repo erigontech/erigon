@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // A parallel fold whose worker views have drifted off the caller's snapshot
@@ -32,11 +31,6 @@ import (
 // same keys from a read-only caller; the drifted arm just has a commit landing
 // between the caller's view and the workers'.
 func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
-	// No b.RunParallel: mutates the process-global trie-selection flag.
-	orig := statecfg.ExperimentalParallelCommitment
-	b.Cleanup(func() { statecfg.ExperimentalParallelCommitment = orig })
-	statecfg.ExperimentalParallelCommitment = true
-
 	stepSize := uint64(100)
 	db, _ := testDbAndAggregatorBench(b, stepSize)
 	ctx := b.Context()
@@ -97,8 +91,7 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 
 	var bump byte
 	var roots [][]byte
-	run := func(b *testing.B, drift, parallel bool) {
-		statecfg.ExperimentalParallelCommitment = parallel
+	run := func(b *testing.B, drift bool) {
 		callerTx, err := db.BeginTemporalRo(ctx)
 		require.NoError(b, err)
 		defer callerTx.Rollback()
@@ -129,9 +122,8 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 		}
 	}
 
-	b.Run("parallel_worker_views_match", func(b *testing.B) { run(b, false, true) })
-	b.Run("parallel_worker_views_drifted", func(b *testing.B) { run(b, true, true) })
-	b.Run("sequential_trie", func(b *testing.B) { run(b, false, false) })
+	b.Run("parallel_worker_views_match", func(b *testing.B) { run(b, false) })
+	b.Run("parallel_worker_views_drifted", func(b *testing.B) { run(b, true) })
 
 	// Both arms must fold to the same root, or the timings compare different work.
 	for _, rh := range roots {

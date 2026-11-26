@@ -1,7 +1,5 @@
 package trie
 
-import "errors"
-
 func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 	var rd RetainDecider
 	if rl != nil {
@@ -10,17 +8,9 @@ func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 	return extractWitnessFromRootNode(t.RootNode, trace, rd)
 }
 
-func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {
-	foundNode, _, found, _ := t.getNode(prefix)
-	if !found {
-		return nil, errors.New("no data found for given prefix")
-	}
-	return extractWitnessFromRootNode(foundNode, trace, rl)
-}
-
 // extractWitnessFromRootNode extracts witness for subtrie starting from the specified root
 // if retainDec param is nil it will make a witness for the full subtrie,
-// if retainDec param is set to a RetainList instance, it will make a witness for only the accounts/storages that were actually touched; other paths will be hashed.
+// if retainDec param is set, it decides which accounts/storages stay in the witness; other paths will be hashed.
 func extractWitnessFromRootNode(root Node, trace bool, retainDec RetainDecider) (*Witness, error) {
 	builder := NewWitnessBuilder(root, trace)
 	var limiter *MerklePathLimiter = nil

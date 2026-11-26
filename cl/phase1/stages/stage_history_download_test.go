@@ -79,6 +79,11 @@ func TestBlobHistoryDownloadStartsOnlyAfterBlockHistoryFinishes(t *testing.T) {
 	require.NotNil(t, downloader.notify)
 }
 
+func TestBlobBackfillStartsAtCurrentHeadWhenAheadOfCheckpoint(t *testing.T) {
+	require.Equal(t, uint64(201), blobBackfillStartSlot(100, 200))
+	require.Equal(t, uint64(101), blobBackfillStartSlot(100, 50))
+}
+
 func TestBlobHistoryDownloadIgnoresNilConfiguredDownloader(t *testing.T) {
 	var downloader *network.BlobHistoryDownloader
 	require.NotPanics(t, func() {

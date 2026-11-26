@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -432,8 +434,29 @@ func TestReceiptsFilter_SendsEffectiveGasPrice(t *testing.T) {
 	}
 }
 
-// The blob fields are derived from the transaction, the chain config and the header, which the
-// RPC side does not have, and only a blob transaction reports them.
+func TestReceiptsFilter_SendsSettledBlobFrameGasPrice(t *testing.T) {
+	const gasUsed = 21_000
+	rn := createReceiptNotification(txHash1)
+	rn.Receipt.Type = types.FrameTxType
+	rn.Receipt.TransactionIndex = 1
+	rn.Receipt.GasUsed = gasUsed
+	rn.Receipt.CumulativeGasUsed = 2 * gasUsed
+	rn.Header = &types.Header{BaseFee: uint256.NewInt(1), ExcessBlobGas: common.NewUint64(0)}
+	rn.Tx = &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 30_000}}},
+		BlobVersionedHashes: []common.Hash{{1}},
+		// At one wei per blob gas, the remaining budget pays four wei per unit of gas used.
+		Fees: types.FrameFees{MaxFee: uint256.Int{params.GasPerBlob + 4*gasUsed}, TipCap: uint256.Int{10}},
+	}
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	reply := agg.receiptNotificationToProto(rn)
+	require.NotNil(t, reply.EffectiveGasPrice)
+	require.Equal(t, uint256.NewInt(4), gointerfaces.ConvertH256ToUint256Int(reply.EffectiveGasPrice))
+}
+
+// Any transaction carrying blobs, including a frame transaction, reports blob gas
+// used and, when available, the blob gas price. The backend derives these fields
+// from the transaction, header and chain config before sending the notification.
 func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges
 	dynamicFee := func() types.DynamicFeeTransaction {
@@ -482,4 +505,37 @@ func TestFrameReceiptSubscription(t *testing.T) {
 	result := ethutils.MarshalSubscribeReceipt(notification)
 	require.Equal(t, &payer, result.Payer)
 	require.Len(t, result.FrameReceipts, 1)
+}
+
+type failingReceiptsServer struct{ *testReceiptsServer }
+
+func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
+	return errors.New("stream closed")
+}
+
+func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	req := &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}
+	failedID, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	agg.updateReceiptsFilter(failedID, req)
+	srv := newTestReceiptsServer(t.Context())
+	liveID, _ := agg.insertReceiptsFilter(srv)
+	agg.updateReceiptsFilter(liveID, req)
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	agg.removeReceiptsFilter(failedID)
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	require.Len(t, srv.sent, 2)
+}
+
+func TestReceiptsFilter_UpdateAfterFailedSendLeavesNoHashes(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	id, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}})
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash2H256}})
+	agg.removeReceiptsFilter(id)
+
+	require.Empty(t, agg.aggReceiptsFilter.txHashes)
 }

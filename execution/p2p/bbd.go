@@ -706,6 +706,9 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		for i, body := range bodyBatch {
 			header := headerBatches[batchIndex][i]
 			bal := balMap[header.Hash()]
+			if bal != nil && bal.ValidateForBlock(header.GasLimit, len(body.Transactions)) != nil {
+				bal = nil
+			}
 			if bal == nil && header.HasBAL() && !header.HasNonEmptyBAL() {
 				bal = types.NewBlockAccessListSidecar(types.BlockAccessList{})
 			}

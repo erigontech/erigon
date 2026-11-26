@@ -24,31 +24,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func TestIsPowerOf2(t *testing.T) {
-	testCases := []struct {
-		n          uint64
-		isPowerOf2 bool
-	}{
-		{0, false},
-		{1, true},
-		{2, true},
-		{3, false},
-		{4, true},
-		{16, true},
-		{17, false},
-		{64, true},
-		{100, false},
-		{256, true},
-	}
-
-	for _, tc := range testCases {
-		isPowerOf2 := utils.IsPowerOf2(tc.n)
-		if isPowerOf2 != tc.isPowerOf2 {
-			t.Errorf("IsPowerOf2 returned incorrect result for %d. Expected: %t, Got: %t", tc.n, tc.isPowerOf2, isPowerOf2)
-		}
-	}
-}
-
 func TestPowerOf2(t *testing.T) {
 	testCases := []struct {
 		n            uint64

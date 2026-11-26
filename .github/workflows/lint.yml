@@ -25,9 +25,10 @@ jobs:
 
       - name: Install actionlint
         run: |
-          curl -sSfL \
-            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin actionlint
+          curl -sSfL --retry 10 --retry-all-errors --retry-max-time 300 --connect-timeout 30 \
+            -o "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C /usr/local/bin actionlint
 
       - name: Install zizmor
         run: pip install --break-system-packages zizmor==1.26.1

@@ -76,7 +76,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `retain` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `false` is returned), or constructed (if `true` is returned). Usually the `retain` function is
-// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see RetainList.Retain function).
+// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie.
 // `buildExtensions` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presence of the prefix groups.

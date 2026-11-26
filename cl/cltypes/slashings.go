@@ -17,6 +17,9 @@
 package cltypes
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -25,6 +28,21 @@ import (
 type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader `json:"signed_header_1"`
 	Header2 *SignedBeaconBlockHeader `json:"signed_header_2"`
+}
+
+func (p *ProposerSlashing) UnmarshalJSON(buf []byte) error {
+	type proposerSlashingJSON ProposerSlashing
+	var tmp proposerSlashingJSON
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	for i, header := range []*SignedBeaconBlockHeader{tmp.Header1, tmp.Header2} {
+		if header == nil || header.Header == nil {
+			return fmt.Errorf("proposer slashing signed_header_%d is missing or has no message", i+1)
+		}
+	}
+	*p = ProposerSlashing(tmp)
+	return nil
 }
 
 func (p *ProposerSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -68,6 +86,45 @@ func (a *AttesterSlashing) SetVersionWithConfig(v clparams.StateVersion, cfg *cl
 	a.Attestation_2.SetVersionWithConfig(v, cfg)
 }
 
+// setVersionAndValidate applies the fork and preset limits to both indexed
+// attestations, which JSON decoding cannot know, and rejects lists over them.
+func (a *AttesterSlashing) setVersionAndValidate(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) error {
+	a.SetVersionWithConfig(v, cfg)
+	for i, att := range []*IndexedAttestation{a.Attestation_1, a.Attestation_2} {
+		if n, limit := att.AttestingIndices.Length(), att.AttestingIndices.Cap(); n > limit {
+			return fmt.Errorf("attestation_%d: attesting indices exceed limit: %d > %d", i+1, n, limit)
+		}
+	}
+	return nil
+}
+
+func (a *AttesterSlashing) UnmarshalJSON(buf []byte) error {
+	var raw struct {
+		Attestation1 *json.RawMessage `json:"attestation_1"`
+		Attestation2 *json.RawMessage `json:"attestation_2"`
+	}
+	if err := json.Unmarshal(buf, &raw); err != nil {
+		return err
+	}
+	if err := decodeIndexedAttestationJSON("attestation_1", raw.Attestation1, &a.Attestation_1); err != nil {
+		return err
+	}
+	return decodeIndexedAttestationJSON("attestation_2", raw.Attestation2, &a.Attestation_2)
+}
+
+func decodeIndexedAttestationJSON(name string, raw *json.RawMessage, target **IndexedAttestation) error {
+	if raw == nil {
+		return fmt.Errorf("attester slashing is missing %s", name)
+	}
+	if *target == nil {
+		*target = &IndexedAttestation{}
+	}
+	if err := json.Unmarshal(*raw, *target); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
+
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }
@@ -93,9 +150,9 @@ func (a *AttesterSlashing) decodeSSZWithConfig(buf []byte, version int, cfg *clp
 	a.Attestation_1 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	a.Attestation_2 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	if strict {
-		return ssz2.UnmarshalSSZStrict(buf, version, a.Attestation_1, a.Attestation_2)
+		return ssz2.UnmarshalSSZStrict(buf, version, withSSZConfig(a.Attestation_1, cfg), withSSZConfig(a.Attestation_2, cfg))
 	}
-	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
+	return ssz2.UnmarshalSSZ(buf, version, withSSZConfig(a.Attestation_1, cfg), withSSZConfig(a.Attestation_2, cfg))
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {

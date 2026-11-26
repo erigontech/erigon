@@ -50,13 +50,11 @@ type GraphQLCallResult struct {
 }
 
 // GraphQLReceipt is a receipt with the transaction fields the GraphQL resolver reads.
-// Its Logs replaces the RPC logs with the receipt's own.
 type GraphQLReceipt struct {
 	*ethutils.RPCReceipt
 	Nonce                uint64           `json:"nonce"`
 	Value                *uint256.Int     `json:"value"`
 	Data                 []byte           `json:"data"`
-	Logs                 types.Logs       `json:"logs"`
 	Gas                  uint64           `json:"gas"`
 	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
@@ -71,25 +69,27 @@ func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
 	transaction := &GraphQLReceipt{
-		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, false),
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true),
 		Nonce:      txn.GetNonce(),
 		Value:      txn.GetValue(),
 		Data:       txn.GetData(),
-		Logs:       receipt.Logs,
 		Gas:        txn.GetGasLimit(),
 		AccessList: txn.GetAccessList(),
+	}
+	if receipt.Logs == nil {
+		transaction.Logs = nil
 	}
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.
 	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
-		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+		if txType != types.FrameTxType {
+			transaction.MaxFeePerGas = txn.GetFeeCap()
+		}
 	}
 	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	} else if frame, ok := txn.(*types.FrameTransaction); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
 	}
 	return transaction
 }
@@ -321,16 +321,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return "", 0, "", err
 	}
 
 	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return "", 0, "", err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -376,16 +372,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
 
 	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return zeroStorageHash, err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
@@ -460,10 +452,6 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -514,7 +502,11 @@ func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, er
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
-	return api.eth.GetLogs(ctx, crit)
+	res, err := api.eth.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return res.Logs, nil
 }
 
 func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {

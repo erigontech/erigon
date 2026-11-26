@@ -25,15 +25,19 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if peerCountGauge != nil {
-		fmt.Fprintln(os.Stderr, "caplin_peer_count gauge is registered before sentinel metrics are recorded")
+	if peerCountGauge != nil || inboundPeerGauge != nil || outboundPeerGauge != nil {
+		fmt.Fprintln(os.Stderr, "peer gauges are registered before sentinel metrics are recorded")
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
 
 func TestRecordPeerMetrics(t *testing.T) {
-	recordPeerMetrics(7)
+	recordPeerMetrics(7, peerCounts{inbound: 5, outbound: 2})
 	require.NotNil(t, peerCountGauge)
 	require.Equal(t, float64(7), peerCountGauge.GetValue())
+	require.NotNil(t, inboundPeerGauge)
+	require.Equal(t, float64(5), inboundPeerGauge.GetValue())
+	require.NotNil(t, outboundPeerGauge)
+	require.Equal(t, float64(2), outboundPeerGauge.GetValue())
 }

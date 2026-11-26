@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -52,6 +54,8 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	mustReadBlock := true
 	reachedPageSize := false
 	hasMore := false
+	var blobFee *uint256.Int
+
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, _, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
@@ -95,6 +99,10 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			if block == nil {
 				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
 			}
+			blobFee, err = api.frameBlobBaseFee(ctx, tx, block.HeaderNoCopy(), block.Transactions()...)
+			if err != nil {
+				return nil, nil, false, err
+			}
 			mustReadBlock = false
 		}
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -105,16 +113,15 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee())
-		txs = append(txs, rpcTx)
-
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, nil, false, err
 		}
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee(), blobFee, receipt.GasUsed)
+		txs = append(txs, rpcTx)
 
 		receipts = append(receipts, ReceiptWithTimestamp{
-			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, false),
+			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true),
 			Timestamp:  block.Time(),
 		})
 

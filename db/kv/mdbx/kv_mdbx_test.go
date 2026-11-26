@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -269,6 +270,17 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, vals, 1)
 	})
+}
+
+func TestRangeDupSortDescFromPrefixWithoutSuccessor(t *testing.T) {
+	_, tx, _ := BaseCase(t)
+	for _, from := range [][]byte{{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, {}} {
+		it, err := tx.RangeDupSort("Table", []byte("key1"), from, nil, order.Desc, -1)
+		require.NoError(t, err)
+		_, vals, err := stream.ToArrayKV(it)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{[]byte("value1.3"), []byte("value1.1")}, vals, "from=%x", from)
+	}
 }
 
 // TestRangeRwTxInterleavedWrite verifies that Range iterators remain correct
@@ -1498,4 +1510,73 @@ func TestCursorUnknownTable(t *testing.T) {
 	defer tx.Rollback()
 	_, err = tx.Cursor("NoSuchTable")
 	require.Error(t, err)
+}
+
+func TestClearTableUnknownNameKeepsGC(t *testing.T) {
+	db := BaseCaseDB(t)
+	ctx := t.Context()
+	val := make([]byte, 1024)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for i := range uint64(1000) {
+			if err := tx.Put(kv.Sequence, binary.BigEndian.AppendUint64(nil, i), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearTable(kv.Sequence) }))
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	gcBefore, err := tx.(*mdbx.MdbxTx).BucketStat("gc")
+	require.NoError(t, err)
+	require.NotZero(t, gcBefore.Entries)
+
+	require.ErrorContains(t, tx.ClearTable("NoSuchTable"), "table NoSuchTable not found")
+
+	gcAfter, err := tx.(*mdbx.MdbxTx).BucketStat("gc")
+	require.NoError(t, err)
+	require.Equal(t, gcBefore.Entries, gcAfter.Entries)
+}
+
+func TestSpaceDirtyWriteTxMatchesReaderScan(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for i := range 1000 {
+		require.NoError(t, tx.Put("Table", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "value%04d", i)))
+	}
+
+	dirty, _, err := tx.(*mdbx.MdbxTx).SpaceDirty()
+	require.NoError(t, err)
+	scanned, err := mdbx.ScannedSpaceDirty(tx.(*mdbx.MdbxTx))
+	require.NoError(t, err)
+	require.Positive(t, dirty)
+	require.Equal(t, scanned, dirty)
+}
+
+func TestCommitCollectsMetricsOnlyForWrites(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.New()).InMem(t.TempDir()).WithMetrics().MustOpen()
+	t.Cleanup(db.Close)
+	label := string(dbcfg.TemporaryDB)
+	size := kv.MDBXGauges.DbSize.WithLabelValues(label)
+	limit := kv.MDBXGauges.TxLimit.WithLabelValues(label)
+	size.SetUint64(0)
+	limit.SetUint64(0)
+
+	ro, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer ro.Rollback()
+	require.NoError(t, ro.(*mdbx.MdbxTx).Commit())
+	require.Zero(t, size.GetValueUint64())
+	require.Zero(t, limit.GetValueUint64())
+
+	rw, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rw.Rollback()
+	require.NoError(t, rw.Commit())
+	require.Positive(t, size.GetValueUint64())
+	require.Positive(t, limit.GetValueUint64())
 }

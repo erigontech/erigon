@@ -181,12 +181,18 @@ func TestTxPoolInspect(t *testing.T) {
 
 	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
 	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")
+	frame := &types.FrameTransaction{
+		Nonce: 6, SenderAddress: a2,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+		Fees:   types.FrameFees{MaxFee: *uint256.NewInt(123456789)},
+	}
 	s1, s2 := gointerfaces.ConvertAddressToH160(a1), gointerfaces.ConvertAddressToH160(a2)
 	pool := &stubPoolContentClient{all: &txpoolproto.AllReply{Txs: []*txpoolproto.AllReply_Tx{
 		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: rlpOf(legacy)},
 		{TxnType: txpoolproto.AllReply_BASE_FEE, Sender: s1, RlpTx: rlpOf(&dynamicFee)},
 		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: blobRlp},
 		{TxnType: txpoolproto.AllReply_QUEUED, Sender: s2, RlpTx: rlpOf(creation)},
+		{TxnType: txpoolproto.AllReply_QUEUED, Sender: s2, RlpTx: rlpOf(frame)},
 	}}}
 	api := NewTxPoolAPI(nil, pool)
 
@@ -200,6 +206,7 @@ func TestTxPoolInspect(t *testing.T) {
 		}},
 		"queued": {a2.Hex(): {
 			"5": "contract creation: 0 wei + 100000 gas × 3 wei",
+			"6": "frame transaction: max fee 123456789 wei",
 		}},
 	}, inspect)
 }

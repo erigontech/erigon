@@ -20,105 +20,10 @@
 package trie
 
 import (
-	"bytes"
-	"fmt"
-	"sort"
-
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type RetainDecider interface {
 	Retain([]byte) bool
 	IsCodeTouched(accounts.CodeHash) bool
-}
-
-// RetainList encapsulates the list of keys that are required to be fully available, or loaded
-// (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
-// pairs
-// DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
-type RetainList struct {
-	inited    bool // Whether keys are sorted and "LTE" and "GT" indices set
-	minLength int  // Mininum length of prefixes for which `HashOnly` function can return `true`
-	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
-	hexes     [][]byte
-}
-
-// NewRetainList creates new RetainList
-func NewRetainList(minLength int) *RetainList {
-	return &RetainList{minLength: minLength}
-}
-
-func (rl *RetainList) Len() int {
-	return len(rl.hexes)
-}
-
-func (rl *RetainList) Less(i, j int) bool {
-	return bytes.Compare(rl.hexes[i], rl.hexes[j]) < 0
-}
-
-func (rl *RetainList) Swap(i, j int) {
-	rl.hexes[i], rl.hexes[j] = rl.hexes[j], rl.hexes[i]
-}
-
-// AddKey adds a new key (in KEY encoding) to the list
-func (rl *RetainList) AddKey(key []byte) []byte {
-	nibbles := make([]byte, 2*len(key))
-	for i, b := range key {
-		nibbles[i*2] = b / 16
-		nibbles[i*2+1] = b % 16
-	}
-	rl.hexes = append(rl.hexes, nibbles)
-	return nibbles
-}
-
-func (rl *RetainList) IsCodeTouched(accounts.CodeHash) bool {
-	return false
-}
-
-func (rl *RetainList) ensureInited() {
-	if rl.inited {
-		return
-	}
-	if !sort.IsSorted(rl) {
-		sort.Sort(rl)
-	}
-	rl.lteIndex = 0
-	rl.inited = true
-}
-
-// Retain decides whether to emit `HASHER` or `BRANCH` for a given prefix, by
-// checking if this is prefix of any of the keys added to the set
-// Since keys in the set are sorted, and we expect that the prefixes will
-// come in monotonically ascending order, we optimise for this, though
-// the function would still work if the order is different
-func (rl *RetainList) Retain(prefix []byte) bool {
-	rl.ensureInited()
-	if len(prefix) < rl.minLength {
-		return true
-	}
-	// Adjust "GT" if necessary
-	var gtAdjusted bool
-	for rl.lteIndex < len(rl.hexes)-1 && bytes.Compare(rl.hexes[rl.lteIndex+1], prefix) <= 0 {
-		rl.lteIndex++
-		gtAdjusted = true
-	}
-	// Adjust "LTE" if necessary (normally will not be necessary)
-	for !gtAdjusted && rl.lteIndex > 0 && bytes.Compare(rl.hexes[rl.lteIndex], prefix) > 0 {
-		rl.lteIndex--
-	}
-	if rl.lteIndex < len(rl.hexes) {
-		if bytes.HasPrefix(rl.hexes[rl.lteIndex], prefix) {
-			return true
-		}
-	}
-	if rl.lteIndex < len(rl.hexes)-1 {
-		if bytes.HasPrefix(rl.hexes[rl.lteIndex+1], prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func (rl *RetainList) String() string {
-	return fmt.Sprintf("%x", rl.hexes)
 }

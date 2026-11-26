@@ -68,3 +68,38 @@ func TestRawUint64ListHashSSZAfterDecodeSSZ(t *testing.T) {
 		})
 	}
 }
+
+func TestRawUint64ListHashSSZAfterSetCap(t *testing.T) {
+	values := []uint64{1, 2, 3}
+	list := solid.NewRawUint64List(2048, values)
+	_, err := list.HashSSZ()
+	require.NoError(t, err)
+
+	list.SetCap(131072)
+	root, err := list.HashSSZ()
+	require.NoError(t, err)
+
+	freshRoot, err := solid.NewRawUint64List(131072, values).HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, freshRoot, root)
+}
+
+func TestRawUint64ListHashSSZAfterCopyToDifferentLimit(t *testing.T) {
+	values := []uint64{1, 2, 3}
+	source := solid.NewRawUint64List(2048, values)
+	_, err := source.HashSSZ()
+	require.NoError(t, err)
+
+	target := solid.NewRawUint64List(131072, []uint64{4, 5, 6})
+	_, err = target.HashSSZ()
+	require.NoError(t, err)
+
+	source.CopyTo(target)
+	require.Equal(t, 131072, target.Cap())
+	root, err := target.HashSSZ()
+	require.NoError(t, err)
+
+	freshRoot, err := solid.NewRawUint64List(131072, values).HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, freshRoot, root)
+}

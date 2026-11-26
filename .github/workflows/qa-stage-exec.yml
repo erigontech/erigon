@@ -25,30 +25,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each (mode_name, commitment_mode) pair runs separately. The testbed
-        # data dir already disambiguates by mode_name; we extend it with
-        # commitment_mode so serial+parallel entries don't clobber each other.
         include:
           - mode_name: resume-nonchaintip
             extra_flags: ""
             test_name: stage_exec_resume_nonchaintip
-            commitment_mode: serial
-          - mode_name: resume-nonchaintip
-            extra_flags: ""
-            test_name: stage_exec_resume_nonchaintip
             commitment_mode: parallel
           - mode_name: from-0
             extra_flags: "--rm-state-all"
             test_name: stage_exec_from_0
-            commitment_mode: serial
-          - mode_name: from-0
-            extra_flags: "--rm-state-all"
-            test_name: stage_exec_from_0
             commitment_mode: parallel
-          - mode_name: chaintip
-            extra_flags: "--chaintip"
-            test_name: stage_exec_resume_chaintip
-            commitment_mode: serial
           - mode_name: chaintip
             extra_flags: "--chaintip"
             test_name: stage_exec_resume_chaintip

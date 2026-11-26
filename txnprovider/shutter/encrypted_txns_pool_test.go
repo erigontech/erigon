@@ -191,3 +191,19 @@ func TestEncryptedTxnsPoolLoadSubmissionsSurfacesIteratorError(t *testing.T) {
 	err := p.loadSubmissions(context.Background(), 0, 100)
 	require.Error(t, err)
 }
+
+func TestEncryptedTxnsPoolTxnsKeepsSubmissionAfterGap(t *testing.T) {
+	t.Parallel()
+	logger := testlog.Logger(t, log.LvlTrace)
+	p := NewEncryptedTxnsPool(logger, shuttercfg.Config{MaxPooledEncryptedTxns: 10_000}, nil, nil)
+	for _, txnIndex := range []TxnIndex{10, 12, 13} {
+		p.addSubmission(EncryptedTxnSubmission{EonIndex: 1, TxnIndex: txnIndex, GasLimit: big.NewInt(21_000)})
+	}
+	txns, err := p.Txns(1, 10, 14, 1_000_000)
+	require.NoError(t, err)
+	var got []TxnIndex
+	for _, txn := range txns {
+		got = append(got, txn.TxnIndex)
+	}
+	require.Equal(t, []TxnIndex{10, 12, 13}, got)
+}

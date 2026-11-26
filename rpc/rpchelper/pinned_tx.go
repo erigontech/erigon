@@ -94,3 +94,21 @@ func (t *PinnedRoTx) Pin() kv.TemporalFilesPin {
 	}
 	return nil
 }
+
+// pinnedKvTx is PinnedRoTx for a plain kv read tx.
+type pinnedKvTx struct {
+	kv.Tx
+	raw kv.Tx
+}
+
+func pinKvToOverlay(tx kv.Tx, overlay *membatchwithdb.MemoryMutation) kv.Tx {
+	view := tx
+	if overlay != nil {
+		view = overlay.NewReadView(tx)
+	}
+	return &pinnedKvTx{Tx: view, raw: tx}
+}
+
+func (t *pinnedKvTx) Rollback() {
+	t.raw.Rollback()
+}

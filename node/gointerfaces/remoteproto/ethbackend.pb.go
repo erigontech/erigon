@@ -82,6 +82,52 @@ func (Event) EnumDescriptor() ([]byte, []int) {
 	return file_remote_ethbackend_proto_rawDescGZIP(), []int{0}
 }
 
+type FrameValidationReply_RejectionReason int32
+
+const (
+	FrameValidationReply_UNSPECIFIED   FrameValidationReply_RejectionReason = 0
+	FrameValidationReply_NONCE_TOO_LOW FrameValidationReply_RejectionReason = 1
+)
+
+// Enum value maps for FrameValidationReply_RejectionReason.
+var (
+	FrameValidationReply_RejectionReason_name = map[int32]string{
+		0: "UNSPECIFIED",
+		1: "NONCE_TOO_LOW",
+	}
+	FrameValidationReply_RejectionReason_value = map[string]int32{
+		"UNSPECIFIED":   0,
+		"NONCE_TOO_LOW": 1,
+	}
+)
+
+func (x FrameValidationReply_RejectionReason) Enum() *FrameValidationReply_RejectionReason {
+	p := new(FrameValidationReply_RejectionReason)
+	*p = x
+	return p
+}
+
+func (x FrameValidationReply_RejectionReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FrameValidationReply_RejectionReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_remote_ethbackend_proto_enumTypes[1].Descriptor()
+}
+
+func (FrameValidationReply_RejectionReason) Type() protoreflect.EnumType {
+	return &file_remote_ethbackend_proto_enumTypes[1]
+}
+
+func (x FrameValidationReply_RejectionReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FrameValidationReply_RejectionReason.Descriptor instead.
+func (FrameValidationReply_RejectionReason) EnumDescriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{39, 0}
+}
+
 type EtherbaseRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2163,8 +2209,10 @@ type FrameValidationReply struct {
 	Deadline       uint64                 `protobuf:"varint,6,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	Dependencies   []*typesproto.H160     `protobuf:"bytes,7,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	CreationNonces []*FrameCreationNonce  `protobuf:"bytes,8,rep,name=creation_nonces,json=creationNonces,proto3" json:"creation_nonces,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Only meaningful when valid is false; unspecified reasons are generic rejections.
+	RejectionReason FrameValidationReply_RejectionReason `protobuf:"varint,9,opt,name=rejection_reason,json=rejectionReason,proto3,enum=remote.FrameValidationReply_RejectionReason" json:"rejection_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FrameValidationReply) Reset() {
@@ -2251,6 +2299,13 @@ func (x *FrameValidationReply) GetCreationNonces() []*FrameCreationNonce {
 		return x.CreationNonces
 	}
 	return nil
+}
+
+func (x *FrameValidationReply) GetRejectionReason() FrameValidationReply_RejectionReason {
+	if x != nil {
+		return x.RejectionReason
+	}
+	return FrameValidationReply_UNSPECIFIED
 }
 
 type BlockForTxNumRequest struct {
@@ -2832,7 +2887,7 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x05count\x18\x02 \x01(\x04R\x05count\"w\n" +
 	"\x16FrameValidationRequest\x12 \n" +
 	"\vtransaction\x18\x01 \x01(\fR\vtransaction\x12;\n" +
-	"\x13expected_block_hash\x18\x02 \x01(\v2\v.types.H256R\x11expectedBlockHash\"\xd9\x02\n" +
+	"\x13expected_block_hash\x18\x02 \x01(\v2\v.types.H256R\x11expectedBlockHash\"\xe9\x03\n" +
 	"\x14FrameValidationReply\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12!\n" +
 	"\x05payer\x18\x02 \x01(\v2\v.types.H160R\x05payer\x12&\n" +
@@ -2841,7 +2896,11 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\tpaymaster\x18\x05 \x01(\bR\tpaymaster\x12\x1a\n" +
 	"\bdeadline\x18\x06 \x01(\x04R\bdeadline\x12/\n" +
 	"\fdependencies\x18\a \x03(\v2\v.types.H160R\fdependencies\x12C\n" +
-	"\x0fcreation_nonces\x18\b \x03(\v2\x1a.remote.FrameCreationNonceR\x0ecreationNonces\",\n" +
+	"\x0fcreation_nonces\x18\b \x03(\v2\x1a.remote.FrameCreationNonceR\x0ecreationNonces\x12W\n" +
+	"\x10rejection_reason\x18\t \x01(\x0e2,.remote.FrameValidationReply.RejectionReasonR\x0frejectionReason\"5\n" +
+	"\x0fRejectionReason\x12\x0f\n" +
+	"\vUNSPECIFIED\x10\x00\x12\x11\n" +
+	"\rNONCE_TOO_LOW\x10\x01\",\n" +
 	"\x14BlockForTxNumRequest\x12\x14\n" +
 	"\x05txnum\x18\x01 \x01(\x04R\x05txnum\"T\n" +
 	"\x15BlockForTxNumResponse\x12!\n" +
@@ -2914,165 +2973,167 @@ func file_remote_ethbackend_proto_rawDescGZIP() []byte {
 	return file_remote_ethbackend_proto_rawDescData
 }
 
-var file_remote_ethbackend_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_remote_ethbackend_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_remote_ethbackend_proto_goTypes = []any{
-	(Event)(0),                                     // 0: remote.Event
-	(*EtherbaseRequest)(nil),                       // 1: remote.EtherbaseRequest
-	(*EtherbaseReply)(nil),                         // 2: remote.EtherbaseReply
-	(*NetVersionRequest)(nil),                      // 3: remote.NetVersionRequest
-	(*NetVersionReply)(nil),                        // 4: remote.NetVersionReply
-	(*SyncingReply)(nil),                           // 5: remote.SyncingReply
-	(*NetPeerCountRequest)(nil),                    // 6: remote.NetPeerCountRequest
-	(*NetPeerCountReply)(nil),                      // 7: remote.NetPeerCountReply
-	(*ProtocolVersionRequest)(nil),                 // 8: remote.ProtocolVersionRequest
-	(*ProtocolVersionReply)(nil),                   // 9: remote.ProtocolVersionReply
-	(*ClientVersionRequest)(nil),                   // 10: remote.ClientVersionRequest
-	(*ClientVersionReply)(nil),                     // 11: remote.ClientVersionReply
-	(*CanonicalHashRequest)(nil),                   // 12: remote.CanonicalHashRequest
-	(*CanonicalHashReply)(nil),                     // 13: remote.CanonicalHashReply
-	(*HeaderNumberRequest)(nil),                    // 14: remote.HeaderNumberRequest
-	(*HeaderNumberReply)(nil),                      // 15: remote.HeaderNumberReply
-	(*CanonicalBodyForStorageRequest)(nil),         // 16: remote.CanonicalBodyForStorageRequest
-	(*CanonicalBodyForStorageReply)(nil),           // 17: remote.CanonicalBodyForStorageReply
-	(*SubscribeRequest)(nil),                       // 18: remote.SubscribeRequest
-	(*SubscribeReply)(nil),                         // 19: remote.SubscribeReply
-	(*LogsFilterRequest)(nil),                      // 20: remote.LogsFilterRequest
-	(*SubscribeLogsReply)(nil),                     // 21: remote.SubscribeLogsReply
-	(*ReceiptsFilterRequest)(nil),                  // 22: remote.ReceiptsFilterRequest
-	(*SubscribeReceiptsReply)(nil),                 // 23: remote.SubscribeReceiptsReply
-	(*FrameReceipt)(nil),                           // 24: remote.FrameReceipt
-	(*BlockRequest)(nil),                           // 25: remote.BlockRequest
-	(*BlockReply)(nil),                             // 26: remote.BlockReply
-	(*TxnLookupRequest)(nil),                       // 27: remote.TxnLookupRequest
-	(*TxnLookupReply)(nil),                         // 28: remote.TxnLookupReply
-	(*NodesInfoRequest)(nil),                       // 29: remote.NodesInfoRequest
-	(*AddPeerRequest)(nil),                         // 30: remote.AddPeerRequest
-	(*RemovePeerRequest)(nil),                      // 31: remote.RemovePeerRequest
-	(*NodesInfoReply)(nil),                         // 32: remote.NodesInfoReply
-	(*PeersReply)(nil),                             // 33: remote.PeersReply
-	(*AddPeerReply)(nil),                           // 34: remote.AddPeerReply
-	(*RemovePeerReply)(nil),                        // 35: remote.RemovePeerReply
-	(*PendingBlockReply)(nil),                      // 36: remote.PendingBlockReply
-	(*EngineGetPayloadBodiesByHashV1Request)(nil),  // 37: remote.EngineGetPayloadBodiesByHashV1Request
-	(*EngineGetPayloadBodiesByRangeV1Request)(nil), // 38: remote.EngineGetPayloadBodiesByRangeV1Request
-	(*FrameValidationRequest)(nil),                 // 39: remote.FrameValidationRequest
-	(*FrameValidationReply)(nil),                   // 40: remote.FrameValidationReply
-	(*BlockForTxNumRequest)(nil),                   // 41: remote.BlockForTxNumRequest
-	(*BlockForTxNumResponse)(nil),                  // 42: remote.BlockForTxNumResponse
-	(*MinimumBlockAvailableReply)(nil),             // 43: remote.MinimumBlockAvailableReply
-	(*FrozenBlocksReply)(nil),                      // 44: remote.FrozenBlocksReply
-	(*SetHeadRequest)(nil),                         // 45: remote.SetHeadRequest
-	(*SetHeadReply)(nil),                           // 46: remote.SetHeadReply
-	(*BlockBodyReply)(nil),                         // 47: remote.BlockBodyReply
-	(*FrameCreationNonce)(nil),                     // 48: remote.FrameCreationNonce
-	(*SyncingReply_StageProgress)(nil),             // 49: remote.SyncingReply.StageProgress
-	(*typesproto.H160)(nil),                        // 50: types.H160
-	(*typesproto.H256)(nil),                        // 51: types.H256
-	(*typesproto.NodeInfoReply)(nil),               // 52: types.NodeInfoReply
-	(*typesproto.PeerInfo)(nil),                    // 53: types.PeerInfo
-	(*emptypb.Empty)(nil),                          // 54: google.protobuf.Empty
-	(*typesproto.VersionReply)(nil),                // 55: types.VersionReply
+	(Event)(0), // 0: remote.Event
+	(FrameValidationReply_RejectionReason)(0),      // 1: remote.FrameValidationReply.RejectionReason
+	(*EtherbaseRequest)(nil),                       // 2: remote.EtherbaseRequest
+	(*EtherbaseReply)(nil),                         // 3: remote.EtherbaseReply
+	(*NetVersionRequest)(nil),                      // 4: remote.NetVersionRequest
+	(*NetVersionReply)(nil),                        // 5: remote.NetVersionReply
+	(*SyncingReply)(nil),                           // 6: remote.SyncingReply
+	(*NetPeerCountRequest)(nil),                    // 7: remote.NetPeerCountRequest
+	(*NetPeerCountReply)(nil),                      // 8: remote.NetPeerCountReply
+	(*ProtocolVersionRequest)(nil),                 // 9: remote.ProtocolVersionRequest
+	(*ProtocolVersionReply)(nil),                   // 10: remote.ProtocolVersionReply
+	(*ClientVersionRequest)(nil),                   // 11: remote.ClientVersionRequest
+	(*ClientVersionReply)(nil),                     // 12: remote.ClientVersionReply
+	(*CanonicalHashRequest)(nil),                   // 13: remote.CanonicalHashRequest
+	(*CanonicalHashReply)(nil),                     // 14: remote.CanonicalHashReply
+	(*HeaderNumberRequest)(nil),                    // 15: remote.HeaderNumberRequest
+	(*HeaderNumberReply)(nil),                      // 16: remote.HeaderNumberReply
+	(*CanonicalBodyForStorageRequest)(nil),         // 17: remote.CanonicalBodyForStorageRequest
+	(*CanonicalBodyForStorageReply)(nil),           // 18: remote.CanonicalBodyForStorageReply
+	(*SubscribeRequest)(nil),                       // 19: remote.SubscribeRequest
+	(*SubscribeReply)(nil),                         // 20: remote.SubscribeReply
+	(*LogsFilterRequest)(nil),                      // 21: remote.LogsFilterRequest
+	(*SubscribeLogsReply)(nil),                     // 22: remote.SubscribeLogsReply
+	(*ReceiptsFilterRequest)(nil),                  // 23: remote.ReceiptsFilterRequest
+	(*SubscribeReceiptsReply)(nil),                 // 24: remote.SubscribeReceiptsReply
+	(*FrameReceipt)(nil),                           // 25: remote.FrameReceipt
+	(*BlockRequest)(nil),                           // 26: remote.BlockRequest
+	(*BlockReply)(nil),                             // 27: remote.BlockReply
+	(*TxnLookupRequest)(nil),                       // 28: remote.TxnLookupRequest
+	(*TxnLookupReply)(nil),                         // 29: remote.TxnLookupReply
+	(*NodesInfoRequest)(nil),                       // 30: remote.NodesInfoRequest
+	(*AddPeerRequest)(nil),                         // 31: remote.AddPeerRequest
+	(*RemovePeerRequest)(nil),                      // 32: remote.RemovePeerRequest
+	(*NodesInfoReply)(nil),                         // 33: remote.NodesInfoReply
+	(*PeersReply)(nil),                             // 34: remote.PeersReply
+	(*AddPeerReply)(nil),                           // 35: remote.AddPeerReply
+	(*RemovePeerReply)(nil),                        // 36: remote.RemovePeerReply
+	(*PendingBlockReply)(nil),                      // 37: remote.PendingBlockReply
+	(*EngineGetPayloadBodiesByHashV1Request)(nil),  // 38: remote.EngineGetPayloadBodiesByHashV1Request
+	(*EngineGetPayloadBodiesByRangeV1Request)(nil), // 39: remote.EngineGetPayloadBodiesByRangeV1Request
+	(*FrameValidationRequest)(nil),                 // 40: remote.FrameValidationRequest
+	(*FrameValidationReply)(nil),                   // 41: remote.FrameValidationReply
+	(*BlockForTxNumRequest)(nil),                   // 42: remote.BlockForTxNumRequest
+	(*BlockForTxNumResponse)(nil),                  // 43: remote.BlockForTxNumResponse
+	(*MinimumBlockAvailableReply)(nil),             // 44: remote.MinimumBlockAvailableReply
+	(*FrozenBlocksReply)(nil),                      // 45: remote.FrozenBlocksReply
+	(*SetHeadRequest)(nil),                         // 46: remote.SetHeadRequest
+	(*SetHeadReply)(nil),                           // 47: remote.SetHeadReply
+	(*BlockBodyReply)(nil),                         // 48: remote.BlockBodyReply
+	(*FrameCreationNonce)(nil),                     // 49: remote.FrameCreationNonce
+	(*SyncingReply_StageProgress)(nil),             // 50: remote.SyncingReply.StageProgress
+	(*typesproto.H160)(nil),                        // 51: types.H160
+	(*typesproto.H256)(nil),                        // 52: types.H256
+	(*typesproto.NodeInfoReply)(nil),               // 53: types.NodeInfoReply
+	(*typesproto.PeerInfo)(nil),                    // 54: types.PeerInfo
+	(*emptypb.Empty)(nil),                          // 55: google.protobuf.Empty
+	(*typesproto.VersionReply)(nil),                // 56: types.VersionReply
 }
 var file_remote_ethbackend_proto_depIdxs = []int32{
-	50, // 0: remote.EtherbaseReply.address:type_name -> types.H160
-	49, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
-	51, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
-	51, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
+	51, // 0: remote.EtherbaseReply.address:type_name -> types.H160
+	50, // 1: remote.SyncingReply.stages:type_name -> remote.SyncingReply.StageProgress
+	52, // 2: remote.CanonicalHashReply.hash:type_name -> types.H256
+	52, // 3: remote.HeaderNumberRequest.hash:type_name -> types.H256
 	0,  // 4: remote.SubscribeRequest.type:type_name -> remote.Event
 	0,  // 5: remote.SubscribeReply.type:type_name -> remote.Event
-	50, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
-	51, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
-	50, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
-	51, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
-	51, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
-	51, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
-	51, // 12: remote.ReceiptsFilterRequest.transaction_hashes:type_name -> types.H256
-	51, // 13: remote.SubscribeReceiptsReply.block_hash:type_name -> types.H256
-	51, // 14: remote.SubscribeReceiptsReply.transaction_hash:type_name -> types.H256
-	50, // 15: remote.SubscribeReceiptsReply.contract_address:type_name -> types.H160
-	21, // 16: remote.SubscribeReceiptsReply.logs:type_name -> remote.SubscribeLogsReply
-	50, // 17: remote.SubscribeReceiptsReply.from:type_name -> types.H160
-	50, // 18: remote.SubscribeReceiptsReply.to:type_name -> types.H160
-	51, // 19: remote.SubscribeReceiptsReply.base_fee:type_name -> types.H256
-	51, // 20: remote.SubscribeReceiptsReply.blob_gas_price:type_name -> types.H256
-	51, // 21: remote.SubscribeReceiptsReply.effective_gas_price:type_name -> types.H256
-	50, // 22: remote.SubscribeReceiptsReply.payer:type_name -> types.H160
-	24, // 23: remote.SubscribeReceiptsReply.frame_receipts:type_name -> remote.FrameReceipt
-	21, // 24: remote.FrameReceipt.logs:type_name -> remote.SubscribeLogsReply
-	51, // 25: remote.BlockRequest.block_hash:type_name -> types.H256
-	51, // 26: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
-	52, // 27: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
-	53, // 28: remote.PeersReply.peers:type_name -> types.PeerInfo
-	51, // 29: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
-	51, // 30: remote.FrameValidationRequest.expected_block_hash:type_name -> types.H256
-	50, // 31: remote.FrameValidationReply.payer:type_name -> types.H160
-	51, // 32: remote.FrameValidationReply.max_cost:type_name -> types.H256
-	51, // 33: remote.FrameValidationReply.payer_balance:type_name -> types.H256
-	50, // 34: remote.FrameValidationReply.dependencies:type_name -> types.H160
-	48, // 35: remote.FrameValidationReply.creation_nonces:type_name -> remote.FrameCreationNonce
-	50, // 36: remote.FrameCreationNonce.address:type_name -> types.H160
-	1,  // 37: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
-	3,  // 38: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
-	6,  // 39: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
-	54, // 40: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
-	54, // 41: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
-	8,  // 42: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
-	10, // 43: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
-	18, // 44: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
-	20, // 45: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
-	22, // 46: remote.ETHBACKEND.SubscribeReceipts:input_type -> remote.ReceiptsFilterRequest
-	25, // 47: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
-	16, // 48: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
-	12, // 49: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
-	14, // 50: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
-	27, // 51: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
-	29, // 52: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
-	54, // 53: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
-	30, // 54: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
-	31, // 55: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
-	30, // 56: remote.ETHBACKEND.AddTrustedPeer:input_type -> remote.AddPeerRequest
-	31, // 57: remote.ETHBACKEND.RemoveTrustedPeer:input_type -> remote.RemovePeerRequest
-	54, // 58: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
-	39, // 59: remote.ETHBACKEND.FrameValidation:input_type -> remote.FrameValidationRequest
-	41, // 60: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
-	54, // 61: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
-	54, // 62: remote.ETHBACKEND.FrozenBlocks:input_type -> google.protobuf.Empty
-	45, // 63: remote.ETHBACKEND.SetHead:input_type -> remote.SetHeadRequest
-	25, // 64: remote.ETHBACKEND.BlockBody:input_type -> remote.BlockRequest
-	2,  // 65: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
-	4,  // 66: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
-	7,  // 67: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
-	55, // 68: remote.ETHBACKEND.Version:output_type -> types.VersionReply
-	5,  // 69: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
-	9,  // 70: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
-	11, // 71: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
-	19, // 72: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
-	21, // 73: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
-	23, // 74: remote.ETHBACKEND.SubscribeReceipts:output_type -> remote.SubscribeReceiptsReply
-	26, // 75: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
-	17, // 76: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
-	13, // 77: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
-	15, // 78: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
-	28, // 79: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
-	32, // 80: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
-	33, // 81: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
-	34, // 82: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
-	35, // 83: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
-	34, // 84: remote.ETHBACKEND.AddTrustedPeer:output_type -> remote.AddPeerReply
-	35, // 85: remote.ETHBACKEND.RemoveTrustedPeer:output_type -> remote.RemovePeerReply
-	36, // 86: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
-	40, // 87: remote.ETHBACKEND.FrameValidation:output_type -> remote.FrameValidationReply
-	42, // 88: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
-	43, // 89: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
-	44, // 90: remote.ETHBACKEND.FrozenBlocks:output_type -> remote.FrozenBlocksReply
-	46, // 91: remote.ETHBACKEND.SetHead:output_type -> remote.SetHeadReply
-	47, // 92: remote.ETHBACKEND.BlockBody:output_type -> remote.BlockBodyReply
-	65, // [65:93] is the sub-list for method output_type
-	37, // [37:65] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	51, // 6: remote.LogsFilterRequest.addresses:type_name -> types.H160
+	52, // 7: remote.LogsFilterRequest.topics:type_name -> types.H256
+	51, // 8: remote.SubscribeLogsReply.address:type_name -> types.H160
+	52, // 9: remote.SubscribeLogsReply.block_hash:type_name -> types.H256
+	52, // 10: remote.SubscribeLogsReply.topics:type_name -> types.H256
+	52, // 11: remote.SubscribeLogsReply.transaction_hash:type_name -> types.H256
+	52, // 12: remote.ReceiptsFilterRequest.transaction_hashes:type_name -> types.H256
+	52, // 13: remote.SubscribeReceiptsReply.block_hash:type_name -> types.H256
+	52, // 14: remote.SubscribeReceiptsReply.transaction_hash:type_name -> types.H256
+	51, // 15: remote.SubscribeReceiptsReply.contract_address:type_name -> types.H160
+	22, // 16: remote.SubscribeReceiptsReply.logs:type_name -> remote.SubscribeLogsReply
+	51, // 17: remote.SubscribeReceiptsReply.from:type_name -> types.H160
+	51, // 18: remote.SubscribeReceiptsReply.to:type_name -> types.H160
+	52, // 19: remote.SubscribeReceiptsReply.base_fee:type_name -> types.H256
+	52, // 20: remote.SubscribeReceiptsReply.blob_gas_price:type_name -> types.H256
+	52, // 21: remote.SubscribeReceiptsReply.effective_gas_price:type_name -> types.H256
+	51, // 22: remote.SubscribeReceiptsReply.payer:type_name -> types.H160
+	25, // 23: remote.SubscribeReceiptsReply.frame_receipts:type_name -> remote.FrameReceipt
+	22, // 24: remote.FrameReceipt.logs:type_name -> remote.SubscribeLogsReply
+	52, // 25: remote.BlockRequest.block_hash:type_name -> types.H256
+	52, // 26: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
+	53, // 27: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
+	54, // 28: remote.PeersReply.peers:type_name -> types.PeerInfo
+	52, // 29: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
+	52, // 30: remote.FrameValidationRequest.expected_block_hash:type_name -> types.H256
+	51, // 31: remote.FrameValidationReply.payer:type_name -> types.H160
+	52, // 32: remote.FrameValidationReply.max_cost:type_name -> types.H256
+	52, // 33: remote.FrameValidationReply.payer_balance:type_name -> types.H256
+	51, // 34: remote.FrameValidationReply.dependencies:type_name -> types.H160
+	49, // 35: remote.FrameValidationReply.creation_nonces:type_name -> remote.FrameCreationNonce
+	1,  // 36: remote.FrameValidationReply.rejection_reason:type_name -> remote.FrameValidationReply.RejectionReason
+	51, // 37: remote.FrameCreationNonce.address:type_name -> types.H160
+	2,  // 38: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
+	4,  // 39: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
+	7,  // 40: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
+	55, // 41: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
+	55, // 42: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
+	9,  // 43: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
+	11, // 44: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
+	19, // 45: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
+	21, // 46: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
+	23, // 47: remote.ETHBACKEND.SubscribeReceipts:input_type -> remote.ReceiptsFilterRequest
+	26, // 48: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
+	17, // 49: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
+	13, // 50: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
+	15, // 51: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
+	28, // 52: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
+	30, // 53: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
+	55, // 54: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
+	31, // 55: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
+	32, // 56: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
+	31, // 57: remote.ETHBACKEND.AddTrustedPeer:input_type -> remote.AddPeerRequest
+	32, // 58: remote.ETHBACKEND.RemoveTrustedPeer:input_type -> remote.RemovePeerRequest
+	55, // 59: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
+	40, // 60: remote.ETHBACKEND.FrameValidation:input_type -> remote.FrameValidationRequest
+	42, // 61: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
+	55, // 62: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
+	55, // 63: remote.ETHBACKEND.FrozenBlocks:input_type -> google.protobuf.Empty
+	46, // 64: remote.ETHBACKEND.SetHead:input_type -> remote.SetHeadRequest
+	26, // 65: remote.ETHBACKEND.BlockBody:input_type -> remote.BlockRequest
+	3,  // 66: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
+	5,  // 67: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
+	8,  // 68: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
+	56, // 69: remote.ETHBACKEND.Version:output_type -> types.VersionReply
+	6,  // 70: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
+	10, // 71: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
+	12, // 72: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
+	20, // 73: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
+	22, // 74: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
+	24, // 75: remote.ETHBACKEND.SubscribeReceipts:output_type -> remote.SubscribeReceiptsReply
+	27, // 76: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
+	18, // 77: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
+	14, // 78: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
+	16, // 79: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
+	29, // 80: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
+	33, // 81: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
+	34, // 82: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
+	35, // 83: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
+	36, // 84: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
+	35, // 85: remote.ETHBACKEND.AddTrustedPeer:output_type -> remote.AddPeerReply
+	36, // 86: remote.ETHBACKEND.RemoveTrustedPeer:output_type -> remote.RemovePeerReply
+	37, // 87: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
+	41, // 88: remote.ETHBACKEND.FrameValidation:output_type -> remote.FrameValidationReply
+	43, // 89: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
+	44, // 90: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
+	45, // 91: remote.ETHBACKEND.FrozenBlocks:output_type -> remote.FrozenBlocksReply
+	47, // 92: remote.ETHBACKEND.SetHead:output_type -> remote.SetHeadReply
+	48, // 93: remote.ETHBACKEND.BlockBody:output_type -> remote.BlockBodyReply
+	66, // [66:94] is the sub-list for method output_type
+	38, // [38:66] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_remote_ethbackend_proto_init() }
@@ -3087,7 +3148,7 @@ func file_remote_ethbackend_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_ethbackend_proto_rawDesc), len(file_remote_ethbackend_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,

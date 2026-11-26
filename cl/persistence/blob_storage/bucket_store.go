@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -43,13 +44,16 @@ const (
 	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
+	// maxParallelSyncs bounds the temp files of one batch that encode and fsync at once.
+	maxParallelSyncs = 16
 )
 
 // ErrPruneNotStarted reports that pruning failed before any bucket was attempted, so the
 // store still holds everything the caller was about to stop advertising.
 var ErrPruneNotStarted = errors.New("prune did not start")
 
-// bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
+// bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>, and columns also under
+// <slot/subdivisionSlot>/packs/<blockRoot>.pack.
 //
 // The caller picks the slot granularity. Reads need none: a write lands by rename, so a
 // reader sees the old file or the new one and never a partial. Writes do — see writeAdmitted.
@@ -138,6 +142,19 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 	return created, nil
 }
 
+// encodeAll encodes entries[positions[j]] onto temps[j].
+func (b *bucketStore) encodeAll(temps []string, entries []batchEntry, positions []int) error {
+	if len(temps) == 1 { // inline, so a panic reaches the caller's recover and its deferred unlocks
+		return b.encodeTo(temps[0], entries[positions[0]].v)
+	}
+	var g errgroup.Group
+	g.SetLimit(maxParallelSyncs)
+	for j, i := range positions {
+		g.Go(func() error { return b.encodeTo(temps[j], entries[i].v) })
+	}
+	return g.Wait()
+}
+
 // removeTemp best-effort deletes the temp file; the caller already holds the
 // real error.
 func (b *bucketStore) removeTemp(tmp string) {
@@ -174,8 +191,7 @@ func (b *bucketStore) read(slot uint64, root common.Hash, idx uint64, out ssz.En
 	}
 	defer fh.Close()
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, out, version); err != nil {
-		// A sidecar that will not decode is a truncated pre-rename write; reporting it absent
-		// lets the caller re-fetch and overwrite it, which returning the error never does.
+		// An undecodable sidecar is reported as absent; blob writes (writeAdmitted) then overwrite it.
 		log.Warn("[blob_storage] discarding undecodable sidecar", "file", file, "err", err)
 		return false, nil
 	}
@@ -212,12 +228,12 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	return err
 }
 
-// EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
-// below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
+// earliestStoredSlot returns where the lowest bucket for which holds reports a stored sidecar starts, which
+// can be below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
 // cannot be read is skipped, since its sidecars cannot be served either, but when no readable
 // bucket holds a sidecar the first read error is returned, so an unreadable store is not
 // mistaken for an empty one.
-func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
+func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (uint64, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
 		return 0, err
@@ -237,7 +253,7 @@ func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
 	slices.Sort(buckets)
 	var firstErr error
 	for _, bucket := range buckets {
-		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
+		stored, err := holds(strconv.FormatUint(bucket, 10))
 		if err != nil {
 			log.Warn("[blob_storage] skipping unreadable column bucket", "bucket", bucket, "err", err)
 			if firstErr == nil {

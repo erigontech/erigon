@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -330,7 +330,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
-		prevEnd, haveSelected := uint64(0), false
+		prevEnd := r.history.from
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -338,10 +338,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if item.endTxNum > r.history.to {
 				break
 			}
-			if haveSelected && item.startTxNum != prevEnd {
+			if item.startTxNum != prevEnd {
 				return nil, nil, fmt.Errorf("History.staticFilesInRange: gap in source files for merge range [%d,%d): file ending at %d is followed by %s starting at %d", r.history.from, r.history.to, prevEnd, ht.h.FilenameBase, item.startTxNum)
 			}
-			prevEnd, haveSelected = item.endTxNum, true
+			prevEnd = item.endTxNum
 
 			historyFiles = append(historyFiles, item.src)
 
@@ -359,6 +359,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 
 			walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
 			return nil, nil, walkErr
+		}
+
+		if prevEnd != r.history.to {
+			return nil, nil, fmt.Errorf("History.staticFilesInRange: %s source files end at %d before merge range [%d,%d)", ht.h.FilenameBase, prevEnd, r.history.from, r.history.to)
 		}
 
 		for _, f := range historyFiles {
@@ -514,7 +518,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 		if keyBuf != nil {
 			if vt != nil {
-				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+				if !commitment.IsCommitmentStateKey(keyBuf) { // no replacement for state key
 					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
@@ -536,7 +540,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 	if keyBuf != nil {
 		if vt != nil {
-			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+			if !commitment.IsCommitmentStateKey(keyBuf) { // no replacement for state key
 				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
@@ -951,32 +955,25 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return indexIn, historyIn, nil
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
-	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
-	if valuesIn != nil {
-		d.dirtyFiles.Set(valuesIn)
-	}
+func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) retiredFiles {
+	retired := d.History.integrateMergedDirtyFiles(indexIn, historyIn)
+	return append(retired, d.dirtyFiles.replace(valuesIn)...)
 }
 
-func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
-	if in != nil {
-		ii.dirtyFiles.Set(in)
-	}
+func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) retiredFiles {
+	return ii.dirtyFiles.replace(in)
 }
 
-func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
-	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
-	// TODO: handle collision
-	if historyIn != nil {
-		h.dirtyFiles.Set(historyIn)
-	}
+func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) retiredFiles {
+	retired := h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
+	return append(retired, h.dirtyFiles.replace(historyIn)...)
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
-	hNames, hRetired := dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
+func (dt *DomainRoTx) cleanAfterMerge(mergedValues, mergedIndex, mergedHistory *FilesItem) (deleted []string, retired []*FilesItem) {
+	hNames, hRetired := dt.ht.cleanAfterMerge(mergedIndex, mergedHistory)
 	deleted = append(deleted, hNames...)
 	retired = append(retired, hRetired...)
-	outs := dt.garbage(mergedDomain)
+	outs := dt.garbage(mergedValues)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
@@ -987,14 +984,14 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
-	iNames, iRetired := ht.iit.cleanAfterMerge(mergedIdx)
+func (ht *HistoryRoTx) cleanAfterMerge(mergedIndex, mergedHistory *FilesItem) (deleted []string, retired []*FilesItem) {
+	iNames, iRetired := ht.iit.cleanAfterMerge(mergedIndex)
 	deleted = append(deleted, iNames...)
 	retired = append(retired, iRetired...)
-	if merged != nil && merged.endTxNum == 0 {
+	if mergedHistory != nil && mergedHistory.endTxNum == 0 {
 		return deleted, retired
 	}
-	outs := ht.garbage(merged)
+	outs := ht.garbage(mergedHistory)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}

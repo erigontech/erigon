@@ -78,6 +78,7 @@ type Index struct {
 	filePath, fileName string
 
 	grData      []uint64
+	grOffset    int     // of grData in data; the bucket directory follows it to the end
 	data        []byte  // slice of correct size for the index to work with
 	mmapHandle1 mmap.Ro // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
@@ -293,6 +294,7 @@ func (idx *Index) init() (err error) {
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
+	idx.grOffset = offset
 	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
@@ -364,6 +366,18 @@ func onlyKnownFeatures(features Features) error {
 		return fmt.Errorf("%w. unknown features bitmap: %b", ErrIncompatible, features)
 	}
 	return nil
+}
+
+// ForceHashInRAM copies the Golomb-Rice codes and the bucket directory into heap, so a lookup reads only its record
+// from the mapped file. It returns the bytes copied.
+func (idx *Index) ForceHashInRAM() datasize.ByteSize {
+	if len(idx.grData) == 0 {
+		return 0
+	}
+	hash := bytes.Clone(idx.data[idx.grOffset:])
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&hash[0])), len(idx.grData))
+	idx.ef.Read(hash[8*len(idx.grData):])
+	return datasize.ByteSize(len(hash))
 }
 
 func (idx *Index) Size() int64 { return idx.size }

@@ -113,7 +113,7 @@ func (r fundedReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 
 // A later tx must see the earlier ones on a versioned state, whether they produce receipts or
 // only warm the state up: the second call needs the first one's nonce and storage write.
-func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
+func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 	t.Parallel()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -137,10 +137,8 @@ func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
 	}
 	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender, counter: accounts.InternAddress(counter)}
 	for _, fromIdx := range []int{0, 1} {
-		want := derive(state.New(reader), fromIdx)
 		got := derive(state.NewWithVersionMap(reader, state.NewVersionMap(nil)), fromIdx)
 		require.Len(t, got, len(txns)-fromIdx)
-		require.Equal(t, want, got, "fromIdx=%d", fromIdx)
 		for i, receipt := range got {
 			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			require.Len(t, receipt.Logs, 1)

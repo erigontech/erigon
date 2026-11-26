@@ -241,7 +241,7 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 	dbg.TraceInstructions = true
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 	gas := mdgas.MdGas{Execution: 100}
-	ret, left, _, err := evm.Run(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), gas, nil, false)
+	ret, left, _, err := evm.Run(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), gas, nil, false)
 	require.NoError(t, err)
 	require.Nil(t, ret)
 	require.Equal(t, gas, left)
@@ -269,7 +269,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			BlobHashes: []common.Hash{common.HexToHash("0x28"), common.HexToHash("0x29")},
 		}
 		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
-		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
+		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
 		f := evm.run
 		if traced {
@@ -484,7 +484,7 @@ func TestRunTakesCopyFastPath(t *testing.T) {
 				if op == RETURNDATACOPY {
 					length = 0 // there is no return data
 				}
-				c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+				c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 				c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), length, byte(PUSH1), 0, byte(PUSH1), 1, byte(op)}
 				f := evm.run
 				if traced {
@@ -507,7 +507,7 @@ func TestRunRejectsMcopyBeforeCancun(t *testing.T) {
 	defer ibs.Close()
 	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	evm.jt = &shanghaiInstructionSet
-	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 0, byte(MCOPY)}
 	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
 	var invalid *ErrInvalidOpCode
@@ -524,7 +524,7 @@ func TestRunRejectsFastOpsBeforeTheirFork(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
 			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 			evm.jt = jt
-			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			c.Code = append(bytes.Repeat([]byte{byte(PUSH1), 1}, 16), byte(op))
 			_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
 			ibs.Close()

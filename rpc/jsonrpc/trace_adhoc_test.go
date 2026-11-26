@@ -569,7 +569,7 @@ func TestReplayTransaction(t *testing.T) {
 	}
 
 	// Call GetTransactionReceipt for transaction which is not in the database
-	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"}, new(bool), nil)
+	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"}, nil)
 	if err != nil {
 		t.Errorf("calling ReplayTransaction: %v", err)
 	}
@@ -586,7 +586,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)
-	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool), nil)
+	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, nil)
 	if err != nil {
 		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}
@@ -603,15 +603,15 @@ func TestTraceBlockUnknownBlockIsResourceNotFound(t *testing.T) {
 	past := rpc.BlockNumber(1_000_000)
 
 	t.Run("trace_block", func(t *testing.T) {
-		_, err := api.Block(m.Ctx, past, nil, nil)
+		_, err := api.Block(m.Ctx, past, nil)
 		requireResourceNotFound(t, err, "block not found")
 	})
 	t.Run("trace_replayBlockTransactions by number", func(t *testing.T) {
-		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(past), []string{TraceTypeTrace}, nil, nil)
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(past), []string{TraceTypeTrace}, nil)
 		requireResourceNotFound(t, err, "block not found")
 	})
 	t.Run("trace_replayBlockTransactions by hash", func(t *testing.T) {
-		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false), []string{TraceTypeTrace}, nil, nil)
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false), []string{TraceTypeTrace}, nil)
 		requireResourceNotFound(t, err, "block not found")
 	})
 }
@@ -636,6 +636,45 @@ func TestTraceCallUnknownBlockIsResourceNotFound(t *testing.T) {
 	}
 }
 
+func TestTraceNonCanonicalHash(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	calls := json.RawMessage(`[[{}, ["trace"]]]`)
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+
+	required := rpc.BlockNumberOrHashWithHash(orphaned, true)
+	t.Run("trace_call requireCanonical", func(t *testing.T) {
+		_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &required, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+	t.Run("trace_callMany requireCanonical", func(t *testing.T) {
+		_, err := api.CallMany(m.Ctx, calls, &required, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+
+	selected := rpc.BlockNumberOrHashWithHash(orphaned, false)
+	t.Run("trace_call", func(t *testing.T) {
+		_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &selected, nil)
+		requireStateUnavailable(t, err)
+	})
+	t.Run("trace_callMany", func(t *testing.T) {
+		_, err := api.CallMany(m.Ctx, calls, &selected, nil)
+		requireStateUnavailable(t, err)
+	})
+	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, selected, []string{TraceTypeTrace}, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+}
+
+func requireStateUnavailable(t *testing.T, err error) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, 4444, rpcErr.ErrorCode())
+	require.ErrorContains(t, err, "is not currently canonical")
+}
+
 func TestTraceUnavailableTagIsResourceNotFound(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -650,11 +689,11 @@ func TestTraceUnavailableTagIsResourceNotFound(t *testing.T) {
 	for _, tag := range []rpc.BlockNumber{rpc.FinalizedBlockNumber, rpc.SafeBlockNumber} {
 		block := rpc.BlockNumberOrHashWithNumber(tag)
 		t.Run(tag.String()+" trace_block", func(t *testing.T) {
-			_, err := api.Block(m.Ctx, tag, nil, nil)
+			_, err := api.Block(m.Ctx, tag, nil)
 			requireResourceNotFound(t, err, "not available")
 		})
 		t.Run(tag.String()+" trace_replayBlockTransactions", func(t *testing.T) {
-			_, err := api.ReplayBlockTransactions(m.Ctx, block, []string{TraceTypeTrace}, nil, nil)
+			_, err := api.ReplayBlockTransactions(m.Ctx, block, []string{TraceTypeTrace}, nil)
 			requireResourceNotFound(t, err, "not available")
 		})
 		t.Run(tag.String()+" trace_call", func(t *testing.T) {
@@ -667,7 +706,7 @@ func TestTraceUnavailableTagIsResourceNotFound(t *testing.T) {
 		})
 		for name, req := range map[string]TraceFilterRequest{"fromBlock": {FromBlock: &tag}, "toBlock": {ToBlock: &tag}} {
 			t.Run(tag.String()+" trace_filter "+name, func(t *testing.T) {
-				err := api.Filter(m.Ctx, req, nil, nil, jsonstream.New(nil))
+				err := api.Filter(m.Ctx, req, nil, jsonstream.New(nil))
 				requireResourceNotFound(t, err, "not available")
 			})
 		}
@@ -679,7 +718,7 @@ func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	api := newTraceApiForTest(m)
 	block := rpc.BlockNumberOrHashWithNumber(1)
 	parent := rpc.BlockNumberOrHashWithNumber(0)
-	blockTraces, err := api.Block(m.Ctx, 1, nil, nil)
+	blockTraces, err := api.Block(m.Ctx, 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blockTraces, len(calls))
 	expectedStateGas := []int64{int64(params.StateGasPerStorageSet), 0}
@@ -692,12 +731,12 @@ func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 		require.EqualValues(t, expectedStateGas[i], *result.StateGasUsed)
 
 		hash := generated.Blocks[0].Transactions()[i].Hash()
-		txnTraces, err := api.Transaction(m.Ctx, hash, nil, nil)
+		txnTraces, err := api.Transaction(m.Ctx, hash, nil)
 		require.NoError(t, err)
 		require.Len(t, txnTraces, 1)
 		require.Equal(t, result, txnTraces[0].Result, "transaction %d", i)
 
-		replay, err := api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace}, nil, nil)
+		replay, err := api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace}, nil)
 		require.NoError(t, err)
 		require.Len(t, replay.Trace, 1)
 		require.Equal(t, result, replay.Trace[0].Result, "replay transaction %d", i)
@@ -721,7 +760,7 @@ func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 
 	for _, traceTypes := range [][]string{{TraceTypeTrace}, {TraceTypeTrace, TraceTypeStateDiff}} {
 		t.Run(strings.Join(traceTypes, "_"), func(t *testing.T) {
-			replays, err := api.ReplayBlockTransactions(m.Ctx, block, traceTypes, nil, nil)
+			replays, err := api.ReplayBlockTransactions(m.Ctx, block, traceTypes, nil)
 			require.NoError(t, err)
 			require.Len(t, replays, len(calls))
 
@@ -884,11 +923,11 @@ func TestUnknownTraceTypeIsInvalidParams(t *testing.T) {
 		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
 	})
 	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
-		_, err := api.ReplayBlockTransactions(ctx, latest, unknown, nil, nil)
+		_, err := api.ReplayBlockTransactions(ctx, latest, unknown, nil)
 		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
 	})
 	t.Run("trace_replayTransaction", func(t *testing.T) {
-		_, err := api.ReplayTransaction(ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), unknown, nil, nil)
+		_, err := api.ReplayTransaction(ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), unknown, nil)
 		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
 	})
 	t.Run("trace_rawTransaction", func(t *testing.T) {
@@ -2278,7 +2317,7 @@ func TestReplayTransactionBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	_, callTxHash, _, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
 	api := c.traceAPI()
 
-	result, err := api.ReplayTransaction(context.Background(), callTxHash, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	result, err := api.ReplayTransaction(context.Background(), callTxHash, []string{"trace"}, traceConfigWithBaseFeeOverride(overrideBaseFee))
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -2297,7 +2336,7 @@ func TestReplayBlockTransactionsBlockOverridesBaseFeeAffectsGasPrice(t *testing.
 	api := c.traceAPI()
 
 	n := rpc.BlockNumber(blockNumber)
-	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, traceConfigWithBaseFeeOverride(overrideBaseFee))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -2322,7 +2361,7 @@ func TestReplayBlockTransactionsParallelPathBlockOverridesBaseFee(t *testing.T) 
 
 	overrideBaseFee := new(uint256.Int).AddUint64(realBaseFee, 1_000_000)
 	n := rpc.BlockNumber(blockNumber)
-	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, traceConfigWithBaseFeeOverride(overrideBaseFee))
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -2347,7 +2386,7 @@ func TestReplayBlockTransactionsParallelPathBlockOverridesOtherFieldsAffectOpcod
 			api := c.traceAPI()
 
 			n := rpc.BlockNumber(blockNumber)
-			results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), &config.TraceConfig{
+			results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, &config.TraceConfig{
 				BlockOverrides: tc.override,
 			})
 			require.NoError(t, err)
@@ -2422,7 +2461,7 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 	txHash := c.mineProtectedTxAtBlock3(t)
 
 	api := c.traceAPI()
-	_, err := api.ReplayTransaction(context.Background(), txHash, []string{"trace"}, new(bool), &config.TraceConfig{
+	_, err := api.ReplayTransaction(context.Background(), txHash, []string{"trace"}, &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
@@ -2563,7 +2602,7 @@ func TestReplayTransactionInvalidType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, new(bool), nil)
+	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unrecognized trace type")
 }
@@ -2615,7 +2654,8 @@ func TestOeTracerMcopyMemory(t *testing.T) {
 			_, _, err := runtime.Execute(common.FromHex(tc.code), nil, &runtime.Config{
 				GasLimit:  1000000,
 				EVMConfig: vm.Config{Tracer: tracer.Tracer().Hooks},
-			}, t.TempDir())
+			})
+
 			require.NoError(t, err)
 			var found bool
 			for _, op := range result.VmTrace.Ops {
@@ -2755,7 +2795,7 @@ func TestOeTracerStateGasRemaining(t *testing.T) {
 			tracer := &OeTracer{r: result}
 			env := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges,
 				vm.Config{Tracer: tracer.Tracer().Hooks})
-			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			contract.Code = []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE)}
 			if tc.refill {
 				contract.Code = append(contract.Code, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE))

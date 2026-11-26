@@ -122,10 +122,11 @@ func (b DirectBackend) SendTransaction(ctx context.Context, txn types.Transactio
 }
 
 func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
-	rpcLogs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
+	found, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
 	if err != nil {
 		return nil, err
 	}
+	rpcLogs := found.Logs
 
 	res := make([]types.Log, len(rpcLogs))
 

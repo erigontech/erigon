@@ -119,7 +119,9 @@ const (
 	UnmatchedBlobTxExt         // KZGcommitments must match the corresponding blobs and proofs
 	BlobTxReplace              // Cannot replace a transaction with blobs by one without blobs
 	BlobPoolOverflow           // The total number of blobs (through blob txns) in the pool has reached its limit
+	BlobNonceGap               // Blob transaction cannot enter the pool until its nonce gap closes
 	NoAuthorizations           // EIP-7702 transactions with an empty authorization list are invalid
+	InvalidAuthorizationNonce  // EIP-7702 self-authorization nonce does not follow the transaction nonce
 	GasLimitTooHigh            // Gas limit is too high
 	ErrAuthorityReserved       // EIP-7702 transaction with authority already reserved
 	InvalidFrame               // Admission failed validation or pool policy checks
@@ -132,6 +134,7 @@ const (
 	DelegatedNonceGap          // Delegated account transaction nonce is not currently executable
 	DelegatedTxnLimit          // Delegated account already has an executable transaction
 	BlobSlotsOverflow
+	BlobReplacementTypeMismatch
 )
 
 func (r DiscardReason) String() string {
@@ -188,12 +191,18 @@ func (r DiscardReason) String() string {
 		return "max number of blobs exceeded"
 	case BlobTxReplace:
 		return "can't replace blob-txn with a non-blob-txn"
+	case BlobReplacementTypeMismatch:
+		return "type-3 blob transactions and blob-carrying frame transactions cannot replace each other"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
 	case BlobSlotsOverflow:
 		return "sender blob limit exceeded"
+	case BlobNonceGap:
+		return "nonce-gapped blob transaction"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
+	case InvalidAuthorizationNonce:
+		return "self-authorization nonce must equal transaction nonce plus one"
 	case GasLimitTooHigh:
 		return "gas limit is too high"
 	case BlobHashCheckFail:

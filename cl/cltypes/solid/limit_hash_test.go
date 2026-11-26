@@ -111,3 +111,68 @@ func TestElementProofNonPowerOfTwoLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestHashSSZRejectsOverLimit(t *testing.T) {
+	checkpoints := solid.NewStaticListSSZ[*solid.Checkpoint](2, 40)
+	indices := solid.NewRawUint64List(2, nil)
+	for i := range uint64(3) {
+		checkpoints.Append(&solid.Checkpoint{})
+		indices.Append(i)
+	}
+	_, err := checkpoints.HashSSZ()
+	require.Error(t, err, "ListSSZ")
+	_, err = indices.HashSSZ()
+	require.Error(t, err, "RawUint64List")
+}
+
+func TestByteListSSZHashSSZZeroLimit(t *testing.T) {
+	root, err := solid.NewByteListSSZ(0).HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, crypto.Sha256(make([]byte, 64)), common.Hash(root))
+}
+
+func TestRawUint64ListHashSSZRejectsOverLimitWithCachedHash(t *testing.T) {
+	values := []uint64{1, 2, 3}
+
+	shrunk := solid.NewRawUint64List(4, values)
+	_, err := shrunk.HashSSZ()
+	require.NoError(t, err)
+	shrunk.SetCap(2)
+	_, err = shrunk.HashSSZ()
+	require.Error(t, err, "SetCap")
+
+	source := solid.NewRawUint64List(4, values)
+	_, err = source.HashSSZ()
+	require.NoError(t, err)
+	target := solid.NewRawUint64List(2, nil)
+	source.CopyTo(target)
+	_, err = target.HashSSZ()
+	require.Error(t, err, "CopyTo")
+}
+
+func TestHashListHashSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewHashList(2)
+	for i := range 3 {
+		list.Append(common.Hash{byte(i)})
+	}
+	_, err := list.HashSSZ()
+	require.Error(t, err)
+}
+
+func TestValidatorSetHashSSZRejectsOverLimit(t *testing.T) {
+	set := solid.NewValidatorSet(2)
+	for range 3 {
+		set.Append(solid.NewValidator())
+	}
+	_, err := set.HashSSZ()
+	require.Error(t, err)
+}
+
+func TestUint64ListHashSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewUint64ListSSZ(2)
+	for i := range 3 {
+		list.Append(uint64(i))
+	}
+	_, err := list.HashSSZ()
+	require.Error(t, err)
+}

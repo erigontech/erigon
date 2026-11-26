@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -43,7 +44,7 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Version: Version{TxIndex: j}, Path: SelfDestructPath},
 		Val:         true,
 	})
-	vm.FlushVersionedWrites(sd, false)
+	vm.FlushWrites(sd, false)
 
 	rs := ReadSet{}
 	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
@@ -68,6 +69,20 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 		"after the destruct is Validated, the read of the destroyed contract's slot is stale")
 	require.False(t, vm.QuietBelow(i, stamp),
 		"promoting a lifecycle cell must invalidate stamps taken before it")
+}
+
+func TestQuietBelow_SeedPutBackByADroppedWriteBlocks(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}}})
+	vm.InitStamps(8)
+	earlier := &WriteSet{}
+	earlier.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(8)})
+	vm.FlushWrites(earlier, false)
+	stamp := vm.WriteSeq()
+
+	vm.DropWrite(addr, BalancePath, accounts.NilKey, Version{TxIndex: 1, Incarnation: 1})
+	require.False(t, vm.QuietBelow(2, stamp), "putting the seed back changes the cell a reader of tx 1 saw")
 }
 
 func newStampedMap(n int) *VersionMap {
@@ -165,7 +180,7 @@ func flushPath(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) 
 	default:
 		ws = newWriteSet(&VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(1)})
 	}
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	return ws
 }
 
@@ -203,7 +218,7 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
 			Val:         *uint256.NewInt(1),
 		})
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 		stamp := vm.WriteSeq()
 		promote(vm, ws)
 		require.False(t, vm.QuietBelow(5, stamp), "%s: a storage-only promotion on an entry with lifecycle cells must bump", name)
@@ -257,8 +272,7 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x05"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
 	}
 	for name, op := range ops {
 		for _, tc := range []struct {
@@ -278,8 +292,7 @@ func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x06"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
 	}
 	for name, op := range ops {
 		vm := newStampedMap(32)
@@ -331,7 +344,7 @@ func TestQuietBelow_NoOpBALCodeFlushDoesNotBump(t *testing.T) {
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: version}, Val: code})
 	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: code.Hash})
 	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: version}, Val: code.Len()})
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	require.True(t, vm.QuietBelow(5, stamp), "an equal code flush must not stamp")
 }
 

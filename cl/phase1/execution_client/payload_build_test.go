@@ -132,6 +132,25 @@ func TestDirectForkChoiceUpdateKeepsBuildingAfterBusyWithAttributes(t *testing.T
 	require.Equal(t, 1, module.assembleCalls)
 }
 
+func TestDirectForkChoiceUpdateRejectsTooDeepReorg(t *testing.T) {
+	for _, attr := range []*engine_types.PayloadAttributes{nil, {}} {
+		module := &payloadBuildModuleStub{
+			forkChoiceResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusReorgTooDeep},
+			assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+		}
+		client, err := NewExecutionClientDirect(
+			chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+		)
+		require.NoError(t, err)
+
+		id, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, attr, clparams.ElectraVersion)
+
+		require.EqualError(t, err, "forkchoice reorg is too deep")
+		require.Nil(t, id)
+		require.Zero(t, module.assembleCalls)
+	}
+}
+
 func TestStartPayloadBuildRequiresMatchingExecutionHead(t *testing.T) {
 	module := &payloadBuildModuleStub{
 		forkChoice: execmodule.ForkChoiceState{HeadHash: common.Hash{0x41}},
@@ -241,7 +260,7 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
 	require.NoError(t, err)
 
-	status, err := client.NewPayload(ctx, payload, &parentRoot, nil, nil)
+	status, err := client.NewPayload(ctx, payload, &parentRoot, []common.Hash{}, nil)
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, PayloadStatusNone, status)

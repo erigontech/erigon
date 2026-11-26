@@ -361,6 +361,8 @@ const (
 	shaLen = 32                     // hash length (for nonce etc)
 
 	eciesOverhead = 65 /* pubkey */ + 16 /* IV */ + 32 /* MAC */
+
+	maxHandshakeMsgSize = 2048
 )
 
 var (
@@ -371,6 +373,8 @@ var (
 	// errPlainMessageTooLarge is returned if a decompressed message length exceeds
 	// the allowed 24 bits (i.e. length >= 16MB).
 	errPlainMessageTooLarge = errors.New("message length >= 16MB")
+
+	errHandshakeMsgTooLarge = errors.New("handshake message too large")
 )
 
 // Secrets represents the connection secrets which are negotiated during the handshake.
@@ -610,6 +614,9 @@ func (h *handshakeState) readMsg(msg any, prv *ecdsa.PrivateKey, r io.Reader) ([
 		return nil, err
 	}
 	size := binary.BigEndian.Uint16(prefix)
+	if size > maxHandshakeMsgSize {
+		return nil, errHandshakeMsgTooLarge
+	}
 
 	// Read the handshake packet.
 	packet, err := h.rbuf.read(r, int(size))

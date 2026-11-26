@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -54,12 +55,31 @@ func (f *chainFetcher) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId
 	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
 }
 
+// FetchBodies round-trips the bodies through RLP, as a body from a peer is decoded.
 func (f *chainFetcher) FetchBodies(_ context.Context, headers []*types.Header, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
 	bodies := make([]*types.Body, len(headers))
 	for i, h := range headers {
-		bodies[i] = f.blocks[h.Hash()].Body()
+		enc, err := rlp.EncodeToBytes(f.blocks[h.Hash()].Body())
+		if err != nil {
+			return p2p.FetcherResponse[[]*types.Body]{}, err
+		}
+		bodies[i] = new(types.Body)
+		if err := rlp.DecodeBytes(enc, bodies[i]); err != nil {
+			return p2p.FetcherResponse[[]*types.Body]{}, err
+		}
 	}
 	return p2p.FetcherResponse[[]*types.Body]{Data: bodies}, nil
+}
+
+// newDownloadingEngineServer returns an engine server whose downloader fetches blocks from fetcher.
+func newDownloadingEngineServer(t *testing.T, m *execmoduletester.ExecModuleTester, fetcher p2p.Fetcher) *EngineServer {
+	t.Helper()
+	peerTracker := p2p.NewPeerTracker(m.Log, nil)
+	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
+	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, peerTracker, t.TempDir())
+	syncCfg := m.Cfg().Sync
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, m.BlockReader, m.DB, m.ChainConfig, syncCfg, bbd)
+	return NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, syncCfg.MaxReorgDepth)
 }
 
 func newExecLagEngineServer(t *testing.T, loopBlockLimit uint, lag int) (*EngineServer, *blockgen.ChainPack) {
@@ -70,20 +90,14 @@ func newExecLagEngineServer(t *testing.T, loopBlockLimit uint, lag int) (*Engine
 	for _, b := range chainPack.Blocks {
 		fetcher.blocks[b.Hash()] = b
 	}
-	peerTracker := p2p.NewPeerTracker(m.Log, nil)
-	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
-	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, peerTracker, t.TempDir())
-	syncCfg := m.Cfg().Sync
-	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, m.BlockReader, m.DB, m.ChainConfig, syncCfg, bbd)
-	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, syncCfg.MaxReorgDepth)
-	return srv, chainPack
+	return newDownloadingEngineServer(t, m, fetcher), chainPack
 }
 
 func TestNewPayloadBeyondLoopBlockLimitIsAccepted(t *testing.T) {
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag])
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -93,7 +107,7 @@ func TestNewPayloadWithDownloadedParentBeyondLoopBlockLimitIsAccepted(t *testing
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag])
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -116,7 +130,7 @@ func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *
 	badHeader.Time = chainPack.Blocks[2].Time()
 	bad := tip.WithSeal(badHeader)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", bad)
+	status, err := srv.HandleNewPayload(t.Context(), "test", bad, nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)

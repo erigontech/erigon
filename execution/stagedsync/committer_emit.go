@@ -19,7 +19,9 @@ package stagedsync
 import (
 	"slices"
 
-	"github.com/erigontech/erigon/common/empty"
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -27,7 +29,8 @@ import (
 
 // The commitment path folds a block's updates straight from the version map instead of
 // accumulating per-field values. accumulateTouched collects the block's key-only touched
-// union (account keys, storage slots, and the self-destruct subtree-reset set);
+// union (account keys, storage slots, and the subtree-reset set of self-destructs and
+// contract creations);
 // emitTouched then reads each final value from the version map view via
 // GetAccount/GetStorage and writes one Update per key. The version map already carries
 // the EIP-161 / self-destruct existence verdict, so this path has no EIP knowledge and
@@ -41,21 +44,22 @@ func (cc *commitmentCalculator) clearTouched() {
 func (cc *commitmentCalculator) clearFoldedKeys() {
 	clear(cc.touchedAccounts)
 	clear(cc.touchedStorage)
-	clear(cc.destructed)
+	clear(cc.storageReset)
 	cc.baseErr = nil
 }
 
 // accumulateTouched folds one write-set view's changed-key set into the touched union.
 // An account is marked touched by any real account-field change
 // and by any real storage change (so its storageRoot refolds); a slot is
-// marked only when it actually changed; a true SelfDestruct marks the subtree reset. A
+// marked only when it actually changed; a true SelfDestruct or CreateContract marks the
+// subtree reset, as a contract created over an account with storage starts empty. A
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
 	if cc.touchedAccounts == nil {
 		cc.touchedAccounts = map[accounts.Address][]byte{}
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
-		cc.destructed = map[accounts.Address]struct{}{}
+		cc.storageReset = map[accounts.Address]struct{}{}
 		cc.wipedAt = map[accounts.Address]int{}
 	}
 	for a := range writes.AccountChanges() {
@@ -63,7 +67,12 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 	}
 	for a, vw := range writes.SelfDestructs() {
 		if vw.Val {
-			cc.destructed[a] = struct{}{}
+			cc.storageReset[a] = struct{}{}
+		}
+	}
+	for a, vw := range writes.CreateContracts() {
+		if vw.Val {
+			cc.storageReset[a] = struct{}{}
 		}
 	}
 	for a, slots := range writes.StorageChanges() {
@@ -80,14 +89,25 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			address, slot := a.Value(), k.Value()
 			plainKey := slices.Concat(address[:], slot[:])
 			m[k] = cc.touchHash(plainKey)
-			if cc.prefetchFn != nil {
-				cc.prefetchFn(plainKey)
+			if cc.branchPrefetch == nil {
+				if cc.prefetchFn != nil {
+					cc.prefetchFn(plainKey)
+				}
+			} else if !cc.balBlock {
+				cc.queueBranch(cc.touchedAccounts[a], m[k])
 			}
 		}
 	}
 }
 
 func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
+	if cc.branchPrefetch != nil {
+		if len(plainKey) > length.Addr {
+			plainKey = plainKey[length.Addr:]
+		}
+		hash := keccak.Sum256(plainKey)
+		return hash[:]
+	}
 	if cc.hashAtFold {
 		return nil
 	}
@@ -107,9 +127,21 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 			cc.baseErr = err
 		}
 	}
-	if cc.prefetchFn != nil {
-		cc.prefetchFn(address[:])
+	if cc.branchPrefetch == nil {
+		if cc.prefetchFn != nil {
+			cc.prefetchFn(address[:])
+		}
+	} else if !cc.balBlock {
+		cc.queueBranch(cc.touchedAccounts[a], nil)
 	}
+}
+
+func (cc *commitmentCalculator) queueBranch(account, slot []byte) {
+	it := prefetchItem{account: [32]byte(account)}
+	if slot != nil {
+		it.slot, it.storage = [32]byte(slot), true
+	}
+	cc.branchPrefetch.add(it)
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
@@ -123,51 +155,33 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	}
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
-		var u commitment.Update
-		acc, ok, wasDeleted := view.GetAccount(addr)
-		if ok {
-			u = commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash.Value(),
-			}
-			if acc.CodeHash.IsEmpty() {
-				u.CodeHash = empty.CodeHash
-			}
-		} else {
-			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
-		}
-		if _, ok := cc.destructed[addr]; ok {
-			u.DeleteStorageSubtree = true
-		}
-		if wasDeleted {
-			at, _ := view.DestroyedAt(addr)
-			if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
-				u.DeleteStorageSubtree = true
-			}
-			cc.wipedAt[addr] = at
-		}
+		u := cc.accountUpdate(view, addr)
 		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)
 	}
 	for addr, slots := range cc.touchedStorage {
 		address := addr.Value()
 		for slot, hashed := range slots {
 			slotVal := slot.Value()
-			var u commitment.Update
-			val, ok := view.GetStorage(addr, slot)
-			if ok && !val.IsZero() {
-				vBytes := val.Bytes()
-				u.Flags = commitment.StorageUpdate
-				u.StorageLen = int8(len(vBytes))
-				copy(u.Storage[:], vBytes)
-			} else {
-				u.Flags = commitment.DeleteUpdate
-			}
+			u := view.StorageUpdate(addr, slot)
 			updates.TouchPlainKeyDirectHashed(string(address[:])+string(slotVal[:]), hashed, &u)
 		}
 	}
 	return view.Err()
+}
+
+func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr accounts.Address) commitment.Update {
+	u, wasDeleted := view.AccountUpdate(addr)
+	if _, ok := cc.storageReset[addr]; ok {
+		u.DeleteStorageSubtree = true
+	}
+	if wasDeleted {
+		at, _ := view.DestroyedAt(addr)
+		if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
+			u.DeleteStorageSubtree = true
+		}
+		cc.wipedAt[addr] = at
+	}
+	return u
 }
 
 func (cc *commitmentCalculator) setBlockBase(vm *state.VersionMap, base state.StateReader) {

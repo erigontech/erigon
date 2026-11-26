@@ -4,11 +4,14 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/rpc"
 )
 
 // ListenAndServe must expose both MCP HTTP transports on one port: streamable
@@ -62,6 +65,14 @@ func TestListenAndServeServesBothTransports(t *testing.T) {
 	require.NoError(t, slashResp.Body.Close())
 	require.Equal(t, http.StatusOK, slashResp.StatusCode, "trailing-slash /mcp/ must reach the streamable handler")
 
+	foreignReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr+"/mcp", strings.NewReader(initBody))
+	require.NoError(t, err)
+	foreignReq.Header.Set("Origin", "https://evil.example")
+	foreignResp, err := client.Do(foreignReq)
+	require.NoError(t, err)
+	require.NoError(t, foreignResp.Body.Close())
+	require.Equal(t, http.StatusForbidden, foreignResp.StatusCode, "the served handler must refuse a foreign origin")
+
 	cancel()
 	require.NoError(t, <-done)
 }
@@ -114,4 +125,38 @@ func TestListenAndServeShutsDownWithOpenStream(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("ListenAndServe did not return within 4s with an open /mcp event stream")
 	}
+}
+
+func TestGuardHTTPRejectsBrowserPagesFromOtherOrigins(t *testing.T) {
+	t.Parallel()
+	for origin, want := range map[string]int{
+		"":                              http.StatusOK,
+		"http://localhost:6274":         http.StatusOK,
+		"http://127.0.0.1:6274":         http.StatusOK,
+		"http://[::1]:6274":             http.StatusOK,
+		"https://evil.example":          http.StatusForbidden,
+		"http://localhost.evil.example": http.StatusForbidden,
+		"null":                          http.StatusForbidden,
+	} {
+		h := guardHTTP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/message", nil)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		require.Equal(t, want, w.Code, origin)
+	}
+}
+
+func TestGuardHTTPLimitsTheBody(t *testing.T) {
+	t.Parallel()
+	var readErr error
+	h := guardHTTP(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, readErr = io.Copy(io.Discard, r.Body)
+	}))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/message", strings.NewReader(strings.Repeat("x", rpc.MaxRequestContentLength+1)))
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	var tooLarge *http.MaxBytesError
+	require.ErrorAs(t, readErr, &tooLarge)
 }

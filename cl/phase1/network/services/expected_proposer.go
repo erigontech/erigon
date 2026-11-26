@@ -37,8 +37,7 @@ import (
 )
 
 const (
-	// maxConcurrentSidecarProposerStateRebuilds bounds the parent states rebuilt at once for sidecar proposer checks,
-	// as maxConcurrentBlockValidationContexts does for blocks.
+	// maxConcurrentSidecarProposerStateRebuilds bounds fork-choice reads, which may rebuild parent states.
 	maxConcurrentSidecarProposerStateRebuilds = 4
 	// maxQueuedSidecarProposerStateRebuilds bounds the reads waiting for a rebuild. Every waiting read holds gossip
 	// validations, so a read beyond the queue is ignored at once instead of adding to them.
@@ -50,8 +49,8 @@ type expectedProposerKey struct {
 	slot       uint64
 }
 
-// expectedProposers reads the expected proposer of a slot on the branch of a parent block. All sidecars of a block
-// share its parent and slot, so each pair is read once.
+// expectedProposers caches successful proposer reads by parent root and slot.
+// Concurrent fork-choice reads for the same pair share work.
 type expectedProposers struct {
 	ctx        context.Context
 	cfg        *clparams.BeaconChainConfig
@@ -59,8 +58,7 @@ type expectedProposers struct {
 	head       synced_data.SyncedData
 	results    *lru.Cache[expectedProposerKey, uint64]
 	reads      singleflight.Group
-	// admitted holds a slot for every read that rebuilds a parent state or waits to, and rebuilds one for every read
-	// that is rebuilding.
+	// admitted counts active and queued fork-choice reads; rebuilds counts active reads.
 	admitted chan struct{}
 	rebuilds chan struct{}
 	// waiting counts the callers waiting for a shared read, followers of an admitted read included. Each holds a gossip
@@ -87,22 +85,16 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 	}
 }
 
-// get returns the expected proposer of slot on the branch of parentRoot, as the spec computes it: from the parent
-// state advanced to slot. Each caller whose parent is the head first reads the head state, in place, when it gives the
-// proposer; that read takes no fork-choice lock and neither rebuilds nor waits. Any other parent state is rebuilt, a bounded number at a time, a
-// bounded number of reads wait for their turn, and a bounded number of callers wait for those reads: a caller beyond
-// either bound, a read that waits longer than a slot, or one whose parent state is gone ignores the sidecar.
-//
-// The sidecars of a block share one rebuild. It runs under the service context, not a caller's, so one canceled
-// validation does not fail the others; each caller waits for it under its own context. The rebuild runs on its own
-// goroutine, outside the gossip validator's recovery, where singleflight makes a panic fatal, so it recovers one
-// itself and ignores the sidecar.
+// get returns the expected proposer on the branch of parentRoot. It uses the matching head state in place
+// when possible; otherwise fork choice may reuse or reconstruct the parent state.
+// Every returned error wraps ErrIgnore.
+// Shared reads use the service context, so canceling a caller only stops that caller's wait.
 func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
-	// The head state neither rebuilds nor waits, so each caller whose parent is the head reads it before the waiter limit.
+	// Head-state reads bypass the waiter limit because they do not wait for a shared read.
 	if proposer, found, err := e.readHeld(parentRoot, parentSlot, slot); err != nil {
 		return 0, err
 	} else if found {
@@ -115,9 +107,10 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	}
 	defer e.waiting.Add(-1)
 	read := e.reads.DoChan(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (result any, err error) {
+		// singleflight runs this on a separate goroutine, outside the gossip validator's panic recovery.
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[dataColumnSidecarService] panic reading the expected proposer", "parentRoot", parentRoot, "slot", slot, "err", r, "stack", dbg.Stack())
+				log.Error("[expectedProposers] panic reading the expected proposer", "parentRoot", parentRoot, "slot", slot, "err", r, "stack", dbg.Stack())
 				result, err = uint64(0), fmt.Errorf("%w: expected proposer read panicked: %v", ErrIgnore, r)
 			}
 		}()
@@ -142,9 +135,7 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	}
 }
 
-// readHeld reads the proposer of slot from the head state when the parent is the head and its state gives the proposer
-// in place. The head state is read without the fork-choice lock, which OnBlock holds for a whole state transition, so
-// this read neither waits for an import nor rebuilds anything.
+// readHeld tries the matching head state in place without taking the fork-choice lock held during block imports.
 func (e *expectedProposers) readHeld(parentRoot common.Hash, parentSlot, slot uint64) (uint64, bool, error) {
 	epoch := slot / e.cfg.SlotsPerEpoch
 	if e.head == nil || !parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch) {
@@ -183,7 +174,7 @@ func (e *expectedProposers) proposerInPlace(parentState *state.CachingBeaconStat
 	return 0, false, nil
 }
 
-// read rebuilds the parent state to find the proposer of slot, once the head state did not give it.
+// read gets the proposer through fork choice, rebuilding or advancing the parent state when needed.
 func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	epoch := slot / e.cfg.SlotsPerEpoch
 	inPlace := parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch)
@@ -193,6 +184,7 @@ func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, pa
 		return 0, fmt.Errorf("%w: too many parent state rebuilds for expected proposers in flight", ErrIgnore)
 	}
 	defer func() { <-e.admitted }()
+	// The slot timeout applies only while waiting for a rebuild permit.
 	wait := time.NewTimer(time.Duration(e.cfg.SecondsPerSlot) * time.Second)
 	defer wait.Stop()
 	select {

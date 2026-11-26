@@ -299,6 +299,7 @@ func initialState1() error {
 			var j uint64
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
+			txs = make([]types.Transaction, 0, 32)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
 				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)

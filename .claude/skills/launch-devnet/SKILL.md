@@ -22,7 +22,7 @@ Optional overrides (ask only if relevant or ambiguous):
 - CL client choice (default `lighthouse`).
 - CL image tag override (default = the tag the network publishes in its inventory).
 - Port offset (default `+100`; bumped automatically if the offset ports are already bound).
-- Extra erigon flags / env vars (e.g. `--prune.mode=...`, `ERIGON_EXEC3_PARALLEL=true`).
+- Extra erigon flags / env vars (e.g. `--prune.mode=...`, `ERIGON_EXEC3_WORKERS=12`).
 
 ## Step 1 — Resolve devnet config
 
@@ -133,7 +133,7 @@ Required flags (substitute values discovered in Step 2):
 - `--pprof`, `--metrics` so the node is debuggable under load
 
 Optional env vars to set in the script body (only when the user asks for them):
-- `ERIGON_EXEC3_PARALLEL=true`, `ERIGON_EXEC3_WORKERS=12`
+- `ERIGON_EXEC3_WORKERS=12`
 - `ERIGON_ASSERT=true`, `LOG_HASH_MISMATCH_REASON=true`
 
 Do not bake in fork-specific or experimental flags unless the user requests them. The script should be a thin wrapper, not a config dump.

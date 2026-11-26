@@ -149,7 +149,7 @@ func (f *ForkChoiceStore) TryBeginPayloadPreparation(ctx context.Context, firstS
 }
 
 func (f *ForkChoiceStore) payloadPreparationBlockSlot(root common.Hash) (uint64, bool) {
-	if f.forkGraph.HasEnvelope(root) {
+	if f.IsEnvelopeRejected(root) || f.forkGraph.HasEnvelope(root) {
 		return 0, false
 	}
 	block, ok := f.forkGraph.GetBlock(root)

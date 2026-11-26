@@ -92,6 +92,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	provider := &fileDataProvider{wg: &errgroup.Group{}}
 	provider.file, err = sortAndFlush(b, tmpdir)
 	if err != nil {
+		provider.Dispose()
 		return nil, err
 	}
 	_, fName := filepath.Split(provider.file.Name())

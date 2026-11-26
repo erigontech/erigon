@@ -85,7 +85,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 			touchPrefixes(indexedUpdates)
 			byHash, indexedKeys, root, err := hph.WitnessesByHash(ctx, indexedUpdates, tc.exclude)
 			require.NoError(t, err)
-			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
+			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys, tc.exclude)
 			require.NoError(t, err)
 
 			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude)

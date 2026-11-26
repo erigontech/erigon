@@ -40,7 +40,7 @@ import (
 
 // createTestTxnSegment writes a transactions file holding txns as txn ids 0..len(txns)-1,
 // stored as the block files store them: hash prefix byte, sender, binary encoding.
-func createTestTxnSegment(t *testing.T, from, to uint64, dir string, ver snaptype.Version, txns []types.Transaction, logger log.Logger) {
+func createTestTxnSegment(t testing.TB, from, to uint64, dir string, ver snaptype.Version, txns []types.Transaction, logger log.Logger) {
 	t.Helper()
 	segPath := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Transactions))
 	compressCfg := seg.DefaultCfg
@@ -124,4 +124,54 @@ func TestTxnHashByIdxInBlockReusesGrownBuffer(t *testing.T) {
 	if !race.Enabled { // the race detector drops sync.Pool puts at random
 		require.Equal(t, smallAllocs, largeAllocs)
 	}
+}
+
+// Looking up a transaction in the block files only hashes its stored encoding: the cost does not
+// depend on what decoding the transaction would allocate.
+func TestTxnLookupInFilesDoesNotDecodeTheTxn(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+	ver := version.V1_0
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	to := common.Address{1}
+	sign := func(txn types.Transaction) types.Transaction {
+		signed, signErr := types.SignTx(txn, *signer, key)
+		require.NoError(t, signErr)
+		return signed
+	}
+	legacy := sign(types.NewTransaction(0, to, uint256.NewInt(1), 1_000_000, uint256.NewInt(1), nil))
+	setCode := sign(&types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 1_000_000},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		},
+		Authorizations: make([]types.Authorization, 8),
+	})
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestTxnSegment(t, 1, 1000, dirs.Snap, ver, []types.Transaction{legacy, setCode}, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	blockReader := NewBlockReader(snapshots)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	allocs := func(txn types.Transaction, wantTxNum uint64) float64 {
+		_, txNum, ok, err := blockReader.TxnLookup(t.Context(), tx, txn.Hash())
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, wantTxNum, txNum)
+		return testing.AllocsPerRun(100, func() {
+			_, _, _, _ = blockReader.TxnLookup(t.Context(), tx, txn.Hash())
+		})
+	}
+	require.Equal(t, allocs(legacy, 0), allocs(setCode, 1))
 }

@@ -2,6 +2,7 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -119,7 +120,7 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 
 	// Snapshot this tx's reads for OCC validation.
 	io := NewVersionedIO(6)
-	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.Reads())
 
 	// A prior tx destroys the account after this tx's warm read. The cache-free
 	// path keeps no deleted stateObject to shadow the recorded read; the staleness
@@ -140,7 +141,7 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
 	require.Equal(t, 7, size, "first read resolves from the version map")
 
 	io := NewVersionedIO(6)
-	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.Reads())
 
 	// A prior tx destroys the account after the warm read: OCC validation catches it.
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
@@ -170,18 +171,13 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
-func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, versioned bool) *IntraBlockState {
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account) *IntraBlockState {
 	_, tx, domains := NewTestRwTx(t)
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	var ibs *IntraBlockState
-	if versioned {
-		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-	} else {
-		ibs = New(reader)
-	}
+	ibs := New(reader)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
 	return ibs
@@ -189,36 +185,32 @@ func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, 
 
 func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb6})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.TouchAccount(addr))
-		n := ibs.journal.length()
-		require.Positive(t, n)
-		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
 }
 
 // The touch result does not depend on the other fields once the tx wrote the balance.
 func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 	t.Parallel()
-	for _, versioned := range []bool{false, true} {
-		addr := accounts.InternAddress([20]byte{0xb7})
-		acc := accounts.NewAccount()
-		acc.Incarnation = 1
-		acc.Nonce = 1
-		acc.Balance = *uint256.NewInt(5)
-		ibs := newTouchTestIBS(t, addr, acc, versioned)
+	addr := accounts.InternAddress([20]byte{0xb7})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(5)
+	ibs := newTouchTestIBS(t, addr, acc)
 
-		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
-		require.NoError(t, ibs.TouchAccount(addr))
-		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.False(t, ok, "nonce read, versioned=%v", versioned)
-	}
+	require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
+	require.NoError(t, ibs.TouchAccount(addr))
+	_, ok := ibs.reads.GetNonce(addr)
+	assert.False(t, ok, "nonce read")
 }
 
 // ------------------------------------------------------------------
@@ -269,7 +261,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	assert.True(t, bal.IsZero(), "non-committed balance read past selfdestruct returns zero")
 
 	// SelfDestructPath dep must be recorded in readSet.
-	_, ok := ibs.versionedReads.getHeader(addr, SelfDestructPath, accounts.NilKey)
+	_, ok := ibs.reads.getHeader(addr, SelfDestructPath, accounts.NilKey)
 	assert.True(t, ok, "SelfDestructPath dependency must be recorded")
 }
 
@@ -288,7 +280,7 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, value.IsZero())
 	ibs.RevertToSnapshot(snapshot, nil)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	read, ok := reads.GetStorage(addr, key)
 	require.True(t, ok)
 	require.True(t, read.Val.IsZero())
@@ -320,7 +312,7 @@ func TestVersionedRead_RevivedStaleCodeHashUsesCodeHashVersion(t *testing.T) {
 	codeHash, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, codeHash)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	io := NewVersionedIO(4)
 	io.RecordReads(Version{TxIndex: 3}, reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, ""))
@@ -382,14 +374,14 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			require.NoError(t, destructor.CreateAccount(addr, true))
 			_, err := destructor.Selfdestruct(addr, false)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(destructor.VersionedWrites(), true)
+			vm.FlushWrites(destructor.Writes(), true)
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 3)
 			zero, err := tt.read(ibs, addr)
 			require.NoError(t, err)
 			require.True(t, zero)
-			reads := ibs.VersionedReads()
+			reads := ibs.Reads()
 
 			io := NewVersionedIO(4)
 			io.RecordReads(Version{TxIndex: 3}, reads)
@@ -494,7 +486,7 @@ func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
 // Section D: writeSet hit (intra-tx writes)
 // ------------------------------------------------------------------
 
-// a write in the current tx is read back via versionedWrites.
+// a write in the current tx is read back via writes.
 func TestVersionedRead_D2_WriteSetHit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -596,7 +588,7 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	assert.True(t, v2.IsZero())
 
 	// readSet must hold the StoragePath entry.
-	_, ok := ibs.versionedReads.getHeader(addr, StoragePath, key)
+	_, ok := ibs.reads.getHeader(addr, StoragePath, key)
 	assert.True(t, ok, "StoragePath read must be recorded")
 }
 
@@ -622,7 +614,7 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	assert.True(t, got.IsZero(), "unwritten slot reads zero after Incarnation rewrite")
 
 	// IncarnationPath dep must be recorded.
-	_, ok := ibs.versionedReads.getHeader(addr, IncarnationPath, accounts.NilKey)
+	_, ok := ibs.reads.getHeader(addr, IncarnationPath, accounts.NilKey)
 	assert.True(t, ok, "IncarnationPath dependency must be recorded")
 }
 
@@ -744,14 +736,14 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 			tt.write(ws, addr, hdr)
 			vm.fieldMissHook = func() {
 				vm.fieldMissHook = nil
-				vm.FlushVersionedWrites(ws, true)
+				vm.FlushWrites(ws, true)
 			}
 
 			got, err := tt.read(ibs, addr)
 			require.NoError(t, err)
 			require.Nil(t, vm.fieldMissHook, "the flush must land after the field probe")
 			assert.Equal(t, tt.want, got)
-			recHdr, recVal := tt.recorded(&ibs.versionedReads, addr)
+			recHdr, recVal := tt.recorded(&ibs.reads, addr)
 			assert.Equal(t, ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}}, recHdr)
 			assert.Equal(t, tt.want, recVal)
 		})
@@ -782,17 +774,17 @@ func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
 	vm, revival := creditedDestructAndRevival(addr, revived)
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, true)
+		vm.FlushWrites(revival, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Equal(t, revived, account)
-	recorded, ok := ibs.versionedReads.GetAddress(addr)
+	recorded, ok := ibs.reads.GetAddress(addr)
 	require.True(t, ok)
 	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
 }
@@ -815,7 +807,7 @@ func TestVersionedRead_DestructFlushedAfterMemoIsRecorded(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
 	destruct.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, valStatus: ValueDeleted}})
 	destruct.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 1}}})
-	vm.FlushVersionedWrites(destruct, false)
+	vm.FlushWrites(destruct, false)
 	vm.MarkWritesValidated(destruct, nil)
 
 	_, err = ibs.Exist(addr)
@@ -845,7 +837,7 @@ func TestVersionedRead_KeptBalanceSurvivesWithdrawnRecreation(t *testing.T) {
 	require.True(t, exists)
 
 	vm.WriteAddress(addr, Version{TxIndex: 1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, false)
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, *uint256.NewInt(5), account.Balance)
@@ -865,24 +857,95 @@ func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
 	removal := &WriteSet{}
 	removal.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}, valStatus: ValueDeleted}, Val: *uint256.NewInt(5)})
-	vm.FlushVersionedWrites(removal, true)
+	vm.FlushWrites(removal, true)
 	recreated := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
 	recreation := &WriteSet{}
 	recreation.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 1}}, Val: recreated})
 	recreation.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: recreated.Balance})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(recreation, true)
+		vm.FlushWrites(recreation, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	account, _, _, err := ibs.accountBase(addr, true)
 	require.NoError(t, err)
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Nil(t, account)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// A repeat read of a committed absence returns the recorded absence although a lower tx's
+// destruct was flushed in between, and validation still rejects the read.
+func TestVersionedRead_RepeatedCommittedAbsenceKeepsRecordedRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa1})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+	_, balanceRecorded := ibs.reads.GetBalance(addr)
+	require.False(t, balanceRecorded)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// Repeat reads of a committed absence record nothing beyond the first read and do not take the
+// address entry's lock, which a higher tx's cell has created.
+func TestVersionedRead_RepeatedCommittedAbsenceSkipsVersionMap(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa2})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(5), true)
+
+	once := NewWithVersionMap(&emptyReader{}, vm)
+	defer once.Close()
+	once.SetTxContext(1, 2)
+	_, err := once.Empty(addr)
+	require.NoError(t, err)
+
+	repeated := NewWithVersionMap(&emptyReader{}, vm)
+	defer repeated.Close()
+	repeated.SetTxContext(1, 2)
+	_, err = repeated.Empty(addr)
+	require.NoError(t, err)
+
+	entry := vm.load(addr)
+	require.NotNil(t, entry)
+	entry.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := repeated.Empty(addr)
+		if err == nil {
+			_, err = repeated.Exist(addr)
+		}
+		done <- err
+	}()
+	select {
+	case err = <-done:
+		entry.mu.Unlock()
+	case <-time.After(5 * time.Second):
+		entry.mu.Unlock()
+		<-done
+		require.Fail(t, "a repeat read took the version-map lock")
+	}
+	require.NoError(t, err)
+	require.Equal(t, once.Reads(), repeated.Reads())
 }
 
 // storage fallback. Empty reader + no prior writes/reads → falls through
@@ -904,17 +967,17 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 // refresh path: the legacy readStorage==nil branch for
 // BalancePath/NoncePath/CodeHashPath/IncarnationPath records the
 // caller-supplied defaultV (the "current" account field) into the
-// versionedReads ReadSet, with vr.Source = StorageRead.  ValidateVersion
+// reads ReadSet, with vr.Source = StorageRead.  ValidateVersion
 // and tiebreaker logic depend on the RECORDED value matching what
 // downstream tx readers will see — recording the typed zero instead of
 // the caller's currentBalance is a behavioral divergence that breaks
 // integration tests (wrong trie root in execution/engineapi).
 //
 // This test calls per-field-account-refresh-style scenarios by going
-// through getVersionedAccount which triggers refreshBalance/refreshNonce/
+// through getAccount which triggers refreshBalance/refreshNonce/
 // refreshCodeHash/refreshIncarnation with the storage-read account's
 // fields as defaultV.  Asserts that subsequent reads through the
-// versionedReads ReadSet see the same typed defaultV that the legacy
+// reads ReadSet see the same typed defaultV that the legacy
 // code recorded.
 func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	t.Parallel()
@@ -947,16 +1010,16 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(1234), bal,
 		"GetBalance returns the storage-read account's balance")
 
-	balRead, ok := ibs.versionedReads.GetBalance(addr)
+	balRead, ok := ibs.reads.GetBalance(addr)
 	require.True(t, ok, "BalancePath read must be recorded")
 	assert.Equal(t, *uint256.NewInt(1234), balRead.Val,
 		"recorded BalancePath value must be the read value, not zero")
 
-	_, ok = ibs.versionedReads.GetNonce(addr)
+	_, ok = ibs.reads.GetNonce(addr)
 	require.False(t, ok, "NoncePath must NOT be recorded by a balance-only read")
-	_, ok = ibs.versionedReads.GetIncarnation(addr)
+	_, ok = ibs.reads.GetIncarnation(addr)
 	require.False(t, ok, "IncarnationPath must NOT be recorded by a balance-only read")
-	_, ok = ibs.versionedReads.GetCodeHash(addr)
+	_, ok = ibs.reads.GetCodeHash(addr)
 	require.False(t, ok, "CodeHashPath must NOT be recorded by a balance-only read")
 }
 
@@ -1067,7 +1130,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(10), true)
 
 	// Manually seed readSet with a stale version (TxIndex 1).
-	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+	ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1082,7 +1145,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	ibs.MergeTxIOInto(&io, ibs.Writes())
 	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid
@@ -1133,8 +1196,8 @@ func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
 	burn := &WriteSet{}
 	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
-	mvhm.FlushVersionedWrites(destruct, false)
-	mvhm.FlushVersionedWrites(burn, true)
+	mvhm.FlushWrites(destruct, false)
+	mvhm.FlushWrites(burn, true)
 
 	_, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
@@ -1160,7 +1223,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetRecordsDep(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
 	// Seed a stale readSet entry at a lower version.
-	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+	ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1192,7 +1255,7 @@ func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	mvhm.WriteStorage(addr, read, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
 	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
-	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
+	ibs.reads.SetStorage(addr, read, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1201,7 +1264,7 @@ func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	assert.EqualValues(t, 99, got.Uint64(), "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	ibs.MergeTxIOInto(&io, ibs.Writes())
 	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
 }
 
@@ -1219,7 +1282,7 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	mvhm.WriteCodeSize(addr, Version{TxIndex: 3, Incarnation: 0}, 30, true)
 
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
-	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
+	ibs.reads.SetCodeSize(addr, VersionedRead[int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        99,
 	})
@@ -1228,7 +1291,7 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, 99, got, "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	ibs.MergeTxIOInto(&io, ibs.Writes())
 	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
 }
 
@@ -1320,7 +1383,7 @@ func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
 	require.Positive(t, n)
 	require.NoError(t, ibs.TouchAccount(addr))
 	assert.Equal(t, n, ibs.journal.length())
-	balance, ok := ibs.versionedWrites.GetBalance(addr)
+	balance, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok)
 	assert.True(t, balance.Val.IsZero())
 }
@@ -1418,18 +1481,4 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(code), size)
 	require.Zero(t, reader.codeReads+reader.codeSizeReads)
-}
-
-// A versioned read that finds a stateObject materialized before the IBS was bound to a
-// version map fails the read instead of panicking.
-func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
-	t.Parallel()
-	ibs := New(NewNoopReader())
-	addr := accounts.InternAddress(common.HexToAddress("0xab"))
-	require.NoError(t, ibs.CreateAccount(addr, true))
-	ibs.SetVersionMap(NewVersionMap(nil))
-	require.NotPanics(t, func() {
-		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
-		require.Error(t, err)
-	})
 }

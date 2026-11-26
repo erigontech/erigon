@@ -264,6 +264,13 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
+	// The request is consumed even on failure: the caller's tx is rolled back,
+	// and a reused Sync must not replay this unwind or resume at the failed stage.
+	defer func() {
+		s.unwindPoint = nil
+		s.unwindReason = UnwindReason{}
+		s.currentStage = 0
+	}()
 	for j := 0; j < len(s.unwindOrder); j++ {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
@@ -273,11 +280,6 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
-	s.unwindPoint = nil
-	s.unwindReason = UnwindReason{}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -299,23 +301,14 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			// RunUnwind clears the request, so keep its reason first.
+			reason := s.unwindReason
+			if err := s.RunUnwind(sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
@@ -457,6 +450,7 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
+	defer func() { s.currentStage = 0 }()
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
@@ -466,10 +460,6 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, fina
 			return err
 		}
 	}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
-	s.currentStage = 0
 	return nil
 }
 

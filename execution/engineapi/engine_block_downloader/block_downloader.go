@@ -175,7 +175,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		}
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
@@ -224,13 +224,17 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		return err
 	}
 
+	var batches batchFeed = feed
+	if req.Trigger == FcuTrigger {
+		batches = newBatchPrefetcher(ctx, feed, int64(e.syncCfg.BodyCacheLimit))
+	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 
 	var batch p2p.BlockBatchResult
 	var insertedBlocksWithoutExec int
 	var lastTip *types.Block
-	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+	for batch, err = batches.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = batches.Next(ctx) {
 		blocks := batch.Blocks
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
@@ -289,7 +293,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block)
 	if err != nil {
 		return err
 	}

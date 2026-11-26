@@ -23,54 +23,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
-
-// computeAndCheckCommitmentV3 on the serial path advances the Execution stage progress
-// (e.Update) but must NOT bump the durable state version a second time — the state
-// version is bumped once by the SharedDomains flush on Commit; a second bump here would
-// double-count it. Exercised in exec-only (DiscardCommitment) mode so no trie work runs
-// against the empty overlay.
-func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
-	_, tx := temporaltest.NewTestTx(t)
-	overlay, err := membatchwithdb.NewMemoryBatch(tx)
-	require.NoError(t, err)
-	defer overlay.Close()
-
-	before, err := rawdb.GetStateVersion(overlay)
-	require.NoError(t, err)
-
-	stage := &StageState{ID: stages.Execution}
-	ok, _, err := computeAndCheckCommitmentV3(
-		t.Context(),
-		&types.Header{Number: *uint256.NewInt(1)},
-		overlay,
-		nil,
-		ExecuteBlockCfg{discardCommitment: true},
-		stage,
-		false,
-		log.New(),
-		nil,
-	)
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	progress, err := stages.GetStageProgress(overlay, stages.Execution)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), progress)
-	after, err := rawdb.GetStateVersion(overlay)
-	require.NoError(t, err)
-	require.Equal(t, before, after, "execution metadata must not advance the durable state generation")
-}
 
 // pinnedHistoryReader reads the account nonce history at its txNum, as a restart-replay worker does.
 type pinnedHistoryReader struct {

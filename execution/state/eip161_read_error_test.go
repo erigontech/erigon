@@ -65,7 +65,7 @@ func TestEncodeExistingEmptyRemovals_BailsOnBaseReadError(t *testing.T) {
 	})
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	ibs.encodeExistingEmptyRemovals(rules, writes, nil)
+	ibs.encodeExistingEmptyRemovals(rules, writes, nil, nil)
 
 	sd, ok := writes.GetSelfDestruct(addr)
 	require.False(t, ok && sd.Val, "a failed base read must not be rewritten as a self-destruct")
