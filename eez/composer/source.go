@@ -98,7 +98,9 @@ type Source struct {
 	origin          accounts.Address
 	gasPrice        uint256.Int
 	gasLimit, spent uint64
-	posting         postingPhase
+	// open marks the posting open: outbound calls join it until a trigger
+	// runs.
+	open bool
 }
 
 // NewSource returns the simulation of the chain of config in the context of

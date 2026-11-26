@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -76,8 +77,9 @@ const l2Rollup = 2
 // targetFixture is an L1 whose manager runs EEZL2's code at EEZL2's
 // address, so it creates a proxy where EEZL2 did on window 468's rollup.
 type targetFixture struct {
-	m   *memState
-	src *Source
+	m      *memState
+	header *types.Header
+	src    *Source
 }
 
 func newTargetFixture(t *testing.T) *targetFixture {
@@ -103,9 +105,30 @@ func newTargetFixture(t *testing.T) *targetFixture {
 	m.deploy(gasTarget, []byte{0x5a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3})
 	m.deploy(probe, slices.Concat([]byte{0x60, 0x20, 0x5f, 0x5f, 0x5f, 0x5f}, push20(tcounter), []byte{0x5a, 0xf1, 0x50},
 		[]byte{0x5f, 0x5f, 0x60, 0x20, 0x5f, 0x5f}, push20(l1Proxy), []byte{0x5a, 0xf1, 0x50, 0x00}))
-	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
-	src := NewSource(chain.TestChainOsakaConfig, header, m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, protocol.EEZL2Address, protocol.MainnetRollupID)
-	return &targetFixture{m: m, src: src}
+	f := &targetFixture{m: m, header: &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}}
+	f.src = f.source(t, m, protocol.EEZL2Address)
+	return f
+}
+
+// source returns a source on reader whose proxies manager registers, its
+// posting open with no sender or gas.
+func (f *targetFixture) source(t *testing.T, reader state.StateReader, manager common.Address) *Source {
+	t.Helper()
+	src := f.unposted(reader, manager)
+	require.NoError(t, src.PostedBy(common.Address{}, new(uint256.Int), 0))
+	return src
+}
+
+func (f *targetFixture) unposted(reader state.StateReader, manager common.Address) *Source {
+	return NewSource(chain.TestChainOsakaConfig, f.header, reader, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, manager, protocol.MainnetRollupID)
+}
+
+// posted replaces the fixture's source with one whose posting poster,
+// funded with balance, sends with tip and gasLimit.
+func (f *targetFixture) posted(poster common.Address, balance, tip, gasLimit uint64) error {
+	f.m.fund(poster, balance)
+	f.src = f.unposted(f.m, protocol.EEZL2Address)
+	return f.src.PostedBy(poster, uint256.NewInt(tip), gasLimit)
 }
 
 func (f *targetFixture) proxyOf(t *testing.T, p common.Address) (protocol.Proxy, bool) {
@@ -243,7 +266,7 @@ func TestExecuteRefuses(t *testing.T) {
 	for name, manager := range map[string]common.Address{"failing": revertTarget, "answering nothing": payee} {
 		t.Run("a manager's proxy address view "+name, func(t *testing.T) {
 			f := newTargetFixture(t)
-			f.src = NewSource(chain.TestChainOsakaConfig, f.src.header, f.m, f.src.blockHash, manager, protocol.MainnetRollupID)
+			f.src = f.source(t, f.m, manager)
 			_, err := f.execute(&Call{Target: valueTarget, Source: l2Sender, SourceRollup: l2Rollup})
 			require.True(t, IsPoison(err), err)
 		})
@@ -251,7 +274,7 @@ func TestExecuteRefuses(t *testing.T) {
 	t.Run("a failed state read waits", func(t *testing.T) {
 		f := newTargetFixture(t)
 		r := &failing{StateReader: f.m, addr: payee, armed: true}
-		f.src = NewSource(chain.TestChainOsakaConfig, f.src.header, r, f.src.blockHash, protocol.EEZL2Address, protocol.MainnetRollupID)
+		f.src = f.source(t, r, protocol.EEZL2Address)
 		_, err := f.execute(&Call{Target: payee, Source: l2Sender, SourceRollup: l2Rollup})
 		require.ErrorIs(t, err, ErrStateRead)
 		require.False(t, IsPoison(err))
@@ -329,7 +352,7 @@ func TestAtomicSharesThePosting(t *testing.T) {
 func TestExecuteRunsInThePosting(t *testing.T) {
 	f := newTargetFixture(t)
 	poster := common.Address{0xee, 0x01}
-	f.src.PostedBy(poster, uint256.NewInt(2), 0)
+	require.NoError(t, f.posted(poster, 0, 2, 0))
 	out, err := f.execute(&Call{Target: originTarget, Source: l2Sender, SourceRollup: l2Rollup})
 	require.NoError(t, err)
 	require.Equal(t, slices.Concat(word(poster), num(3)), out)
@@ -337,13 +360,12 @@ func TestExecuteRunsInThePosting(t *testing.T) {
 
 // TestExecuteBuysThePostingsGas: as it opens, once, the posting moves its
 // sender's nonce on and buys its gas limit at its price from it; a sender
-// that cannot pay stops it.
+// that cannot pay leaves it closed.
 func TestExecuteBuysThePostingsGas(t *testing.T) {
 	f := newTargetFixture(t)
 	poster := common.Address{0xee, 0x01}
-	f.m.fund(poster, 1e9)
 	// 1,000,000 gas at the base fee, 1, plus the tip, 2.
-	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
+	require.NoError(t, f.posted(poster, 1e9, 2, 1_000_000))
 	for range 2 {
 		out, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
 		require.NoError(t, err)
@@ -352,22 +374,20 @@ func TestExecuteBuysThePostingsGas(t *testing.T) {
 	require.Equal(t, uint64(1), f.nonce(t, poster))
 
 	f = newTargetFixture(t)
-	f.m.fund(poster, 2_999_999)
-	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
-	_, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+	err := f.posted(poster, 2_999_999, 2, 1_000_000)
 	require.ErrorContains(t, err, "does not buy the posting's gas")
 	require.Zero(t, f.nonce(t, poster), "a posting that does not open leaves its sender")
-	require.False(t, IsPoison(err))
+	_, err = f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+	require.ErrorIs(t, err, errPostingClosed)
 }
 
-// TestRunAfterAnEmptyPosting: a trigger of a bundle without outbound calls
+// TestRunAfterThePosting: a trigger of a bundle without outbound calls
 // still runs after its posting: the poster's nonce moved on and its gas
 // bought.
-func TestRunAfterAnEmptyPosting(t *testing.T) {
+func TestRunAfterThePosting(t *testing.T) {
 	f := newTargetFixture(t)
 	poster := common.Address{0xee, 0x01}
-	f.m.fund(poster, 1e9)
-	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
+	require.NoError(t, f.posted(poster, 1e9, 2, 1_000_000))
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	f.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
@@ -391,9 +411,7 @@ func TestExecuteWithinThePostingsGas(t *testing.T) {
 	require.Greater(t, left(t, newTargetFixture(t)), uint64(1_000_000), "no posting: the frame's own bound")
 	posted := func(t *testing.T, gasLimit uint64) *targetFixture {
 		f := newTargetFixture(t)
-		poster := common.Address{0xee, 0x01}
-		f.m.fund(poster, 1e9)
-		f.src.PostedBy(poster, new(uint256.Int), gasLimit)
+		require.NoError(t, f.posted(common.Address{0xee, 0x01}, 1e9, 0, gasLimit))
 		return f
 	}
 

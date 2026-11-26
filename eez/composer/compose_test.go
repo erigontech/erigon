@@ -1091,6 +1091,18 @@ func TestComposeOutboundBoundsThePostingGas(t *testing.T) {
 	require.Zero(t, f.pool.Len())
 }
 
+// TestComposeAfterThePosting: a trigger the poster signed composes on the
+// nonce after its posting's, though no outbound call opened the posting.
+func TestComposeAfterThePosting(t *testing.T) {
+	f := newCrossFixture(t)
+	poster := *f
+	poster.key = f.c.poster.(*testPoster).key
+	trigger := poster.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{trigger}, fx.held)
+}
+
 // TestComposeOutboundPastTheDeadlineWaits: an outbound transaction whose
 // load the deadline cuts short waits with its chain, not evicted.
 func TestComposeOutboundPastTheDeadlineWaits(t *testing.T) {

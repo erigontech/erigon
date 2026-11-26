@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// errPostingClosed refuses an outbound call after a trigger ran: the
-// posting precedes the triggers of its bundle.
-var errPostingClosed = errors.New("the posting ran before the triggers")
+// errPostingClosed refuses an outbound call while no posting is open: none
+// was posted, or a trigger ran, which the posting precedes.
+var errPostingClosed = errors.New("no posting open: it precedes the triggers")
 
 var (
 	// ErrFunding refuses a call whose value the manager cannot pay now.
@@ -56,43 +56,30 @@ const (
 	frameGas = 30_000_000
 )
 
-// postingPhase is where a source is in its posting.
-type postingPhase uint8
-
-const (
-	// postingIdle is before any outbound call.
-	postingIdle postingPhase = iota
-	// postingOpen runs outbound calls in the posting's transaction.
-	postingOpen
-	// postingClosed is after a trigger ran.
-	postingClosed
-)
-
-// PostedBy sets the posting's sender, from, its tip and its gas limit:
-// outbound calls run with from as their origin, the block's base fee plus
-// tip as their gas price, and within gasLimit, which the posting buys from
-// from's balance as it opens.
-func (s *Source) PostedBy(from common.Address, tip *uint256.Int, gasLimit uint64) {
+// PostedBy opens the posting, sent by from with tip and gasLimit, before
+// any outbound call or trigger runs or reads its sender: outbound calls run
+// with from as their origin, the block's base fee plus tip as their gas
+// price, and within gasLimit, which the posting buys from from's balance.
+func (s *Source) PostedBy(from common.Address, tip *uint256.Int, gasLimit uint64) error {
 	s.origin = accounts.InternAddress(from)
 	s.gasPrice.Add(s.header.BaseFee, tip)
 	s.gasLimit = gasLimit
+	s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
+	if err := s.startPosting(); err != nil {
+		return err
+	}
+	s.open = true
+	return nil
 }
 
 // Atomic runs f as the next entry of the posting, the one L1 transaction
 // that runs a batch's outbound calls in order: transient storage and warm
 // accounts carry from one entry to the next. The writes f makes through
-// Execute stay when it returns nil. Once Run ran, it refuses with
-// errPostingClosed.
+// Execute stay when it returns nil. Before PostedBy, or once Run ran, it
+// refuses with errPostingClosed.
 func (s *Source) Atomic(f func() error) error {
-	switch s.posting {
-	case postingClosed:
+	if !s.open {
 		return errPostingClosed
-	case postingIdle:
-		s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
-		if err := s.startPosting(); err != nil {
-			return err
-		}
-		s.posting = postingOpen
 	}
 	return s.entry(f)
 }
@@ -127,19 +114,12 @@ func (s *Source) startPosting() error {
 	return s.ibs.SubBalance(s.origin, fee, tracing.BalanceDecreaseGasBuy)
 }
 
-// closePosting ends the posting, which precedes the triggers: one no
-// outbound call opened still moves its sender's nonce on and buys its gas.
+// closePosting ends the posting, which precedes the triggers.
 func (s *Source) closePosting() error {
-	phase := s.posting
-	s.posting = postingClosed
-	switch {
-	case phase == postingClosed, phase == postingIdle && s.gasLimit == 0:
+	if !s.open {
 		return nil
-	case phase == postingIdle:
-		if err := s.startPosting(); err != nil {
-			return err
-		}
 	}
+	s.open = false
 	return s.finalize()
 }
 
