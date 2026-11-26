@@ -1091,6 +1091,8 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 	seen := make(map[string]struct{}, len(fileNames))
 	pendingUnlink := s.pendingUnlinkNames()
 	var unsupported *DirtySegment
+	var unsupportedVersion snaptype.Version
+	var openErr error
 
 	for _, fName := range fileNames {
 		if _, dup := seen[fName]; dup {
@@ -1127,7 +1129,8 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			if err := sn.Open(s.dir); err != nil {
 				stop, failErr := ClassifyOpenErr(err, optimistic)
 				if failErr != nil {
-					return failErr
+					openErr = failErr
+					break
 				}
 				if stop {
 					break
@@ -1136,9 +1139,17 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			}
 		}
 
-		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Type().Versions().Supports(sn.Version()) {
+		openedVersion := sn.Version()
+		if open {
+			openedFile, _, ok := snaptype.ParseFileName(s.dir, sn.FileName())
+			if ok {
+				openedVersion = openedFile.Version
+			}
+		}
+		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Type().Versions().Supports(openedVersion) {
 			if unsupported == nil {
 				unsupported = sn
+				unsupportedVersion = openedVersion
 			}
 			sn.closeSeg()
 			continue
@@ -1161,14 +1172,14 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 
 	}
 
-	if err := wg.Wait(); err != nil {
-		return err
-	}
+	waitErr := wg.Wait()
 	if unsupported != nil {
-		unsupported.Type().Versions().MustSupport(unsupported.Version(), unsupported.FileName())
+		unsupported.Type().Versions().MustSupport(unsupportedVersion, unsupported.FileName())
 	}
-
-	return nil
+	if openErr != nil {
+		return openErr
+	}
+	return waitErr
 }
 
 func (s *BaseRoSnapshots) Ranges(align bool) []Range {

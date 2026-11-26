@@ -98,6 +98,56 @@ func TestCaplinSnapshotOpenListRejectsUnsupportedVersion(t *testing.T) {
 	require.Contains(t, fmt.Sprint(panicValue), name)
 }
 
+func TestOpenListReportsUnsupportedVersionBeforeIndexError(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	typ := snaptype.BeaconBlocks
+	unsupported := writeVersionedSegment(t, dirs.Snap, typ, version.V2_0)
+	supported := writeVersionedSegment(t, dirs.Snap, typ, typ.Versions().Current)
+	index := typ.IdxFileName(version.V2_0, 0, 2)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, index), []byte("corrupt"), 0o644))
+
+	s := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(s.Close)
+	var panicValue any
+	func() {
+		defer func() { panicValue = recover() }()
+		_ = s.OpenList([]string{unsupported, supported}, false)
+	}()
+	require.Contains(t, fmt.Sprint(panicValue), unsupported)
+}
+
+func TestOpenListReportsUnsupportedVersionBeforeSegmentOpenError(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	typ := snaptype.BeaconBlocks
+	unsupported := writeVersionedSegment(t, dirs.Snap, typ, version.V2_0)
+	broken := typ.FileName(typ.Versions().Current, 2, 4)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, broken), []byte("corrupt"), 0o644))
+
+	s := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(s.Close)
+	var panicValue any
+	func() {
+		defer func() { panicValue = recover() }()
+		_ = s.OpenList([]string{unsupported, broken}, false)
+	}()
+	require.Contains(t, fmt.Sprint(panicValue), unsupported)
+}
+
+func TestOpenListUsesOpenedBeaconSegmentVersion(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	typ := snaptype.BeaconBlocks
+	name := writeVersionedSegment(t, dirs.Snap, typ, typ.Versions().Current)
+	info, _, ok := snaptype.ParseFileName(dirs.Snap, name)
+	require.True(t, ok)
+	index := typ.IdxFileName(version.ZeroVersion, info.From, info.To)
+	require.NoError(t, os.Rename(filepath.Join(dirs.Snap, typ.IdxFileName(typ.Versions().Current, info.From, info.To)), filepath.Join(dirs.Snap, index)))
+
+	s := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenList([]string{index}, false))
+	require.Equal(t, []string{name}, s.Files())
+}
+
 func openCaplinFile(t *testing.T, typ snaptype.Type, ver version.Version) (func() error, string, func() []string) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
@@ -159,8 +209,6 @@ func TestOpenListKeepsBeaconIndexVersionBehavior(t *testing.T) {
 
 	s := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(s.Close)
-	require.NoError(t, s.OpenFolder())
-	require.Equal(t, []string{name}, s.Files())
 
 	var got any
 	func() {
