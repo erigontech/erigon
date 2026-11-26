@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -174,16 +175,16 @@ func witnessGoldenFixturePath(f witnessGoldenFixture, commitmentV3 bool) string 
 	return filepath.Join(root, f.name)
 }
 
-func writeWitnessGoldenFixtures(t *testing.T, dir string, hph, v3 []witnessGoldenFixture) {
+func writeWitnessGoldenFixtures(t *testing.T, root string, hph, v3 []witnessGoldenFixture) {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.MkdirAll(root, 0o755))
 	for i, fixture := range hph {
 		v3Fixture := v3[i]
 		if fixture.method == "eth_getWitness" || fixture.method == "debug_executionWitness" && fixture.mode == "legacy" {
 			requireWitnessGoldenFixtureSuperset(t, fixture, v3Fixture)
-			override := filepath.Join(dir, "v3", fixture.name)
+			override := filepath.Join(root, "v3", fixture.name)
 			if bytes.Equal(fixture.data, v3Fixture.data) {
-				if err := os.Remove(override); !errors.Is(err, fs.ErrNotExist) {
+				if err := dir.RemoveFile(override); !errors.Is(err, fs.ErrNotExist) {
 					require.NoError(t, err)
 				}
 			} else {
@@ -194,20 +195,20 @@ func writeWitnessGoldenFixtures(t *testing.T, dir string, hph, v3 []witnessGolde
 		} else {
 			require.Equal(t, fixture.data, v3Fixture.data, "v3 witness fixtures must match HPH: block %d method %s mode %s", fixture.block, fixture.method, fixture.mode)
 		}
-		require.NoError(t, os.WriteFile(filepath.Join(dir, fixture.name), fixture.data, 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, fixture.name), fixture.data, 0o644))
 	}
 }
 
 func TestWitnessGoldenUpdateDropsMatchingOverride(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
 	fixture := witnessGoldenFixture{name: "1-debug_executionWitness-legacy.json", block: 1, method: "debug_executionWitness", mode: "legacy", data: []byte(`{"state":[],"codes":[]}`)}
-	override := filepath.Join(dir, "v3", fixture.name)
+	override := filepath.Join(root, "v3", fixture.name)
 	require.NoError(t, os.MkdirAll(filepath.Dir(override), 0o755))
 	require.NoError(t, os.WriteFile(override, []byte(`{"state":["0x80"],"codes":[]}`), 0o644))
-	writeWitnessGoldenFixtures(t, dir, []witnessGoldenFixture{fixture}, []witnessGoldenFixture{fixture})
+	writeWitnessGoldenFixtures(t, root, []witnessGoldenFixture{fixture}, []witnessGoldenFixture{fixture})
 	require.NoFileExists(t, override)
 	missing := witnessGoldenFixture{name: "2-debug_executionWitness-legacy.json", block: 2, method: "debug_executionWitness", mode: "legacy", data: fixture.data}
-	writeWitnessGoldenFixtures(t, dir, []witnessGoldenFixture{missing}, []witnessGoldenFixture{missing})
+	writeWitnessGoldenFixtures(t, root, []witnessGoldenFixture{missing}, []witnessGoldenFixture{missing})
 }
 
 func TestWitnessGoldenFixtures(t *testing.T) {
