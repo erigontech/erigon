@@ -229,28 +229,6 @@ func truncateCanonicalAfter(tx kv.RwTx, head uint64) error {
 	return rawdbv3.TxNums.Truncate(tx, from)
 }
 
-// Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
-func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
-	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if !ok {
-		return common.Hash{}, fmt.Errorf("missing canonical hash at committed block %d", finish)
-	}
-	if err := truncateCanonicalAfter(tx, finish); err != nil {
-		return common.Hash{}, err
-	}
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
-		if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
-			return common.Hash{}, err
-		}
-	}
-	// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
-	rawdb.WriteHeadBlockHash(tx, head)
-	return head, rawdb.WriteHeadHeaderHash(tx, head)
-}
-
 // currentFinalisedBlockNum returns zero when finality is unset,
 // or nil when the stored finalized hash has no known block number.
 func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter) (*uint64, error) {

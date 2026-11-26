@@ -386,21 +386,55 @@ func (pe *PipelineExecutor) discardRejectedCanonicalTail(ctx context.Context, ba
 	var head common.Hash
 	err := pe.db.Update(ctx, func(tx kv.RwTx) error {
 		hash, err := rawdb.ReadCanonicalHash(tx, bad.Number)
-		if err != nil || hash == (common.Hash{}) || hash != bad.Hash {
+		if err != nil {
 			return err
 		}
+		if hash == (common.Hash{}) || hash != bad.Hash {
+			return nil
+		}
+
 		finish, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution)
-		if err != nil || !aligned || bad.Number <= finish || finish < pe.blockReader.FrozenBlocksInView(tx) {
+		if err != nil {
 			return err
 		}
+		if !aligned || bad.Number <= finish || finish < pe.blockReader.FrozenBlocksInView(tx) {
+			return nil
+		}
+
 		safe, err := pe.preservesAcceptedChain(ctx, tx, finish, proposedHead)
-		if err != nil || !safe {
+		if err != nil {
 			return err
 		}
+		if !safe {
+			return nil
+		}
+
 		head, err = pe.resetCanonicalToCheckpoint(ctx, tx, finish)
 		return err
 	})
 	return head, err
+}
+
+// Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
+func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
+	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !ok {
+		return common.Hash{}, fmt.Errorf("missing canonical hash at committed block %d", finish)
+	}
+	if err := truncateCanonicalAfter(tx, finish); err != nil {
+		return common.Hash{}, err
+	}
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
+		if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
+			return common.Hash{}, err
+		}
+	}
+	// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
+	rawdb.WriteHeadBlockHash(tx, head)
+	return head, rawdb.WriteHeadHeaderHash(tx, head)
 }
 
 func (pe *PipelineExecutor) preservesAcceptedChain(ctx context.Context, tx kv.Tx, finish uint64, proposedHead common.Hash) (bool, error) {

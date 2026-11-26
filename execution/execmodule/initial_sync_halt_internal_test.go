@@ -89,24 +89,45 @@ func TestStartupRecoveryDiscardsOnlyUnacceptedMutableBlocks(t *testing.T) {
 	sideTip := child(side, 5)
 	overlappingTip := child(next, 5)
 	for _, tc := range []struct {
-		name     string
-		accepted common.Hash
-		rejected *types.Header
-		frozen   uint64
-		executed uint64
-		recover  bool
+		name            string
+		accepted        common.Hash
+		rejected        *types.Header
+		frozenThrough   uint64
+		executedThrough uint64
+		wantDiscard     bool
 	}{
-		{"accepted_other_branch", sideTip.Hash(), tip, 1, 1, true},
-		{"accepted_parent_in_suffix", overlappingTip.Hash(), tip, 1, 1, false},
-		{"frozen_block_in_suffix", checkpoint.Hash(), tip, 2, 1, false},
-		{"rejected_checkpoint", checkpoint.Hash(), checkpoint, 0, 1, false},
-		{"rejected_other_hash", checkpoint.Hash(), sideTip, 0, 1, false},
-		{"execution_ahead_of_finish", checkpoint.Hash(), tip, 0, 2, false},
-		{"unknown_accepted_head", common.Hash{}, tip, 0, 1, false},
+		{
+			name: "accepted_other_branch", accepted: sideTip.Hash(), rejected: tip,
+			frozenThrough: 1, executedThrough: 1, wantDiscard: true,
+		},
+		{
+			name: "accepted_parent_in_suffix", accepted: overlappingTip.Hash(), rejected: tip,
+			frozenThrough: 1, executedThrough: 1, wantDiscard: false,
+		},
+		{
+			name: "frozen_block_in_suffix", accepted: checkpoint.Hash(), rejected: tip,
+			frozenThrough: 2, executedThrough: 1, wantDiscard: false,
+		},
+		{
+			name: "rejected_checkpoint", accepted: checkpoint.Hash(), rejected: checkpoint,
+			frozenThrough: 0, executedThrough: 1, wantDiscard: false,
+		},
+		{
+			name: "rejected_other_hash", accepted: checkpoint.Hash(), rejected: sideTip,
+			frozenThrough: 0, executedThrough: 1, wantDiscard: false,
+		},
+		{
+			name: "execution_ahead_of_finish", accepted: checkpoint.Hash(), rejected: tip,
+			frozenThrough: 0, executedThrough: 2, wantDiscard: false,
+		},
+		{
+			name: "unknown_accepted_head", accepted: common.Hash{}, rejected: tip,
+			frozenThrough: 0, executedThrough: 1, wantDiscard: false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			pe := PipelineExecutor{db: db, blockReader: startupBlockReader{freezeblocks.NewBlockReader(nil), tc.frozen}}
+			pe := PipelineExecutor{db: db, blockReader: startupBlockReader{freezeblocks.NewBlockReader(nil), tc.frozenThrough}}
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 				for _, header := range []*types.Header{checkpoint, next, tip, side, sideTip, overlappingTip} {
 					require.NoError(t, rawdb.WriteHeader(tx, header))
@@ -115,13 +136,13 @@ func TestStartupRecoveryDiscardsOnlyUnacceptedMutableBlocks(t *testing.T) {
 					require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 				}
 				rawdb.WriteForkchoiceHead(tx, tc.accepted)
-				require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, tc.executed))
+				require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, tc.executedThrough))
 				return stages.SaveStageProgress(tx, stages.Finish, checkpoint.Number.Uint64())
 			}))
 			bad := &stagedsync.RejectedBlockError{Number: tc.rejected.Number.Uint64(), Hash: tc.rejected.Hash(), Err: rules.ErrInvalidBlock}
 			err := pe.discardRejectedStartupTail(t.Context(), bad)
 			wantTip := tip.Hash()
-			if tc.recover {
+			if tc.wantDiscard {
 				require.NoError(t, err)
 				wantTip = common.Hash{}
 			} else {
