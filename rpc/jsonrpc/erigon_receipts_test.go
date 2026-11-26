@@ -95,12 +95,12 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	}
 }
 
-// Old cache files hold receipts whose index is the txNum (#21658). eth_getTransactionReceipt and
-// eth_getLogs do not serve them, and return the position in the block as eth_getBlockReceipts does.
+// eth_getTransactionReceipt and eth_getLogs do not serve a cached receipt whose index is its txNum, and
+// return the position in the block as eth_getBlockReceipts does.
 func TestPersistedReceiptWithTxNumAsIndex(t *testing.T) {
 	enableHistoricalRCache(t)
 	m := newLatestLogsTestChain(t)
-	// Give transaction 1's stored receipt a txNum as its index, as #21658 wrote it.
+	// Give transaction 1's stored receipt a txNum as its index.
 	entries := map[string][]byte{}
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		if err := tx.ForEach(kv.TblRCacheHistoryVals, nil, func(k, v []byte) error {

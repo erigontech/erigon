@@ -159,8 +159,8 @@ func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 	}
 }
 
-// Cached prior receipts are used only when their index matches their position: old cache files hold
-// receipts whose index is the txNum (#21658), and those are re-executed instead.
+// Cached prior receipts are used only when their index matches their position; a receipt whose index
+// is its txNum is re-executed instead.
 func TestDerivePriorReceiptsChecksCachedIndex(t *testing.T) {
 	t.Parallel()
 	cfg, txns, header, reader := counterCalls(t)

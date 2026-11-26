@@ -185,13 +185,12 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64, txIndex int) (*types.Receipt, bool, error) {
 	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
 		TxNum:     txNum,
-		TxIndex:   txIndex,
 		BlockNum:  blockNum,
 		BlockHash: blockHash,
 		TxnHash:   txnHash,
 		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
 		DontCalcBloom: true,
-	})
+	}, txIndex)
 	return receipt, ok && receipt != nil, err
 }
 

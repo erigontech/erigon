@@ -1313,7 +1313,6 @@ type RCacheV2Query struct {
 	BlockHash common.Hash
 	TxnHash   common.Hash
 	TxNum     uint64
-	TxIndex   int // position of the transaction in its block
 
 	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
 }
@@ -1342,7 +1341,7 @@ func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.D
 	}), nil
 }
 
-func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
+func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query, txIndex int) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
@@ -1360,9 +1359,8 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, query.BlockNum, len(v))
 	}
 	res := (*types.Receipt)(receipt)
-	// Old cache files hold receipts whose index is the txNum (#21658); treat them as missing,
-	// as ReadBlockReceiptsCacheV2 does.
-	if int(res.TransactionIndex) != query.TxIndex {
+	// A cached receipt whose index is not its position in the block is treated as missing.
+	if int(res.TransactionIndex) != txIndex {
 		return nil, false, nil
 	}
 	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)

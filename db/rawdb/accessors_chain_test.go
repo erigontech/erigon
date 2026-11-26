@@ -990,7 +990,7 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, rs)
 	// The single-receipt reader rejects it too.
-	r, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{BlockNum: blockNum, BlockHash: hash, TxnHash: tx1.Hash(), TxNum: base + 1, TxIndex: 0})
+	r, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{BlockNum: blockNum, BlockHash: hash, TxnHash: tx1.Hash(), TxNum: base + 1}, 0)
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Nil(t, r)
