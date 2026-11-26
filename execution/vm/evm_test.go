@@ -221,7 +221,7 @@ func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
 	collision, err := evm.hasCreateCollision(addr)
 	require.NoError(t, err)
 	require.False(t, collision)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, nonceRead := reads.GetNonce(addr)
 	_, codeHashRead := reads.GetCodeHash(addr)
 	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
@@ -278,7 +278,7 @@ func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
 	_, _, _, err := evm.Call(accounts.ZeroAddress, callee, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, balanceRead := reads.GetBalance(callee)
 	require.False(t, balanceRead, "a zero-value call to an account with code depends on no balance")
 }

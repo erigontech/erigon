@@ -1,6 +1,8 @@
 package p2p
 
 import (
+	"time"
+
 	"github.com/erigontech/erigon/p2p/discover"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -17,6 +19,11 @@ type P2PManager interface {
 	UDPv5Listener() *discover.UDPv5
 	SetENRAttSubnets(subnets []uint64)
 	UpdateENRSyncNets(subnetIndex int, on bool)
+	// MarkPeerUseful records that pid just gave us something: a first copy of a valid gossip message
+	// or a decoded answer to a data request.
+	MarkPeerUseful(pid peer.ID)
+	// PeerLastUseful returns when pid was last useful, counting its connection time as useful.
+	PeerLastUseful(pid peer.ID) (time.Time, bool)
 	// ConsumeDuplicateLoss reports whether a failure with pid may come from closing a duplicate connection, and uses that up.
 	ConsumeDuplicateLoss(pid peer.ID) bool
 }
