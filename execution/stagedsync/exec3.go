@@ -748,7 +748,8 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", allowedUnwindTo)
 	if u != nil {
-		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
+		rejected := &RejectedBlockError{Number: blockNumber, Hash: blockHash, Err: ErrInvalidStateRootHash}
+		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, rejected), applyTx); err != nil {
 			return err
 		}
 	}

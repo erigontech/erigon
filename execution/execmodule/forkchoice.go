@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -222,20 +221,7 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
-// A rejected catch-up must leave startup at the last committed execution checkpoint.
 // Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
-func (e *ExecModule) discardUnexecutedCanonical(ctx context.Context) (head common.Hash, err error) {
-	err = e.db.Update(ctx, func(tx kv.RwTx) error {
-		finish, err := stages.GetStageProgress(tx, stages.Finish)
-		if err != nil {
-			return err
-		}
-		head, err = e.pipelineExecutor.resetCanonicalToCheckpoint(ctx, tx, finish)
-		return err
-	})
-	return head, err
-}
-
 func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
 	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
 	if err != nil {
@@ -778,7 +764,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	const smallBlockJumpThreshold = 16
 	headNum := fcuHeader.Number.Uint64()
 	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
-	catchupCommitted := false
 
 	tx, currentContext, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
@@ -814,7 +799,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
 			checkpointStateChanges()
-			catchupCommitted = true
 			// Keep the committed receipts if a later cycle fails.
 			if hasMore && e.accum != nil && e.accum.RecentReceipts != nil {
 				restoreRecentReceipts = e.accum.RecentReceipts.Snapshot()
@@ -853,31 +837,39 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		// Tip execution reports invalid blocks directly. During catch-up, ErrInvalidBlock
-		// can also mean the executor missed a result, so rejection needs a block identity.
-		_, rejected := errors.AsType[*stagedsync.RejectedBlockError](err)
-		if rejected || (!initialCycle && errors.Is(err, rules.ErrInvalidBlock)) {
-			var latestValidHash common.Hash
-			if catchupCommitted {
-				teardownOverlay()
-				roTx.Rollback()
-				var cleanupErr error
-				latestValidHash, cleanupErr = e.discardUnexecutedCanonical(ctx)
-				if cleanupErr != nil {
-					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
-				}
-			} else {
-				// An uncommitted unwind moves only the overlay's head to the common ancestor.
-				latestValidHash = rawdb.ReadHeadBlockHash(tx)
-			}
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				Status:          ExecutionStatusBadBlock,
-				ValidationError: err.Error(),
-				LatestValidHash: latestValidHash,
-			}, stateFlushingInParallel)
-			return nil
+		bad, rejected := errors.AsType[*stagedsync.RejectedBlockError](err)
+		if !rejected || bad.Hash == (common.Hash{}) {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		// A previous forkchoice may have committed this block's canonical entry.
+		// Check the committed view before taking the writer lock for cleanup.
+		canonical, cleanupErr := rawdb.ReadCanonicalHash(roTx, bad.Number)
+		if cleanupErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
+		}
+		var latestValidHash common.Hash
+		if canonical == bad.Hash {
+			teardownOverlay()
+			roTx.Rollback()
+			latestValidHash, cleanupErr = e.pipelineExecutor.discardRejectedCanonicalTail(ctx, bad, blockHash)
+		} else {
+			// A private reorg may have unwound to a common ancestor. Its head
+			// marker can also point to an unexecuted proposal from an earlier call.
+			var finish uint64
+			finish, cleanupErr = stages.GetStageProgress(tx, stages.Finish)
+			if cleanupErr == nil {
+				latestValidHash, cleanupErr = e.canonicalHash(ctx, tx, finish)
+			}
+		}
+		if cleanupErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
+		}
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			Status:          ExecutionStatusBadBlock,
+			ValidationError: err.Error(),
+			LatestValidHash: latestValidHash,
+		}, stateFlushingInParallel)
+		return nil
 	}
 
 	// if head hash was set then success otherwise no

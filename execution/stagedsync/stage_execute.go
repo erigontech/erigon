@@ -518,19 +518,14 @@ func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 	}
 
 	if v := out.verdict; v != nil {
-		// Catch-up can discard an unaccepted suffix only when execution
-		// identifies the rejected block. An internal failure has no such identity.
-		if s.CurrentSyncCycle.IsInitialCycle {
-			if v.blockHash != (common.Hash{}) {
-				return &RejectedBlockError{Number: v.blockNum, Hash: v.blockHash, Err: v.err}
-			}
-		} else if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+		if !s.CurrentSyncCycle.IsInitialCycle && errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
 			return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
 		}
-		// A plain invalid block propagates the error without setting a stage unwind
-		// point — the caller owns the unwind. Setting one here would leave a stale
-		// bad-block verdict that blocks a fresh canonical block at the same height
-		// from being re-executed on the next fork-choice.
+		if v.blockHash != (common.Hash{}) {
+			return &RejectedBlockError{Number: v.blockNum, Hash: v.blockHash, Err: v.err}
+		}
+		// Missing execution results can wrap ErrInvalidBlock without identifying
+		// a block that forkchoice can reject.
 		return v.err
 	}
 

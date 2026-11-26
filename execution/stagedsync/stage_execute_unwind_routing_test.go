@@ -156,7 +156,10 @@ func TestRenderExecOutcome(t *testing.T) {
 		cfg := ExecuteBlockCfg{badBlockHalt: true}
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 20, blockHash: common.HexToHash("0xbad20"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, cfg, s, u, logger)
-		require.Same(t, wrongRoot, got)
+		require.ErrorIs(t, got, wrongRoot)
+		var rejected *RejectedBlockError
+		require.ErrorAs(t, got, &rejected)
+		require.Equal(t, out.verdict.blockHash, rejected.Hash)
 		require.Empty(t, u.calls)
 	})
 
@@ -214,5 +217,9 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.NoError(t, got)
 		require.Len(t, u.calls, 1)
 		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
+		var rejected *RejectedBlockError
+		require.ErrorAs(t, u.calls[0].reason.ErrBadBlock, &rejected)
+		require.Equal(t, out.verdict.blockNum, rejected.Number, "the rejected block is above the unwind target")
+		require.Equal(t, out.verdict.blockHash, rejected.Hash)
 	})
 }

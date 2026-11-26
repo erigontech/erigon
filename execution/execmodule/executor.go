@@ -371,55 +371,60 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 }
 
 func (pe *PipelineExecutor) discardRejectedStartupTail(ctx context.Context, bad *stagedsync.RejectedBlockError) error {
-	return pe.db.Update(ctx, func(tx kv.RwTx) error {
-		finish, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution)
-		if err != nil {
-			return err
-		}
-		if !aligned || finish < pe.blockReader.FrozenBlocksInView(tx) || bad.Number <= finish {
-			return bad
-		}
-		hash, err := rawdb.ReadCanonicalHash(tx, bad.Number)
-		if err != nil {
-			return err
-		}
-		if hash != bad.Hash {
-			return bad
-		}
+	head, err := pe.discardRejectedCanonicalTail(ctx, bad, common.Hash{})
+	if err == nil && head == (common.Hash{}) {
+		return bad
+	}
+	return err
+}
 
-		// The accepted fork may be taller than this checkpoint. Walk its parents
-		// until we know that truncation would preserve every accepted canonical block.
-		accepted := rawdb.ReadForkchoiceHead(tx)
-		if accepted == (common.Hash{}) {
-			return bad
-		}
-		number, err := pe.blockReader.HeaderNumber(ctx, tx, accepted)
-		if err != nil {
+// A committed batch records the proposed chain beyond Finish. Return the checkpoint
+// if the rejected block was in a suffix we could discard, or zero if we kept it.
+func (pe *PipelineExecutor) discardRejectedCanonicalTail(ctx context.Context, bad *stagedsync.RejectedBlockError, proposedHead common.Hash) (common.Hash, error) {
+	var head common.Hash
+	err := pe.db.Update(ctx, func(tx kv.RwTx) error {
+		hash, err := rawdb.ReadCanonicalHash(tx, bad.Number)
+		if err != nil || hash == (common.Hash{}) || hash != bad.Hash {
 			return err
 		}
-		if number == nil {
-			return bad
+		finish, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution)
+		if err != nil || !aligned || bad.Number <= finish || finish < pe.blockReader.FrozenBlocksInView(tx) {
+			return err
 		}
-		for height := *number; height > finish; height-- {
-			canonical, err := rawdb.ReadCanonicalHash(tx, height)
-			if err != nil {
-				return err
-			}
-			if accepted == canonical {
-				return bad
-			}
-			header, err := pe.blockReader.Header(ctx, tx, accepted, height)
-			if err != nil {
-				return err
-			}
-			if header == nil {
-				return bad
-			}
-			accepted = header.ParentHash
+		safe, err := pe.preservesAcceptedChain(ctx, tx, finish, proposedHead)
+		if err != nil || !safe {
+			return err
 		}
-		_, err = pe.resetCanonicalToCheckpoint(ctx, tx, finish)
+		head, err = pe.resetCanonicalToCheckpoint(ctx, tx, finish)
 		return err
 	})
+	return head, err
+}
+
+func (pe *PipelineExecutor) preservesAcceptedChain(ctx context.Context, tx kv.Tx, finish uint64, proposedHead common.Hash) (bool, error) {
+	accepted := rawdb.ReadForkchoiceHead(tx)
+	if accepted == (common.Hash{}) {
+		// Before the first accepted forkchoice, a live request can identify its
+		// own persisted proposal. Startup has no such request.
+		return proposedHead != (common.Hash{}) && rawdb.ReadHeadHeaderHash(tx) == proposedHead, nil
+	}
+	number, err := pe.blockReader.HeaderNumber(ctx, tx, accepted)
+	if err != nil || number == nil {
+		return false, err
+	}
+	// A taller accepted fork is safe only if it diverged at or below Finish.
+	for height := *number; height > finish; height-- {
+		canonical, err := rawdb.ReadCanonicalHash(tx, height)
+		if err != nil || accepted == canonical {
+			return false, err
+		}
+		header, err := pe.blockReader.Header(ctx, tx, accepted, height)
+		if err != nil || header == nil {
+			return false, err
+		}
+		accepted = header.ParentHash
+	}
+	return true, nil
 }
 
 // lastValidationExecStageTiming reports the Execution stage duration of the most

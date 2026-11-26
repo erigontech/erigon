@@ -155,7 +155,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if bad != nil {
 		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, bad.number, bad.hash, bad.err))
 		invalidBlock := errors.Is(bad.err, rules.ErrInvalidBlock)
-		if s.CurrentSyncCycle.IsInitialCycle && invalidBlock {
+		if invalidBlock {
 			bad.err = &RejectedBlockError{Number: bad.number, Hash: bad.hash, Err: bad.err}
 		}
 		if cfg.badBlockHalt {

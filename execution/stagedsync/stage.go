@@ -108,7 +108,7 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	return execution, err
 }
 
-// RejectedBlockError identifies the block a sync stage rejected during catch-up.
+// RejectedBlockError identifies the block a sync stage rejected.
 type RejectedBlockError struct {
 	Number uint64
 	Hash   common.Hash

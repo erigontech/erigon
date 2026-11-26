@@ -382,12 +382,10 @@ func TestSendersUnwindsToTheBlockBeforeABadSignature(t *testing.T) {
 		require.Equal(t, uint64(3), u.point)
 		require.NotNil(t, u.reason.Block)
 		require.Equal(t, hashes[3], *u.reason.Block)
-		if catchup {
-			var rejected *stagedsync.RejectedBlockError
-			require.ErrorAs(t, u.reason.ErrBadBlock, &rejected)
-			require.Equal(t, uint64(4), rejected.Number)
-			require.Equal(t, hashes[3], rejected.Hash)
-		}
+		var rejected *stagedsync.RejectedBlockError
+		require.ErrorAs(t, u.reason.ErrBadBlock, &rejected)
+		require.Equal(t, uint64(4), rejected.Number)
+		require.Equal(t, hashes[3], rejected.Hash)
 	}
 }
 
