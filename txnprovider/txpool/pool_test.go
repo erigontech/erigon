@@ -3851,8 +3851,8 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	}
 }
 
-// Any peer can relay a transaction that its sender signed earlier, so the sender is
-// punished only for a transaction that would take a new slot.
+// Any peer can relay a transaction that its sender signed earlier, so the sender is punished
+// only for a transaction that passes the other checks and would take a new slot.
 func TestRemoteTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -3898,7 +3898,7 @@ func TestRemoteTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 	}
 }
 
-// Blob limits and the blob fee are checked before the sender slot limit, so a blob transaction
+// Blob limits and the blob fee cap are checked before the sender slot limit, so a blob transaction
 // that they reject does not count as spam.
 func TestRemoteBlobTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 	for _, tc := range []struct {

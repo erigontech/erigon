@@ -1435,7 +1435,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 	// A Spammer result makes validateTxns call punishSpammer, which evicts up to half of the
 	// sender's pooled transactions. Any peer can relay any transaction that the sender ever
 	// signed, including ones that the pool would reject anyway. So a transaction counts as spam
-	// only if it would take a new slot and passes the checks above and the insertion checks.
+	// only if it passes the checks above and checkInsertion, and would take a new slot: no pooled
+	// transaction of the sender has its nonce. Keep this check after the other checks in this function.
 	//
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
@@ -2312,16 +2313,18 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	return txpoolcfg.NotSet
 }
 
-// checkInsertion runs the checks that addLocked makes before it inserts txn, after the replacement
-// checks. found is the pooled transaction that txn would replace, or nil when txn takes a new slot.
-// It returns NotSet if txn can be inserted. The caller must hold the pool lock.
+// checkInsertion runs the checks that addLocked makes before it inserts txn, after the frame admission
+// and replacement checks. found is the pooled transaction that txn would replace, or nil when txn takes
+// a new slot. It returns NotSet if txn can be inserted. It requires the pool lock and leaves pool state
+// unchanged, except that it caches a rejection that depends only on txn.
 func (p *TxPool) checkInsertion(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
-	// Don't add blob txn to queued if it's less than current pending blob base fee
+	// A blob transaction that cannot pay the pending blob base fee is rejected, not queued.
 	if txn.HasBlobs() && txn.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	// A pooled authorization from the sender reserves the sender's account nonce, unless txn replaces
+	// the transaction that holds the authorization. Authorizations cannot reserve keyed nonces.
 	senderAddr, ok := p.senders.senderID2Addr[txn.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
@@ -2331,10 +2334,11 @@ func (p *TxPool) checkInsertion(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardR
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
-	// Check if we have txn with same authorization in the pool
+	// A SetCode transaction cannot carry an authorization that another pooled transaction holds.
 	if txn.TxType() == SetCodeTxnType {
 		for _, a := range txn.AuthAndNonces {
-			// Self authorization nonce should be senderNonce + 1
+			// Execution increments the sender's nonce before it applies authorizations, so a
+			// self-authorization is valid only for the nonce after the transaction's own.
 			if a.authority == senderAddr && a.nonce != txn.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", txn.IDHash))
 				// This pool rule is stricter than execution. Its rejection depends only on
