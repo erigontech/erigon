@@ -1754,7 +1754,7 @@ type txnAdmission struct {
 	// The sidecar is independent of policy and frame simulation, which checks only
 	// the inner transaction. Its verification result survives admission retries.
 	sidecarReason      txpoolcfg.DiscardReason
-	conditionalSidecar bool // use this proof result only if an earlier input makes the transaction eligible
+	conditionalSidecar bool // use this proof result only if the copy is pooled or becomes eligible
 	skipAfterBadProof  bool // an earlier proof failure from this peer takes precedence over the policy result
 	local              bool
 	needsPreparation   bool // authorization recovery or sidecar verification still pending
@@ -1849,6 +1849,11 @@ func (p *TxPool) precheckCandidate(a *txnAdmission, batch *admissionBatch, view 
 	} else {
 		a.reason = txpoolcfg.NotSet
 	}
+	// A remote copy of a pooled blob needs a proof result even if policy
+	// rejects the transaction. Admission rechecks policy if the hash disappears.
+	if !a.local && a.txn.TxType() == BlobTxnType && p.byHash[string(a.txn.IDHash[:])] != nil {
+		return nil
+	}
 	if err := p.validateCandidate(a, view, false); err != nil {
 		return err
 	}
@@ -1922,11 +1927,15 @@ func (o *kzgOffenders) add(source remoteSource) {
 }
 
 type earlierInputs struct {
+	hashes   map[common.Hash]bool
 	senders  map[uint64]bool // true if an earlier input could charge this sender a penalty
 	mayEvict bool
 }
 
 func (e *earlierInputs) record(p *TxPool, a *txnAdmission) {
+	if a.reason == txpoolcfg.NotSet {
+		e.hashes[a.txn.IDHash] = true
+	}
 	sender := a.txn.SenderID
 	mayPenalize, seenSender := e.senders[sender]
 	policyUndecided := a.reason == txpoolcfg.NotSet || a.reason == txpoolcfg.Spammer || a.conditionalSidecar
@@ -1957,8 +1966,8 @@ func (e *earlierInputs) mayFreeSlot(a *txnAdmission) bool {
 	return false
 }
 
-// An earlier sender penalty can free a slot for a deferred candidate.
-// Recover its signers or verify its sidecar outside the lock before
+// A candidate may need signers or a sidecar check only if an earlier input
+// frees a slot or installs its hash. Finish that work outside the lock before
 // admitting any input, so a retry cannot expose or promote part of the batch.
 func (p *TxPool) planPreparation(batch *admissionBatch, view kvcache.CacheView) error {
 	txns := batch.txns
@@ -1973,6 +1982,7 @@ func (p *TxPool) planPreparation(batch *admissionBatch, view kvcache.CacheView) 
 	var earlier earlierInputs
 	if len(txns) > 1 {
 		earlier.senders = make(map[uint64]bool)
+		earlier.hashes = make(map[common.Hash]bool)
 	}
 	needPreparation := false
 	for i := range txns {
@@ -1983,8 +1993,11 @@ func (p *TxPool) planPreparation(batch *admissionBatch, view kvcache.CacheView) 
 				return err
 			}
 			if !skipPeer {
-				if a.reason == txpoolcfg.NotSet || earlier.mayFreeSlot(a) {
-					a.conditionalSidecar = a.txn.HasBlobs() && a.reason != txpoolcfg.NotSet
+				remoteBlob := !a.local && a.txn.HasBlobs()
+				pooled := remoteBlob && p.byHash[string(a.txn.IDHash[:])] != nil
+				mayDuplicate := remoteBlob && earlier.hashes[a.txn.IDHash]
+				if a.reason == txpoolcfg.NotSet || pooled || mayDuplicate || earlier.mayFreeSlot(a) {
+					a.conditionalSidecar = a.txn.HasBlobs() && a.reason != txpoolcfg.NotSet && !pooled
 					a.reason, a.needsPreparation = txpoolcfg.NotSet, true
 					needPreparation = true
 				}
@@ -2225,8 +2238,8 @@ func (p *TxPool) insertTxns(txns []txnAdmission, cells blobCells, announcements 
 		found := p.byHash[string(txn.IDHash[:])]
 		// A pooled hash cannot establish that a peer's sidecar is valid. Preserve
 		// both sidecar rejections and skips caused by an earlier remote proof failure.
-		rejectSidecar := a.sidecarRejected() && (!a.conditionalSidecar || a.reason == txpoolcfg.NotSet)
-		if !a.local && offenders.skip(a.source) && (a.skipAfterBadProof || rejectSidecar) {
+		rejectSidecar := a.sidecarRejected() && (!a.conditionalSidecar || found != nil || a.reason == txpoolcfg.NotSet)
+		if !a.local && offenders.skip(a.source) && (found != nil || a.skipAfterBadProof || rejectSidecar) {
 			a.reason = txpoolcfg.SkippedAfterKZGFailure
 			continue
 		}
@@ -2239,7 +2252,7 @@ func (p *TxPool) insertTxns(txns []txnAdmission, cells blobCells, announcements 
 				continue
 			}
 		}
-		if found != nil && (a.local || !txn.HasBlobs() || a.sidecarReason == txpoolcfg.Success) {
+		if found != nil {
 			a.reason = txpoolcfg.DuplicateHash
 			// A local resubmission can help the pooled transaction propagate again.
 			if a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {

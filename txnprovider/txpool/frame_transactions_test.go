@@ -1633,6 +1633,16 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+
+	// A remote copy still needs a sidecar result when simulation is unavailable.
+	pool.ethBackend.(*frameValidationBackend).err = errors.New("simulation unavailable")
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+	replay.BlobBundles[0].Proofs[0] = slot.BlobBundles[0].Proofs[0]
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
 }
 
 func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {
