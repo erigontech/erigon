@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -107,11 +106,7 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	transientBeforeSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(338)}
-	transientAfterSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(42)}
-	cascadeSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(24), witnessBenchSlot(14)}
-	plainSlots := [2]common.Hash{witnessBenchSlot(1), witnessBenchSlot(2)}
-	emptySlots := plainSlots
+	transientBeforeSlots := witnessBenchTransientBeforeSlots
 	inlineSlots := [2]common.Hash{
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000003c6b4"),
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000007dc4f"),
@@ -120,40 +115,9 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	require.GreaterOrEqual(t, witnessBenchPrefixLength(inlineHashes[0], inlineHashes[1]), 10)
 
 	transientBefore := witnessBenchAddress(0x1001)
-	transientAfter := witnessBenchAddress(0x1002)
-	cascade := witnessBenchAddress(0x1003)
-	plain := witnessBenchAddress(0x1004)
-	empty := witnessBenchAddress(0x1005)
-	inline := witnessBenchAddress(0x1006)
 	emptyStorage := witnessBenchAddress(0x1007)
 	selfDestruct := witnessBenchAddressWithPrefix(sender)
-	alloc := types.GenesisAlloc{
-		sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
-		transientBefore: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{transientBeforeSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientBeforeSlots[1], witnessBenchValue(2)},
-		)},
-		transientAfter: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{transientAfterSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientAfterSlots[1], witnessBenchValue(2)},
-		)},
-		cascade: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{cascadeSlots[0], witnessBenchValue(1)}, [2]common.Hash{cascadeSlots[1], witnessBenchValue(2)}, [2]common.Hash{cascadeSlots[2], witnessBenchValue(3)},
-		)},
-		plain: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
-		)},
-		empty: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{emptySlots[0], witnessBenchValue(1)}, [2]common.Hash{emptySlots[1], witnessBenchValue(2)},
-		)},
-		selfDestruct: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
-		)},
-		inline: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{inlineSlots[0], witnessBenchValue(1)}, [2]common.Hash{inlineSlots[1], witnessBenchValue(2)},
-		)},
-		emptyStorage: {Balance: new(big.Int), Nonce: 1, Code: []byte{0x00}},
-	}
-	spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
+	run := witnessBenchBuildCollapse(t, &emptyStorage)
 	shapes := []witnessGoldenShape{
 		{name: "transient-before", blockNum: 1},
 		{name: "transient-after", blockNum: 2},
@@ -163,28 +127,9 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 		{name: "self-destruct", blockNum: 6},
 		{name: "inline-survivor", blockNum: 7},
 	}
-	generated, err := m.GenerateChain(len(shapes), func(i int, block *blockgen.BlockGen) {
-		switch i {
-		case 0:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientBefore, witnessBenchPairData([2]common.Hash{transientBeforeSlots[0], {}}, [2]common.Hash{transientBeforeSlots[2], witnessBenchValue(3)})))
-		case 1:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientAfter, witnessBenchPairData([2]common.Hash{transientAfterSlots[0], {}}, [2]common.Hash{transientAfterSlots[2], witnessBenchValue(3)})))
-		case 2:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, cascade, witnessBenchPairData([2]common.Hash{cascadeSlots[0], {}}, [2]common.Hash{cascadeSlots[1], {}})))
-		case 3:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, plain, witnessBenchPairData([2]common.Hash{plainSlots[0], {}})))
-		case 4:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, empty, witnessBenchPairData([2]common.Hash{emptySlots[0], {}}, [2]common.Hash{emptySlots[1], {}})))
-		case 5:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, selfDestruct, nil))
-		case 6:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, inline, witnessBenchPairData([2]common.Hash{inlineSlots[0], {}})))
-		}
-	})
-	require.NoError(t, err)
 	absentSlot := witnessBenchValue(0x99)
 	return witnessGoldenRun{
-		m: m, chain: generated, shapes: shapes,
+		m: run.m, chain: run.chain, shapes: shapes,
 		proofs: []witnessGoldenProof{
 			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(transientBeforeSlots[1][:])}},
 			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
@@ -341,26 +286,7 @@ func witnessGoldenCollapseCandidates(t *testing.T, api *DebugAPIImpl, m *execmod
 	accessed, _, err := api.buildAccessedState(ctx, tx, block, chainConfig, api.engine(), firstTxNum, witnessModeLegacy, nil)
 	require.NoError(t, err)
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
-	for address := range accessed.Deleted {
-		to, ok := kv.NextSubtree(address[:])
-		if !ok {
-			to = nil
-		}
-		it, err := tx.RangeAsOf(kv.StorageDomain, address[:], to, firstTxNum, order.Asc, kv.Unlim)
-		require.NoError(t, err)
-		for it.HasNext() {
-			key, value, err := it.Next()
-			require.NoError(t, err)
-			if len(value) == 0 {
-				continue
-			}
-			if accessed.Storage[address] == nil {
-				accessed.Storage[address] = make(map[common.Hash]struct{})
-			}
-			accessed.Storage[address][common.BytesToHash(key[len(address):])] = struct{}{}
-		}
-		it.Close()
-	}
+	require.NoError(t, addDeletedAccountStorage(tx, firstTxNum, accessed))
 	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -387,12 +313,8 @@ func TestWitnessGoldenCollapseShapes(t *testing.T) {
 			require.NotEmpty(t, v3.legacy[name], name)
 		}
 	}
-	require.NotEmpty(t, hph.legacy["transient-after"])
-	require.NotEmpty(t, v3.legacy["transient-after"])
 	require.Empty(t, hph.canonical["transient-after"])
 	require.Empty(t, v3.canonical["transient-after"])
-	require.Less(t, len(hph.canonical["transient-after"]), len(hph.legacy["transient-after"]))
-	require.NotEqual(t, hph.legacy["transient-after"], hph.canonical["transient-after"])
 }
 
 func TestWitnessGoldenContractSStore(t *testing.T) {

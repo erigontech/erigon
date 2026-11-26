@@ -776,36 +776,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
 
-	// A self-destruct / empty-account delete never traverses the account's storage
-	// trie, so the recording reader saw none of its slots. The stateless verifier's
-	// DeleteSubtree clears that subtree structurally and needs it in the witness, so
-	// range the deleted account's parent-state storage and add its slots to the access
-	// set — they become proved keys, so the fold materializes the subtree and the lean
-	// prune keeps it.
-	for delAddr := range accessed.Deleted {
-		to, ok := kv.NextSubtree(delAddr[:])
-		if !ok {
-			to = nil
-		}
-		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNumInBlock, order.Asc, kv.Unlim)
-		if err != nil {
-			return nil, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				it.Close()
-				return nil, err
-			}
-			if len(v) == 0 {
-				continue
-			}
-			if accessed.Storage[delAddr] == nil {
-				accessed.Storage[delAddr] = make(map[common.Hash]struct{})
-			}
-			accessed.Storage[delAddr][common.BytesToHash(k[len(delAddr):])] = struct{}{}
-		}
-		it.Close()
+	if err := addDeletedAccountStorage(tx, firstTxNumInBlock, accessed); err != nil {
+		return nil, err
 	}
 
 	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
@@ -896,6 +868,35 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 
 	return bytes.Clone(witnessBuffer.Bytes()), nil
+}
+
+func addDeletedAccountStorage(tx kv.TemporalTx, firstTxNum uint64, accessed *accessedState) error {
+	for delAddr := range accessed.Deleted {
+		to, ok := kv.NextSubtree(delAddr[:])
+		if !ok {
+			to = nil
+		}
+		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNum, order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				it.Close()
+				return err
+			}
+			if len(v) == 0 {
+				continue
+			}
+			if accessed.Storage[delAddr] == nil {
+				accessed.Storage[delAddr] = make(map[common.Hash]struct{})
+			}
+			accessed.Storage[delAddr][common.BytesToHash(k[len(delAddr):])] = struct{}{}
+		}
+		it.Close()
+	}
+	return nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and

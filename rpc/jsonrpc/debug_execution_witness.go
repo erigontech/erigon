@@ -1717,10 +1717,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 
 func ReplayExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, parent *types.Header) (common.Hash, error) {
 	replay := *result
-	replay.headerByNumber = nil
-	if parent != nil {
-		replay.headerByNumber = map[uint64]*types.Header{parent.Number.Uint64(): parent}
-	}
+	replay.headerByNumber = map[uint64]*types.Header{parent.Number.Uint64(): parent}
 	root, _, err := execBlockStatelessly(&replay, block, chainConfig, engine)
 	return root, err
 }

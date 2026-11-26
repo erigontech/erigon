@@ -27,16 +27,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
-	type deleteGroup struct {
-		plane byte
-		owner []byte
-		paths [][]byte
-	}
-	groups := make(map[string]*deleteGroup)
+	groups := make(map[string][][]byte)
 	deletedAccounts := make(map[string]struct{})
 	for _, item := range items {
 		if item.update != nil && item.update.Deleted() && len(item.plainKey) == length.Addr {
@@ -47,7 +41,7 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		if item.update == nil || !item.update.Deleted() {
 			continue
 		}
-		plane, owner, path := planeAccount, []byte(nil), item.hashedKey
+		owner, path := "", item.hashedKey
 		if len(item.plainKey) != length.Addr {
 			if len(path) < 64 {
 				continue
@@ -55,29 +49,25 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 			if _, ok := deletedAccounts[string(path[:64])]; ok {
 				continue
 			}
-			addrHash := hashAddressPath(path[:64])
-			plane, owner, path = planeStorage, addrHash[:], path[64:]
+			owner, path = string(path[:64]), path[64:]
 		}
-		groupKey := string(append([]byte{plane}, owner...))
-		group := groups[groupKey]
-		if group == nil {
-			group = &deleteGroup{plane: plane, owner: slices.Clone(owner)}
-			groups[groupKey] = group
-		}
-		group.paths = append(group.paths, slices.Clone(path))
+		groups[owner] = append(groups[owner], slices.Clone(path))
 	}
-	for _, group := range groups {
-		slices.SortFunc(group.paths, bytes.Compare)
-		group.paths = slices.CompactFunc(group.paths, bytes.Equal)
+	for owner, paths := range groups {
+		slices.SortFunc(paths, bytes.Compare)
+		groups[owner] = slices.CompactFunc(paths, bytes.Equal)
 	}
 	for _, groupKey := range slices.Sorted(maps.Keys(groups)) {
-		group := groups[groupKey]
-		g := graph{plane: group.plane, addrHash: group.owner}
+		plane := planeAccount
+		addrHash := []byte(nil)
 		ownerPath := []byte(nil)
-		if group.plane == planeStorage {
-			ownerPath = make([]byte, 64)
-			nibbles.Expand(group.owner, ownerPath)
+		if groupKey != "" {
+			plane = planeStorage
+			ownerPath = []byte(groupKey)
+			packed := hashAddressPath(ownerPath)
+			addrHash = packed[:]
 		}
+		g := graph{plane: plane, addrHash: addrHash}
 		root, err := g.loadRoot(ctx)
 		if err != nil {
 			return err
@@ -85,7 +75,7 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		if root == nil {
 			continue
 		}
-		deletes := deleteRange(group.paths, root.path, nil)
+		deletes := deleteRange(groups[groupKey], root.path, nil)
 		if len(deletes) == 0 {
 			continue
 		}

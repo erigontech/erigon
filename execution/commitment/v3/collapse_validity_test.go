@@ -168,43 +168,36 @@ func validityTrieKey(key []byte) []byte {
 	return append(crypto.Keccak256(key[:length.Addr]), crypto.Keccak256(key[length.Addr:])...)
 }
 
-func validityCascadeScenarios(t *testing.T) []struct {
+var validityCascadeScenarios = []struct {
 	name  string
 	shape witnessShape
 	batch func(*witnessBed) []commitmenttest.Op
-} {
-	t.Helper()
-	return []struct {
-		name  string
-		shape witnessShape
-		batch func(*witnessBed) []commitmenttest.Op
-	}{
-		{
-			name:  "account-cascade",
-			shape: witnessShape{accounts: 3, accountPrefixes: [][]byte{{1, 2, 3}, {1, 2, 4}, {8}}},
-			batch: func(b *witnessBed) []commitmenttest.Op {
-				return []commitmenttest.Op{commitmenttest.DeleteAt(b.accounts[0]), commitmenttest.DeleteAt(b.accounts[1])}
-			},
+}{
+	{
+		name:  "account-cascade",
+		shape: witnessShape{accounts: 3, accountPrefixes: [][]byte{{1, 2, 3}, {1, 2, 4}, {8}}},
+		batch: func(b *witnessBed) []commitmenttest.Op {
+			return []commitmenttest.Op{commitmenttest.DeleteAt(b.accounts[0]), commitmenttest.DeleteAt(b.accounts[1])}
 		},
-		{
-			name:  "storage-cascade",
-			shape: witnessShape{accounts: 1, slots: 3, slotPrefixes: [][]byte{{1, 2, 3}, {1, 2, 4}, {8}}},
-			batch: func(b *witnessBed) []commitmenttest.Op {
-				return []commitmenttest.Op{commitmenttest.DeleteAt(b.slots[0]), commitmenttest.DeleteAt(b.slots[1])}
-			},
+	},
+	{
+		name:  "storage-cascade",
+		shape: witnessShape{accounts: 1, slots: 3, slotPrefixes: [][]byte{{1, 2, 3}, {1, 2, 4}, {8}}},
+		batch: func(b *witnessBed) []commitmenttest.Op {
+			return []commitmenttest.Op{commitmenttest.DeleteAt(b.slots[0]), commitmenttest.DeleteAt(b.slots[1])}
 		},
-		{
-			name:  "self-destruct",
-			shape: witnessShape{accounts: 3, slots: 2, accountPrefixes: [][]byte{{1, 2}, {1, 3}, {8}}},
-			batch: func(b *witnessBed) []commitmenttest.Op {
-				return []commitmenttest.Op{commitmenttest.DeleteAt(b.accounts[0])}
-			},
+	},
+	{
+		name:  "self-destruct",
+		shape: witnessShape{accounts: 3, slots: 2, accountPrefixes: [][]byte{{1, 2}, {1, 3}, {8}}},
+		batch: func(b *witnessBed) []commitmenttest.Op {
+			return []commitmenttest.Op{commitmenttest.DeleteAt(b.accounts[0])}
 		},
-	}
+	},
 }
 
 func TestCollapseOracleHasTeeth(t *testing.T) {
-	tc := validityCascadeScenarios(t)[0]
+	tc := validityCascadeScenarios[0]
 	rng := rand.New(rand.NewSource(17))
 	b := newWitnessBed(t, witnessState(rng, tc.shape))
 	batch := tc.batch(b)
@@ -225,7 +218,7 @@ func TestCollapseOracleHasTeeth(t *testing.T) {
 }
 
 func TestCollapseValiditySearch(t *testing.T) {
-	for _, tc := range validityCascadeScenarios(t) {
+	for _, tc := range validityCascadeScenarios {
 		t.Run(tc.name, func(t *testing.T) {
 			rng := rand.New(rand.NewSource(17))
 			b := newWitnessBed(t, witnessState(rng, tc.shape))

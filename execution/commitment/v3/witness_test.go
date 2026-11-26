@@ -412,11 +412,6 @@ func TestWitnessSupersetAtExtensionEnd(t *testing.T) {
 			}
 			atEnd := fetch(end)
 			pastEnd := fetch(slices.Concat(end, []byte{15}))
-			for hash := range pastEnd {
-				if _, ok := atEnd[hash]; !ok {
-					t.Fatalf("extension-end superset size = %d, want %d, missing branch %x", len(atEnd), len(pastEnd), hash)
-				}
-			}
 			require.Equal(t, pastEnd, atEnd)
 		})
 	}

@@ -48,11 +48,6 @@ const witnessBenchContractBytecodeHex = "361560225760005b80369010601057005b80359
 
 var witnessBenchContractBytecode = common.Hex2Bytes(witnessBenchContractBytecodeHex)
 
-type witnessBenchHashedSlot struct {
-	value common.Hash
-	hash  common.Hash
-}
-
 type witnessBenchRun struct {
 	m             *execmoduletester.ExecModuleTester
 	chain         *blockgen.ChainPack
@@ -74,7 +69,10 @@ func BenchmarkWitnessBuild(b *testing.B) {
 			statecfg.EnableHistoricalCommitment()
 			var run *witnessBenchRun
 			if chainName == "collapse" {
-				run = witnessBenchBuildCollapse(b)
+				run = witnessBenchBuildCollapse(b, nil)
+				if err := run.m.InsertChain(run.chain); err != nil {
+					b.Fatal(err)
+				}
 			} else {
 				run = witnessBenchBuildGenerated(b)
 			}
@@ -169,6 +167,15 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 		return 0, err
 	}
 	decoder := codec.NewDecoder(reader, &witnessBenchCbor)
+	consume := func(count int) error {
+		for range count {
+			var operand codec.Raw
+			if err := decoder.Decode(&operand); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	nodes := 0
 	for {
 		opcode, err := reader.ReadByte()
@@ -181,21 +188,17 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 		switch opcode {
 		case 0:
 			nodes++
-			if err := witnessBenchDecodeBytes(decoder); err != nil {
-				return 0, err
-			}
-			if err := witnessBenchDecodeBytes(decoder); err != nil {
+			if err := consume(2); err != nil {
 				return 0, err
 			}
 		case 1:
 			nodes++
-			if err := witnessBenchDecodeBytes(decoder); err != nil {
+			if err := consume(1); err != nil {
 				return 0, err
 			}
 		case 2:
 			nodes++
-			var mask uint32
-			if err := decoder.Decode(&mask); err != nil {
+			if err := consume(1); err != nil {
 				return 0, err
 			}
 		case 3:
@@ -205,34 +208,30 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 				return 0, err
 			}
 		case 4:
-			if err := witnessBenchDecodeBytes(decoder); err != nil {
+			if err := consume(1); err != nil {
 				return 0, err
 			}
 		case 5:
 			nodes++
-			if err := witnessBenchDecodeBytes(decoder); err != nil {
+			if err := consume(1); err != nil {
 				return 0, err
 			}
 			flags, err := reader.ReadByte()
 			if err != nil {
 				return 0, err
 			}
+			operands := 0
 			if flags&(1<<2) != 0 {
-				var nonce uint64
-				if err := decoder.Decode(&nonce); err != nil {
-					return 0, err
-				}
+				operands++
 			}
 			if flags&(1<<3) != 0 {
-				if err := witnessBenchDecodeBytes(decoder); err != nil {
-					return 0, err
-				}
+				operands++
 			}
 			if flags&1 != 0 {
-				var codeSize uint64
-				if err := decoder.Decode(&codeSize); err != nil {
-					return 0, err
-				}
+				operands++
+			}
+			if err := consume(operands); err != nil {
+				return 0, err
 			}
 		case 6:
 			nodes++
@@ -244,29 +243,24 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 	}
 }
 
-func witnessBenchDecodeBytes(decoder *codec.Decoder) error {
-	var value []byte
-	return decoder.Decode(&value)
-}
-
-func witnessBenchBuildCollapse(b *testing.B) *witnessBenchRun {
-	b.Helper()
+func witnessBenchBuildCollapse(tb testing.TB, emptyStorage *common.Address) *witnessBenchRun {
+	tb.Helper()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	if err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	transientBeforeSlots := witnessBenchTransientSlots(b, true)
-	transientAfterSlots := witnessBenchTransientSlots(b, false)
-	cascadeSlots := witnessBenchCascadeSlots(b)
-	plainSlots := witnessBenchPlainSlots(b)
-	emptySlots := witnessBenchPlainSlots(b)
+	transientBeforeSlots := witnessBenchTransientBeforeSlots
+	transientAfterSlots := witnessBenchTransientAfterSlots
+	cascadeSlots := witnessBenchCascadeSlots
+	plainSlots := witnessBenchPlainSlots
+	emptySlots := witnessBenchPlainSlots
 	inlineSlots := [2]common.Hash{
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000003c6b4"),
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000007dc4f"),
 	}
 	if witnessBenchPrefixLength(crypto.Keccak256Hash(inlineSlots[0][:]), crypto.Keccak256Hash(inlineSlots[1][:])) < 10 {
-		b.Fatal("inline slot constants do not share the required prefix")
+		tb.Fatal("inline slot constants do not share the required prefix")
 	}
 	transientBefore := witnessBenchAddress(0x1001)
 	transientAfter := witnessBenchAddress(0x1002)
@@ -278,53 +272,53 @@ func witnessBenchBuildCollapse(b *testing.B) *witnessBenchRun {
 	alloc := types.GenesisAlloc{
 		sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
 		transientBefore: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{transientBeforeSlots[0].value, witnessBenchValue(1)}, [2]common.Hash{transientBeforeSlots[1].value, witnessBenchValue(2)},
+			[2]common.Hash{transientBeforeSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientBeforeSlots[1], witnessBenchValue(2)},
 		)},
 		transientAfter: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{transientAfterSlots[0].value, witnessBenchValue(1)}, [2]common.Hash{transientAfterSlots[1].value, witnessBenchValue(2)},
+			[2]common.Hash{transientAfterSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientAfterSlots[1], witnessBenchValue(2)},
 		)},
 		cascade: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{cascadeSlots[0].value, witnessBenchValue(1)}, [2]common.Hash{cascadeSlots[1].value, witnessBenchValue(2)}, [2]common.Hash{cascadeSlots[2].value, witnessBenchValue(3)},
+			[2]common.Hash{cascadeSlots[0], witnessBenchValue(1)}, [2]common.Hash{cascadeSlots[1], witnessBenchValue(2)}, [2]common.Hash{cascadeSlots[2], witnessBenchValue(3)},
 		)},
 		plain: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{plainSlots[0].value, witnessBenchValue(1)}, [2]common.Hash{plainSlots[1].value, witnessBenchValue(2)},
+			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
 		)},
 		empty: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{emptySlots[0].value, witnessBenchValue(1)}, [2]common.Hash{emptySlots[1].value, witnessBenchValue(2)},
+			[2]common.Hash{emptySlots[0], witnessBenchValue(1)}, [2]common.Hash{emptySlots[1], witnessBenchValue(2)},
 		)},
 		selfDestruct: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
-			[2]common.Hash{plainSlots[0].value, witnessBenchValue(1)}, [2]common.Hash{plainSlots[1].value, witnessBenchValue(2)},
+			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
 		)},
 		inline: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...), Storage: witnessBenchStorage(
 			[2]common.Hash{inlineSlots[0], witnessBenchValue(1)}, [2]common.Hash{inlineSlots[1], witnessBenchValue(2)},
 		)},
 	}
+	if emptyStorage != nil {
+		alloc[*emptyStorage] = types.GenesisAccount{Balance: new(big.Int), Nonce: 1, Code: []byte{0x00}}
+	}
 	spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
-	m := execmoduletester.New(b, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
-	witnessBenchEnableHistory(b, m)
+	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
+	witnessBenchEnableHistory(tb, m)
 	generated, err := m.GenerateChain(7, func(i int, block *blockgen.BlockGen) {
 		switch i {
 		case 0:
-			block.AddTx(witnessBenchSignedCall(b, block, key, transientBefore, witnessBenchPairData([2]common.Hash{transientBeforeSlots[0].value, {}}, [2]common.Hash{transientBeforeSlots[2].value, witnessBenchValue(3)})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, transientBefore, witnessBenchPairData([2]common.Hash{transientBeforeSlots[0], {}}, [2]common.Hash{transientBeforeSlots[2], witnessBenchValue(3)})))
 		case 1:
-			block.AddTx(witnessBenchSignedCall(b, block, key, transientAfter, witnessBenchPairData([2]common.Hash{transientAfterSlots[0].value, {}}, [2]common.Hash{transientAfterSlots[2].value, witnessBenchValue(3)})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, transientAfter, witnessBenchPairData([2]common.Hash{transientAfterSlots[0], {}}, [2]common.Hash{transientAfterSlots[2], witnessBenchValue(3)})))
 		case 2:
-			block.AddTx(witnessBenchSignedCall(b, block, key, cascade, witnessBenchPairData([2]common.Hash{cascadeSlots[0].value, {}}, [2]common.Hash{cascadeSlots[1].value, {}})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, cascade, witnessBenchPairData([2]common.Hash{cascadeSlots[0], {}}, [2]common.Hash{cascadeSlots[1], {}})))
 		case 3:
-			block.AddTx(witnessBenchSignedCall(b, block, key, plain, witnessBenchPairData([2]common.Hash{plainSlots[0].value, {}})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, plain, witnessBenchPairData([2]common.Hash{plainSlots[0], {}})))
 		case 4:
-			block.AddTx(witnessBenchSignedCall(b, block, key, empty, witnessBenchPairData([2]common.Hash{emptySlots[0].value, {}}, [2]common.Hash{emptySlots[1].value, {}})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, empty, witnessBenchPairData([2]common.Hash{emptySlots[0], {}}, [2]common.Hash{emptySlots[1], {}})))
 		case 5:
-			block.AddTx(witnessBenchSignedCall(b, block, key, selfDestruct, nil))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, selfDestruct, nil))
 		case 6:
-			block.AddTx(witnessBenchSignedCall(b, block, key, inline, witnessBenchPairData([2]common.Hash{inlineSlots[0], {}})))
+			block.AddTx(witnessBenchSignedCall(tb, block, key, inline, witnessBenchPairData([2]common.Hash{inlineSlots[0], {}})))
 		}
 	})
 	if err != nil {
-		b.Fatal(err)
-	}
-	if err := m.InsertChain(generated); err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
 	return &witnessBenchRun{
 		m: m, chain: generated,
@@ -406,12 +400,12 @@ func witnessBenchBuildGenerated(b *testing.B) *witnessBenchRun {
 	}
 }
 
-func witnessBenchEnableHistory(b *testing.B, m *execmoduletester.ExecModuleTester) {
-	b.Helper()
+func witnessBenchEnableHistory(tb testing.TB, m *execmoduletester.ExecModuleTester) {
+	tb.Helper()
 	if err := m.DB.Update(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}); err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
 }
 
@@ -425,21 +419,21 @@ func witnessBenchProofSlots() StorageKeys {
 	return slots
 }
 
-func witnessBenchSignedTransfer(b *testing.B, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address) types.Transaction {
-	return witnessBenchSignedTransaction(b, block, key, to, uint64(1), 21_000, nil)
+func witnessBenchSignedTransfer(tb testing.TB, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address) types.Transaction {
+	return witnessBenchSignedTransaction(tb, block, key, to, uint64(1), 21_000, nil)
 }
 
-func witnessBenchSignedCall(b *testing.B, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address, data []byte) types.Transaction {
-	return witnessBenchSignedTransaction(b, block, key, to, uint64(1), 1_000_000, data)
+func witnessBenchSignedCall(tb testing.TB, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address, data []byte) types.Transaction {
+	return witnessBenchSignedTransaction(tb, block, key, to, uint64(1), 1_000_000, data)
 }
 
-func witnessBenchSignedTransaction(b *testing.B, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address, value uint64, gas uint64, data []byte) types.Transaction {
-	b.Helper()
+func witnessBenchSignedTransaction(tb testing.TB, block *blockgen.BlockGen, key *ecdsa.PrivateKey, to common.Address, value uint64, gas uint64, data []byte) types.Transaction {
+	tb.Helper()
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	tx := types.NewTransaction(block.TxNonce(from), to, uint256.NewInt(value), gas, uint256.NewInt(1), data)
 	signed, err := types.SignTx(tx, *types.LatestSignerForChainID(chain.TestChainBerlinConfig.ChainID), key)
 	if err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
 	return signed
 }
@@ -470,75 +464,12 @@ func witnessBenchAddressWithPrefix(sender common.Address) common.Address {
 	}
 }
 
-func witnessBenchHashedSlots(count int) []witnessBenchHashedSlot {
-	slots := make([]witnessBenchHashedSlot, 0, count)
-	for value := uint64(1); len(slots) < count; value++ {
-		slot := witnessBenchSlot(value)
-		slots = append(slots, witnessBenchHashedSlot{value: slot, hash: crypto.Keccak256Hash(slot[:])})
-	}
-	return slots
-}
-
-func witnessBenchTransientSlots(b *testing.B, before bool) [3]witnessBenchHashedSlot {
-	b.Helper()
-	slots := witnessBenchHashedSlots(4096)
-	for _, deleted := range slots {
-		for _, survivor := range slots {
-			if deleted.value == survivor.value || witnessBenchPrefixLength(deleted.hash, survivor.hash) != 1 {
-				continue
-			}
-			deletedChild := witnessBenchNibble(deleted.hash, 1)
-			survivorChild := witnessBenchNibble(survivor.hash, 1)
-			for _, inserted := range slots {
-				if inserted.value == deleted.value || inserted.value == survivor.value || witnessBenchPrefixLength(deleted.hash, inserted.hash) < 1 {
-					continue
-				}
-				insertedChild := witnessBenchNibble(inserted.hash, 1)
-				if insertedChild == deletedChild || insertedChild == survivorChild {
-					continue
-				}
-				if (bytes.Compare(inserted.hash[:], deleted.hash[:]) < 0) == before {
-					return [3]witnessBenchHashedSlot{deleted, survivor, inserted}
-				}
-			}
-		}
-	}
-	b.Fatal("no transient storage keys found")
-	return [3]witnessBenchHashedSlot{}
-}
-
-func witnessBenchCascadeSlots(b *testing.B) [3]witnessBenchHashedSlot {
-	b.Helper()
-	slots := witnessBenchHashedSlots(4096)
-	for _, first := range slots {
-		for _, second := range slots {
-			if first.value == second.value || witnessBenchPrefixLength(first.hash, second.hash) != 2 {
-				continue
-			}
-			for _, survivor := range slots {
-				if witnessBenchNibble(survivor.hash, 0) == witnessBenchNibble(first.hash, 0) && witnessBenchNibble(survivor.hash, 1) != witnessBenchNibble(first.hash, 1) {
-					return [3]witnessBenchHashedSlot{first, second, survivor}
-				}
-			}
-		}
-	}
-	b.Fatal("no cascade storage keys found")
-	return [3]witnessBenchHashedSlot{}
-}
-
-func witnessBenchPlainSlots(b *testing.B) [2]witnessBenchHashedSlot {
-	b.Helper()
-	slots := witnessBenchHashedSlots(256)
-	for _, first := range slots {
-		for _, second := range slots {
-			if first.value != second.value && witnessBenchNibble(first.hash, 0) != witnessBenchNibble(second.hash, 0) {
-				return [2]witnessBenchHashedSlot{first, second}
-			}
-		}
-	}
-	b.Fatal("no plain storage keys found")
-	return [2]witnessBenchHashedSlot{}
-}
+var (
+	witnessBenchTransientBeforeSlots = [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(338)}
+	witnessBenchTransientAfterSlots  = [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(42)}
+	witnessBenchCascadeSlots         = [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(24), witnessBenchSlot(14)}
+	witnessBenchPlainSlots           = [2]common.Hash{witnessBenchSlot(1), witnessBenchSlot(2)}
+)
 
 func witnessBenchNibble(hash common.Hash, index int) byte {
 	if index%2 == 0 {
