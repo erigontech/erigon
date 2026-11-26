@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +109,14 @@ func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+		switch r.URL.Path {
+		case "/eth/v2/debug/beacon/heads":
+			_, _ = w.Write([]byte(`{"data":[{"slot":"1"}]}`))
+		case "/eth/v1/beacon/states/0/root":
+			_, _ = w.Write([]byte(`{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -120,6 +128,66 @@ func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
 			require.NotContains(t, err.Error(), "query-secret")
 		})
 	}
+}
+
+func TestGetStateRootAtSlotRejectsMalformedRoot(t *testing.T) {
+	for name, root := range map[string]string{"invalid hex": "0xzz", "short": "0x1234"} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"data":{"root":"` + root + `"}}`))
+			}))
+			t.Cleanup(srv.Close)
+
+			_, err := getStateRootAtSlot(t.Context(), srv.URL, 0)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestGetHeadDoesNotQuoteAnInvalidSlot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"slot":"https://x/?apikey=K"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := getHead(t.Context(), srv.URL)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "apikey")
+}
+
+type recordingTransport func(*http.Request) (*http.Response, error)
+
+func (f recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type recordingBody struct {
+	io.ReadCloser
+	closed *bool
+}
+
+func (b *recordingBody) Close() error {
+	*b.closed = true
+	return b.ReadCloser.Close()
+}
+
+func TestGetStateRootAtSlotClosesTheBodyOnNotFound(t *testing.T) {
+	closed := false
+	original := http.DefaultTransport
+	http.DefaultTransport = recordingTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{},
+			Body: &recordingBody{
+				ReadCloser: io.NopCloser(strings.NewReader(`{"code":404,"message":"not found"}`)),
+				closed:     &closed,
+			},
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = original })
+
+	root, err := getStateRootAtSlot(t.Context(), "http://beacon", 0)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, root)
+	require.True(t, closed)
 }
 
 func TestGetStateRootAtSlotReturnsZeroHashOnNotFound(t *testing.T) {

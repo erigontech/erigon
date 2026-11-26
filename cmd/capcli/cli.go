@@ -811,14 +811,14 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	}
 	slot, err := strconv.ParseUint(headResponse.Data[0].Slot, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, errors.New("invalid beacon head slot")
 	}
 	return slot, nil
 }
 
 type beaconStateRootResponse struct {
 	Data struct {
-		Root string `json:"root"`
+		Root common.Hash `json:"root"`
 	} `json:"data"`
 }
 
@@ -847,10 +847,10 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return common.Hash{}, err
 	}
-	if response.Data.Root == "" {
+	if response.Data.Root == (common.Hash{}) {
 		return common.Hash{}, errors.New("no state root found")
 	}
-	return common.HexToHash(response.Data.Root), nil
+	return response.Data.Root, nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
