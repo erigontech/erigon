@@ -2343,7 +2343,7 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 }
 
 // discardOverflow evicts mt from pending or the base fee sub-pool. The sender's next txn, if any, loses
-// its nonce chain. Unlike queued senders, these senders are not refreshed on every block, so refresh the
+// its nonce chain. A block refreshes only senders with queued txns or account changes, so refresh the
 // sender before the next txn can be selected or promoted.
 func (p *TxPool) discardOverflow(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.discardLocked(mt, reason)
