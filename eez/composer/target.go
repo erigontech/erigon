@@ -128,10 +128,10 @@ func (s *Source) finalize() error {
 // Execute runs c, a call from a rollup to a contract of this chain, as the
 // manager delivers it: through the proxy of c's source, created first when
 // missing, from the manager with c's value. It returns the target's output
-// and sets c.Gas to the gas the call used; its writes are the enclosing
-// transaction's, Atomic's. A value the manager cannot pay returns
-// ErrFunding. A call to the manager, a failed call and a target calling a
-// proxy are poison.
+// and sets c.Gas to the gas the call used, the proxy's creation included;
+// its writes are the enclosing transaction's, Atomic's. A value the manager
+// cannot pay returns ErrFunding. A call to the manager, a failed call and a
+// target calling a proxy are poison.
 func (s *Source) Execute(c *Call) ([]byte, error) {
 	manager := s.manager.Value()
 	if c.Target == manager {
@@ -149,8 +149,10 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	var created uint64
 	if !registered {
-		if _, _, err := s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil); err != nil {
+		// The posting creates it, in the call's entry.
+		if _, created, err = s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil); err != nil {
 			return nil, Poison(fmt.Errorf("create the proxy of %s on rollup %d: %w", c.Source, c.SourceRollup, err))
 		}
 	}
@@ -179,7 +181,7 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	case err != nil:
 		return nil, Poison(fmt.Errorf("%w: %w %x", ErrCallFailed, err, ret))
 	}
-	c.Gas = used
+	c.Gas = created + used
 	return ret, nil
 }
 

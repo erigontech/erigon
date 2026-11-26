@@ -157,13 +157,16 @@ func TestExecuteCreatesTheProxy(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, protocol.Proxy{Address: source, RollupID: 0}, p)
 	require.Equal(t, nonce+1, f.nonce(t, protocol.EEZL2Address), "one creation")
-	require.NotZero(t, c.Gas)
 
 	// The proxy exists: no second creation.
-	out, err = f.execute(&Call{Target: callerTarget, Source: source, SourceRollup: 0})
+	again := &Call{Target: callerTarget, Source: source, SourceRollup: 0}
+	out, err = f.execute(again)
 	require.NoError(t, err)
 	require.Equal(t, word(recorded), out)
 	require.Equal(t, nonce+1, f.nonce(t, protocol.EEZL2Address))
+	require.NotZero(t, again.Gas)
+	// A contract creation takes 32,000 gas before its code deposit.
+	require.Greater(t, c.Gas, again.Gas+32_000, "the creation is the posting's")
 }
 
 func TestExecuteReturnsTheTargetsOutput(t *testing.T) {

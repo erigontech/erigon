@@ -70,7 +70,8 @@ type Call struct {
 	Data         []byte
 	// Return is the target's output.
 	Return []byte
-	// Gas is the gas the call used where Execute ran it.
+	// Gas is the gas the call used where Execute ran it, the creation of its
+	// source's proxy included.
 	Gas uint64
 }
 
