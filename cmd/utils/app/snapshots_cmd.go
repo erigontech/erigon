@@ -463,7 +463,7 @@ var snapshotCommand = cli.Command{
 				}
 				return nil
 			},
-			Description: "temporary tool: rewrite the code and storage files that the CodeHash and StorageOfAbsentAccount integrity checks find wrong. Replaced files go to snapshots/patch-backup",
+			Description: "temporary tool: rewrite the code and storage files that the CodeHash and StorageOfAbsentAccount integrity checks find wrong. Replaced files go to <datadir>/patch-backup",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Value: fmt.Sprintf("%s,%s", integrity.CodeHash, integrity.StorageOfAbsentAccount), Usage: fmt.Sprintf("comma separated list from: %s, %s", integrity.CodeHash, integrity.StorageOfAbsentAccount)},
@@ -484,7 +484,7 @@ var snapshotCommand = cli.Command{
 				}
 				return nil
 			},
-			Description: "temporary tool: write the .kv and history .v/.ef files of a domain again with the current compressor and replace the files whose bytes change, with rebuilt accessors. Replaced files go to snapshots/patch-backup",
+			Description: "temporary tool: write the .kv and history .v/.ef files of a domain again with the current compressor and replace the files whose bytes change, with rebuilt accessors. Replaced files go to <datadir>/patch-backup",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "domain", Value: kv.StorageDomain.String()},

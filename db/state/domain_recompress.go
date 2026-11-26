@@ -37,7 +37,7 @@ type RecompressResult struct{ Same, Changed int }
 // RecompressDomainFiles writes each .kv and history .v/.ef file of the domain again with the
 // current compressor, and skips the file kinds that the domain does not compress. A file whose
 // bytes change replaces the original together with its rebuilt accessors, and the original
-// goes to snapshots/patch-backup. Files are done one at a time, so the extra disk space is one
+// goes to <datadir>/patch-backup. Files are done one at a time, so the extra disk space is one
 // file. The caller must not hold readers of the aggregator's files.
 func (a *Aggregator) RecompressDomainFiles(ctx context.Context, name kv.Domain, dryRun bool, logger log.Logger) (RecompressResult, error) {
 	var kvRanges, vRanges []txRange

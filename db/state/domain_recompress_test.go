@@ -85,13 +85,18 @@ func TestRecompressDomainFiles(t *testing.T) {
 	res, err := agg.RecompressDomainFiles(ctx, kv.StorageDomain, true, log.New())
 	require.NoError(t, err)
 	require.Equal(t, state.RecompressResult{Changed: 4, Same: 2}, res)
-	backups, err := dir.Glob(filepath.Join(agg.Dirs().Snap, "patch-backup", "*"))
-	require.NoError(t, err)
-	require.Empty(t, backups)
+	backups := func(root string) []string {
+		files, globErr := dir.Glob(filepath.Join(root, "patch-backup", "*"))
+		require.NoError(t, globErr)
+		return files
+	}
+	require.Empty(t, backups(agg.Dirs().DataDir))
 
 	res, err = agg.RecompressDomainFiles(ctx, kv.StorageDomain, false, log.New())
 	require.NoError(t, err)
 	require.Equal(t, state.RecompressResult{Changed: 4, Same: 2}, res)
+	require.NotEmpty(t, backups(agg.Dirs().DataDir))
+	require.Empty(t, backups(agg.Dirs().Snap), "backups under snapshots/ are seen by the downloader")
 	require.Equal(t, before, latest())
 	require.Equal(t, beforeAsOf, asOf())
 

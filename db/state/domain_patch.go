@@ -60,7 +60,7 @@ var (
 )
 
 // PatchDomainFiles rewrites the history and domain files that the patches touch, moves the
-// replaced files to snapshots/patch-backup and reloads the files. The caller must not hold
+// replaced files to <datadir>/patch-backup and reloads the files. The caller must not hold
 // readers of the aggregator's files.
 func (a *Aggregator) PatchDomainFiles(ctx context.Context, name kv.Domain, history []HistoryPatch, latest []LatestPatch, logger log.Logger) error {
 	if len(history) == 0 && len(latest) == 0 {
@@ -86,11 +86,12 @@ func (a *Aggregator) newPatchStage() (string, error) {
 	return stage, os.MkdirAll(stage, 0o755)
 }
 
-// replaceFiles moves the files of ranges to snapshots/patch-backup, moves the staged files
-// to their live paths and reloads the files.
+// replaceFiles moves the files of ranges to <datadir>/patch-backup, moves the staged files
+// to their live paths and reloads the files. The backup is outside snapshots/ because the
+// downloader treats every .torrent there as a file to seed.
 func (a *Aggregator) replaceFiles(name kv.Domain, ranges []patchedRange, staged map[string]string, logger log.Logger) error {
 	a.CloseFilesNoReopen()
-	backup := filepath.Join(a.dirs.Snap, "patch-backup", time.Now().UTC().Format("20060102-150405"))
+	backup := filepath.Join(a.dirs.DataDir, "patch-backup", time.Now().UTC().Format("20060102-150405"))
 	if err := os.MkdirAll(backup, 0o755); err != nil {
 		return err
 	}
