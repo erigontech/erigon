@@ -828,9 +828,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	if dbg.AssertEnabled {
 		// Gate on the serialized op-stream we actually return: decode it back and confirm it
-		// reconstructs the parent state root. Any lossy/malformed serialization yields a
-		// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
-		// pre-serialization witness-root check above cannot.
+		// rebuilds the parent state root, so an Encode/WriteInto defect that drops or changes a
+		// trie node fails here; the pre-serialization witness-root check above cannot see it.
 		decodedWitness, err := opstream.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
 		if err != nil {
 			return nil, fmt.Errorf("decode produced witness: %w", err)

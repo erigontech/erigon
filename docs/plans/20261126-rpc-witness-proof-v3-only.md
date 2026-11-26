@@ -286,6 +286,9 @@
       Task 6 stateless re-execution stays green; the EEST canonical corpus stays byte-identical
 - [x] move the v3 files of the legacy-sibling outputs that change to the override directory; list them in the PR body
 - [x] run v3, rpc and engineapi tests, v3 on and off: green
+- [x] ➕ pre-PR review: a branch that keeps no child reports its last child in nibble order, the child HPH sees alone
+      after its sorted deletes; the random gate also runs the `debug_executionWitness` key set, which does not prove
+      the storage of a deleted account, and filters each variant by its own post-state child counts
 
 ### Task 8: witness build cost, old pipeline against new
 **Files:**

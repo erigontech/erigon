@@ -56,7 +56,7 @@ transaction transiently collapsed; the witness is then assembled against the par
   represented by their 32-byte hash (a `HashNode`).
 - **Untouched storage roots** — for a witnessed account whose storage was not touched in this block, the
   storage root is emitted as a bare `HashNode` (the 32-byte root) and is **never** expanded into its sub-trie
-  nodes. This holds in both modes.
+  nodes, except along a collapse-sibling path (*Legacy additions*, item 2). This holds in both modes.
 - **Ordering** — the array is sorted ascending by node bytes after self-verification, so the root is not
   positionally first. A consumer identifies the root as the node whose Keccak-256 equals the parent block's
   `stateRoot`; a decoder that assumes `state[0]` is the root (as erigon's own `RLPDecode` does on the pre-sort
@@ -100,11 +100,13 @@ reached by a `BLOCKHASH` opcode during execution. Used to answer `BLOCKHASH` und
    `EmptyRoot`) is appended once to `state` when any emitted node's bytes contain the 32-byte `EmptyRoot` — in
    practice an account leaf's empty storage-root field. It is appended *after* stateless verification: the bare
    node is unreachable from the root, so re-execution would reject it.
-2. **Collapse siblings retained.** During replay a branch can transiently collapse toward a single child;
-   `detectCollapseSiblings` reports the survivor for every pre-state branch that has at least two children and keeps
-   exactly one child after the block's deletes. The walk ignores inserts. For an account survivor, the reported path
-   continues through a single-path pre-state storage trie, as HPH does. Canonical drops candidates whose post-state
-   branch keeps two or more children; legacy keeps the full deletes-only survivor set and is thus the superset.
+2. **Collapse siblings retained.** During replay a branch can transiently collapse toward a single child. With
+   commitment v3, `detectCollapseSiblings` walks the block's deletes over the pre-state trie, ignores inserts, and
+   reports one sibling for every branch that has at least two children and keeps at most one after the deletes: the
+   surviving child, or, when no child survives, the last child in nibble order (the child a sorted delete pass sees
+   alone). With HPH it reports the collapses the HPH fold observes. For an account sibling, the reported path
+   continues through a single-path pre-state storage trie. Canonical drops candidates whose post-state branch keeps
+   two or more children; legacy keeps every candidate and is thus the superset.
    `eth_getWitness` carries these legacy siblings and encodes them from the lean node list.
 
 The account and storage proofs are otherwise built identically in the two modes; these two points are the only
@@ -174,8 +176,9 @@ Serving semantics in head-capture mode:
   `execution/commitment/v3.Trie.WitnessNodes` on v3; the frozen HPH fallback uses
   `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` and
   `trie.WitnessNodesForKeysByHash`.
-- **Collapse** — `execution/commitment/v3/collapse.go` walks pre-state records and reports deletes-only survivors;
-  account survivor paths continue through a single-path storage trie.
+- **Collapse** — `execution/commitment/v3/collapse.go` walks pre-state records and reports deletes-only siblings: the
+  survivor, or the last child of a branch that keeps none; account sibling paths continue through a single-path
+  storage trie.
 - **Op-stream** — `execution/commitment/witness/opstream.Encode` encodes the lean node list and code reads.
 - **Proof** — `execution/commitment/witness.ProofFromNodes` extracts account and storage proofs from RLP nodes.
 - **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
