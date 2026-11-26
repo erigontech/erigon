@@ -90,7 +90,7 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 }
 
 func TestGetAttesterDutiesUsesCurrentEpochAtCheckpointFloor(t *testing.T) {
-	db, _, _, _, head, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	db, _, _, _, anchor, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return state_accessors.SetStateProcessingProgress(tx, 0)
 	}))
@@ -100,8 +100,6 @@ func TestGetAttesterDutiesUsesCurrentEpochAtCheckpointFloor(t *testing.T) {
 	epochSlot := uint64(epoch) * cfg.SlotsPerEpoch
 	floor := epochSlot + 1
 	fcu.LowestAvailableSlotVal = &floor
-	anchor, err := head.Copy()
-	require.NoError(t, err)
 	require.NoError(t, anchor.SetSlot(floor))
 	dependentRoot := common.Hash{0x42}
 	require.NoError(t, anchor.SetBlockRootAt(int(cfg.SlotsPerEpoch-1), dependentRoot))

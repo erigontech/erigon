@@ -159,7 +159,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	var dependentRoot common.Hash
 	var optimistic, useHistory bool
 
-	// get the duties
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		headEpoch := state.Epoch(s)
 		if epoch > headEpoch+s.BeaconConfig().MinSeedLookahead+1 {
@@ -171,7 +170,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			return nil
 		}
 
-		// non-finality case
 		root, err := a.getDependentRoot(s.GetBlockRootAtSlot, headRoot, headSlot, epoch, true)
 		if err != nil {
 			return err

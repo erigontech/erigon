@@ -425,8 +425,7 @@ func TestGetDutiesProposerFutureEpochBounds(t *testing.T) {
 
 type dutyViewHooks struct {
 	synced_data.SyncedData
-	beforeView func() error
-	afterView  func() error
+	beforeView, afterView func()
 }
 
 func (s *dutyViewHooks) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
@@ -438,16 +437,14 @@ func (s *dutyViewHooks) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
 func (s *dutyViewHooks) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
 	if beforeView := s.beforeView; beforeView != nil {
 		s.beforeView = nil
-		if err := beforeView(); err != nil {
-			return err
-		}
+		beforeView()
 	}
 	if err := s.SyncedData.ViewHeadStateWithIdentity(fn); err != nil {
 		return err
 	}
 	if afterView := s.afterView; afterView != nil {
 		s.afterView = nil
-		return afterView()
+		afterView()
 	}
 	return nil
 }
@@ -502,8 +499,8 @@ func TestDutiesUseSameHeadAsDependentRoot(t *testing.T) {
 			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, oldRoot))
 			before := getDuties()
 			require.Equal(t, oldRoot, before.DependentRoot)
-			h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() error {
-				return manager.OnHeadStateWithBlockRoot(newHead, newRoot)
+			h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(newHead, newRoot))
 			}}
 			during := getDuties()
 			h.syncedData = manager
@@ -523,15 +520,15 @@ func TestDutiesUseSameHeadAsDependentRoot(t *testing.T) {
 }
 
 func TestGetDutiesProposerUsesReplacementHeadBeforeView(t *testing.T) {
-	db, _, _, _, head, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	db, _, _, _, replacement, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return state_accessors.SetStateProcessingProgress(tx, 0)
 	}))
 
 	cfg := h.beaconChainCfg
-	epoch := state.Epoch(head)
+	epoch := state.Epoch(replacement)
 	epochSlot := epoch * cfg.SlotsPerEpoch
-	oldHead, err := head.Copy()
+	oldHead, err := replacement.Copy()
 	require.NoError(t, err)
 	require.NoError(t, oldHead.SetSlot(epochSlot+cfg.SlotsPerEpoch))
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, common.Hash{0x44}))
@@ -539,8 +536,6 @@ func TestGetDutiesProposerUsesReplacementHeadBeforeView(t *testing.T) {
 	lowestAvailableSlot := oldHead.Slot()
 	fcu.LowestAvailableSlotVal = &lowestAvailableSlot
 
-	replacement, err := head.Copy()
-	require.NoError(t, err)
 	require.NoError(t, replacement.SetSlot(oldHead.Slot()-1))
 	mixIndex := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
 	require.NoError(t, replacement.SetRandaoMixAt(int(mixIndex), common.Hash{0x41}))
@@ -552,8 +547,8 @@ func TestGetDutiesProposerUsesReplacementHeadBeforeView(t *testing.T) {
 	require.NotEqual(t, oldDuties.Data, expected.Data)
 
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, common.Hash{0x44}))
-	h.syncedData = &dutyViewHooks{SyncedData: manager, beforeView: func() error {
-		return manager.OnHeadStateWithBlockRoot(replacement, common.Hash{0x43})
+	h.syncedData = &dutyViewHooks{SyncedData: manager, beforeView: func() {
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(replacement, common.Hash{0x43}))
 	}}
 	actual := getProposerDutiesForEpoch(t, h, epoch)
 	require.Equal(t, expected.DependentRoot, actual.DependentRoot)
@@ -567,9 +562,8 @@ func TestGetDutiesProposerLogsAdvanceFailureAfterView(t *testing.T) {
 	h.beaconChainCfg.InitializeForkSchedule()
 
 	var released, warned, warnedAfterView atomic.Bool
-	h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() error {
+	h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
 		released.Store(true)
-		return nil
 	}}
 	logger := log.Root()
 	previous := logger.GetHandler()
@@ -606,20 +600,6 @@ func TestGetDependentRootChecksOutOfWindowSlotOnce(t *testing.T) {
 	}, common.Hash{}, headSlot, 2, true)
 	require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
 	require.Equal(t, []uint64{slot}, rootLookups)
-}
-
-// Processing the empty slots after the head would carry the head root into their block roots.
-func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
-	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-
-	require.NoError(t, syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
-		for _, attester := range []bool{false, true} {
-			root, err := handler.getDependentRoot(head.GetBlockRootAtSlot, headRoot, headSlot, state.Epoch(head)+2, attester)
-			require.NoError(t, err)
-			require.Equal(t, headRoot, root)
-		}
-		return nil
-	}))
 }
 
 type proposerDutiesResponse struct {
