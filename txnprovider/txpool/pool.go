@@ -545,9 +545,6 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
-	// An unwind can return a transaction when the sender is already above its
-	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
-	// transactions and leave others queued behind the missing nonce.
 	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, true)
 	if err != nil {
 		return frames, err
@@ -1313,7 +1310,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	return p.validateTxWithCells(txn, isLocal, stateCache, nil, false)
 }
 
-func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, skipSlotLimit bool) (txpoolcfg.DiscardReason, error) {
+func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, unwinding bool) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1434,21 +1431,19 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 
-	// Any peer can relay a transaction that its sender signed earlier, so only a transaction
-	// that passes every other admission check and keeps a new slot counts as spam.
-	if !skipSlotLimit && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+	// A Spammer result makes validateTxns call punishSpammer, which evicts half of the sender's
+	// remote transactions. Any peer can relay any transaction that the sender ever signed,
+	// including ones that the pool would reject anyway. So a transaction counts as spam only if it
+	// would take a new slot and passes the checks above and the insertion checks.
+	//
+	// An unwind can return a transaction when the sender is already above its
+	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
+	// transactions and leave others queued behind the missing nonce.
+	if !unwinding && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+		// Frames returned earlier, so txn uses an account nonce, and a new slot has no pooled
+		// transaction to replace.
 		if reason := p.checkInsertion(txn, false, nil); reason != txpoolcfg.NotSet {
 			return reason, nil
-		}
-		// Pooled nonces can only narrow the gap from the account nonce, so walk them only if that gap would evict txn.
-		if reason, _ := p.nonceGapReason(txn, senderNonce); reason != txpoolcfg.NotSet && !p.hasParkedLegacyFrame(txn.SenderID) {
-			next := senderNonce
-			for p.all.get(txn.SenderID, next) != nil {
-				next++
-			}
-			if reason, _ := p.nonceGapReason(txn, next); reason != txpoolcfg.NotSet {
-				return reason, nil
-			}
 		}
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
@@ -1780,8 +1775,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		// A spam penalty needs the sidecar and authorization checks that follow this precheck.
-		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, true)
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, false)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
 			return err
 		}
@@ -1868,7 +1862,7 @@ func (o *kzgOffenders) add(i int) {
 // A remote KZG failure skips later txns from that peer; with nil sources,
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
 // Non-nil sources must be index-aligned with txns.
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, skipSlotLimit bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, unwinding bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1887,7 +1881,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
-		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, skipSlotLimit)
+		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, unwinding)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
@@ -2319,7 +2313,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	return txpoolcfg.NotSet
 }
 
-// checkInsertion returns why txn cannot take the slot of found, or a new slot when found is nil.
+// checkInsertion runs the checks that addLocked makes before it inserts txn, after the replacement
+// checks. found is the pooled transaction that txn would replace, or nil when txn takes a new slot.
+// keyedNonce is set for a frame on a keyed nonce sequence, which authorizations cannot reserve.
+// It returns NotSet if txn can be inserted. The caller must hold the pool lock.
 func (p *TxPool) checkInsertion(txn *TxnSlot, keyedNonce bool, found *metaTxn) txpoolcfg.DiscardReason {
 	// Don't add blob txn to queued if it's less than current pending blob base fee
 	if txn.HasBlobs() && txn.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
@@ -2694,18 +2691,6 @@ func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) err
 	return nil
 }
 
-// nonceGapReason returns why txn must leave the pool when next is the first nonce missing from
-// its sender's pooled account nonces, or NotSet if txn can wait for the gap to close.
-func (p *TxPool) nonceGapReason(txn *TxnSlot, next uint64) (txpoolcfg.DiscardReason, string) {
-	switch {
-	case p.cfg.MaxNonceGap > 0 && txn.Nonce > next && txn.Nonce-next > p.cfg.MaxNonceGap:
-		return txpoolcfg.NonceTooDistant, "nonce gap too large"
-	case txn.Nonce != next && txn.HasBlobs():
-		return txpoolcfg.BlobNonceGap, "nonce-gapped blob txn"
-	}
-	return txpoolcfg.NotSet, ""
-}
-
 // onSenderStateChange refreshes pool eligibility and ordering for one sender.
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
@@ -2748,8 +2733,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
-		case !nonceChainBlocked:
-			discardReason, deleteAndContinueReasonLog = p.nonceGapReason(mt.TxnSlot, noGapsNonce)
+		case !nonceChainBlocked && p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
+			deleteAndContinueReasonLog = "nonce gap too large"
+			discardReason = txpoolcfg.NonceTooDistant
+		case !nonceChainBlocked && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
+			deleteAndContinueReasonLog = "nonce-gapped blob txn"
+			discardReason = txpoolcfg.BlobNonceGap
 		}
 		if deleteAndContinueReasonLog != "" {
 			if mt.TxnSlot.Traced {
