@@ -55,7 +55,8 @@ type cowChunk struct {
 }
 
 // cowSlot caches its chunk's data pointer so a random element read is one
-// dependent load instead of slot, chunk, data.
+// dependent load instead of slot, chunk, data. Store publishes base before
+// chunk, so a writer that sees the new chunk also reads through its base.
 type cowSlot struct {
 	chunk atomic.Pointer[cowChunk]
 	base  atomic.Pointer[byte]
