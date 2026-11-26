@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"math/bits"
 	"slices"
+	"sort"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -93,43 +95,54 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		if root == nil {
 			continue
 		}
+		deletes := make([][]byte, 0, len(group.paths))
 		for _, path := range group.paths {
+			if !bytes.HasPrefix(path, root.path) {
+				continue
+			}
+			deletes = append(deletes, path)
+		}
+		if len(deletes) == 0 {
+			continue
+		}
+		for _, path := range deletes {
 			if err := g.ensurePath(ctx, root, path); err != nil {
 				return err
 			}
 		}
-		if _, err := walkDeletedNode(root, group.paths, tracer, ownerPath); err != nil {
+		if _, err := walkDeletedNode(ctx, g, root, deletes, tracer, ownerPath); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func walkDeletedNode(n *node, deletes [][]byte, tracer commitment.CollapseTracer, ownerPath []byte) (bool, error) {
+func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [][]byte, tracer commitment.CollapseTracer, ownerPath []byte) (bool, error) {
 	if n == nil || n.childMask == 0 {
 		return false, nil
 	}
 	if n.isExtension() {
 		nib := bits.TrailingZeros16(n.childMask)
 		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
-			return walkDeletedNode(child, deletes, tracer, ownerPath)
+			return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
 		}
 	}
 	if n.childMask == n.leafMask && bits.OnesCount16(n.childMask) == 1 {
 		nib := bits.TrailingZeros16(n.childMask)
-		return !containsDelete(deletes, deleteChildPath(n, nib)), nil
+		return len(deleteRange(deletes, deleteChildPath(n, nib), nil)) == 0, nil
 	}
 	survivorCount := 0
 	var survivor []byte
 	for mask := n.childMask; mask != 0; mask &= mask - 1 {
 		nib := bits.TrailingZeros16(mask)
 		childPath := deleteChildPath(n, nib)
+		childDeletes := deleteRange(deletes, childPath, nil)
 		live := true
 		if n.leafMask&(uint16(1)<<nib) != 0 {
-			live = !containsDelete(deletes, childPath)
-		} else if child := n.child(nib); child != nil && hasDeleteUnder(childPath, deletes) {
+			live = len(childDeletes) == 0
+		} else if child := n.child(nib); child != nil && len(childDeletes) != 0 {
 			var err error
-			live, err = walkDeletedNode(child, deletes, tracer, ownerPath)
+			live, err = walkDeletedNode(ctx, g, child, childDeletes, tracer, ownerPath)
 			if err != nil {
 				return false, err
 			}
@@ -137,12 +150,48 @@ func walkDeletedNode(n *node, deletes [][]byte, tracer commitment.CollapseTracer
 		if live {
 			survivorCount++
 			survivor = childPath
+			if n.leafMask&(uint16(1)<<nib) != 0 {
+				var err error
+				survivor, err = collapseSurvivorPath(ctx, g, n, nib, survivor)
+				if err != nil {
+					return false, err
+				}
+			}
 		}
 	}
 	if bits.OnesCount16(n.childMask) >= 2 && survivorCount == 1 {
 		tracer(slices.Concat(ownerPath, survivor), slices.Concat(ownerPath, n.path))
 	}
 	return survivorCount != 0, nil
+}
+
+func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib int, path []byte) ([]byte, error) {
+	if g.plane != planeAccount || n.leafMask&(uint16(1)<<nib) == 0 {
+		return path, nil
+	}
+	_, payload := n.leafAt(nib)
+	_, _, _, storageRoot, err := decodeAccountLeaf(payload)
+	if err != nil || bytes.Equal(storageRoot, empty.RootHash[:]) {
+		return path, nil
+	}
+	addrHash := hashAddressPath(path)
+	storage := graph{plane: planeStorage, addrHash: addrHash[:]}
+	root, err := storage.loadRoot(ctx)
+	if err != nil || root == nil || root.childMask == 0 {
+		return path, err
+	}
+	var extension []byte
+	switch {
+	case root.isLeafRoot():
+		child := bits.TrailingZeros16(root.childMask)
+		suffix, _ := root.leafAt(child)
+		extension = append([]byte{byte(child)}, unpackPath(suffix, 63, nil)...)
+	case root.isExtension():
+		extension = slices.Clone(root.path)
+	default:
+		return path, nil
+	}
+	return slices.Concat(path, extension), nil
 }
 
 func deleteChildPath(n *node, nib int) []byte {
@@ -154,22 +203,17 @@ func deleteChildPath(n *node, nib int) []byte {
 	return append(path, unpackPath(suffix, 63-len(n.path), nil)...)
 }
 
-func containsDelete(deletes [][]byte, path []byte) bool {
-	for _, deleted := range deletes {
-		if bytes.Equal(deleted, path) {
-			return true
+func deleteRange(deletes [][]byte, prefix []byte, comparisons *int) [][]byte {
+	compare := func(left, right []byte) int {
+		if comparisons != nil {
+			*comparisons++
 		}
+		return bytes.Compare(left, right)
 	}
-	return false
-}
-
-func hasDeleteUnder(prefix []byte, deletes [][]byte) bool {
-	for _, deleted := range deletes {
-		if bytes.HasPrefix(deleted, prefix) {
-			return true
-		}
-	}
-	return false
+	start := sort.Search(len(deletes), func(i int) bool { return compare(deletes[i], prefix) >= 0 })
+	upper := append(slices.Clone(prefix), 0x10)
+	end := sort.Search(len(deletes), func(i int) bool { return compare(deletes[i], upper) >= 0 })
+	return deletes[start:end]
 }
 
 func splitPrefix(prefix []byte) (plane byte, addrHash, path []byte) {

@@ -39,6 +39,36 @@ type collapseTestEvent struct {
 	prefix  []byte
 }
 
+func TestCollapseRuleAbsentDelete(t *testing.T) {
+	rng := rand.New(rand.NewSource(19))
+	pre := witnessState(rng, witnessShape{accounts: 2, accountPrefixes: [][]byte{{1, 2}, {1, 3}}})
+	missing := craftKey(rng, 20, []byte{8}, accountNibbles)
+	batch := []commitmenttest.Op{commitmenttest.DeleteAt(missing)}
+	for _, route := range []string{"untraced", "Process", "TraceCollapsesRoot"} {
+		t.Run(route, func(t *testing.T) {
+			bed := newWitnessBed(t, pre)
+			tr := bed.openV3(t.Context())
+			_, _, err := tr.RestoreState(bed.v3State)
+			require.NoError(t, err)
+			before, err := tr.RootHash()
+			require.NoError(t, err)
+			updates := testUpdates(t, commitment.ModeCollect, batch)
+			trace := func([]byte, []byte) { t.Error("absent delete reported a collapse") }
+			var after []byte
+			if route == "TraceCollapsesRoot" {
+				after, err = tr.TraceCollapsesRoot(t.Context(), updates, trace)
+			} else {
+				if route == "Process" {
+					tr.SetCollapseTracer(trace)
+				}
+				after, err = tr.Process(t.Context(), updates, "", nil, commitment.WarmupConfig{})
+			}
+			require.NoError(t, err, "deleting an absent account outside the root extension")
+			require.Equal(t, before, after)
+		})
+	}
+}
+
 func collapseRuleEvents(t *testing.T, pre, batch []commitmenttest.Op, reverse bool) []collapseTestEvent {
 	t.Helper()
 	b := newWitnessBed(t, pre)
@@ -244,6 +274,141 @@ func TestDeletesOnlyCollapseProperty(t *testing.T) {
 		require.Equal(t, gotSet, collapseEventSet(collapseRuleEvents(t, pre, batch, true)), "seed %d feed order", seed)
 		require.Len(t, gotSet, len(got), "seed %d duplicate events", seed)
 	}
+}
+
+func TestCollapseRandomBlocksKeepWitnessNodes(t *testing.T) {
+	seedCount := 180
+	if testing.Short() {
+		seedCount = 24
+	}
+	var legacyMisses, canonicalDiffs int
+	for seed := range int64(seedCount) {
+		rng := rand.New(rand.NewSource(seed))
+		pre := witnessState(rng, witnessShape{accounts: 16, slots: 4})
+		bed := newWitnessBed(t, pre)
+		batch := collapseBatch(rng, bed)
+		var keys witnessKeys
+		byKey := make(map[string]bool, len(pre))
+		for _, op := range pre {
+			byKey[string(op.Key)] = true
+		}
+		var valid []commitmenttest.Op
+		dead := make(map[string]bool)
+		touched := make(map[string]bool)
+		for _, op := range batch {
+			keys.plain = append(keys.plain, op.Key)
+			if op.Delete && !byKey[string(op.Key)] {
+				continue
+			}
+			valid = append(valid, op)
+			touched[string(op.Key)] = true
+			if op.Delete && len(op.Key) == length.Addr {
+				dead[string(op.Key)] = true
+			}
+		}
+		for _, slot := range bed.slots {
+			if dead[string(slot[:length.Addr])] && !touched[string(slot)] {
+				valid = append(valid, commitmenttest.DeleteAt(slot))
+				keys.plain = append(keys.plain, slot)
+			}
+		}
+		batch = valid
+
+		v3Events := collapseRuleEvents(t, pre, batch, false)
+		hphEvents := collapseHphEvents(t, pre, batch)
+		post := newWitnessBed(t, pre)
+		_, root := post.v3Collapses(t, batch, true)
+		_, root2 := post.v3Collapses(t, batch, false)
+		require.Equal(t, root, root2)
+		tr := post.openV3(t.Context())
+		read := func(key []byte) ([]byte, error) {
+			data, _, err := post.v3Mem.Branch(key)
+			return data, err
+		}
+		makeKeys := func(events []collapseTestEvent, canonical bool) witnessKeys {
+			result := witnessKeys{plain: slices.Clone(keys.plain)}
+			for _, event := range events {
+				if canonical {
+					childCount, err := tr.BranchChildCount(read, event.prefix)
+					require.NoError(t, err)
+					if childCount >= 2 {
+						continue
+					}
+				}
+				result.hashed = append(result.hashed, event.sibling)
+			}
+			return result
+		}
+
+		hphLegacy := bed.hphWitness(t, makeKeys(hphEvents, false), true)
+		v3Legacy := bed.v3NativeWitness(t, makeKeys(v3Events, false), true)
+		if missing := countWitnessNodes(hphLegacy, v3Legacy); missing != 0 {
+			legacyMisses++
+			if legacyMisses <= 2 {
+				t.Logf("legacy seed %d HPH %d v3 %d missing %d", seed, len(hphLegacy), len(v3Legacy), missing)
+			}
+		}
+		hphCanonical := bed.hphWitness(t, makeKeys(hphEvents, true), false)
+		v3Canonical := bed.v3NativeWitness(t, makeKeys(v3Events, true), false)
+		if !slices.EqualFunc(hphCanonical, v3Canonical, bytes.Equal) {
+			canonicalDiffs++
+			if canonicalDiffs <= 2 {
+				t.Logf("canonical seed %d HPH %d v3 %d", seed, len(hphCanonical), len(v3Canonical))
+			}
+		}
+	}
+	t.Logf("%d seeds legacy misses=%d canonical HPH diffs=%d", seedCount, legacyMisses, canonicalDiffs)
+	require.Zero(t, legacyMisses)
+	require.Zero(t, canonicalDiffs)
+}
+
+func TestCollapseDeleteRangeCost(t *testing.T) {
+	deletes := make([][]byte, 1024)
+	for i := range deletes {
+		path := make([]byte, 64)
+		value := i
+		for pos := len(path) - 1; value != 0; pos-- {
+			path[pos] = byte(value & 0x0f)
+			value >>= 4
+		}
+		deletes[i] = path
+	}
+	comparisons := 0
+	for _, path := range deletes {
+		require.NotEmpty(t, deleteRange(deletes, path, &comparisons))
+	}
+	t.Logf("1024 deletes comparisons=%d", comparisons)
+	require.LessOrEqual(t, comparisons, 32*len(deletes))
+}
+
+func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseTestEvent {
+	t.Helper()
+	bed := newWitnessBed(t, pre)
+	bed.hphMem.Apply(batch)
+	reader, _ := bed.hphMem.Open(t.Context())
+	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	require.NoError(t, hph.SetState(bed.hphState))
+	events := make([]collapseTestEvent, 0)
+	hph.SetCollapseTracer(func(sibling, prefix []byte) {
+		events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
+	})
+	_, err := hph.Process(t.Context(), testUpdates(t, commitment.ModeUpdate, batch), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	return events
+}
+
+func countWitnessNodes(want, got [][]byte) int {
+	gotSet := make(map[string]struct{}, len(got))
+	for _, node := range got {
+		gotSet[string(node)] = struct{}{}
+	}
+	missing := 0
+	for _, node := range want {
+		if _, ok := gotSet[string(node)]; !ok {
+			missing++
+		}
+	}
+	return missing
 }
 
 func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseTestEvent {

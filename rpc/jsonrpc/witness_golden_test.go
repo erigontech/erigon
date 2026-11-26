@@ -697,3 +697,45 @@ func TestGoldenSharedOutputOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestCollapseWitnessKeepsSurvivorStorage(t *testing.T) {
+	t.Setenv("ERIGON_WITNESS_STRICT_VERIFY", "true")
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	victim := witnessGoldenAddress(0x1010)
+	survivor := witnessGoldenAddressWithPrefix(t, victim)
+	build := func(useV3 bool) chainWitnesses {
+		t.Cleanup(statecfg.SetCommitmentV3(useV3))
+		statecfg.EnableHistoricalCommitment()
+		alloc := types.GenesisAlloc{
+			sender:   {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+			victim:   {Balance: new(big.Int), Nonce: 1, Code: witnessGoldenContractBytecode},
+			survivor: {Balance: new(big.Int), Nonce: 1, Code: []byte{0}, Storage: witnessGoldenStorage([2]common.Hash{witnessGoldenValue(1), witnessGoldenValue(2)})},
+		}
+		spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
+		blocks, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, victim, nil))
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(blocks))
+		return collectChainWitnesses(t, useV3, m, blocks)
+	}
+	hph, v3 := build(false), build(true)
+	t.Run("legacy", func(t *testing.T) {
+		var want, got ExecutionWitnessResult
+		require.NoError(t, json.Unmarshal(hph.Legacy[0], &want))
+		require.NoError(t, json.Unmarshal(v3.Legacy[0], &got))
+		requireWitnessStateSuperset(t, want.State, got.State, "legacy")
+	})
+	t.Run("canonical", func(t *testing.T) {
+		want, got := hph.Canonical[0], v3.Canonical[0]
+		if !bytes.Equal(want, got) {
+			t.Errorf("canonical witness changed: HPH %d bytes, v3 %d bytes", len(want), len(got))
+		}
+	})
+	t.Run("eth_getWitness", func(t *testing.T) {
+		requireWitnessStreamSuperset(t, hph.GetWitness[0], v3.GetWitness[0], "eth_getWitness")
+	})
+}
