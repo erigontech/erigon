@@ -38,8 +38,12 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -511,7 +515,7 @@ func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger lo
 	app := &cli.Command{
 		Flags: []cli.Flag{&flag},
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			setCommitmentV3(cmd, dirs, chain, logger)
+			setCommitmentV3(context.Background(), cmd, dirs, chain, logger)
 			return nil
 		},
 	}
@@ -591,6 +595,16 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	require.Contains(t, logs, "--"+ExperimentalCommitmentV3Flag.Name+"=false")
 	require.NotContains(t, logs, "seg reset", "a chain without published snapshots has no seg reset path")
 
+	chaindataOnly := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(chaindataOnly.Chaindata).MustOpen()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.TblCommitmentVals, commitment.KeyCommitmentState, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
+	}))
+	db.Close()
+	v3, logs = run(chaindataOnly, "dev")
+	require.False(t, v3, "a datadir with legacy commitment in chaindata only is not fresh")
+	require.Contains(t, logs, warning)
+
 	_, logs = run(legacyDirs, "sepolia", "--"+ExperimentalCommitmentV3Flag.Name+"=false")
 	require.NotContains(t, logs, warning, "an explicit legacy choice must not warn")
 
@@ -599,6 +613,27 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 		require.True(t, v3, "a fresh or v3 datadir must use commitment v3")
 		require.NotContains(t, logs, warning, dirs.DataDir)
 	}
+}
+
+func TestSetCommitmentV3FollowsChaindata(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	datadirWithState := func(key []byte) datadir.Dirs {
+		dirs := datadir.New(t.TempDir())
+		db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).MustOpen()
+		defer db.Close()
+		require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(kv.TblCommitmentVals, key, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
+		}))
+		return dirs
+	}
+	run := func(dirs datadir.Dirs) bool {
+		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
+		return runSetCommitmentV3(t, dirs, "mainnet", log.Root())
+	}
+
+	require.False(t, run(datadirWithState(commitment.KeyCommitmentState)), "a datadir with legacy commitment in chaindata only must use the legacy trie")
+	require.True(t, run(datadirWithState(commitment.KeyCommitmentV3State)), "a datadir with v3 commitment in chaindata only must use the v3 trie")
 }
 
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
