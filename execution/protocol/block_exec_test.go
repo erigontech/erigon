@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -61,6 +62,23 @@ func TestSysCallContractSeesBlockCoinbase(t *testing.T) {
 	var want uint256.Int
 	want.SetBytes(coinbase[:])
 	require.Equal(t, want.Hex(), got.Hex())
+}
+
+func TestSysCallContractBlockHashWithoutHeaderReader(t *testing.T) {
+	t.Parallel()
+	contract := params.WithdrawalRequestAddress
+	code := []byte{byte(vm.NUMBER), byte(vm.PUSH1), 2, byte(vm.SWAP1), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.STOP)}
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	require.NoError(t, ibs.CreateAccount(contract, false))
+	require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	header := &types.Header{Number: *uint256.NewInt(3)}
+
+	var err error
+	require.NotPanics(t, func() {
+		_, err = SysCallContract(contract, nil, chain.TestChainBerlinConfig, ibs, header, ethash.NewFaker(), false, vm.Config{})
+	})
+	require.ErrorContains(t, err, "header reader unavailable for block 1")
 }
 
 // Stateless execution rejects an invalid tx and goes on, but a panic inside execution is a

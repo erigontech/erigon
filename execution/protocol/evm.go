@@ -145,6 +145,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			return hash, nil
 		}
 
+		if getHeader == nil {
+			return common.Hash{}, fmt.Errorf("header reader unavailable for block %d", n)
+		}
+
 		if n > lastKnownNumber {
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash
