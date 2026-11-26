@@ -59,6 +59,10 @@ type composition struct {
 	popped, unroomed int
 }
 
+// errSimulated ends an outbound transaction's simulation, undoing its
+// writes.
+var errSimulated = errors.New("simulated")
+
 // above reports whether h is above root in root's nonce chain.
 func above(h *Held) func(root *Held) bool {
 	return func(root *Held) bool { return root.chainKey() == h.chainKey() && h.Nonce > root.Nonce }
@@ -146,22 +150,20 @@ func (k *composition) add(h *Held) error {
 		k.deferred = append(k.deferred, h)
 		return nil
 	}
-	var accept func()
 	tx, err := types.DecodeTransaction(h.Raw)
 	switch {
 	case err != nil:
 		err = Poison(err)
 	case h.Direction == Outbound:
-		accept, err = k.outbound(h, tx)
+		err = k.outbound(h, tx)
 	default:
-		accept, err = k.inbound(h, tx)
+		err = k.inbound(h, tx)
 	}
 	if errors.Is(err, ErrFull) && len(k.fx.held) == 0 {
 		err = Poison(fmt.Errorf("alone: %w", err))
 	}
 	switch {
 	case err == nil:
-		accept()
 		h.Deferred = 0
 		k.fx.held = append(k.fx.held, h)
 		k.fx.txs = k.draft.Txs()
@@ -222,10 +224,10 @@ func (k *composition) drop(h *Held) {
 }
 
 // inbound delivers the calls tx, an L1 transaction, makes into the rollup.
-func (k *composition) inbound(h *Held, tx types.Transaction) (func(), error) {
+func (k *composition) inbound(h *Held, tx types.Transaction) error {
 	ds, err := NewDeliveries(k.c.x.Sync, k.draft)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var cost l1Cost
 	if _, err := k.src.Run(k.ctx, tx, ds.Dispatch, func([]*Call) error {
@@ -236,39 +238,43 @@ func (k *composition) inbound(h *Held, tx types.Transaction) (func(), error) {
 		cost.trigger = tx.GetGasLimit()
 		return k.room(h, cost)
 	}); err != nil {
-		return nil, err
+		return err
 	}
-	return func() {
-		k.gas.take(cost)
-		k.draft = ds.fork
-		k.fx.deliveries = append(k.fx.deliveries, ds.Delivered...)
-	}, nil
+	k.gas.take(cost)
+	k.draft = ds.fork
+	k.fx.deliveries = append(k.fx.deliveries, ds.Delivered...)
+	return nil
 }
 
 // outbound composes h, tx, a rollup transaction calling L1: simulated on a
 // fork of the draft, its one call runs on L1 as the manager delivers it;
-// the call's entry, loaded ahead of tx in the draft, must be what tx
+// the call's entry, loaded ahead of tx on the fork, must be what tx
 // consumes.
-func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
+func (k *composition) outbound(h *Held, tx types.Transaction) error {
 	x := k.c.x
 	var (
 		e     *protocol.ExecutionEntry
 		value uint256.Int
 		cost  l1Cost
-		next  *Draft
+		fork  *Draft
 	)
 	err := k.src.Atomic(func() error {
-		sim, err := k.draft.Simulation(x.Sync.EEZL2, x.Sync.RollupID)
-		if err != nil {
+		var err error
+		if fork, err = k.draft.Fork(); err != nil {
 			return err
 		}
-		calls, err := sim.Run(k.ctx, tx, func(c *Call) ([]byte, error) {
+		// The simulation runs without the load, and leaves the fork as it was.
+		var calls []*Call
+		_, err = fork.simulation(x.Sync.EEZL2, x.Sync.RollupID).Run(k.ctx, tx, func(c *Call) ([]byte, error) {
 			if c.RollupID != protocol.MainnetRollupID {
 				return nil, Poison(fmt.Errorf("call to rollup %d: only calls to L1 leave the rollup", c.RollupID))
 			}
 			return k.src.Execute(c)
-		}, nil)
-		if err != nil {
+		}, func(cs []*Call) error {
+			calls = cs
+			return errSimulated
+		})
+		if !errors.Is(err, errSimulated) {
 			return err
 		}
 		if len(calls) != 1 {
@@ -298,10 +304,6 @@ func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
 		if err != nil {
 			return err
 		}
-		fork, err := k.draft.Fork()
-		if err != nil {
-			return err
-		}
 		var logs []*types.Log
 		for _, t := range []types.Transaction{load, tx} {
 			r, err := fork.Apply(t, nil)
@@ -322,20 +324,18 @@ func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
 		if err := deriver.VerifyOutbound([]protocol.ExecutionEntry{*e}, logs, x.Sync.RollupID, x.Sync.EEZL2); err != nil {
 			return Poison(err)
 		}
-		next = fork
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return func() {
-		k.gas.take(cost)
-		if k.escrow != nil {
-			k.escrow.Sub(k.escrow, &value)
-		}
-		k.draft = next
-		k.fx.outbound = append(k.fx.outbound, *e)
-	}, nil
+	k.gas.take(cost)
+	if k.escrow != nil {
+		k.escrow.Sub(k.escrow, &value)
+	}
+	k.draft = fork
+	k.fx.outbound = append(k.fx.outbound, *e)
+	return nil
 }
 
 // escrowLeft returns what the rollup's outbound calls can still carry,

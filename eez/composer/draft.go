@@ -140,17 +140,14 @@ func (d *Draft) Fork() (*Draft, error) {
 	return f, nil
 }
 
-// Simulation returns a simulation of the draft's chain on a fork of it,
-// whose proxies manager registers; rollup is the chain's rollup id.
-func (d *Draft) Simulation(manager common.Address, rollup uint64) (*Source, error) {
-	f, err := d.Fork()
-	if err != nil {
-		return nil, err
-	}
+// simulation returns a simulation of the draft's chain on the draft's
+// state, whose proxies manager registers; rollup is the chain's rollup id. A
+// run it keeps writes into the draft.
+func (d *Draft) simulation(manager common.Address, rollup uint64) *Source {
 	return &Source{
-		config: d.config, header: f.header, ibs: f.ibs, reads: f.reads, blockHash: f.blockHash,
-		manager: accounts.InternAddress(manager), rollup: rollup, rules: f.chainRules, index: len(f.txs),
-	}, nil
+		config: d.config, header: d.header, ibs: d.ibs, reads: d.reads, blockHash: d.blockHash,
+		manager: accounts.InternAddress(manager), rollup: rollup, rules: d.chainRules, index: len(d.txs),
+	}
 }
 
 // Nonce returns addr's nonce in the draft.
