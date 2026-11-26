@@ -377,3 +377,38 @@ func TestEmitTouched_FoldReusesFirstTouchKeyHash(t *testing.T) {
 		require.Equal(t, commitment.KeyToHexNibbleHash([]byte(pk)), got[pk], "key %x", pk)
 	}
 }
+
+func TestMemoAccountReader_ReadsEachAccountOnce(t *testing.T) {
+	t.Parallel()
+
+	present, absent := accounts.InternAddress([20]byte{1}), accounts.InternAddress([20]byte{2})
+	acc := &accounts.Account{Nonce: 7}
+	inner := &countingAccountReader{mapStateReader: newMapStateReader()}
+	inner.accounts[present] = acc
+	r := newMemoAccountReader(inner)
+	for range 3 {
+		got, err := r.ReadAccountData(present)
+		require.NoError(t, err)
+		require.Equal(t, acc, got)
+		got, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	}
+	require.Equal(t, 2, inner.reads)
+}
+
+func TestMemoAccountReader_DoesNotCacheAFailedRead(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress([20]byte{3})
+	acc := &accounts.Account{Nonce: 7}
+	failing := &failingAccountReader{mapStateReader: newMapStateReader(), err: errors.New("read failed")}
+	failing.accounts[addr] = acc
+	r := newMemoAccountReader(failing)
+	_, err := r.ReadAccountData(addr)
+	require.ErrorIs(t, err, failing.err)
+	failing.err = nil
+	got, err := r.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, acc, got)
+}
