@@ -378,6 +378,23 @@ func TestCollapseDeletedSiblingsKeepHphStorageNodes(t *testing.T) {
 	require.Zero(t, countWitnessNodes(hphLegacy, v3Legacy), "hph events %x, v3 events %x", hphEvents, v3Events)
 }
 
+func TestCollapseRuleReadsStorageOnlyForSiblings(t *testing.T) {
+	prefixes := make([][]byte, 16)
+	for i := range prefixes {
+		prefixes[i] = []byte{byte(i)}
+	}
+	pre := witnessState(rand.New(rand.NewSource(9)), witnessShape{accounts: 16, slots: 1, accountPrefixes: prefixes, slotPrefixes: [][]byte{{1}}})
+	batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key)}
+	b := newWitnessBed(t, pre)
+	b.v3Mem.Apply(batch)
+	reader, _ := b.v3Mem.Open(t.Context())
+	counting := &countingReads{PatriciaContext: reader, reads: map[string]int{}}
+	events := 0
+	require.NoError(t, traceCollapsesDeletes(counting, collapseTestItems(batch), func([]byte, []byte) { events++ }))
+	require.Zero(t, events)
+	require.Len(t, counting.reads, 1)
+}
+
 func TestCollapseDeleteRangeCost(t *testing.T) {
 	deletes := make([][]byte, 1024)
 	for i := range deletes {
