@@ -1011,8 +1011,6 @@ func (f *ForkChoiceStore) TotalActiveBalance(root common.Hash) (uint64, bool) {
 }
 
 func (f *ForkChoiceStore) LowestAvailableSlot() uint64 {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
 	return f.forkGraph.LowestAvailableSlot()
 }
 
