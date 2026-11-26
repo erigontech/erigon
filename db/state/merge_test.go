@@ -1711,7 +1711,7 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 
 	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module)
 
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	ps := background.NewProgressSet()
 	for step := range kv.Step(numFiles) {
