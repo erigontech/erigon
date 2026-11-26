@@ -1272,7 +1272,7 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 // so the parallel finalize can be driven straight from the recorded IO.
 func (ws *WriteSet) Finalize(skip map[accounts.Address]struct{}) *WriteSet {
 	ws.zeroSameTxCreateDestructStorage()
-	return ws.snapshot(skip)
+	return ws.Snapshot(skip)
 }
 
 // zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
@@ -1300,11 +1300,7 @@ func (ws *WriteSet) zeroSameTxCreateDestructStorage() {
 // needs residual balance, later reads the incarnation cell as the storage-wipe
 // signal, the calculator the per-slot deletes, and fee finalization the creation
 // marker); the rest drop.
-func (ws *WriteSet) Snapshot() *WriteSet {
-	return ws.snapshot(nil)
-}
-
-func (ws *WriteSet) snapshot(skip map[accounts.Address]struct{}) *WriteSet {
+func (ws *WriteSet) Snapshot(skip map[accounts.Address]struct{}) *WriteSet {
 	out := &WriteSet{}
 
 	addrs := make(map[accounts.Address]struct{})
