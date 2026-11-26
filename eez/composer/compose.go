@@ -108,7 +108,8 @@ type effects struct {
 // compositions, a transaction whose nonce is ahead of its sender's waits
 // with the rest of its chain, out of the drain's count, and so does one only
 // a lighter window has room for, in the count, while others behind it
-// compose. Nil when none composes.
+// compose. An outbound transaction popped after a trigger ran waits for the
+// next slot, in the count. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target, ts uint64) *effects {
 	k := &composition{c: c, ctx: ctx, fx: &effects{}}
 	if !k.pop(c.x.MaxTxs) {

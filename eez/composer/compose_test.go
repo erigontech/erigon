@@ -1652,6 +1652,30 @@ func TestComposeOutboundBehindInboundWaits(t *testing.T) {
 	}
 }
 
+// TestComposeOutboundBehindInboundCounts: an outbound transaction waiting
+// behind a trigger counts against the drain, which pops no more for it.
+func TestComposeOutboundBehindInboundCounts(t *testing.T) {
+	f := newCrossFixture(t)
+	f.c.x.MaxTxs = 2
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	other := *f
+	other.key = key
+	gapped := other.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+	out := f.holdOutbound(t, 0)
+	next := f.holdOutbound(t, 1)
+	var buf bytes.Buffer
+	f.c.logger = log.New()
+	f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{trigger}, fx.held)
+	require.Contains(t, buf.String(), "waiting=2", "the second outbound transaction stays queued")
+	require.Equal(t, []*Held{gapped, out, next}, f.pool.PopN(math.MaxInt))
+}
+
 // TestComposeOutboundWaitsOnANonceGap: an outbound transaction whose nonce
 // is ahead of its sender's on the rollup waits, as an inbound one does.
 func TestComposeOutboundWaitsOnANonceGap(t *testing.T) {

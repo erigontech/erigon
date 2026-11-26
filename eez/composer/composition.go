@@ -55,7 +55,8 @@ type composition struct {
 	// wait for the next slot.
 	rest, deferred []*Held
 	// popped counts the transactions popped; unroomed, those deferred after
-	// a simulation: they take from the drain as the others do.
+	// a simulation or behind a trigger: they take from the drain as the
+	// others do.
 	popped, unroomed int
 }
 
@@ -120,6 +121,7 @@ func (k *composition) add(h *Held) error {
 	case h.Direction == Outbound && k.src.posting == postingClosed:
 		// A trigger ran: the posting, which its call would join, precedes it.
 		k.deferred = append(k.deferred, h)
+		k.unroomed++
 		return nil
 	}
 	nonce := k.src.Nonce
