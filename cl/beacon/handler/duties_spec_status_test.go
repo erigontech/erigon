@@ -773,12 +773,13 @@ func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
 						return err
 					}
 				}
-				if tc.dumpReady {
-					if err := beacon_indicies.MarkRootCanonical(tx, slot-1, common.Hash{1}); err != nil {
+				if err := beacon_indicies.MarkRootCanonical(tx, slot-1, common.Hash{1}); err != nil {
+					return err
+				}
+				if !tc.dumpReady {
+					if err := tx.Delete(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(slot)); err != nil {
 						return err
 					}
-				} else if err := tx.Delete(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(slot)); err != nil {
-					return err
 				}
 				return state_accessors.SetStateProcessingProgress(tx, slot-1)
 			}))
