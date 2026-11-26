@@ -75,6 +75,19 @@ func effectiveTip(minFeeCap, pendingBaseFee *uint256.Int, minTip uint64) uint256
 	return *tip
 }
 
+// rankMarkers returns the markers that better and worse compare first. EnoughFeeCapBlock follows the
+// pending base fee, and a local txn after a remote one of its sender ranks as remote.
+func (mt *metaTxn) rankMarkers(pendingBaseFee *uint256.Int) SubPoolMarker {
+	subPool := mt.subPool
+	if mt.minFeeCap.Cmp(pendingBaseFee) >= 0 {
+		subPool |= EnoughFeeCapBlock
+	}
+	if mt.followsRemote {
+		subPool &^= IsLocal
+	}
+	return subPool
+}
+
 // Returns true if the txn "mt" is better than the parameter txn "than"
 // it first compares the subpool markers of the two meta txns, then,
 // (since they have the same subpool marker, and thus same pool)
@@ -82,20 +95,7 @@ func effectiveTip(minFeeCap, pendingBaseFee *uint256.Int, minTip uint64) uint256
 // it compares the effective tip (for P), nonceDistance (for both P,Q)
 // minFeeCap (for B), and cumulative balance distance (for P, Q)
 func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
-	subPool := mt.subPool
-	thanSubPool := than.subPool
-	if mt.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-		subPool |= EnoughFeeCapBlock
-	}
-	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-		thanSubPool |= EnoughFeeCapBlock
-	}
-	if mt.followsRemote {
-		subPool &^= IsLocal
-	}
-	if than.followsRemote {
-		thanSubPool &^= IsLocal
-	}
+	subPool, thanSubPool := mt.rankMarkers(&pendingBaseFee), than.rankMarkers(&pendingBaseFee)
 	if subPool != thanSubPool {
 		return subPool > thanSubPool
 	}
@@ -135,14 +135,7 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 // worse orders transactions for eviction. Within a sub-pool it ranks fees as better does,
 // so an overflow discards the transactions that selection and promotion value least.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
-	subPool := mt.subPool
-	thanSubPool := than.subPool
-	if mt.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-		subPool |= EnoughFeeCapBlock
-	}
-	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-		thanSubPool |= EnoughFeeCapBlock
-	}
+	subPool, thanSubPool := mt.rankMarkers(&pendingBaseFee), than.rankMarkers(&pendingBaseFee)
 	if subPool != thanSubPool {
 		return subPool < thanSubPool
 	}

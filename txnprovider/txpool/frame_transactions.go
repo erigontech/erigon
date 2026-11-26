@@ -523,9 +523,8 @@ func (p *TxPool) enforceTotalCapacity(pendingBaseFee uint64) {
 			parked = parked[1:]
 		} else {
 			p.removeFromSubPool(worst, "total pool overflow")
-			p.frameAccountsToRefresh[p.senders.senderID2Addr[worst.TxnSlot.SenderID]] = struct{}{}
 		}
-		p.discardLocked(worst, reason)
+		p.discardOverflow(worst, reason)
 		excess--
 	}
 }
