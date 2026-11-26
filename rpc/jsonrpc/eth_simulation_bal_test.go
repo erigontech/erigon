@@ -389,6 +389,42 @@ func TestSimulateV1TouchedEmptyAccountIsRemovedBeforeNextCall(t *testing.T) {
 	require.Equal(t, absent, authorizationGasUsed(t, "genesis"))
 }
 
+func TestSimulateV1SystemCallBlockHash(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	pack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	code := hexutil.Bytes{
+		byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0d, byte(vm.JUMPI),
+		byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH),
+		byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.SLOAD), byte(vm.PUSH0), byte(vm.MSTORE),
+		byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN),
+	}
+	beaconRoots := params.BeaconRootsAddress.Value()
+	gas := hexutil.Uint64(100_000)
+	readSlot := ethapi.CallArgs{From: &bankAddr, To: &beaconRoots, Gas: &gas}
+	result, err := api.SimulateV1(t.Context(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{
+				StateOverrides: &ethapi.StateOverrides{params.BeaconRootsAddress: {Code: &code}},
+				Calls:          []ethapi.CallArgs{readSlot},
+			},
+			{},
+			{Calls: []ethapi.CallArgs{readSlot}},
+		},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 3)
+	require.Len(t, result[0].Calls, 1)
+	require.Equal(t, m.Genesis.Hash().Hex(), result[0].Calls[0].ReturnData)
+	require.NotNil(t, result[0].Hash)
+	require.Len(t, result[2].Calls, 1)
+	require.Equal(t, result[0].Hash.Hex(), result[2].Calls[0].ReturnData)
+}
+
 func TestSimulateV1SystemCallSelfDestructKeepsBalanceWithoutCalls(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
