@@ -88,7 +88,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if expectedSlot == a.beaconChainCfg.GenesisSlot {
 			table = kv.BlockRoot
 		}
-		stateGetter, err := historicalDutiesStateGetter(tx, view, expectedSlot, table)
+		stateGetter, err := historicalDutiesStateGetter(tx, view, expectedSlot, table, a.beaconChainCfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, err
 		}

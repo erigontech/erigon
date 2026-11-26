@@ -236,7 +236,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	view := a.caplinStateSnapshots.View()
 	defer view.Close()
-	stateGetter, err := historicalDutiesStateGetter(tx, view, slot, kv.ActiveValidatorIndicies)
+	stateGetter, err := historicalDutiesStateGetter(tx, view, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -331,14 +331,29 @@ func historicalInputsReady(tx kv.Tx, view *snapshotsync.CaplinStateView, rowSlot
 	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
 }
 
-func historicalDutiesStateGetter(tx kv.Tx, view *snapshotsync.CaplinStateView, slot uint64, table string) (state_accessors.GetValFn, error) {
-	if err := historicalInputsReady(tx, view, slot, slot, table); err != nil {
+func historicalDutiesStateGetter(tx kv.Tx, view *snapshotsync.CaplinStateView, slot uint64, table string, slotsPerEpoch uint64) (state_accessors.GetValFn, error) {
+	if err := historicalInputsReady(tx, view, slot, slot, table); err != nil && (table != kv.BlockRoot || beaconhttp.WrapEndpointError(err).Code != http.StatusServiceUnavailable) {
 		return nil, err
 	}
 	get := state_accessors.GetValFnTxAndSnapshot(tx, view)
 	return func(table string, key []byte) ([]byte, error) {
 		rowSlot := base_encoding.Decode64FromBytes4(key)
 		if err := historicalInputsReady(tx, view, rowSlot, rowSlot, table); err != nil {
+			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
+				for range maxEpochsLookaheadForDuties * 2 * slotsPerEpoch {
+					root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
+					if rootErr != nil {
+						return nil, rootErr
+					}
+					if root != (common.Hash{}) {
+						return root[:], nil
+					}
+					if rowSlot == 0 {
+						break
+					}
+					rowSlot--
+				}
+			}
 			return nil, err
 		}
 		return get(table, key)
