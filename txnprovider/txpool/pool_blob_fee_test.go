@@ -74,6 +74,36 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
+// A blob fee rise must not leave such a blob txn in pending, where an overflow would evict a txn that can be included
+// instead.
+func TestBlobFeeRiseDemotesBlobTxnBeforeOverflow(t *testing.T) {
+	ctx, pool, blob, txns := newPoolWithBlobTxn(t, "Osaka")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	senders := []common.Address{{2}, {3}}
+	newBlock := func(height, blobFee uint64) {
+		change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, senders...)
+		change.BlockGasLimit = 30_000_000
+		change.PendingBlobFeePerGas = blobFee
+		change.ChangeBatch[0].BlockHeight = height
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	newBlock(1, 1)
+	pool.pending.limit = 2
+	// Its tip ranks the blob txn above this one.
+	ordinary, reason := addRemoteTestTxn(t, pool, senders[0], 0, 1, 50, 1)
+	require.Equal(t, txpoolcfg.Success, reason)
+	require.Equal(t, 2, pool.pending.Len())
+
+	newBlock(2, blob.GetBlobFeeCap().Uint64()+1)
+	_, reason = addRemoteTestTxn(t, pool, senders[1], 0, 2, 60, 2)
+	require.Equal(t, txpoolcfg.Success, reason)
+	require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+	require.Equal(t, BaseFeeSubPool, pool.byHash[string(blob.IDHash[:])].currentSubPool)
+	require.Equal(t, 2, pool.pending.Len())
+}
+
 // The inner transaction alone cannot supply a blob sidecar. A transaction with a missing
 // network wrapper stays pending and can be selected once the full wrapper is available.
 func TestBestKeepsPendingBlobTxnWithMissingWrapper(t *testing.T) {

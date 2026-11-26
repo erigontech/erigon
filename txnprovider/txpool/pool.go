@@ -166,6 +166,7 @@ type TxPool struct {
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
+	pendingCoveredBlobFee   uint64        // Every pending txn covers this blob fee
 	blockGasLimit           atomic.Uint64
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
@@ -2871,6 +2872,20 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	coversFees := func(mt *metaTxn) bool {
 		return coversPendingFees(mt, mt.TxnSlot.GetGas(), pendingBaseFee, pendingBlobFee)
 	}
+	// Pending is ordered without the blob fee, so after it rises, the txns below it can be anywhere in pending.
+	if pendingBlobFee > p.pendingCoveredBlobFee {
+		var uncovered []*metaTxn
+		for _, mt := range p.pending.best.ms {
+			if !coversFees(mt) {
+				uncovered = append(uncovered, mt)
+			}
+		}
+		for _, mt := range uncovered {
+			p.pending.Remove(mt, "demote-blob-fee", p.logger)
+			p.baseFee.Add(mt, "demote-blob-fee", p.logger)
+		}
+	}
+	p.pendingCoveredBlobFee = pendingBlobFee
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversFees(worst)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
