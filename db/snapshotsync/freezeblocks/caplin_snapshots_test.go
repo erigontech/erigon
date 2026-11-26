@@ -143,14 +143,31 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 }
 
 func TestDumpBeaconBlocksRangeFailsOnCanonicalRootWithoutBody(t *testing.T) {
-	for name, missingSlot := range map[string]uint64{"first": 0, "last": snaptype.CaplinMergeLimit - 500} {
+	for name, tc := range map[string]struct {
+		slot      uint64
+		emptyBody bool
+	}{
+		"first":            {slot: 0},
+		"last":             {slot: snaptype.CaplinMergeLimit - 500},
+		"last, empty body": {slot: snaptype.CaplinMergeLimit - 500, emptyBody: true},
+	} {
 		t.Run(name, func(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			dirs := datadir.New(t.TempDir())
-			writeSparseCanonicalChain(t, db, missingSlot)
+			writeSparseCanonicalChain(t, db, tc.slot)
+			if tc.emptyBody {
+				var root common.Hash
+				binary.BigEndian.PutUint64(root[:], tc.slot+1)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(tc.slot, root), []byte{})
+				}))
+			}
 
 			err := dumpBeaconBlocksRange(t.Context(), db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New())
-			require.ErrorContains(t, err, "has no body", "slot %d", missingSlot)
+			require.ErrorContains(t, err, "has no body", "slot %d", tc.slot)
+			files, globErr := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*"))
+			require.NoError(t, globErr)
+			require.Empty(t, files, "slot %d", tc.slot)
 		})
 	}
 }
