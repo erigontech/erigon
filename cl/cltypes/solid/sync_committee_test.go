@@ -162,3 +162,28 @@ func TestSyncCommitteeJson(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, syncCommittee, decodedSyncCommittee)
 }
+
+func TestSyncCommitteePublicKeyAt(t *testing.T) {
+	for _, size := range []int{32, defaultSyncCommitteeSize} {
+		committee := make([]common.Bytes48, size)
+		for i := range committee {
+			committee[i][0], committee[i][47] = byte(i), byte(i>>8)
+		}
+		aggregatePublicKey := common.Bytes48{0xAB}
+		sc := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
+
+		for i := range committee {
+			require.Equal(t, committee[i], sc.PublicKeyAt(i), "size %d, index %d", size, i)
+		}
+		// The aggregate public key follows the committee in the backing data and must not be reachable.
+		for _, i := range []int{-1, size} {
+			require.Panics(t, func() { sc.PublicKeyAt(i) }, "size %d, index %d", size, i)
+		}
+	}
+}
+
+func TestSyncCommitteePublicKeyAtOnZeroValue(t *testing.T) {
+	sc := &SyncCommittee{}
+	require.Equal(t, common.Bytes48{}, sc.PublicKeyAt(defaultSyncCommitteeSize-1))
+	require.Panics(t, func() { sc.PublicKeyAt(defaultSyncCommitteeSize) })
+}
