@@ -180,7 +180,7 @@ func TestBlobsFromColumnsRefusesASlotBelowTheEarliestAvailableSlotWithoutWaiting
 	_, _, err := h.d.BlobsFromColumns(ctx, recoveryTestSlot, h.root, []uint64{0, 1}, false)
 
 	require.ErrorIs(t, err, ErrColumnsNotKept)
-	require.Zero(t, blobReconstructions.waiting.Load(), "waiting requests")
+	require.Zero(t, h.d.reconstructions.waiting.Load(), "waiting requests")
 }
 
 func (g *gossipRecovery) requireBlobsRebuilt(t *testing.T) {
@@ -367,14 +367,12 @@ type heldReconstructions struct {
 // holdReconstructions admits permits reconstructions at a time and holds their column reads until release is called.
 func holdReconstructions(t *testing.T, permits int) *heldReconstructions {
 	t.Helper()
-	previous := blobReconstructions
-	blobReconstructions = newReconstructionAdmission(permits)
-	t.Cleanup(func() { blobReconstructions = previous })
 	h := &heldReconstructions{results: make(chan error, 16)}
 	h.columns = &gatedColumnReads{gate: make(chan struct{}), reads: make(map[common.Hash]int)}
 	h.gossipRecovery = startGossipRecovery(t, false, atFuluFromGenesis, func(r *recoveryRun) {
 		h.columns.DataColumnStorage = r.d.columnStorage
 		r.d.columnStorage = h.columns
+		r.d.reconstructions = newReconstructionAdmission(permits)
 	})
 	h.release = sync.OnceFunc(func() { close(h.columns.gate) })
 	t.Cleanup(h.release)
@@ -391,7 +389,7 @@ func (h *heldReconstructions) start(ctx context.Context, root common.Hash) {
 func (h *heldReconstructions) awaitAdmission(t *testing.T, running, waiting int32) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		return h.columns.inFlight.Load() == running && blobReconstructions.waiting.Load() == waiting
+		return h.columns.inFlight.Load() == running && h.d.reconstructions.waiting.Load() == waiting
 	}, 30*time.Second, time.Millisecond)
 }
 
@@ -404,6 +402,13 @@ func (h *heldReconstructions) requireResult(t *testing.T) error {
 		t.Fatal("a reconstruction did not return")
 		return nil
 	}
+}
+
+func holdEveryPermit(d *peerdas) {
+	for range cap(d.reconstructions.permits) {
+		d.reconstructions.permits <- struct{}{}
+	}
+	d.reconstructions.waiting.Store(int32(cap(d.reconstructions.permits)))
 }
 
 func TestBlobsFromColumnsRunsAtMostThePermittedReconstructionsAtOnce(t *testing.T) {
@@ -449,7 +454,7 @@ func TestBlobsFromColumnsReadsNoMoreColumnsForARequestCancelledWhileWaiting(t *t
 	cancel()
 
 	require.ErrorIs(t, h.requireResult(t), context.Canceled)
-	require.Equal(t, int32(0), blobReconstructions.waiting.Load())
+	require.Equal(t, int32(0), h.d.reconstructions.waiting.Load())
 	require.Equal(t, 1, h.columns.readsOf(h.root), "held column reads")
 	h.release()
 	require.NoError(t, h.requireResult(t))
@@ -545,4 +550,719 @@ func TestBlobsFromColumnsStopsWhenTheRequestIsCancelled(t *testing.T) {
 			require.Equal(t, tc.at, columns.reads.Load(), "column reads")
 		})
 	}
+}
+
+func TestBlobsFromColumnsDoesNotShareReconstructionPermitsBetweenInstances(t *testing.T) {
+	busy := startGossipRecovery(t, false, atFuluFromGenesis)
+	other := startGossipRecovery(t, false, atFuluFromGenesis)
+	holdEveryPermit(busy.d)
+
+	_, _, err := busy.blobsFromColumns([]uint64{0, 1}, false)
+	require.ErrorIs(t, err, ErrReconstructionBusy)
+
+	blobs, _, err := other.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.NoError(t, err)
+	require.Len(t, blobs, 2)
+}
+
+type columnRead struct {
+	root   common.Hash
+	column int64
+}
+
+type seamStorage struct {
+	blob_storage.DataColumnStorage
+	mu          sync.Mutex
+	indexReads  int
+	columnReads map[columnRead]int
+	beforeIndex func(ctx context.Context) error
+	beforeRead  func(ctx context.Context, column int64) error
+}
+
+func (s *seamStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
+	s.mu.Lock()
+	s.indexReads++
+	before := s.beforeIndex
+	s.mu.Unlock()
+	if before != nil {
+		if err := before(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+}
+
+func (s *seamStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	s.mu.Lock()
+	s.columnReads[columnRead{blockRoot, columnIndex}]++
+	before := s.beforeRead
+	s.mu.Unlock()
+	if before != nil {
+		if err := before(ctx, columnIndex); err != nil {
+			return nil, err
+		}
+	}
+	return s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+}
+
+func (s *seamStorage) setBeforeIndex(before func(ctx context.Context) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.beforeIndex = before
+}
+
+func (s *seamStorage) setBeforeRead(before func(ctx context.Context, column int64) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.beforeRead = before
+}
+
+func (s *seamStorage) reads(root common.Hash, column int64) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.columnReads[columnRead{root, column}]
+}
+
+func (s *seamStorage) allReads() (total int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, reads := range s.columnReads {
+		total += reads
+	}
+	return total
+}
+
+func (s *seamStorage) indexLookups() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.indexReads
+}
+
+func (s *seamStorage) reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.indexReads = 0
+	clear(s.columnReads)
+}
+
+type blobsResult struct {
+	sidecars []*cltypes.BlobSidecar
+	err      error
+	panicked any
+}
+
+func awaitBlobs(t *testing.T, results <-chan blobsResult) blobsResult {
+	t.Helper()
+	select {
+	case result := <-results:
+		return result
+	case <-time.After(30 * time.Second):
+		t.Fatal("a request did not return")
+		return blobsResult{}
+	}
+}
+
+type sharedBuilds struct {
+	*gossipRecovery
+	seams *seamStorage
+}
+
+func startSharedBuilds(t *testing.T, blobs, permits int, configure ...func(*recoveryRun)) *sharedBuilds {
+	t.Helper()
+	s := &sharedBuilds{seams: &seamStorage{columnReads: make(map[columnRead]int)}}
+	s.gossipRecovery = startGossipRecoveryWithBlobs(t, false, blobs, append([]func(*recoveryRun){atFuluFromGenesis, func(r *recoveryRun) {
+		s.seams.DataColumnStorage = r.d.columnStorage
+		r.d.columnStorage = s.seams
+		r.d.reconstructions = newReconstructionAdmission(permits)
+	}}, configure...)...)
+	return s
+}
+
+func withSlotSeconds(seconds uint64) func(*recoveryRun) {
+	return func(r *recoveryRun) {
+		cfg := *r.d.beaconConfig
+		cfg.SecondsPerSlot = seconds
+		r.d.beaconConfig = &cfg
+	}
+}
+
+func withBlobLimit(limit uint64) func(*recoveryRun) {
+	return func(r *recoveryRun) {
+		cfg := *r.d.beaconConfig
+		cfg.BlobSchedule = []clparams.BlobParameters{{Epoch: 0, MaxBlobsPerBlock: limit}}
+		r.d.beaconConfig = &cfg
+	}
+}
+
+func (s *sharedBuilds) startFullRequest(ctx context.Context) <-chan blobsResult {
+	results := make(chan blobsResult, 1)
+	go func() {
+		var result blobsResult
+		defer func() {
+			result.panicked = recover()
+			results <- result
+		}()
+		_, result.sidecars, result.err = s.d.BlobsFromColumns(ctx, recoveryTestSlot, s.root, nil, true)
+	}()
+	return results
+}
+
+func newGate(t *testing.T) (wait, release func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	release = sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(release)
+	return func() { <-gate }, release
+}
+
+func (s *sharedBuilds) holdColumn(t *testing.T, column int64) (release func()) {
+	t.Helper()
+	wait, release := newGate(t)
+	s.seams.setBeforeRead(func(_ context.Context, read int64) error {
+		if read == column {
+			wait()
+		}
+		return nil
+	})
+	return release
+}
+
+func (s *sharedBuilds) awaitRead(t *testing.T, column int64) {
+	t.Helper()
+	require.Eventually(t, func() bool { return s.seams.reads(s.root, column) > 0 }, 30*time.Second, time.Millisecond)
+}
+
+func (s *sharedBuilds) awaitJoined(t *testing.T, joiners int32) {
+	t.Helper()
+	require.Eventually(t, func() bool { return s.d.reconstructions.joined.Load() == joiners }, 30*time.Second, time.Millisecond)
+}
+
+func (s *sharedBuilds) requireNoBuildLeft(t *testing.T, heldPermits int) {
+	t.Helper()
+	s.d.blobBuildsMu.Lock()
+	defer s.d.blobBuildsMu.Unlock()
+	require.Empty(t, s.d.blobBuilds, "builds in flight")
+	require.Len(t, s.d.reconstructions.permits, heldPermits, "held permits")
+	require.Zero(t, s.d.reconstructions.waiting.Load(), "waiting requests")
+	require.Zero(t, s.d.reconstructions.joined.Load(), "joined requests")
+}
+
+func (s *sharedBuilds) requireNothingCached(t *testing.T) {
+	t.Helper()
+	require.Zero(t, s.d.builtBlobSidecars.Len(), "cached blocks")
+}
+
+func (s *sharedBuilds) requireCacheHit(t *testing.T, root common.Hash, want []*cltypes.BlobSidecar) {
+	t.Helper()
+	reads := s.seams.allReads()
+	_, got, err := s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+	require.NoError(t, err)
+	require.Len(t, got, len(want))
+	for i := range got {
+		require.Same(t, want[i], got[i], "sidecar %d", i)
+	}
+	require.Equal(t, reads, s.seams.allReads(), "column reads of the repeated request")
+}
+
+func requireSameSidecarData(t *testing.T, want, got []*cltypes.BlobSidecar) {
+	t.Helper()
+	require.Len(t, got, len(want))
+	for i := range want {
+		wantSSZ, err := want[i].EncodeSSZ(nil)
+		require.NoError(t, err)
+		gotSSZ, err := got[i].EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Equal(t, wantSSZ, gotSSZ, "sidecar %d", i)
+	}
+}
+
+func (s *sharedBuilds) storeBlock(t *testing.T, executionBlockHash common.Hash) common.Hash {
+	t.Helper()
+	_, root, _, columns := recoverableFuluDataWithBlobs(t, s.d.beaconConfig, recoveryTestSlot, executionBlockHash, len(s.blobs))
+	s.storeFirstHalf(t, root, columns)
+	return root
+}
+
+func (s *sharedBuilds) storeFirstHalf(t *testing.T, root common.Hash, columns []*cltypes.DataColumnSidecar) {
+	t.Helper()
+	for index := range s.d.beaconConfig.NumberOfColumns / 2 {
+		require.NoError(t, s.d.columnStorage.WriteColumnSidecars(t.Context(), root, int64(index), columns[index]))
+	}
+}
+
+func TestBlobsFromColumnsSharesOneBuildBetweenIdenticalRequests(t *testing.T) {
+	s := startSharedBuilds(t, 2, 4)
+	_, want, err := s.blobsFromColumns([]uint64{0, 1}, true)
+	require.NoError(t, err)
+	s.seams.reset()
+	release := s.holdColumn(t, 1)
+	const requests = 4
+	var results [requests]<-chan blobsResult
+	for i := range results {
+		results[i] = s.startFullRequest(t.Context())
+	}
+	s.awaitJoined(t, requests-1)
+
+	release()
+
+	first := awaitBlobs(t, results[0])
+	require.NoError(t, first.err)
+	requireSameSidecarData(t, want, first.sidecars)
+	for _, pending := range results[1:] {
+		got := awaitBlobs(t, pending)
+		require.NoError(t, got.err)
+		require.Len(t, got.sidecars, len(first.sidecars))
+		for k := range got.sidecars {
+			require.Same(t, first.sidecars[k], got.sidecars[k], "sidecar %d", k)
+		}
+	}
+	for column := int64(1); column < int64(s.d.beaconConfig.NumberOfColumns/2); column++ {
+		require.Equal(t, 1, s.seams.reads(s.root, column), "reads of column %d", column)
+	}
+}
+
+func TestBlobsFromColumnsFinishesTheSharedBuildWhenTheStarterIsCancelled(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	release := s.holdColumn(t, 1)
+	starterCtx, cancelStarter := context.WithCancel(t.Context())
+	starter := s.startFullRequest(starterCtx)
+	s.awaitRead(t, 1)
+	waiter := s.startFullRequest(t.Context())
+	s.awaitJoined(t, 1)
+
+	cancelStarter()
+	release()
+
+	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
+	got := awaitBlobs(t, waiter)
+	require.NoError(t, got.err)
+	require.Len(t, got.sidecars, 2)
+	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
+	s.requireCacheHit(t, s.root, got.sidecars)
+}
+
+func TestBlobsFromColumnsFreesTheWaiterPlaceOfACancelledWaiter(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	release := s.holdColumn(t, 1)
+	starter := s.startFullRequest(t.Context())
+	s.awaitRead(t, 1)
+	waiterCtx, cancelWaiter := context.WithCancel(t.Context())
+	waiter := s.startFullRequest(waiterCtx)
+	s.awaitJoined(t, 1)
+
+	cancelWaiter()
+
+	require.ErrorIs(t, awaitBlobs(t, waiter).err, context.Canceled)
+	s.awaitJoined(t, 0)
+	release()
+	got := awaitBlobs(t, starter)
+	require.NoError(t, got.err)
+	require.Len(t, got.sidecars, 2)
+	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
+	s.requireCacheHit(t, s.root, got.sidecars)
+}
+
+func TestBlobsFromColumnsCompletesAndCachesTheBuildWhenEveryRequestIsCancelled(t *testing.T) {
+	s := startSharedBuilds(t, 2, 4)
+	release := s.holdColumn(t, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	starter := s.startFullRequest(ctx)
+	s.awaitRead(t, 1)
+	waiters := []<-chan blobsResult{s.startFullRequest(ctx), s.startFullRequest(ctx)}
+	s.awaitJoined(t, 2)
+
+	cancel()
+	for _, waiter := range waiters {
+		require.ErrorIs(t, awaitBlobs(t, waiter).err, context.Canceled)
+	}
+	s.awaitJoined(t, 0)
+	release()
+
+	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
+	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
+	cached, ok := s.d.builtBlobSidecars.Peek(s.root)
+	require.True(t, ok, "the build is cached")
+	s.requireCacheHit(t, s.root, cached)
+	s.requireNoBuildLeft(t, 0)
+}
+
+func TestBlobsFromColumnsEndsABuildThatIsBlockedPastTheOwnerDeadline(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2, withSlotSeconds(1))
+	var blocked atomic.Bool
+	blocked.Store(true)
+	s.seams.setBeforeRead(func(ctx context.Context, column int64) error {
+		if column == 1 && blocked.Load() {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	})
+
+	got := awaitBlobs(t, s.startFullRequest(t.Context()))
+
+	require.ErrorIs(t, got.err, ErrReconstructionBusy)
+	require.Nil(t, got.sidecars)
+	s.requireNoBuildLeft(t, 0)
+	s.requireNothingCached(t)
+	blocked.Store(false)
+	_, sidecars, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.Len(t, sidecars, 2)
+}
+
+func TestBlobsFromColumnsEndsABuildThatWaitsForAPermitPastTheOwnerDeadline(t *testing.T) {
+	s := startSharedBuilds(t, 2, 1, withSlotSeconds(1))
+	s.d.reconstructions.permits <- struct{}{}
+
+	got := awaitBlobs(t, s.startFullRequest(t.Context()))
+
+	require.ErrorIs(t, got.err, ErrReconstructionBusy)
+	require.Nil(t, got.sidecars)
+	s.requireNoBuildLeft(t, 1)
+	s.requireNothingCached(t)
+}
+
+func TestBlobsFromColumnsRefusesAJoinerWhenTheJoinerPlacesAreFull(t *testing.T) {
+	s := startSharedBuilds(t, 2, 1)
+	release := s.holdColumn(t, 1)
+	starter := s.startFullRequest(t.Context())
+	s.awaitRead(t, 1)
+	cancellableCtx, cancelJoiner := context.WithCancel(t.Context())
+	cancellable := s.startFullRequest(cancellableCtx)
+	steady := s.startFullRequest(t.Context())
+	s.awaitJoined(t, 2)
+
+	require.ErrorIs(t, awaitBlobs(t, s.startFullRequest(t.Context())).err, ErrReconstructionBusy)
+
+	cancelJoiner()
+	require.ErrorIs(t, awaitBlobs(t, cancellable).err, context.Canceled)
+	s.awaitJoined(t, 1)
+	replacement := s.startFullRequest(t.Context())
+	s.awaitJoined(t, 2)
+	release()
+	require.NoError(t, awaitBlobs(t, starter).err)
+	require.NoError(t, awaitBlobs(t, steady).err)
+	require.NoError(t, awaitBlobs(t, replacement).err)
+	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
+}
+
+func TestBlobsFromColumnsLetsTheOwnerWaitForItsPermitWhileJoinersWait(t *testing.T) {
+	const permits = 2
+	s := startSharedBuilds(t, 2, permits)
+	for range permits {
+		s.d.reconstructions.permits <- struct{}{}
+	}
+	wait, releasePreflight := newGate(t)
+	s.seams.setBeforeIndex(func(context.Context) error {
+		wait()
+		return nil
+	})
+	owner := s.startFullRequest(t.Context())
+	require.Eventually(t, func() bool { return s.seams.indexLookups() == 1 }, 30*time.Second, time.Millisecond)
+	joiners := make([]<-chan blobsResult, permits)
+	for i := range joiners {
+		joiners[i] = s.startFullRequest(t.Context())
+	}
+	s.awaitJoined(t, permits)
+
+	releasePreflight()
+	require.Eventually(t, func() bool { return s.d.reconstructions.waiting.Load() == 1 || len(owner) == 1 }, 30*time.Second, time.Millisecond)
+	<-s.d.reconstructions.permits
+
+	ownerResult := awaitBlobs(t, owner)
+	require.NoError(t, ownerResult.err)
+	require.Len(t, ownerResult.sidecars, 2)
+	for _, pending := range joiners {
+		got := awaitBlobs(t, pending)
+		require.NoError(t, got.err)
+		require.Len(t, got.sidecars, len(ownerResult.sidecars))
+		for i := range got.sidecars {
+			require.Same(t, ownerResult.sidecars[i], got.sidecars[i], "sidecar %d", i)
+		}
+	}
+	s.requireNoBuildLeft(t, 1)
+}
+
+func TestBlobsFromColumnsDoesNotCacheABlockWithNoStoredColumn(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	_, root, _, columns := recoverableFuluDataWithBlobs(t, s.d.beaconConfig, recoveryTestSlot, common.Hash{1}, len(s.blobs))
+
+	_, sidecars, err := s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
+	s.requireNothingCached(t)
+	s.storeFirstHalf(t, root, columns)
+
+	_, sidecars, err = s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+
+	require.NoError(t, err)
+	require.Len(t, sidecars, len(s.blobs))
+}
+
+func TestBlobsFromColumnsTakesABuildThatEndedJustBeforeTheLockedLookupFromTheCache(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	_, built, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	s.seams.reset()
+
+	got, err := s.d.sharedBlobSidecars(t.Context(), recoveryTestSlot, s.root)
+
+	require.NoError(t, err)
+	require.Len(t, got, len(built))
+	for i := range got {
+		require.Same(t, built[i], got[i], "sidecar %d", i)
+	}
+	require.Zero(t, s.seams.allReads(), "column reads")
+	require.Zero(t, s.seams.indexLookups(), "saved-index lookups")
+}
+
+func TestBlobsFromColumnsSharesThePreflightOfIdenticalColdRequests(t *testing.T) {
+	s := startSharedBuilds(t, 2, 4)
+	wait, release := newGate(t)
+	s.seams.setBeforeIndex(func(context.Context) error {
+		wait()
+		return nil
+	})
+	const requests = 4
+	var results [requests]<-chan blobsResult
+	for i := range results {
+		results[i] = s.startFullRequest(t.Context())
+	}
+	s.awaitJoined(t, requests-1)
+
+	release()
+
+	for _, pending := range results {
+		got := awaitBlobs(t, pending)
+		require.NoError(t, got.err)
+		require.Len(t, got.sidecars, 2)
+	}
+	require.Equal(t, 1, s.seams.indexLookups(), "saved-index lookups")
+	require.Equal(t, 1, s.seams.reads(s.root, 0), "reads of column 0")
+}
+
+func TestBlobsFromColumnsAnswersARepeatedRequestFromTheCache(t *testing.T) {
+	s := startSharedBuilds(t, 3, 2)
+	_, built, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.Len(t, built, 3)
+	s.seams.reset()
+	holdEveryPermit(s.d)
+
+	s.requireCacheHit(t, s.root, built)
+
+	_, selected, err := s.blobsFromColumns([]uint64{0, 2, 9}, true)
+	require.NoError(t, err)
+	require.Equal(t, []*cltypes.BlobSidecar{built[0], built[2]}, selected)
+	for _, tc := range []struct {
+		name    string
+		indices []uint64
+		want    []int
+	}{
+		{"a selection", []uint64{0, 2, 9}, []int{0, 2}},
+		{"every blob", nil, []int{0, 1, 2}},
+	} {
+		blobs, sidecars, err := s.blobsFromColumns(tc.indices, false)
+
+		require.NoError(t, err, tc.name)
+		require.Nil(t, sidecars, tc.name)
+		require.Len(t, blobs, len(tc.want), tc.name)
+		for k, index := range tc.want {
+			require.True(t, *blobs[k] == built[index].Blob, "%s: blob %d", tc.name, index)
+		}
+	}
+	require.Zero(t, s.seams.allReads(), "column reads")
+	require.Zero(t, s.seams.indexLookups(), "saved-index lookups")
+}
+
+func TestBlobsFromColumnsSharesAFailedBuildAndDoesNotCacheIt(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	require.NoError(t, s.d.columnStorage.RemoveColumnSidecars(t.Context(), recoveryTestSlot, s.root, 5))
+	s.storeColumn(t, 64)
+	release := s.holdColumn(t, 1)
+	first := s.startFullRequest(t.Context())
+	s.awaitRead(t, 1)
+	second := s.startFullRequest(t.Context())
+	s.awaitJoined(t, 1)
+
+	release()
+
+	require.ErrorIs(t, awaitBlobs(t, first).err, ErrBlobsUnavailable)
+	require.ErrorIs(t, awaitBlobs(t, second).err, ErrBlobsUnavailable)
+	require.Equal(t, 1, s.seams.reads(s.root, 5), "reads of the missing column")
+	s.requireNoBuildLeft(t, 0)
+	s.requireNothingCached(t)
+	requireBlobRecoveryReleased(t, s.d, s.root)
+	s.requireAllColumnsStored(t)
+
+	_, built, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.Len(t, built, 2)
+	s.requireCacheHit(t, s.root, built)
+}
+
+func TestBlobsFromColumnsKeepsAPanicWithTheStartingRequest(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	wait, release := newGate(t)
+	var failing atomic.Bool
+	failing.Store(true)
+	s.seams.setBeforeRead(func(_ context.Context, column int64) error {
+		if column == 1 && failing.Load() {
+			wait()
+			panic("column storage failed")
+		}
+		return nil
+	})
+	starter := s.startFullRequest(t.Context())
+	s.awaitRead(t, 1)
+	joiner := s.startFullRequest(t.Context())
+	s.awaitJoined(t, 1)
+
+	release()
+
+	require.Equal(t, "column storage failed", awaitBlobs(t, starter).panicked)
+	got := awaitBlobs(t, joiner)
+	require.Nil(t, got.panicked)
+	require.Error(t, got.err)
+	require.Nil(t, got.sidecars)
+	s.requireNoBuildLeft(t, 0)
+	s.requireNothingCached(t)
+	failing.Store(false)
+	_, sidecars, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.Len(t, sidecars, 2)
+}
+
+func TestBlobsFromColumnsCachesTheLastFourBlocks(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	roots := []common.Hash{s.root}
+	for i := 1; i < 5; i++ {
+		roots = append(roots, s.storeBlock(t, common.Hash{byte(i)}))
+	}
+	build := func(root common.Hash) {
+		_, sidecars, err := s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+		require.NoError(t, err)
+		require.Len(t, sidecars, 2)
+	}
+	for _, root := range roots[:4] {
+		build(root)
+	}
+	build(roots[0])
+	build(roots[4])
+	s.seams.reset()
+
+	for _, root := range []common.Hash{roots[0], roots[2], roots[3], roots[4]} {
+		build(root)
+	}
+	require.Zero(t, s.seams.allReads(), "column reads of the four newest blocks")
+
+	build(roots[1])
+	require.Equal(t, 1, s.seams.reads(roots[1], 0), "reads of column 0 of the oldest block")
+}
+
+func TestBlobsFromColumnsRefusesMoreBlobsThanTheSlotAllows(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2, withBlobLimit(1))
+	holdEveryPermit(s.d)
+	for _, tc := range []struct {
+		name         string
+		indices      []uint64
+		withSidecars bool
+	}{
+		{"every blob with sidecars", nil, true},
+		{"a selection", []uint64{0}, false},
+	} {
+		_, _, err := s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, s.root, tc.indices, tc.withSidecars)
+
+		require.ErrorContains(t, err, "more than the 1 that slot", tc.name)
+		require.NotErrorIs(t, err, ErrBlobsUnavailable, tc.name)
+		require.NotErrorIs(t, err, ErrReconstructionBusy, tc.name)
+		require.Zero(t, s.seams.reads(s.root, 1), "%s: reads of column 1", tc.name)
+	}
+	s.requireNothingCached(t)
+}
+
+func TestBlobsFromColumnsReadsNothingForACancelledRequest(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, tc := range []struct {
+		indices      []uint64
+		withSidecars bool
+	}{
+		{nil, true},
+		{nil, false},
+		{[]uint64{0, 1}, true},
+		{[]uint64{0, 1}, false},
+	} {
+		_, _, err := s.d.BlobsFromColumns(ctx, recoveryTestSlot, s.root, tc.indices, tc.withSidecars)
+
+		require.ErrorIs(t, err, context.Canceled)
+	}
+	require.Zero(t, s.seams.indexLookups(), "saved-index lookups")
+	require.Zero(t, s.seams.allReads(), "column reads")
+}
+
+func TestBlobsFromColumnsAnswersAPrunedSlotWithColumnsNotKeptEvenWhenCached(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	_, _, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.NoError(t, s.d.PruneBelow(recoveryTestSlot+1))
+
+	_, _, err = s.blobsFromColumns(nil, true)
+
+	require.ErrorIs(t, err, ErrColumnsNotKept)
+}
+
+func TestBlobsFromColumnsCachesTwoBlocksOfOneSlotSeparately(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	other := s.storeBlock(t, common.Hash{1})
+	var built [2][]*cltypes.BlobSidecar
+	for i, root := range []common.Hash{s.root, other} {
+		_, sidecars, err := s.d.BlobsFromColumns(t.Context(), recoveryTestSlot, root, nil, true)
+		require.NoError(t, err)
+		built[i] = sidecars
+	}
+
+	for i, root := range []common.Hash{s.root, other} {
+		s.requireCacheHit(t, root, built[i])
+		headerRoot, err := built[i][0].SignedBlockHeader.Header.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, root, common.Hash(headerRoot), "block %d", i)
+	}
+}
+
+func TestBlobsFromColumnsOfAGloasBlockNeitherReadsNorFillsTheCache(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2, func(r *recoveryRun) { forkToGloasAt(t, r, recoveryTestSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch) })
+	blobs, _, err := s.blobsFromColumns([]uint64{0, 1}, false)
+	require.NoError(t, err)
+	require.Len(t, blobs, 2)
+	s.requireNothingCached(t)
+
+	planted := make([]*cltypes.BlobSidecar, 2)
+	for i := range planted {
+		planted[i] = &cltypes.BlobSidecar{Blob: cltypes.Blob{0xff}}
+	}
+	s.d.builtBlobSidecars.Add(s.root, planted)
+
+	blobs, _, err = s.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.NoError(t, err)
+	require.Len(t, blobs, 2)
+	for i := range blobs {
+		require.True(t, *blobs[i] == s.blobs[i].Blob, "blob %d", i)
+	}
+}
+
+func TestBlobsFromColumnsAcceptsExactlyTheMaximumBlobCount(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2, withBlobLimit(2))
+
+	blobs, _, err := s.blobsFromColumns([]uint64{0, 1}, false)
+	require.NoError(t, err)
+	require.Len(t, blobs, 2)
+
+	_, sidecars, err := s.blobsFromColumns(nil, true)
+	require.NoError(t, err)
+	require.Len(t, sidecars, 2)
 }

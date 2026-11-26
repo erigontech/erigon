@@ -121,6 +121,13 @@ type peerdas struct {
 	gossipManager     gossipmgr.Gossip
 	recoverBlobsQueue chan recoverBlobsRequest
 
+	reconstructions *reconstructionAdmission
+	blobBuildsMu    sync.Mutex
+	blobBuilds      map[common.Hash]*blobBuild
+
+	// The most recently built blocks, about 2.7 MiB each at 21 blobs. Readers share the sidecars and must not change them.
+	builtBlobSidecars *lru.Cache[common.Hash, []*cltypes.BlobSidecar]
+
 	recoveringMutex     sync.Mutex
 	isRecovering        map[common.Hash]bool
 	recoveryRequests    map[common.Hash]recoverBlobsRequest
@@ -196,6 +203,7 @@ func NewPeerDas(
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
 	}
+	p.initBlobBuilds()
 	return p
 }
 

@@ -19,6 +19,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"sync/atomic"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -42,13 +44,12 @@ var (
 type reconstructionAdmission struct {
 	permits chan struct{}
 	waiting atomic.Int32
+	joined  atomic.Int32
 }
 
 func newReconstructionAdmission(permits int) *reconstructionAdmission {
 	return &reconstructionAdmission{permits: make(chan struct{}, permits)}
 }
-
-var blobReconstructions = newReconstructionAdmission(max(1, runtime.GOMAXPROCS(0)/2))
 
 func (a *reconstructionAdmission) acquire(ctx context.Context) (func(), error) {
 	release := func() { <-a.permits }
@@ -70,6 +71,28 @@ func (a *reconstructionAdmission) acquire(ctx context.Context) (func(), error) {
 	}
 }
 
+func (a *reconstructionAdmission) join() (leave func(), err error) {
+	if a.joined.Add(1) > int32(2*cap(a.permits)) {
+		a.joined.Add(-1)
+		return nil, ErrReconstructionBusy
+	}
+	return func() { a.joined.Add(-1) }, nil
+}
+
+type blobBuild struct {
+	done     chan struct{}
+	sidecars []*cltypes.BlobSidecar
+	err      error
+}
+
+const builtBlobSidecarBlocks = 4
+
+func (d *peerdas) initBlobBuilds() {
+	d.reconstructions = newReconstructionAdmission(max(1, runtime.GOMAXPROCS(0)/2))
+	d.blobBuilds = make(map[common.Hash]*blobBuild)
+	d.builtBlobSidecars, _ = lru.New[common.Hash, []*cltypes.BlobSidecar]("builtBlobSidecars", builtBlobSidecarBlocks)
+}
+
 func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot common.Hash, indices []uint64, withSidecars bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error) {
 	if !d.keepsAllColumns(slot) || slot < d.state.GetEarliestAvailableSlot() {
 		return nil, nil, ErrColumnsNotKept
@@ -78,6 +101,113 @@ func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot c
 	if isGloas && withSidecars {
 		return nil, nil, errors.New("blob sidecars are not built from the columns of a Gloas block")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if isGloas {
+		return d.buildBlobs(ctx, slot, blockRoot, indices, withSidecars, true)
+	}
+	if built, ok := d.builtBlobSidecars.Get(blockRoot); ok {
+		blobs, sidecars := selectBuilt(built, indices, withSidecars)
+		return blobs, sidecars, nil
+	}
+	if indices != nil || !withSidecars {
+		return d.buildBlobs(ctx, slot, blockRoot, indices, withSidecars, false)
+	}
+	built, err := d.sharedBlobSidecars(ctx, slot, blockRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	blobs, sidecars := selectBuilt(built, nil, true)
+	return blobs, sidecars, nil
+}
+
+func selectBuilt(built []*cltypes.BlobSidecar, indices []uint64, withSidecars bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar) {
+	selected := built
+	if indices != nil {
+		selected = make([]*cltypes.BlobSidecar, 0, len(indices))
+		for _, index := range indices {
+			if index < uint64(len(built)) {
+				selected = append(selected, built[index])
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	blobs := make([]*cltypes.Blob, len(selected))
+	for i, sidecar := range selected {
+		blobs[i] = &sidecar.Blob
+	}
+	if !withSidecars {
+		return blobs, nil
+	}
+	return blobs, selected
+}
+
+func (d *peerdas) sharedBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, error) {
+	d.blobBuildsMu.Lock()
+	if built, ok := d.builtBlobSidecars.Peek(blockRoot); ok {
+		d.blobBuildsMu.Unlock()
+		return built, nil
+	}
+	build, running := d.blobBuilds[blockRoot]
+	if !running {
+		build = &blobBuild{done: make(chan struct{})}
+		d.blobBuilds[blockRoot] = build
+	}
+	d.blobBuildsMu.Unlock()
+	if running {
+		return d.joinBlobBuild(ctx, build)
+	}
+	return d.runBlobBuild(ctx, slot, blockRoot, build)
+}
+
+func (d *peerdas) joinBlobBuild(ctx context.Context, build *blobBuild) ([]*cltypes.BlobSidecar, error) {
+	leave, err := d.reconstructions.join()
+	if err != nil {
+		return nil, err
+	}
+	defer leave()
+	select {
+	case <-build.done:
+		return build.sidecars, build.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (d *peerdas) runBlobBuild(ctx context.Context, slot uint64, blockRoot common.Hash, build *blobBuild) ([]*cltypes.BlobSidecar, error) {
+	// The starting request's cancellation must not end the build: joined requests wait for its result.
+	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.slotDuration())
+	defer cancel()
+	var sidecars []*cltypes.BlobSidecar
+	err := errors.New("blob reconstruction aborted")
+	defer func() { d.publishBlobBuild(blockRoot, build, sidecars, err) }()
+	_, sidecars, err = d.buildBlobs(buildCtx, slot, blockRoot, nil, true, false)
+	if buildErr := buildCtx.Err(); buildErr != nil && errors.Is(err, buildErr) {
+		err = fmt.Errorf("%w: %w", ErrReconstructionBusy, err)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	return sidecars, err
+}
+
+func (d *peerdas) publishBlobBuild(blockRoot common.Hash, build *blobBuild, sidecars []*cltypes.BlobSidecar, err error) {
+	d.blobBuildsMu.Lock()
+	defer d.blobBuildsMu.Unlock()
+	if err == nil && len(sidecars) > 0 {
+		d.builtBlobSidecars.Add(blockRoot, sidecars)
+	}
+	build.sidecars, build.err = sidecars, err
+	close(build.done)
+	if d.blobBuilds[blockRoot] == build {
+		delete(d.blobBuilds, blockRoot)
+	}
+}
+
+func (d *peerdas) buildBlobs(ctx context.Context, slot uint64, blockRoot common.Hash, indices []uint64, withSidecars, isGloas bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error) {
 	saved, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
 	if err != nil {
 		return nil, nil, err
@@ -96,6 +226,9 @@ func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot c
 		return nil, nil, err
 	}
 	blobCount := first.Column.Len()
+	if limit := d.beaconConfig.GetBlobParameters(slot / d.beaconConfig.SlotsPerEpoch).MaxBlobsPerBlock; uint64(blobCount) > limit {
+		return nil, nil, fmt.Errorf("the columns of the block hold %d blobs, more than the %d that slot %d allows", blobCount, limit, slot)
+	}
 	rows := make([]int, 0, blobCount)
 	if indices == nil {
 		for row := range blobCount {
@@ -111,7 +244,7 @@ func (d *peerdas) BlobsFromColumns(ctx context.Context, slot uint64, blockRoot c
 	if len(rows) == 0 {
 		return nil, nil, nil
 	}
-	release, err := blobReconstructions.acquire(ctx)
+	release, err := d.reconstructions.acquire(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
