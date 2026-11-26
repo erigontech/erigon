@@ -587,39 +587,50 @@ func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
 }
 
 func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
-	logger := log.New()
-	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
-	lowest := uint64(65)
-	fcu.LowestAvailableSlotVal = &lowest
-	root := common.Hash{1}
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := beacon_indicies.MarkRootCanonical(tx, 31, root); err != nil {
-			return err
-		}
-		return state_accessors.SetStateProcessingProgress(tx, 0)
-	}))
-	dirs := datadir.New(t.TempDir())
-	getter := func(uint64) ([]byte, []byte, error) { return nil, nil, nil }
-	active := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter}}, logger)
-	defer active.Close()
-	require.NoError(t, active.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, active.OpenFolder())
-	activeFiles := active.SegFileNames(0, 50_000)
-	require.Len(t, activeFiles, 1)
-	rootGetter := func(uint64) ([]byte, []byte, error) { return nil, root[:], nil }
-	roots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.BlockRoot: rootGetter}}, logger)
-	defer roots.Close()
-	require.NoError(t, roots.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, roots.OpenFolder())
-	rootFiles := roots.SegFileNames(50_000, 100_000)
-	require.Len(t, rootFiles, 1)
-	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter, kv.BlockRoot: getter}}
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	defer snapshots.Close()
-	require.NoError(t, snapshots.OpenList([]string{filepath.Base(activeFiles[0]), filepath.Base(rootFiles[0])}, false))
-	handler.caplinStateSnapshots = snapshots
-	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/2", `[]`)
-	require.Equal(t, http.StatusOK, status, body)
+	for _, tc := range []struct {
+		name          string
+		canonicalSlot uint64
+		status        int
+	}{
+		{"exact canonical root", 31, http.StatusOK},
+		{"earlier canonical root while indexing is pending", 30, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+			lowest := uint64(65)
+			fcu.LowestAvailableSlotVal = &lowest
+			root := common.Hash{1}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.MarkRootCanonical(tx, tc.canonicalSlot, root); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, 0)
+			}))
+			dirs := datadir.New(t.TempDir())
+			getter := func(uint64) ([]byte, []byte, error) { return nil, nil, nil }
+			active := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter}}, logger)
+			defer active.Close()
+			require.NoError(t, active.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
+			require.NoError(t, active.OpenFolder())
+			activeFiles := active.SegFileNames(0, 50_000)
+			require.Len(t, activeFiles, 1)
+			rootGetter := func(uint64) ([]byte, []byte, error) { return nil, root[:], nil }
+			roots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.BlockRoot: rootGetter}}, logger)
+			defer roots.Close()
+			require.NoError(t, roots.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
+			require.NoError(t, roots.OpenFolder())
+			rootFiles := roots.SegFileNames(50_000, 100_000)
+			require.Len(t, rootFiles, 1)
+			types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter, kv.BlockRoot: getter}}
+			snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+			defer snapshots.Close()
+			require.NoError(t, snapshots.OpenList([]string{filepath.Base(activeFiles[0]), filepath.Base(rootFiles[0])}, false))
+			handler.caplinStateSnapshots = snapshots
+			status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/2", `[]`)
+			require.Equal(t, tc.status, status, body)
+		})
+	}
 }
 
 func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {

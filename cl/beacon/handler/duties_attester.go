@@ -349,18 +349,12 @@ func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot u
 		}
 		if err := readiness.check(rowSlot, writeSlot, table); err != nil {
 			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
-				for range maxEpochsLookaheadForDuties * 2 * slotsPerEpoch {
-					root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
-					if rootErr != nil {
-						return nil, rootErr
-					}
-					if root != (common.Hash{}) {
-						return root[:], nil
-					}
-					if rowSlot == 0 {
-						break
-					}
-					rowSlot--
+				root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
+				if rootErr != nil {
+					return nil, rootErr
+				}
+				if root != (common.Hash{}) {
+					return root[:], nil
 				}
 			}
 			return nil, err
