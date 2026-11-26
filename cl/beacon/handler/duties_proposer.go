@@ -92,8 +92,13 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if err != nil {
 			return nil, err
 		}
-		if expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot) {
-			return nil, validatorReplayPending(expectedSlot)
+		if expectedSlot != a.beaconChainCfg.GenesisSlot {
+			if !a.stateReader.ValidatorTableCovers(expectedSlot) {
+				return nil, validatorReplayPending(expectedSlot)
+			}
+			if err := historicalInputsReady(tx, view, expectedSlot, expectedSlot, kv.ValidatorEffectiveBalance); err != nil {
+				return nil, err
+			}
 		}
 
 		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
