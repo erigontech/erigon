@@ -185,34 +185,39 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
-	for i := 0; i < len(in.RlpTxs); i++ {
-		j := len(slots.Txns) // some incoming txns may be rejected, so - need second index
-		slots.Resize(uint(j + 1))
-		slots.Txns[j] = &TxnSlot{}
-		slots.IsLocal[j] = true
+	for i, raw := range in.RlpTxs {
+		slot := new(TxnSlot)
+		var sender common.Address
 		var knownReason txpoolcfg.DiscardReason
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
-			knownReason = s.txPool.KnownTxnReason(hash)
-			if knownReason != txpoolcfg.NotSet {
+		validateHash := func(hash []byte) error {
+			reason := s.txPool.KnownTxnReason(hash)
+			// If earlier inputs await admission, only a rejection independent of pool
+			// and chain state is final. Those inputs can replace a pooled transaction,
+			// and a new head can invalidate a cached frame rejection.
+			if reason != txpoolcfg.NotSet && (len(slots.Txns) == 0 || cachedRejectionDependsOnlyOnTxn(reason)) {
+				knownReason = reason
 				return ErrRejected
 			}
 			return nil
-		}); err != nil {
-			slots.Resize(uint(j)) // remove erroneous transaction
-			switch {
-			case knownReason != txpoolcfg.NotSet:
-				reply.Errors[i] = knownReason.String()
-				reply.Imported[i] = mapDiscardReasonToProto(knownReason)
-			case errors.Is(err, ErrRlpTooBig):
-				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
-				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			case errors.Is(err, ErrParseTxn):
-				reply.Errors[i] = err.Error()
-				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			default:
-				reply.Errors[i] = err.Error()
-				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
-			}
+		}
+		_, err := parseCtx.ParseTransaction(raw, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
+		if err == nil {
+			slots.Append(slot, sender[:], true)
+			continue
+		}
+		switch {
+		case knownReason != txpoolcfg.NotSet:
+			reply.Errors[i] = knownReason.String()
+			reply.Imported[i] = mapDiscardReasonToProto(knownReason)
+		case errors.Is(err, ErrRlpTooBig):
+			reply.Errors[i] = txpoolcfg.RLPTooLong.String()
+			reply.Imported[i] = txpoolproto.ImportResult_INVALID
+		case errors.Is(err, ErrParseTxn):
+			reply.Errors[i] = err.Error()
+			reply.Imported[i] = txpoolproto.ImportResult_INVALID
+		default:
+			reply.Errors[i] = err.Error()
+			reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
 		}
 	}
 
@@ -227,6 +232,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		return nil, err
 	}
 
+	// Inputs rejected during parsing already have replies. Entries still at the default
+	// SUCCESS value match the slots passed to admission, in input order.
 	j := 0
 	for i := range reply.Imported {
 		if reply.Imported[i] != txpoolproto.ImportResult_SUCCESS {
@@ -234,10 +241,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		}
 
 		reason := discardReasons[j]
-		// Another request may admit the transaction while this one validates.
-		// Failed simulations bypass admission's duplicate check, so recheck membership.
-		// A confirmed DuplicateHash remains valid even if the transaction has since left the pool.
-		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.KnownTxnReason(slots.Txns[j].IDHash[:]) == txpoolcfg.AlreadyKnown) {
+		if reason == txpoolcfg.DuplicateHash {
 			reason = txpoolcfg.AlreadyKnown
 		}
 		reply.Imported[i] = mapDiscardReasonToProto(reason)

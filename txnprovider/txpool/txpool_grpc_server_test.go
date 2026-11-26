@@ -116,6 +116,7 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 }
 
 func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
+	knownRLP := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
 	for _, tc := range []struct {
 		name  string
 		rlps  [][]byte
@@ -124,7 +125,8 @@ func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
 	}{
 		{"empty", nil, false, []txpoolproto.ImportResult{}},
 		{"invalid", [][]byte{{0xff}}, false, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}},
-		{"known", [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+		{"known", [][]byte{knownRLP}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+		{"invalid then known", [][]byte{{0xff}, knownRLP}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID, txpoolproto.ImportResult_ALREADY_EXISTS}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := &addMockTxPool{knownByCall: []bool{tc.known}}
@@ -144,7 +146,7 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	chainID := *uint256.NewInt(1)
 
 	mockPool := &addMockTxPool{
-		knownByCall: []bool{true, false}, // first tx treated as already-known, second goes to AddLocalTxns
+		knownByCall: []bool{true, false, true}, // a third lookup would hide the second input's rejection
 		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
 	}
 
@@ -172,24 +174,97 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+func addRPCTransactions(t *testing.T, ctx context.Context, server *GrpcServer, rlpTxns ...[]byte) *txpoolproto.AddReply {
+	t.Helper()
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxns})
+	require.NoError(t, err)
+	return reply
+}
+
+type beforeAdmissionPool struct {
+	*TxPool
+	beforeAdd func()
+}
+
+func (p *beforeAdmissionPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	p.beforeAdd()
+	return p.TxPool.AddLocalTxns(ctx, txns)
+}
+
 func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 	t.Parallel()
 
-	ctx := t.Context()
-	mockPool := &addMockTxPool{
-		knownByCall: []bool{false},
-		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash},
-	}
-	server := NewGrpcServer(ctx, mockPool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
-	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
-
-	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
-	require.NoError(t, err)
-	require.Equal(t, 1, mockPool.addLocalSlotsLen)
+	ctx, pool, poolDB, _ := newTestPool(t)
+	fixture := TxnParseMainnetTests[1]
+	sender := common.HexToAddress(fixture.SenderStr)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	txnRLP := hexutil.MustDecodeHex(fixture.PayloadStr)
+	server := NewGrpcServer(ctx, pool, poolDB, nil, uint256.Int{1}, pool.logger)
+	// Pool membership and the block gas limit can both change between the RPC lookup and admission.
+	delayed := &beforeAdmissionPool{TxPool: pool, beforeAdd: func() {
+		admitted := addRPCTransactions(t, ctx, server, txnRLP)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, admitted.Imported)
+		change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+		change.BlockGasLimit = 20_000
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}}
+	delayedServer := NewGrpcServer(ctx, delayed, poolDB, nil, uint256.Int{1}, pool.logger)
+	reply := addRPCTransactions(t, ctx, delayedServer, txnRLP)
 	require.Equal(t, &txpoolproto.AddReply{
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
 	}, reply)
+}
+
+func TestGrpcServerAddBatchReplacement(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	chainID := chain.AllProtocolChanges.ChainID
+	signer := *types.LatestSignerForChainID(chainID)
+	encode := func(fee uint64) []byte {
+		t.Helper()
+		txn := newTestTxnSlot(0, 0, fee, fee, 100_000).Txn.(*types.DynamicFeeTransaction)
+		txn.ChainID = *chainID
+		signed, err := types.SignTx(txn, signer, key)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, signed.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+	original, replacement := encode(100), encode(200)
+
+	for _, tc := range []struct {
+		name   string
+		pooled []byte
+		batch  [][]byte
+		want   *txpoolproto.AddReply
+	}{
+		{"original replaced in batch", nil, [][]byte{original, replacement}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_SUCCESS},
+			Errors:   []string{txpoolcfg.ReplacedByHigherTip.String(), txpoolcfg.Success.String()},
+		}},
+		{"pooled original resubmitted after replacement", original, [][]byte{replacement, original}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_FEE_TOO_LOW},
+			Errors:   []string{txpoolcfg.Success.String(), txpoolcfg.NotReplaced.String()},
+		}},
+		{"pooled transaction survives an underpriced replacement", replacement, [][]byte{original, replacement}, &txpoolproto.AddReply{
+			Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_ALREADY_EXISTS},
+			Errors:   []string{txpoolcfg.NotReplaced.String(), txpoolcfg.AlreadyKnown.String()},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, _ := newTestPool(t)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+			if tc.pooled != nil {
+				reply := addRPCTransactions(t, ctx, server, tc.pooled)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+			}
+			reply := addRPCTransactions(t, ctx, server, tc.batch...)
+			require.Equal(t, tc.want, reply)
+		})
+	}
 }
 
 func TestGrpcServerAddUnavailablePool(t *testing.T) {
@@ -284,6 +359,7 @@ func TestGrpcServerAddBlobNonceGap(t *testing.T) {
 }
 
 func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
+	ordinary := TxnParseMainnetTests[0]
 	for _, tc := range []struct {
 		name  string
 		nonce uint64
@@ -296,7 +372,8 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 			key, err := crypto.GenerateKey()
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			change := newBlockChangeForAccounts(common.Hash{}, 0, sender, common.HexToAddress(ordinary.SenderStr))
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, tc.nonce)
 			require.NoError(t, err)
 			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000).Txn.(*types.SetCodeTransaction)
@@ -323,6 +400,12 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 				require.True(t, known, "this self-authorization nonce mismatch is independent of state")
 				return nil
 			}))
+
+			// The cached mismatch still applies after the account nonce advances.
+			change = newBlockChangeForAccounts(common.Hash{1}, 1, sender)
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			reply := addRPCTransactions(t, ctx, server, hexutil.MustDecodeHex(ordinary.PayloadStr), encoded.Bytes())
+			require.Equal(t, []string{txpoolcfg.Success.String(), txpoolcfg.InvalidAuthorizationNonce.String()}, reply.Errors)
 		})
 	}
 }
@@ -331,13 +414,17 @@ type concurrentAddTxPool struct {
 	*TxPool
 	admissions atomic.Int32
 	bothParsed chan struct{}
+	reasons    [2][]txpoolcfg.DiscardReason
 }
 
 func (p *concurrentAddTxPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	if p.admissions.Add(1) == 2 {
+	call := p.admissions.Add(1)
+	if call == 2 {
 		close(p.bothParsed)
 	}
-	return p.TxPool.AddLocalTxns(ctx, txns)
+	reasons, err := p.TxPool.AddLocalTxns(ctx, txns)
+	p.reasons[call-1] = reasons
+	return reasons, err
 }
 
 func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
@@ -399,10 +486,116 @@ func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, accepted.reply.Imported)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(frame.IDHash[:]))
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, wrapped.reasons[1])
+			require.False(t, pool.frameRejections.Contains(string(frame.IDHash[:])))
+			require.False(t, pool.discardReasonsLRU.Contains(string(frame.IDHash[:])))
 			require.Equal(t, &txpoolproto.AddReply{
 				Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 				Errors:   []string{txpoolcfg.AlreadyKnown.String()},
 			}, reply)
+		})
+	}
+}
+
+func TestGrpcServerAddKnownFrameAfterUnrelatedTransaction(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	ordinary := TxnParseMainnetTests[1]
+	other := common.HexToAddress(ordinary.SenderStr)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender, other), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *frame.Txn.GetChainID(), pool.logger)
+	reply := addRPCTransactions(t, ctx, server, frame.Rlp)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+	reply = addRPCTransactions(t, ctx, server, hexutil.MustDecodeHex(ordinary.PayloadStr), frame.Rlp, frame.Rlp)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_ALREADY_EXISTS, txpoolproto.ImportResult_ALREADY_EXISTS}, reply.Imported)
+	require.Equal(t, []common.Hash{frame.IDHash}, pool.ethBackend.(*frameValidationBackend).calls)
+
+	replacement := framePoolSlot(t, sender, 4, 8, uint256.Int{1})
+	reply = addRPCTransactions(t, ctx, server, replacement.Rlp, frame.Rlp)
+	require.Equal(t, []string{txpoolcfg.Success.String(), txpoolcfg.NotReplaced.String()}, reply.Errors)
+}
+
+func TestGrpcServerAddChecksSeparatelySuppliedSender(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	ordinary := TxnParseMainnetTests[1]
+	sender := common.Address{1}
+	other := common.HexToAddress(ordinary.SenderStr)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender, other), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	txn := newTestTxnSlot(0, 0, 5, 5, 100_000).Txn.(*types.DynamicFeeTransaction)
+	txn.ChainID.SetUint64(1)
+	var encoded bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&encoded))
+	parser := NewTxnParseContext(txn.ChainID)
+	parser.WithSender(false)
+	var slot TxnSlot
+	_, err := parser.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, true, nil)
+	require.NoError(t, err)
+	var txns TxnSlots
+	txns.Append(&slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	server := NewGrpcServer(ctx, pool, poolDB, nil, txn.ChainID, pool.logger)
+	reply := addRPCTransactions(t, ctx, server, hexutil.MustDecodeHex(ordinary.PayloadStr), encoded.Bytes())
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_INVALID}, reply.Imported)
+	require.Contains(t, reply.Errors[1], "recovering sender from signature")
+}
+
+func TestGrpcServerAddFrameConflictCreatedInBatch(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = func() {
+		if len(backend.calls) == 1 {
+			backend.err = status.Error(codes.Unavailable, "backend unavailable")
+		}
+	}
+	first := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	second := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *first.Txn.GetChainID(), pool.logger)
+	reply := addRPCTransactions(t, ctx, server, first.Rlp, second.Rlp)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_INVALID}, reply.Imported)
+	require.Equal(t, txpoolcfg.InvalidFrame.String(), reply.Errors[1])
+	rejection, ok := pool.frameRejections.Peek(string(second.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, common.Hash(first.IDHash), rejection.blocker)
+}
+
+func TestGrpcServerAddFrameConflictAroundReplacement(t *testing.T) {
+	replacement := TxnParseMainnetTests[1]
+	sender := common.HexToAddress(replacement.SenderStr)
+	for _, tc := range []struct {
+		name            string
+		originalFee     uint64
+		wantReplacement txpoolproto.ImportResult
+		wantFrame       txpoolproto.ImportResult
+	}{
+		{"accepted", 1, txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_SUCCESS},
+		{"underpriced", common.GWei, txpoolproto.ImportResult_FEE_TOO_LOW, txpoolproto.ImportResult_INVALID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _ := keyedFramePoolEnv(t)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.payer, backend.balance = sender, common.Ether
+			original := framePoolSlot(t, sender, tc.originalFee, tc.originalFee)
+			keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *original.Txn.GetChainID(), pool.logger)
+			reply := addRPCTransactions(t, ctx, server, original.Rlp)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+			// The first attempt caches the conflict. Only an accepted replacement clears it for the second attempt.
+			reply = addRPCTransactions(t, ctx, server, keyed.Rlp, hexutil.MustDecodeHex(replacement.PayloadStr), keyed.Rlp)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID, tc.wantReplacement, tc.wantFrame}, reply.Imported)
+			if tc.wantFrame == txpoolproto.ImportResult_SUCCESS {
+				require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+				require.Contains(t, pool.byHash, string(keyed.IDHash[:]))
+				require.Equal(t, []common.Hash{original.IDHash, keyed.IDHash}, backend.calls)
+			} else {
+				require.Contains(t, pool.byHash, string(original.IDHash[:]))
+				require.NotContains(t, pool.byHash, string(keyed.IDHash[:]))
+			}
 		})
 	}
 }
@@ -612,6 +805,33 @@ func TestGrpcServerCachedFrameRejectionBeforeSignatures(t *testing.T) {
 			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 		})
 	}
+}
+
+func TestGrpcServerAddRechecksCachedFrameRejectionAfterHeadChange(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	chainID := *frame.Txn.GetChainID()
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, chainID, pool.logger)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.valid = false
+	reply := addRPCTransactions(t, ctx, server, frame.Rlp)
+	require.Equal(t, []string{txpoolcfg.InvalidFrame.String()}, reply.Errors)
+	require.Equal(t, txpoolcfg.InvalidFrame, pool.KnownTxnReason(frame.IDHash[:]))
+
+	ordinary := TxnParseMainnetTests[1]
+	delayed := &beforeAdmissionPool{TxPool: pool, beforeAdd: func() {
+		// At the new head the ordinary sender has funds and the frame passes simulation.
+		backend.valid = true
+		change := newBlockChangeForAccounts(common.Hash{1}, 0, common.HexToAddress(ordinary.SenderStr))
+		change.ChangeBatch[0].BlockHeight = 1
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}}
+	batchServer := NewGrpcServer(ctx, delayed, pool.poolDB, nil, chainID, pool.logger)
+	reply = addRPCTransactions(t, ctx, batchServer, hexutil.MustDecodeHex(ordinary.PayloadStr), frame.Rlp)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS, txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+	reply = addRPCTransactions(t, ctx, server, frame.Rlp)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, reply.Imported)
 }
 
 func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
