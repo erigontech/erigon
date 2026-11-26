@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -686,8 +685,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		select {
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 			now := time.Now()
 			blkPerSec := float64(blockNum-lastLogBlock) / now.Sub(lastLogTime).Seconds()
 			lastLogTime = now
@@ -698,7 +696,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 		default:
 		}
 		return nil
@@ -825,12 +823,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	latestRoot = rh
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	logger.Info("[rebuild_commitment_history] done", "duration", time.Since(start),
 		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
 		"root", hex.EncodeToString(latestRoot),
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	if totalKeysProcessed == 0 {
 		return latestRoot, nil
@@ -1096,10 +1093,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			domains.Close()
 
-			// make new file visible for all aggregator transactions
-			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(nil)
-			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
 			for {
@@ -1131,10 +1124,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			latestRoot = rebuiltCommit.RootHash
 		}
 
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
+		alloc, sys := dbg.MemUsage()
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
-			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 		for {
 			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
@@ -1148,9 +1140,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	acRo.Close()
 
@@ -1222,10 +1213,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
+	writer := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[kv.CommitmentDomain]
+	files, err := aggTx.d[kv.CommitmentDomain].d.dumpStepRangeToPath(ctx, cfg.StepFrom, cfg.StepTo, writer, "")
 	if err != nil {
 		return nil, err
 	}
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = files
+	aggTx.a.IntegrateDirtyFiles(static, aggTx.a.FirstTxNumOfStep(cfg.StepFrom), aggTx.a.FirstTxNumOfStep(cfg.StepTo))
 
 	logger.Info(cfg.LogPrefix+" finished", "block", cfg.BlockNumber, "txn", cfg.TxnNumber, "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
@@ -1257,7 +1252,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	d := a.d[kv.CommitmentDomain]
 	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
 	defer wal.Close()
-	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), "")
 	if err != nil {
 		return err
 	}
@@ -1270,10 +1265,9 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	if err != nil {
 		return err
 	}
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	d.integrateDirtyFiles(sf, uint64(step)*a.StepSize(), uint64(step+1)*a.StepSize())
-	a.recalcVisibleFiles(nil)
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = sf
+	a.IntegrateDirtyFiles(static, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
 	return nil
 }
 

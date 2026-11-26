@@ -86,6 +86,25 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 	})
 }
 
+func TestCachedReceiptGasUsedByIndexAndBlock(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	frame := &types.FrameTransaction{}
+	block := types.NewBlockFromStorage(header.Hash(), header, types.Transactions{&types.LegacyTx{}, frame}, nil, nil, nil)
+	g := newTestGenerator(t)
+	g.receiptsCache.Add(block.Hash(), types.Receipts{{GasUsed: 21_000}, {GasUsed: 50_000}})
+	gasUsed, err := g.GetReceiptGasUsed(t.Context(), tx, header, frame, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(50_000), gasUsed)
+
+	receipts, err := g.GetReceiptsGasUsed(t.Context(), tx, block)
+	require.NoError(t, err)
+	require.Len(t, receipts, 2)
+	require.Equal(t, uint64(21_000), receipts[0].GasUsed)
+	require.Equal(t, uint64(50_000), receipts[1].GasUsed)
+}
+
 func TestFirstReceiptAtGasHistoryStart(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 1))

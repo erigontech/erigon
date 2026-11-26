@@ -429,15 +429,13 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	if st.evm.IntraBlockState().IsVersioned() {
-		defer func() {
-			if r := recover(); r != nil {
-				// An in-flight dependency aborts via result.Dep, it does not panic,
-				// so any panic here is a genuine failure.
-				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
-			}
-		}()
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			// An in-flight dependency aborts via result.Dep, it does not panic,
+			// so any panic here is a genuine failure.
+			err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
+		}
+	}()
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
 		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)
@@ -646,7 +644,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return nil, err
 	}
 
-	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
+	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Value()) {
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %s, burnt: %s, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount.String(), burnAmount.String(), st.gasPrice, st.txnGasUsed)
 	}
 
@@ -866,7 +864,7 @@ func (st *TxnExecutor) burnFees(gasUsed uint64, blobCost uint256.Int) (uint256.I
 func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := u256.Mul(u256.U64(gasLeft.Total()), *st.gasPrice)
-	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
+	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Value()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
 	if err := st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn); err != nil {
