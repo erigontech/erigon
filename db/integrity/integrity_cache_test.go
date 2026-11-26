@@ -169,6 +169,24 @@ func TestIntegrityCacheRejectsLegacyFormat(t *testing.T) {
 	require.True(t, strings.HasPrefix(string(saved), "integrity-cache-v1\n"))
 }
 
+func TestIntegrityCacheKeepsSuppliedVerifiedPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.seg")
+	replacement := filepath.Join(dir, "replacement.seg")
+	require.NoError(t, os.WriteFile(target, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	require.NoError(t, os.WriteFile(replacement, bytes.Repeat([]byte{0xbb}, 1024), 0o644))
+	resolved := cachePath(target)
+	cache, err := LoadIntegrityCache(filepath.Join(t.TempDir(), "integrity.cache"))
+	require.NoError(t, err)
+
+	require.NoError(t, dir2.RemoveFile(target))
+	require.NoError(t, os.Symlink(replacement, target))
+	var hash [20]byte
+	hash[0] = 1
+	cache.markVerified(resolved, hash)
+	require.True(t, cache.filesVerified([]fileFingerprint{{path: resolved, hash: hash}}))
+}
+
 func TestIntegrityCacheKeepsAllVerifiedHashesForResolvedPath(t *testing.T) {
 	dir := t.TempDir()
 	dataPath := filepath.Join(dir, "data.seg")

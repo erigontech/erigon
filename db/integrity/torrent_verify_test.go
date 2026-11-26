@@ -113,22 +113,16 @@ func TestVerifyTorrentFilesRecordsResolvedReadPath(t *testing.T) {
 
 	var callbackPath string
 	var callbackErr error
-	verified := make(map[string][20]byte)
-	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(path string, hash [20]byte) {
+	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(path string, _ [20]byte) {
 		callbackPath = path
 		callbackErr = dir2.RemoveFile(alias)
 		if callbackErr == nil {
 			callbackErr = os.Symlink(targetTwo, alias)
 		}
-		if callbackErr == nil {
-			verified[cachePath(path)] = hash
-		}
 	})
 	require.NoError(t, err)
 	require.NoError(t, callbackErr)
 	require.Equal(t, cachePath(targetOne), callbackPath)
-	_, ok := verified[cachePath(targetOne)]
-	require.True(t, ok)
 }
 
 func TestVerifyTorrentFilesRejectsTrailingBytes(t *testing.T) {

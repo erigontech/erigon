@@ -36,6 +36,11 @@ type fileFingerprint struct {
 	path     string
 }
 
+type verifiedFile struct {
+	path string
+	hash [20]byte
+}
+
 const integrityCacheVersion = "integrity-cache-v1"
 
 // IntegrityCache records which files have already passed an integrity check so
@@ -46,7 +51,7 @@ type IntegrityCache struct {
 	entries     map[string]string // cacheKey (check+basenames) -> tab-separated hashes
 	dirty       bool              // true if entries were added or replaced
 	verifiedMu  sync.Mutex
-	verifiedSet map[string]map[[20]byte]struct{}
+	verifiedSet map[verifiedFile]struct{}
 }
 
 // LoadIntegrityCache reads the cache file at path into an IntegrityCache.
@@ -55,7 +60,7 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	c := &IntegrityCache{
 		path:        path,
 		entries:     make(map[string]string),
-		verifiedSet: make(map[string]map[[20]byte]struct{}),
+		verifiedSet: make(map[verifiedFile]struct{}),
 	}
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -170,24 +175,14 @@ func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
 
 func (c *IntegrityCache) markVerified(path string, hash [20]byte) {
 	c.verifiedMu.Lock()
-	path = cachePath(path)
-	hashes := c.verifiedSet[path]
-	if hashes == nil {
-		hashes = make(map[[20]byte]struct{})
-		c.verifiedSet[path] = hashes
-	}
-	hashes[hash] = struct{}{}
+	c.verifiedSet[verifiedFile{path: path, hash: hash}] = struct{}{}
 	c.verifiedMu.Unlock()
 }
 
 func (c *IntegrityCache) filesVerified(files []fileFingerprint) bool {
 	for _, file := range files {
 		if file.path != "" {
-			verifiedHashes, ok := c.verifiedSet[file.path]
-			if !ok {
-				return false
-			}
-			if _, ok := verifiedHashes[file.hash]; !ok {
+			if _, ok := c.verifiedSet[verifiedFile{path: file.path, hash: file.hash}]; !ok {
 				return false
 			}
 		}
