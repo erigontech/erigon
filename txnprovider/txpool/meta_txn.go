@@ -133,10 +133,12 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 }
 
 // worse orders transactions for eviction: an overflow discards the worst one first. Like better, it
-// compares the sub-pool markers first and then the fees: the effective tip in pending, the fee cap in the
-// base fee sub-pool. So an overflow discards the transactions that selection and promotion value least.
-// Unlike better, it keeps the local marker of a transaction that follows a remote one of its sender, so an
-// overflow can evict the remote transaction first and leave a nonce gap; discardOverflow handles the gap.
+// compares the sub-pool markers first and then the fees. The fees rank by the sub-pool that the shared
+// markers qualify for, whatever sub-pool each transaction is in: the effective tip for pending, the fee
+// cap for the base fee sub-pool. So an overflow discards the transactions that selection and promotion
+// value least, and a comparison across sub-pools does not depend on its direction. Unlike better, worse
+// keeps the local marker of a transaction that follows a remote one of its sender, so an overflow can
+// evict the remote transaction first and leave a nonce gap; discardOverflow handles the gap.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
@@ -150,19 +152,8 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 		return subPool < thanSubPool
 	}
 
-	feeOrder := mt.currentSubPool
-	if feeOrder == 0 {
-		// A parked frame is in no sub-pool until it is validated again. Rank its fees as in the
-		// sub-pool that its markers qualify for, although it cannot be selected or promoted yet.
-		switch {
-		case subPool >= BaseFeePoolBits+EnoughFeeCapBlock:
-			feeOrder = PendingSubPool
-		case subPool >= BaseFeePoolBits:
-			feeOrder = BaseFeeSubPool
-		}
-	}
-	switch feeOrder {
-	case PendingSubPool:
+	switch {
+	case subPool >= BaseFeePoolBits+EnoughFeeCapBlock: // qualifies for pending
 		mtTip := effectiveTip(&mt.minFeeCap, &pendingBaseFee, mt.minTip)
 		thanTip := effectiveTip(&than.minFeeCap, &pendingBaseFee, than.minTip)
 		if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
@@ -173,7 +164,7 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
 			return cmp < 0
 		}
-	case BaseFeeSubPool:
+	case subPool >= BaseFeePoolBits: // qualifies for the base fee sub-pool
 		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
 			return cmp < 0
 		}

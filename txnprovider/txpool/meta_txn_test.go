@@ -19,6 +19,7 @@ package txpool
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -120,7 +121,7 @@ func TestBaseFeeOverflowEvictsLowestFeeCap(t *testing.T) {
 	}
 }
 
-// Evicting a txn leaves a nonce gap before its sender's next txn. That txn must move to the queued sub-pool
+// Evicting a txn leaves a nonce gap before its sender's later txns. They must move to the queued sub-pool
 // and stay out of pending, also after a base fee fall.
 func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 	for _, tc := range []struct {
@@ -135,7 +136,7 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 			evictedSubPool: PendingSubPool, nextSubPool: BaseFeeSubPool,
 		},
 		{
-			name: "base fee overflow", firstFeeCap: 5, otherFeeCap: 8, pendingLimit: 10, baseFeeLimit: 2,
+			name: "base fee overflow", firstFeeCap: 5, otherFeeCap: 8, pendingLimit: 10, baseFeeLimit: 3,
 			localNext: true, evictedSubPool: BaseFeeSubPool, nextSubPool: BaseFeeSubPool,
 		},
 	} {
@@ -154,20 +155,85 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 			first, reason := addRemoteTestTxn(t, pool, senders[0], 0, 0, tc.firstFeeCap, 1)
 			require.Equal(t, txpoolcfg.Success, reason)
 			require.Equal(t, tc.evictedSubPool, pool.byHash[string(first.IDHash[:])].currentSubPool)
-			next := newTestTxnSlot(1, 0, 0, 5, 21_000)
-			next.IDHash[0] = 2
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[0], tc.localNext, next))
-			require.Equal(t, tc.nextSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
-			other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, tc.otherFeeCap, 3)
+			var successors []*TxnSlot
+			for nonce := uint64(1); nonce <= 2; nonce++ {
+				txn := newTestTxnSlot(nonce, 0, 0, 5, 21_000)
+				txn.IDHash[0] = byte(nonce + 1)
+				successors = append(successors, txn)
+			}
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, addTestTxns(t, pool, senders[0], tc.localNext, successors...))
+			requireSuccessorsIn := func(subPool SubPoolType) {
+				t.Helper()
+				for _, txn := range successors {
+					require.Equal(t, subPool, pool.byHash[string(txn.IDHash[:])].currentSubPool)
+				}
+			}
+			requireSuccessorsIn(tc.nextSubPool)
+			other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, tc.otherFeeCap, 4)
 			require.Equal(t, txpoolcfg.Success, reason)
 			requireEvicted(t, pool, first, other)
-			require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+			requireSuccessorsIn(QueuedSubPool)
 
 			// A base fee fall promotes base fee txns without refreshing their senders.
 			pool.pending.limit = 10
 			newBlock(1, 1, senders[1])
-			require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+			requireSuccessorsIn(QueuedSubPool)
 			require.Equal(t, 1, pool.pending.Len())
 		})
 	}
+}
+
+// Two transactions with the same markers rank alike, whatever sub-pool each one is in, so a comparison
+// across sub-pools does not depend on its direction.
+func TestWorseRanksEqualMarkersAlike(t *testing.T) {
+	baseFee := *uint256.NewInt(10)
+	txn := func(subPool SubPoolType, feeCap, tip uint64) *metaTxn {
+		return &metaTxn{subPool: BaseFeePoolBits, currentSubPool: subPool, minFeeCap: *uint256.NewInt(feeCap), minTip: tip}
+	}
+	for _, tc := range []struct {
+		name    string
+		subPool SubPoolType
+	}{
+		{"parked frame", 0},
+		{"pending txn", PendingSubPool},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Both cover the base fee, so both have the markers of pending. A blob fee rise kept the first
+			// out of pending; it has the higher tip, the other the higher fee cap.
+			waitingForBlobFee := txn(BaseFeeSubPool, 50, 5)
+			lowerTip := txn(tc.subPool, 100, 1)
+			require.True(t, lowerTip.worse(waitingForBlobFee, baseFee))
+			require.False(t, waitingForBlobFee.worse(lowerTip, baseFee))
+		})
+	}
+}
+
+// The successor that an eviction strands leaves pending before the next txn is evicted, so a batch
+// evicts no more than adding its txns one at a time would.
+func TestPendingOverflowFreesSlotOfStrandedSuccessor(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	senders := []common.Address{{2}, {3}, {4}}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, senders...), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.pending.limit = 2
+
+	first, reason := addRemoteTestTxn(t, pool, senders[0], 0, 0, 300, 1)
+	require.Equal(t, txpoolcfg.Success, reason)
+	// A local txn ranks above remote ones, so overflow evicts its remote predecessor first.
+	next := newTestTxnSlot(1, 0, 0, 300, 21_000)
+	next.IDHash[0] = 2
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[0], true, next))
+	require.Equal(t, 2, pool.pending.Len())
+
+	var batch TxnSlots
+	for i, sender := range senders[1:] {
+		txn := newTestTxnSlot(0, 0, uint64(i+1), 50, 21_000)
+		txn.IDHash[0] = byte(i + 3)
+		batch.Append(txn, sender[:], false)
+	}
+	reasons, err := pool.addNewTxns(ctx, batch, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
+	require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+	require.Equal(t, 2, pool.pending.Len())
 }

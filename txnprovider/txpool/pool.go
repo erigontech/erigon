@@ -2343,14 +2343,27 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 	return txpoolcfg.NotSet
 }
 
-// discardOverflow evicts mt from pending or the base fee sub-pool for capacity. If the sender has a txn at
-// the next nonce, that txn now follows a nonce gap but keeps its NoNonceGaps marker until the sender is
-// refreshed. A block refreshes only senders with queued txns or account changes, so mark the sender for
-// the refresh in promote, which runs before the txn can be selected or promoted.
+// discardOverflow evicts mt from pending or the base fee sub-pool for capacity. The sender's txns after mt,
+// up to the next nonce gap, now follow a gap. They lose NoNonceGaps and move to queued at once, so that
+// they free their slots before the next eviction. Their other markers wait for the sender's next refresh,
+// which every block runs for senders with queued txns.
 func (p *TxPool) discardOverflow(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.discardLocked(mt, reason)
-	if !mt.keyedNonce && p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce+1) != nil {
-		p.frameAccountsToRefresh[p.senders.senderID2Addr[mt.TxnSlot.SenderID]] = struct{}{}
+	if mt.keyedNonce {
+		return
+	}
+	for nonce := mt.TxnSlot.Nonce + 1; ; nonce++ {
+		next := p.all.get(mt.TxnSlot.SenderID, nonce)
+		if next == nil {
+			return
+		}
+		next.subPool &^= NoNonceGaps
+		if next.currentSubPool == PendingSubPool || next.currentSubPool == BaseFeeSubPool {
+			p.removeFromSubPool(next, "nonce gap")
+			p.queued.Add(next, "nonce gap", p.logger)
+		} else {
+			p.updateInSubPool(next)
+		}
 	}
 }
 
