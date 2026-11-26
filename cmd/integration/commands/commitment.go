@@ -79,6 +79,7 @@ var (
 	branchPrefixFlag string
 	txnumFlag        uint64
 	verifyAsOf       []uint
+	verifyHistory    bool
 )
 
 // visualize command flags
@@ -148,6 +149,7 @@ func init() {
 	must(cmdCommitmentVerify.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records just after the first state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
@@ -311,31 +313,11 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	}
 	defer agg.Close()
 	agg.DisableAllDependencies()
-	points := []uint64{math.MaxUint64}
-	for _, txNum := range verifyAsOf {
-		points = append(points, uint64(txNum))
+	asOf := make([]uint64, len(verifyAsOf))
+	for i, txNum := range verifyAsOf {
+		asOf[i] = uint64(txNum)
 	}
-	historyDisabled := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled
-	for _, asOf := range points {
-		label := "latest"
-		if asOf != math.MaxUint64 {
-			label = strconv.FormatUint(asOf, 10)
-			if historyDisabled {
-				return fmt.Errorf("as of %s: commitment history is disabled", label)
-			}
-		}
-		started := time.Now()
-		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
-		if err != nil {
-			return fmt.Errorf("as of %s: %w", label, err)
-		}
-		if asOf != math.MaxUint64 && c.TxNum >= asOf {
-			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
-		}
-		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
-			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
-	}
-	return nil
+	return dbstate.VerifyCommitmentV3(ctx, agg, asOf, verifyHistory, logger)
 }
 
 var cmdCommitmentRebuild = &cobra.Command{
@@ -601,11 +583,13 @@ removes the converted files. It is mutually exclusive with --squeeze and
 --nibbles.v2.
 
 --continue resumes a prior interrupted run, re-using complete shards left
-in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
-pass the same --squeeze and --nibbles.v2 values used in the original run; a
-mismatch silently produces mixed-encoding output. Without --continue, a
-mid-run crash discards any in-progress work in snap/rebuild/domain/ and
-Phase 1 restarts from scratch. --continue is mutually exclusive with
+in <datadir>/snap/rebuild/domain/ and converted commitment history files
+whose .v, .vi, .ef and .efi all exist in snap/rebuild/{history,idx,accessor}/,
+and re-doing the rest. The operator MUST pass the same --squeeze and
+--nibbles.v2 values used in the original run; a mismatch silently produces
+mixed-encoding output. Without --continue, a mid-run crash discards any
+in-progress work in snap/rebuild/domain/ and snap/rebuild/{history,idx,accessor}/
+and Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
 For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
@@ -706,7 +690,7 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return err
 	}
-	if opts.TargetV3 && !opts.NoHistory {
+	if opts.TargetV3 {
 		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 		if err != nil {
 			return err
