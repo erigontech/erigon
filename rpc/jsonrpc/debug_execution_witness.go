@@ -1715,6 +1715,16 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	return nil
 }
 
+func ReplayExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, parent *types.Header) (common.Hash, error) {
+	replay := *result
+	replay.headerByNumber = nil
+	if parent != nil {
+		replay.headerByNumber = map[uint64]*types.Header{parent.Number.Uint64(): parent}
+	}
+	root, _, err := execBlockStatelessly(&replay, block, chainConfig, engine)
+	return root, err
+}
+
 // checkWitnessKeysComplete verifies result.Keys carries a preimage for every account
 // and storage leaf the stateless re-execution resolved from the witness trie. A missing
 // preimage means a verifier treating keys[] as the closed accessed set cannot route to a

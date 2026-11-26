@@ -856,6 +856,16 @@ func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 		require.NoError(t, err, "mode %s", mode)
 		require.NotEmpty(t, result.State, "mode %s state", mode)
 		require.NotEmpty(t, result.Keys, "mode %s keys", mode)
+		var accountKeys int
+		for _, key := range result.Keys {
+			if len(key) != len(common.Address{}) {
+				continue
+			}
+			accountKeys++
+			_, resolved := decodedTrie.GetAccount(crypto.Keccak256(key))
+			require.True(t, resolved, "mode %s account %x must resolve from eth_getWitness", mode, key)
+		}
+		require.NotZero(t, accountKeys, "mode %s account keys", mode)
 		replay := *result
 		replay.State = slices.Clone(result.State)
 		rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool {

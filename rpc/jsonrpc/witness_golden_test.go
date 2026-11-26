@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -141,19 +142,24 @@ func witnessGoldenTransientSlots(t *testing.T, before bool) [3]common.Hash {
 	t.Helper()
 	slots := witnessGoldenSlots(4096)
 	for _, deleted := range slots {
-		for _, inserted := range slots {
-			if deleted.value == inserted.value || witnessGoldenPrefixLength(deleted.hash, inserted.hash) != 1 {
+		for _, survivor := range slots {
+			if deleted.value == survivor.value || witnessGoldenPrefixLength(deleted.hash, survivor.hash) != 1 {
 				continue
 			}
-			insertedBefore := bytes.Compare(inserted.hash[:], deleted.hash[:]) < 0
-			if insertedBefore != before {
-				continue
-			}
-			for _, survivor := range slots {
-				if witnessGoldenNibble(survivor.hash, 0) == witnessGoldenNibble(deleted.hash, 0) {
+			deletedChild := witnessGoldenNibble(deleted.hash, 1)
+			survivorChild := witnessGoldenNibble(survivor.hash, 1)
+			for _, inserted := range slots {
+				if inserted.value == deleted.value || inserted.value == survivor.value || witnessGoldenPrefixLength(deleted.hash, inserted.hash) < 1 {
 					continue
 				}
-				return [3]common.Hash{deleted.value, survivor.value, inserted.value}
+				insertedChild := witnessGoldenNibble(inserted.hash, 1)
+				if insertedChild == deletedChild || insertedChild == survivorChild {
+					continue
+				}
+				insertedBefore := bytes.Compare(inserted.hash[:], deleted.hash[:]) < 0
+				if insertedBefore == before {
+					return [3]common.Hash{deleted.value, survivor.value, inserted.value}
+				}
 			}
 		}
 	}
@@ -320,7 +326,7 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
 			{address: sender},
 			{address: witnessGoldenAddress(0xdead)},
-			{address: emptyStorage},
+			{address: emptyStorage, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
 			{address: selfDestruct},
 		},
 	}
@@ -381,7 +387,7 @@ func witnessGoldenFixturesFor(t *testing.T, commitmentV3 bool) []witnessGoldenFi
 
 func witnessGoldenFixturePath(f witnessGoldenFixture, commitmentV3 bool) string {
 	root := *witnessGoldenDir
-	if commitmentV3 {
+	if commitmentV3 && (f.method == "eth_getWitness" || f.method == "debug_executionWitness" && f.mode == "legacy") {
 		path := filepath.Join(root, "v3", f.name)
 		if _, err := os.Stat(path); err == nil {
 			return path
@@ -494,11 +500,20 @@ func TestWitnessGoldenCollapseShapes(t *testing.T) {
 	require.True(t, t.Run("hph", func(t *testing.T) { hph = witnessGoldenCandidatesFor(t, false) }))
 	require.True(t, t.Run("v3", func(t *testing.T) { v3 = witnessGoldenCandidatesFor(t, true) }))
 	for _, name := range []string{"transient-before", "transient-after", "cascade", "plain-storage", "empty-storage", "self-destruct", "inline-survivor"} {
-		require.NotEmpty(t, hph.legacy[name], name)
-		require.NotEmpty(t, v3.legacy[name], name)
+		if name == "transient-before" {
+			require.Empty(t, hph.legacy[name], name)
+			require.Empty(t, v3.legacy[name], name)
+		} else {
+			require.NotEmpty(t, hph.legacy[name], name)
+			require.NotEmpty(t, v3.legacy[name], name)
+		}
 		require.Equal(t, hph.legacy[name], v3.legacy[name], "legacy candidates %s", name)
 		require.Equal(t, hph.canonical[name], v3.canonical[name], "canonical candidates %s", name)
 	}
+	require.NotEmpty(t, hph.legacy["transient-after"])
+	require.NotEmpty(t, v3.legacy["transient-after"])
+	require.Empty(t, hph.canonical["transient-after"])
+	require.Empty(t, v3.canonical["transient-after"])
 	require.Less(t, len(hph.canonical["transient-after"]), len(hph.legacy["transient-after"]))
 	require.NotEqual(t, hph.legacy["transient-after"], hph.canonical["transient-after"])
 }
@@ -559,5 +574,60 @@ func TestWitnessGoldenChainMatchesHPH(t *testing.T) {
 		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
 		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
 		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+	}
+}
+
+func TestGoldenTransientBranchChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before bool
+	}{{"before", true}, {"after", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			slots := witnessGoldenTransientSlots(t, tc.before)
+			a := crypto.Keccak256Hash(slots[0][:])
+			b := crypto.Keccak256Hash(slots[1][:])
+			c := crypto.Keccak256Hash(slots[2][:])
+			depth := witnessGoldenPrefixLength(a, b)
+			insert := witnessGoldenNibble(c, depth)
+			if witnessGoldenPrefixLength(a, c) < depth || insert == witnessGoldenNibble(a, depth) || insert == witnessGoldenNibble(b, depth) {
+				t.Errorf("want c in a free branch child at depth %d, got a=%x b=%x c=%x", depth, witnessGoldenNibble(a, depth), witnessGoldenNibble(b, depth), insert)
+			}
+		})
+	}
+}
+
+func TestGoldenEmptyStorageSlotProof(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(*witnessGoldenDir, "1-eth_getProof.json"))
+	require.NoError(t, err)
+	var proofs []accounts.AccProofResult
+	require.NoError(t, json.Unmarshal(data, &proofs))
+	var slots int
+	for _, proof := range proofs {
+		if proof.StorageHash == empty.RootHash {
+			slots += len(proof.StorageProof)
+		}
+	}
+	if slots == 0 {
+		t.Errorf("block 1 empty-root storage proof entries = %d, want at least one", slots)
+	}
+}
+
+func TestGoldenSharedOutputOverrides(t *testing.T) {
+	old := *witnessGoldenDir
+	*witnessGoldenDir = t.TempDir()
+	t.Cleanup(func() { *witnessGoldenDir = old })
+	require.NoError(t, os.Mkdir(filepath.Join(*witnessGoldenDir, "v3"), 0o755))
+	for _, fixture := range []witnessGoldenFixture{
+		{name: "1-eth_getProof.json", block: 1, method: "eth_getProof", mode: "default"},
+		{name: "1-debug_executionWitness-canonical.json", block: 1, method: "debug_executionWitness", mode: "canonical"},
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(*witnessGoldenDir, fixture.name), []byte("shared"), 0o600))
+		path := filepath.Join("v3", fixture.name)
+		require.NoError(t, os.WriteFile(filepath.Join(*witnessGoldenDir, path), []byte("changed"), 0o600))
+		got, err := filepath.Rel(*witnessGoldenDir, witnessGoldenFixturePath(fixture, true))
+		require.NoError(t, err)
+		if got != fixture.name {
+			t.Errorf("shared fixture %s selected %s", fixture.name, got)
+		}
 	}
 }

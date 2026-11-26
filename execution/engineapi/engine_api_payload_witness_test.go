@@ -8,6 +8,9 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -30,6 +33,8 @@ import (
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -119,10 +124,75 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 		}
 	}
 	require.NotEqual(t, -1, rootIndex, "witness parent root")
+	nodes := make(map[string][]byte, len(state))
+	for _, node := range state {
+		nodes[string(crypto.Keccak256(node))] = node
+	}
 	state[0], state[rootIndex] = state[rootIndex], state[0]
 	decoded, err := trie.RLPDecode(state)
 	require.NoError(t, err)
 	require.Equal(t, parent.Root, decoded.Hash())
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	proof, account, err := trie.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	require.NoError(t, err)
+	require.NotEmpty(t, proof)
+	require.NotEmpty(t, account)
+	txns := make([][]byte, len(p.ExecutionPayload.Transactions))
+	for i, tx := range p.ExecutionPayload.Transactions {
+		txns[i] = tx
+	}
+	transactions, err := types.DecodeTransactions(txns)
+	require.NoError(t, err)
+	block := types.NewBlockFromNetwork(engineapitester.MockClPayloadToHeader(p), &types.Body{Transactions: transactions, Withdrawals: p.ExecutionPayload.Withdrawals}, nil)
+	root, err := jsonrpc.ReplayExecutionWitness(witness, block, eat.ChainConfig, merge.New(ethash.NewFaker()), parent)
+	require.NoError(t, err)
+	require.Equal(t, p.ExecutionPayload.StateRoot, root, "witness post-state root")
+}
+
+func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
+	const changed = "changed the sender leaf in the SSZ response"
+	if os.Getenv("ERIGON_TEST_MISSING_WITNESS_SENDER") != "1" {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.v", "-test.run=^TestEngineWitnessChecksRejectMissingSender$")
+		cmd.Env = append(os.Environ(), "ERIGON_TEST_MISSING_WITNESS_SENDER=1")
+		out, err := cmd.CombinedOutput()
+		require.Contains(t, string(out), changed, "%s", out)
+		if err == nil {
+			t.Fatal("committed payload witness checks accepted a response missing the sender leaf")
+		}
+		return
+	}
+
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
+	ctx := t.Context()
+	payload := buildCommittedChangerPayload(ctx, t, eat)
+	code, body := postPayloadWitness(ctx, t, eat, payload)
+	require.Equal(t, http.StatusOK, code)
+	_, witness, err := engineapi.DecodePayloadStatusWithWitness(body)
+	require.NoError(t, err)
+	parent, err := eat.ExecutionModule.GetHeader(ctx, &payload.ExecutionPayload.ParentHash, nil)
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+	nodes := make(map[string][]byte)
+	for _, node := range witness.State {
+		nodes[string(crypto.Keccak256(node))] = node
+	}
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	proof, account, err := trie.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	require.NoError(t, err)
+	require.NotEmpty(t, account)
+	require.Greater(t, len(proof), 1)
+	leaf := proof[len(proof)-1]
+	require.Equal(t, 1, bytes.Count(body, leaf))
+	body[bytes.Index(body, leaf)+len(leaf)-1] ^= 1
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+	eat.EngineApiUrl = server.URL
+	t.Log(changed)
+	require.NotEmpty(t, requirePayloadWitness(ctx, t, eat, payload).State)
 }
 
 func requireEngineCommitmentVariant(t *testing.T, eat engineapitester.EngineApiTester, wantV3 bool) {

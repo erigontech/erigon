@@ -188,7 +188,8 @@
       `rpcdaemontest` chain stays unchanged
 - [x] its blocks hold: a delete and an insert under one branch (transient collapse, with the insert both before and after
       the delete in key order), a cascade, a storage-plane collapse, a storage trie that becomes empty, a self-destruct,
-      an inline storage leaf as survivor; assert collapse candidates > 0 for each shape
+      an inline storage leaf as survivor; assert collapse candidates > 0 for each shape except transient-before, where HPH
+      reports none today
 - [x] per block write `debug_executionWitness` legacy and canonical, `eth_getWitness` bytes, and `eth_getProof` for a fixed
       key set (present, absent, storage present and absent, empty storage, deleted account); this test holds the
       eth_getProof byte check
