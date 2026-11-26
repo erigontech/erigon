@@ -226,6 +226,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 		case <-pruneTicker.C:
 			// Prune excess peers periodically
 			s.pruneExcessPeers()
+			s.evictIdlePeers(time.Now())
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
 			underserved := underservedSubnets(&coverage)
@@ -321,6 +322,35 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+// subnetsOfConnectedPeers returns the attestation subnets of each connected peer and how many connected
+// peers each subnet has. Gossipsub forgets a closed peer asynchronously, so its topic peers can include
+// peers that are gone.
+func subnetsOfConnectedPeers(subnetToPeers *[attestationSubnetCount][]peer.ID, connected []peer.ID) (coverage [attestationSubnetCount]int, peerToSubnets map[peer.ID][]int) {
+	peerToSubnets = make(map[peer.ID][]int, len(connected))
+	for _, pid := range connected {
+		peerToSubnets[pid] = nil
+	}
+	for subnet, pids := range subnetToPeers {
+		for _, pid := range pids {
+			if subnets, ok := peerToSubnets[pid]; ok {
+				peerToSubnets[pid] = append(subnets, subnet)
+				coverage[subnet]++
+			}
+		}
+	}
+	return coverage, peerToSubnets
+}
+
+// MarkPeerUseful records that pid answered one of our data requests with data that decoded.
+func (s *Sentinel) MarkPeerUseful(pid peer.ID) {
+	s.p2p.MarkPeerUseful(pid)
+}
+
+// ConsumeDuplicateLoss is p2p.P2PManager.ConsumeDuplicateLoss for a peer that is still connected.
+func (s *Sentinel) ConsumeDuplicateLoss(pid peer.ID) bool {
+	return s.p2p.Host().Network().Connectedness(pid) == network.Connected && s.p2p.ConsumeDuplicateLoss(pid)
+}
+
 func (s *Sentinel) closePeer(pid peer.ID) {
 	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
 		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
@@ -402,13 +432,15 @@ func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnet
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peers := s.p2p.Host().Network().Peers()
+	connected := make([]peer.ID, 0, len(peers))
 	candidates := make([]pruneCandidate, 0, len(peers))
 	var counts peerCounts
 	for _, pid := range peers {
-		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		conns := openConns(s.p2p.Host().Network(), pid)
 		if len(conns) == 0 {
 			continue
 		}
+		connected = append(connected, pid)
 		candidate := pruneCandidate{pid: pid, inbound: peerIsInbound(conns), opened: conns[0].Stat().Opened}
 		if candidate.inbound {
 			counts.inbound++
@@ -425,13 +457,8 @@ func (s *Sentinel) pruneExcessPeers() {
 	}
 	log.Debug("[Sentinel] Pruning excess peers", "current", counts.total(), "inbound", counts.inbound, "outbound", counts.outbound, "toRemove", toRemove)
 
-	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
-	peerToSubnets := make(map[peer.ID][]int)
-	for i := range attestationSubnetCount {
-		for _, pid := range subnetToPeers[i] {
-			peerToSubnets[pid] = append(peerToSubnets[pid], i)
-		}
-	}
+	_, subnetToPeers := s.getSubnetCoverageWithPeers()
+	coverage, peerToSubnets := subnetsOfConnectedPeers(&subnetToPeers, connected)
 	for i := range candidates {
 		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}
@@ -633,6 +660,9 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	valid, err := validate()
+	if !valid && s.ConsumeDuplicateLoss(peerId) {
+		valid, err = validate()
+	}
 	if !valid && err != nil {
 		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
 		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
@@ -648,7 +678,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 	}
 
 	if !valid {
-		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// The peer's status did not decode or is for another fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 		s.p2p.Host().Peerstore().RemovePeer(peerId)

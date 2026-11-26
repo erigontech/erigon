@@ -93,17 +93,6 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 
 	convertRestore, convertContinue = false, false
 	statecfg.ExperimentalCommitmentV3 = true
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertV3 = false
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true")
-
-	convertRestore = false
-	statecfg.ExperimentalCommitmentV3 = false
-	convertV3 = false
-	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
 		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
@@ -117,28 +106,62 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 }
 
 func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
-	enabled := statecfg.ExperimentalCommitmentV3
-	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = enabled
-		datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf
-	})
-	statecfg.ExperimentalCommitmentV3 = true
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
 	db, dirs := dbWithV3State(t)
-	dbPath := db.Path()
 	db.Close()
-	datadirCli = dirs.DataDir
-	chaindata = dbPath
-	verifyAsOf = []uint{0}
-	openSnapshotOnce = sync.Once{}
+	datadirCli, verifyAsOf = dirs.DataDir, []uint{0}
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
+}
+
+// verify reads the state files only: it runs without chaindata, and creates none.
+func TestCommitmentVerifyRunsWithoutChaindata(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(dirs.Tmp))
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-blocks.txt")), "verify opens no block files")
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	require.NoError(t, commitmentVerify(t.Context(), log.New()))
+	require.NoDirExists(t, dirs.Chaindata)
+}
+
+func TestCommitmentVerifyNeedsStateSalt(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, "salt-state.txt")))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	err := commitmentVerify(t.Context(), log.New())
+	require.ErrorContains(t, err, "salt-state.txt")
+	require.NotContains(t, err.Error(), "salt-blocks.txt")
+}
+
+func TestCommitmentVerifyChecksSnapshotFileVersions(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1-accounts.0-1.kv"), nil, 0o600))
+
+	datadirCli, verifyAsOf = dirs.DataDir, nil
+	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "incompatible with the current erigon version")
 }
 
 func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()
-	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
-	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
+	previousDatadir, previousVerifyAsOf := datadirCli, verifyAsOf
+	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
 
 	db, dirs := dbWithV3State(t)
 	latest, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), math.MaxUint64)
@@ -155,10 +178,9 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 		require.NoError(t, dir.RemoveFile(f))
 	}
 
-	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	datadirCli = dirs.DataDir
 	for _, asOf := range []uint64{1, latest.TxNum} {
 		verifyAsOf = []uint{uint(asOf)}
-		openSnapshotOnce = sync.Once{}
 		require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), fmt.Sprintf("no commitment history covers txNum %d", asOf))
 	}
 }

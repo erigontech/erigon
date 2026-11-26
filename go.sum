@@ -241,6 +241,8 @@ github.com/erigontech/mdbx-go v0.43.1 h1:0wCMZVU2COvRPZ5sjEX4H/1zLHpXsqSzH2yj7G9
 github.com/erigontech/mdbx-go v0.43.1/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.4.1 h1:LnD0xscr390TAiVzpiRGvibkLbqk5o6+sDNKxJjzOh0=
 github.com/erigontech/secp256k1 v1.4.1/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
+github.com/ethereum/c-kzg-4844/v2 v2.1.8 h1:oQ48q/TMe2SKU8qBE3N7e4/HlG3EpJftom6EsPQgJ58=
+github.com/ethereum/c-kzg-4844/v2 v2.1.8/go.mod h1:8HMkUZ5JRv4hpw/XUrYWSQNAUzhHMg2UDb/U+5m+XNw=
 github.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=
 github.com/fatih/color v1.19.0/go.mod h1:zNk67I0ZUT1bEGsSGyCZYZNrHuTkJJB+r6Q9VuMi0LE=
 github.com/felixge/fgprof v0.9.5 h1:8+vR6yu2vvSKn08urWyEuxx75NWPEvybbkBirEpsbVY=

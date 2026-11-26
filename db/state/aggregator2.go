@@ -257,7 +257,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
 		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
 			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
-				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
+				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 					"convert the datadir with `integration commitment convert --v3`, "+
 					"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
 			}

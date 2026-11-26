@@ -430,7 +430,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return uint256.Int(*b)
 	}
 	value := deref(txJson.Value)
-	gasPrice := uint256.Int(txJson.GasPrice)
+	gasPrice := deref(txJson.GasPrice)
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 

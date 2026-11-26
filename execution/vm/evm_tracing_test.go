@@ -472,7 +472,7 @@ func TestGasChangeV2CodeDeposit(t *testing.T) {
 			}}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
 			initial := mdgas.MdGas{Execution: 200_000, State: 50_000}
 			if frame {
-				tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{Limits: initial}}}
+				tx := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{Limits: initial}}}
 				evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
 			}
 			_, _, _, _, err := evm.Create(accounts.ZeroAddress, []byte{byte(PUSH1), 1, byte(PUSH0), byte(RETURN)},

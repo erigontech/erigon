@@ -187,6 +187,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 			cumGas += params.TxGas
 			require.NoError(t, rawtemporaldb.AppendReceiptMetadata(putDel, 0, cumGas, 0, minTxNum+1+uint64(i)))
 		}
+		require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayNumber))
 	}
 
 	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, overlayBody: overlayBody, events: events, doms: doms}
@@ -1152,7 +1153,7 @@ func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
 	api := newEthApiForTest(base, m.DB, nil, nil)
 	hash := overlayHeader.Hash()
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
 	require.Nil(t, logs)
 }
@@ -1286,6 +1287,28 @@ func TestSimulateV1RejectsBlockAheadOfExecution(t *testing.T) {
 	require.ErrorContains(t, err, "not executed")
 }
 
+func TestCallMethodsRejectBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	args := ethapi.CallArgs{From: &m.Address, To: &m.Address}
+
+	for name, selector := range map[string]rpc.BlockNumberOrHash{
+		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, false),
+		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.Call(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.EstimateGas(m.Ctx, &args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+
+			_, err = api.CreateAccessList(m.Ctx, args, &selector, nil, nil)
+			require.ErrorContains(t, err, "not executed")
+		})
+	}
+}
+
 func TestEthWitnessMethodsRejectBlockAheadOfExecution(t *testing.T) {
 	m, aheadHash := newBlockAheadOfExecutionTester(t)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
@@ -1416,7 +1439,7 @@ func TestGetLogsBlockHashRequiresBody(t *testing.T) {
 	m, aheadHash := newHeaderAheadTester(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash}))
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", aheadHash))
 	require.Nil(t, logs)
 }

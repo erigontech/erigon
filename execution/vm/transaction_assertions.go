@@ -19,13 +19,11 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func inPostTx(evm *EVM) bool {
-	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx
+func inAssert(evm *EVM) bool {
+	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FrameAssert
 }
 
 // Assertion read errors must survive call rollback and reach the transaction
@@ -37,23 +35,23 @@ func (evm *EVM) assertionReadError(err error) error {
 }
 
 func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
+	if !inAssert(evm) {
 		return pc, nil, ErrFrameContext
 	}
 	param, index := call.Stack.pop1Peek1()
-	if !param.IsUint64() || param.Uint64() > 0x15 || !index.IsUint64() {
+	if !param.IsUint64() || param.Uint64() > 0x1a || !index.IsUint64() {
 		return pc, nil, ErrFrameParameter
 	}
 	selector, entryIndex := param.Uint64(), index.Uint64()
-	if (selector <= 2 || selector == 0x0c || selector >= 0x14) && entryIndex != 0 {
+	if (selector <= 0x03 || selector == 0x11 || selector >= 0x19) && entryIndex != 0 {
 		return pc, nil, ErrFrameParameter
 	}
 	ctx := evm.FrameContext
-	if selector == 0x14 {
+	if selector == 0x19 {
 		index.Set(&ctx.MaxCost)
 		return pc, nil, nil
 	}
-	if selector == 0x15 {
+	if selector == 0x1a {
 		address := ctx.Payer.Value()
 		index.SetBytes(address[:])
 		return pc, nil, nil
@@ -63,173 +61,102 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		return pc, nil, evm.assertionReadError(err)
 	}
 	switch selector {
-	case 0:
+	case 0x00:
 		index.SetUint64(uint64(len(trace.Balances)))
-	case 1:
+	case 0x01:
 		index.SetUint64(uint64(len(trace.Slots)))
-	case 2:
-		index.SetUint64(uint64(len(trace.Deployed)))
-	case 3, 4, 5:
+	case 0x02:
+		index.SetUint64(uint64(len(trace.Codes)))
+	case 0x03:
+		index.SetUint64(uint64(len(trace.Nonces)))
+	case 0x04, 0x05, 0x06:
 		if entryIndex >= uint64(len(trace.Balances)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Balances[entryIndex]
 		switch selector {
-		case 3:
+		case 0x04:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 4:
+		case 0x05:
 			index.Set(&entry.Before)
-		case 5:
+		case 0x06:
 			index.Set(&entry.After)
 		}
-	case 6, 7, 8, 9:
+	case 0x07, 0x08, 0x09, 0x0a:
 		if entryIndex >= uint64(len(trace.Slots)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Slots[entryIndex]
 		switch selector {
-		case 6:
+		case 0x07:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 7:
+		case 0x08:
+			index.Set(&entry.Before)
+		case 0x09:
+			index.Set(&entry.After)
+		case 0x0a:
 			key := entry.Key.Value()
 			index.SetBytes(key[:])
-		case 8:
-			index.Set(&entry.Before)
-		case 9:
-			index.Set(&entry.After)
 		}
-	case 0x0a, 0x0b:
-		if entryIndex >= uint64(len(trace.Deployed)) {
+	case 0x0b, 0x0c, 0x0d:
+		if entryIndex >= uint64(len(trace.Codes)) {
 			return pc, nil, ErrFrameParameter
 		}
-		entry := &trace.Deployed[entryIndex]
-		if selector == 0x0a {
+		entry := &trace.Codes[entryIndex]
+		switch selector {
+		case 0x0b:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		} else {
-			hash := entry.CodeHash.Value()
+		case 0x0c:
+			hash := entry.Before.Value()
+			index.SetBytes(hash[:])
+		case 0x0d:
+			hash := entry.After.Value()
 			index.SetBytes(hash[:])
 		}
-	case 0x0c:
+	case 0x0e, 0x0f, 0x10:
+		if entryIndex >= uint64(len(trace.Nonces)) {
+			return pc, nil, ErrFrameParameter
+		}
+		entry := &trace.Nonces[entryIndex]
+		switch selector {
+		case 0x0e:
+			address := entry.Address.Value()
+			index.SetBytes(address[:])
+		case 0x0f:
+			index.SetUint64(entry.Before)
+		case 0x10:
+			index.SetUint64(entry.After)
+		}
+	case 0x11:
 		index.SetUint64(uint64(len(trace.Events)))
-	default:
+	case 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18:
 		if entryIndex >= uint64(len(trace.Events)) {
 			return pc, nil, ErrFrameParameter
 		}
 		event := trace.Events[entryIndex]
 		switch selector {
-		case 0x0d:
+		case 0x12:
 			index.SetBytes(event.Address[:])
-		case 0x0e:
-			index.SetUint64(uint64(len(event.Topics)))
 		case 0x13:
-			index.SetUint64(uint64(len(event.Data)))
-		default:
-			topic := selector - 0x0f
+			index.SetUint64(uint64(len(event.Topics)))
+		case 0x14, 0x15, 0x16, 0x17:
+			topic := selector - 0x14
 			if topic >= uint64(len(event.Topics)) {
 				return pc, nil, ErrFrameParameter
 			}
 			index.SetBytes(event.Topics[topic][:])
+		case 0x18:
+			index.SetUint64(uint64(len(event.Data)))
 		}
-	}
-	return pc, nil, nil
-}
-
-// gasTxDiff adds the cold-access surcharge; the interpreter has already
-// charged the warm access cost. opTxDiff reports context and operand errors
-// because the interpreter reports errors from gas functions as out of gas.
-func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
-	param, key, index := call.Stack.back3(0, 1, 2)
-	ibs := evm.IntraBlockState()
-	if !param.IsUint64() {
-		return mdgas.MdGasCost{}, nil
-	}
-	var cost uint64
-	if selector := param.Uint64(); selector <= 1 {
-		address, slot := ibs.InternAddress(key), ibs.InternStorageKey(index)
-		if _, warm := ibs.SlotInAccessList(address, slot); !warm {
-			cost = coldStorageAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
-		}
-	} else if selector <= 5 && !ibs.AddressInAccessList(ibs.InternAddress(key)) {
-		cost = coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
-	}
-	return mdgas.MdGasCost{Execution: cost}, nil
-}
-
-func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
-		return pc, nil, ErrFrameContext
-	}
-	param, key, index := call.Stack.pop2Peek1()
-	if !param.IsUint64() || param.Uint64() > 0x0c {
-		return pc, nil, ErrFrameParameter
-	}
-	selector := param.Uint64()
-	if selector >= 2 && selector != 7 && selector != 9 && selector != 0x0c && !index.IsZero() {
-		return pc, nil, ErrFrameParameter
-	}
-	ibs := evm.IntraBlockState()
-	trace, err := evm.FrameContext.TransactionTrace(ibs)
-	if err != nil {
-		return pc, nil, evm.assertionReadError(err)
-	}
-	if selector <= 5 {
-		address := ibs.InternAddress(key)
-		ibs.MarkAddressAccess(address, false)
-		if selector <= 1 {
-			slot := ibs.InternStorageKey(index)
-			ibs.AddSlotOnlyToAccessList(address, slot)
-			value, err := trace.Storage(ibs, address, slot, selector == 0)
-			if err != nil {
-				return pc, nil, evm.assertionReadError(err)
-			}
-			index.Set(&value)
-			return pc, nil, nil
-		}
-		ibs.AddAddressToAccessList(address)
-		if selector <= 3 {
-			value, err := trace.Balance(ibs, address, selector == 2)
-			if err != nil {
-				return pc, nil, evm.assertionReadError(err)
-			}
-			index.Set(&value)
-			return pc, nil, nil
-		}
-		hash, err := trace.CodeHash(ibs, address, selector == 4)
-		if err != nil {
-			return pc, nil, evm.assertionReadError(err)
-		}
-		value := hash.Value()
-		index.SetBytes(value[:])
-		return pc, nil, nil
-	}
-	var indices []int
-	switch selector {
-	case 6, 7:
-		indices = trace.SlotIndicesByAddress[ibs.InternAddress(key)]
-	case 8, 9:
-		indices = trace.EventIndicesByAddress[ibs.InternAddress(key)]
-	case 0x0a:
-		index.SetUint64(trace.AccountFlags[ibs.InternAddress(key)])
-		return pc, nil, nil
-	case 0x0b, 0x0c:
-		indices = trace.EventIndicesByTopic[key.Bytes32()]
-	}
-	if selector == 6 || selector == 8 || selector == 0x0b {
-		index.SetUint64(uint64(len(indices)))
-	} else {
-		if !index.IsUint64() || index.Uint64() >= uint64(len(indices)) {
-			return pc, nil, ErrFrameParameter
-		}
-		index.SetUint64(uint64(indices[index.Uint64()]))
 	}
 	return pc, nil, nil
 }
 
 func opEventDataCopy(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
+	if !inAssert(evm) {
 		return pc, nil, ErrFrameContext
 	}
 	eventIndex, memoryOffset := call.Stack.pop2()
