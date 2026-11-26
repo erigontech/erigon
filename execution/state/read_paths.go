@@ -1421,14 +1421,47 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
-	if !s.warmReadable(addr) {
+	ownWrites := !s.warmReadable(addr)
+	if ownWrites {
 		if vw, ok := s.writes.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
 		}
 	}
-	if tr, ok := s.reads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+	tr, read := s.reads.GetStorage(addr, key)
+	if read && warmSource(tr.Source) {
 		return tr.Val, tr.Source, tr.Version, true, nil
 	}
+	if !read && !ownWrites && s.untouchedInBlock(addr) {
+		return readUntouchedState(s, addr, key)
+	}
+	return readStateCore(s, addr, key)
+}
+
+// untouchedInBlock reports that no tx of the block has a version-map cell for addr,
+// so a slot of it resolves from the origin layer or the state reader only.
+func (ibs *IntraBlockState) untouchedInBlock(addr accounts.Address) bool {
+	_, probed := ibs.sdProbeMemo(addr)
+	return !probed && ibs.versionMap.load(addr) == nil
+}
+
+// readUntouchedState is readStateCore for an address without own writes or
+// version-map cells: it records the same read without probing the empty layers.
+func readUntouchedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	origin := Version{TxIndex: originIndex}
+	if v, ok := s.versionMap.LoadOriginStorage(addr, key); ok {
+		s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader{Source: MapRead, Version: origin}, v})
+		return v, MapRead, origin, false, nil
+	}
+	v, err := s.originStorageDirect(addr, key)
+	if err != nil {
+		return uint256.Int{}, StorageRead, UnknownVersion, false, err
+	}
+	s.recordStorageOrigin(addr, key, v)
+	s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader{Source: StorageRead, Version: origin}, v})
+	return v, StorageRead, origin, true, nil
+}
+
+func readStateCore(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
 	var r readPathResult
 	readCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
