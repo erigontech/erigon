@@ -129,7 +129,7 @@ DATA rcx4<>+760(SB)/8, $0x8000000080008008
 GLOBL rcx4<>(SB), RODATA|NOPTR, $768
 
 // func keccakX4AVX2(a *[100]uint64, blocks *[4]*byte, scratch *[100]uint64)
-TEXT ·keccakX4AVX2(SB), NOSPLIT, $0-24
+TEXT ·keccakX4AVX2(SB), $128-24
 	MOVQ a+0(FP), AX
 	MOVQ blocks+8(FP), CX
 	MOVQ 0(CX), R8
@@ -1106,7 +1106,7 @@ avx2loop:
 	RET
 
 // func keccakX4AVX512(a *[100]uint64, blocks *[4]*byte)
-TEXT ·keccakX4AVX512(SB), NOSPLIT, $0-16
+TEXT ·keccakX4AVX512(SB), $128-16
 	MOVQ a+0(FP), AX
 	MOVQ blocks+8(FP), CX
 	MOVQ 0(CX), R8

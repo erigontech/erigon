@@ -96,7 +96,7 @@ func loadPointers() {
 
 func genAVX2() {
 	fmt.Fprintln(w, "// func keccakX4AVX2(a *[100]uint64, blocks *[4]*byte, scratch *[100]uint64)")
-	fmt.Fprintln(w, "TEXT ·keccakX4AVX2(SB), NOSPLIT, $0-24")
+	fmt.Fprintln(w, "TEXT ·keccakX4AVX2(SB), $128-24")
 	loadPointers()
 	absorb()
 	emit("MOVQ scratch+16(FP), BX")
@@ -168,7 +168,7 @@ func genAVX512() {
 	tern := func(imm, c, b, a int) { emit("VPTERNLOGQ $0x%02x, Y%d, Y%d, Y%d", imm, c, b, a) }
 
 	fmt.Fprintln(w, "// func keccakX4AVX512(a *[100]uint64, blocks *[4]*byte)")
-	fmt.Fprintln(w, "TEXT ·keccakX4AVX512(SB), NOSPLIT, $0-16")
+	fmt.Fprintln(w, "TEXT ·keccakX4AVX512(SB), $128-16")
 	loadPointers()
 	absorb()
 	emit("LEAQ rc<>(SB), DX")
