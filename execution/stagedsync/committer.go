@@ -655,7 +655,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	vm.SetBaseTxNum(req.firstTxNum)
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
-	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
+	base := newMemoAccountReader(cc.asOfReader.dr.StateReaderAt(req.firstTxNum))
 	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
 		return
@@ -670,12 +670,12 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	after, err := cc.checkpointStepsFromBAL(ctx, req, vm)
+	after, err := cc.checkpointStepsFromBAL(ctx, req, vm, base)
 	if err != nil {
 		fail(err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, math.MaxUint32, targetOf(br))
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, base, after, math.MaxUint32, targetOf(br))
 	if err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -710,7 +710,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // gives the state as of the edge. The returned root is discarded (no header to
 // verify mid-block). Runs before the block-end compute so that builds on it.
 // checkpointStepsFromBAL returns the tx index of its last checkpoint, -1 when it made none.
-func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) (int64, error) {
+func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, base state.StateReader) (int64, error) {
 	after := int64(-1)
 	ss := cc.doms.StepSize()
 	if ss == 0 {
@@ -722,7 +722,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
 		idx := uint32(edge - req.firstTxNum)
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, after, idx, targetOf(stepBr))
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, base, after, idx, targetOf(stepBr))
 		if err != nil {
 			return after, fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
@@ -740,8 +740,9 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // from its BAL-seeded version map via emitTouched, into a fresh updates buffer, and
 // computes the root at t. Shared by the block-end compute-ahead and the mid-block step
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
-// (and the seeded EIP-161 removal) is read from the version map view.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, afterTxIndex int64, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
+// (and the seeded EIP-161 removal) is read from the version map view over base, the
+// state before the block: the map holds every in-block write, so a later base adds nothing.
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, base state.StateReader, afterTxIndex int64, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr, prefetched: cc.branchPrefetch, cur: vm, curTxNum: t.lastTxNum}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
@@ -761,7 +762,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	cc.balBlock = true
 	cc.accumulateTouched(bal.ToWriteSetAfter(req.bal, afterTxIndex, maxTxIndex), nil)
-	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
+	err := cc.emit(cc.foldView(vm, t.lastTxNum, base), balUpdates)
 	cc.clearFoldedKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)

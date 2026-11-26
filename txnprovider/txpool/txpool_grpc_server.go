@@ -275,7 +275,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.NonceTooLow:
 		return txpoolproto.ImportResult_STALE
-	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.ReplacedByHigherTip, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,
