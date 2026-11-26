@@ -1091,6 +1091,29 @@ func TestComposeOutboundBoundsThePostingGas(t *testing.T) {
 	require.Zero(t, f.pool.Len())
 }
 
+// TestComposeOutboundPastTheDeadlineWaits: an outbound transaction whose
+// load the deadline cuts short waits with its chain, not evicted.
+func TestComposeOutboundPastTheDeadlineWaits(t *testing.T) {
+	f := newCrossFixture(t)
+	f.l1.m.accounts[protocol.EEZL2Address].Balance.SetUint64(100)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// The deadline passes between the simulation and the load.
+	f.c.x.Escrow = func(context.Context, common.Hash) (*uint256.Int, error) {
+		cancel()
+		return uint256.NewInt(10), nil
+	}
+	h := f.holdOut(t, 0, outboundProxies[1], 7, nil)
+	var buf bytes.Buffer
+	f.c.logger = log.New()
+	f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
+	sync := f.w.sync.Header()
+	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101, targetTime))
+	require.NotContains(t, buf.String(), "eez.composer.poison")
+	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt))
+	require.Zero(t, h.Attempts)
+}
+
 // TestComposeOutboundValue: an outbound call's value comes out of the
 // rollup's escrow, read once at the anchor, and the manager's balance; a
 // call they cannot pay waits with its chain, uncomposed, until its third

@@ -316,7 +316,7 @@ func (k *composition) outbound(h *Held, tx types.Transaction) error {
 			switch {
 			case errors.Is(err, core.ErrGasLimitReached):
 				return ErrFull
-			case errors.Is(err, ErrStateRead):
+			case errors.Is(err, ErrStateRead), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 				return err
 			case err != nil:
 				return Poison(fmt.Errorf("with its L1 call loaded: %w", err))
