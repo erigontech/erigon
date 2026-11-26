@@ -1568,17 +1568,15 @@ func TestHistoryRange2(t *testing.T) {
 			}, vals)
 
 			// single Get test-cases
-			tx := beginRo(t, db)
-
-			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutil.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
