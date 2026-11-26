@@ -87,22 +87,30 @@ func TestCountStorageSlotsCountsSlotsAtTheBaseBlock(t *testing.T) {
 	require.ErrorContains(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2), "more than 2 storage slots")
 }
 
-func TestCountStorageSlotsCountsHeadAndBaseSlotsOnce(t *testing.T) {
+// On a historical base, the slots the simulation wrote and the base block's slots are each counted once, and a slot
+// only the head holds is not counted.
+func TestCountStorageSlotsCountsSimulatedAndBaseSlotsOnce(t *testing.T) {
 	t.Parallel()
 	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
 	addr := common.HexToAddress("0xaa")
+	key := func(slot byte) []byte { return dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}) }
 	putDel := sd.AsPutDel(rwTx)
-	for slot := byte(1); slot <= 2; slot++ {
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
-		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot + 2}), []byte{slot}, 2, nil))
-	}
-	require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: 5}), []byte{5}, 1, nil))
+	putSlots(t, putDel, addr, 2) // the base block's slots 1 and 2
+	require.NoError(t, putDel.DomainPut(kv.StorageDomain, key(3), []byte{3}, 5, nil))
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	// The simulation rewrites slot 2 and writes slot 4, which stay in the mem batch, and writes and clears slot 5.
+	for _, slot := range []byte{2, 4, 5} {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, key(slot), []byte{9}, 6, nil))
+	}
+	require.NoError(t, putDel.DomainDel(kv.StorageDomain, key(5), 7, []byte{9}))
+	newSim := func() *simulator {
+		touched := storageKeys{accounts.InternKey(common.Hash{31: 2}), accounts.InternKey(common.Hash{31: 4}), accounts.InternKey(common.Hash{31: 2}), accounts.InternKey(common.Hash{31: 5})}
+		return &simulator{touchedKeys: keysByAccount{accounts.InternAddress(addr): touched}}
+	}
 
-	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 5))
-	err := (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 4)
-	require.ErrorContains(t, err, "more than 4 storage slots")
+	require.NoError(t, newSim().countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 3))
+	err := newSim().countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2)
+	require.ErrorContains(t, err, "more than 2 storage slots")
 	var rpcErr rpc.Error
 	require.ErrorAs(t, err, &rpcErr)
 	require.Equal(t, rpc.ErrCodeClientLimitExceeded, rpcErr.ErrorCode())
@@ -123,6 +131,19 @@ func TestCountStorageSlotsSkipsBaseSlotsAlreadySwept(t *testing.T) {
 
 	require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2))
 	require.Zero(t, sim.removedSlots)
+}
+
+// On a historical base, an account that has no slots at the base block removes none, whatever the head holds.
+func TestCountStorageSlotsIgnoresHeadOnlySlotsOnAHistoricalBase(t *testing.T) {
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addr := common.HexToAddress("0xaa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 2; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 5, nil))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+
+	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 1), "the slots were written after the base block")
 }
 
 // Slots that an earlier write already removed are not counted again.

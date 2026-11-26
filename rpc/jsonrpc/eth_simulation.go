@@ -640,13 +640,17 @@ func (s *simulator) countStorageSlots(ctx context.Context, addr []byte, sd *exec
 		removed++
 		return removed <= budget
 	}
-	if err := sd.IteratePrefix(kv.StorageDomain, addr, tx, func(k, _ []byte) (bool, error) {
-		return add(k), ctx.Err()
-	}); err != nil {
-		return err
-	}
-	if !latest && removed <= budget {
-		if _, swept := s.sweptStorage[accounts.InternAddress(common.BytesToAddress(addr))]; !swept {
+	if latest {
+		if err := sd.IteratePrefix(kv.StorageDomain, addr, tx, func(k, _ []byte) (bool, error) {
+			return add(k), ctx.Err()
+		}); err != nil {
+			return err
+		}
+	} else {
+		// A historical base reads the mem batch, then the base block: slots only the head holds are never read.
+		address := accounts.InternAddress(common.BytesToAddress(addr))
+		visitSimulatedSlots(sd, address, s.touchedKeys[address], func(k, _ []byte) bool { return add(k) })
+		if _, swept := s.sweptStorage[address]; !swept && removed <= budget {
 			if err := visitStorageSlotsAsOf(ctx, tx, addr, firstMinTxNum, add); err != nil {
 				return err
 			}
@@ -657,6 +661,24 @@ func (s *simulator) countStorageSlots(ctx context.Context, addr []byte, sd *exec
 	}
 	s.removedSlots += removed
 	return nil
+}
+
+// visitSimulatedSlots visits the slots of address that the simulation wrote and still holds in the mem batch.
+// Every storage write of a simulation goes through diffTrackingWriter, which records its key in touched.
+func visitSimulatedSlots(sd *execctx.SharedDomains, address accounts.Address, touched storageKeys, visit func(k, v []byte) bool) {
+	addressValue := address.Value()
+	seen := make(map[accounts.StorageKey]struct{}, len(touched))
+	for _, loc := range touched {
+		if _, ok := seen[loc]; ok {
+			continue
+		}
+		seen[loc] = struct{}{}
+		locValue := loc.Value()
+		k := append(append(make([]byte, 0, length.Addr+length.Hash), addressValue[:]...), locValue[:]...)
+		if v, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok && len(v) > 0 && !visit(k, v) {
+			return
+		}
+	}
 }
 
 func visitStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, visit func(key []byte) bool) error {
@@ -1447,15 +1469,24 @@ func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, p
 	return p.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 
-// DomainDelPrefix also deletes the base block's slots: SharedDomains walks head storage only.
+// DomainDelPrefix deletes the slots the simulation wrote and the base block's slots. Reads go to the mem batch,
+// then the base block, so the slots only the head holds need no tombstone.
 func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
-	if err := p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum); err != nil {
-		return err
-	}
 	if domain != kv.StorageDomain {
-		return nil
+		return p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 	}
 	address := accounts.InternAddress(common.BytesToAddress(prefix))
+	type slot struct{ k, v []byte }
+	var written []slot
+	visitSimulatedSlots(p.view.sd, address, p.touched[address], func(k, v []byte) bool {
+		written = append(written, slot{k, v})
+		return true
+	})
+	for _, w := range written {
+		if err := p.TemporalPutDel.DomainDel(kv.StorageDomain, w.k, txNum, w.v); err != nil {
+			return err
+		}
+	}
 	_, swept := p.sweptStorage[address]
 	p.sweptStorage[address] = struct{}{}
 	to, _ := kv.NextSubtree(prefix)

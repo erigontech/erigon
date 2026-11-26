@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -230,5 +231,66 @@ func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// On a historical base, deploying at the real address of a contract that is created after the base block, and holds
+// more slots than the bound at the head, removes nothing: it is not refused, the later slots read as empty, and the
+// state roots are the ones of the same simulation on a chain that ends at the base block.
+func TestSimulateV1HistoricalDeployIgnoresLaterStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = nil // the transaction that fills the contract needs more gas than the EIP-7825 cap
+	newChain := func() *execmoduletester.ExecModuleTester {
+		return execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: cfg, GasLimit: 3_000_000_000,
+			Alloc: types.GenesisAlloc{testAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)}},
+		}), execmoduletester.WithKey(testKey))
+	}
+	contract := types.CreateAddress(testAddr, 0)
+	slots := maxSimRemovedSlots + 1
+	// PUSH3 slots; loop: PUSH1 1 DUP2 SSTORE PUSH1 1 SWAP1 SUB DUP1 PUSH1 4 JUMPI; STOP
+	fill := []byte{
+		byte(vm.PUSH3), byte(slots >> 16), byte(slots >> 8), byte(slots), byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 1, byte(vm.DUP2), byte(vm.SSTORE), byte(vm.PUSH1), 1, byte(vm.SWAP1), byte(vm.SUB),
+		byte(vm.DUP1), byte(vm.PUSH1), 4, byte(vm.JUMPI), byte(vm.STOP),
+	}
+	later := newChain()
+	pack, err := later.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i != 0 {
+			return
+		}
+		txn, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 2_400_000_000, uint256.NewInt(1_000_000_000), fill), *types.LatestSigner(later.ChainConfig), testKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, later.InsertChain(pack))
+	require.Equal(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+	require.Equal(t, contract, pack.Receipts[0][0].ContractAddress)
+
+	// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN, deployed by its init code.
+	readSlot1 := []byte{byte(vm.PUSH1), 1, byte(vm.SLOAD), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	deploy := hexutil.Bytes(append(append([]byte{byte(vm.PUSH11)}, readSlot1...), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 11, byte(vm.PUSH1), 21, byte(vm.RETURN)))
+	gas := hexutil.Uint64(1_000_000)
+	req := SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{Calls: []ethapi.CallArgs{{From: &testAddr, Gas: &gas, Input: &deploy}}},
+		{Calls: []ethapi.CallArgs{{From: &testAddr, To: &contract, Gas: &gas}}},
+	}}
+	got, err := newEthApiForTest(newBaseApiForTest(later), later.DB, nil, nil).SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(0))
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(got[0].Calls[0].Status), "%v", got[0].Calls[0].Error)
+	require.Equal(t, hexutil.Encode(make([]byte, 32)), got[1].Calls[0].ReturnData, "slot 1 of the later contract")
+
+	base := newChain()
+	want, err := newEthApiForTest(newBaseApiForTest(base), base.DB, nil, nil).SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	for i := range want {
+		require.NotEqual(t, common.Hash{}, want[i].StateRoot, "block %d", i)
+		require.Equal(t, want[i].StateRoot, got[i].StateRoot, "block %d", i)
+		require.Equal(t, want[i].Calls[0].ReturnData, got[i].Calls[0].ReturnData, "block %d", i)
 	}
 }
