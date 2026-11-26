@@ -1126,7 +1126,7 @@ func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv
 	if err != nil {
 		return err
 	}
-	h.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(h.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 

@@ -246,29 +246,21 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 	}
 }
 
-// buildValueTransformer returns the valueTransformer for the requested
-// (detected, target) squeeze-axis combination, or nil when both match
-// (pass-through; the dump path treats nil as a no-op).
+// buildValueTransformer returns a transformer for encoded branch values, or nil
+// when the source and target squeeze settings match.
 //
 //	unsqueezed → unsqueezed  nil
-//	unsqueezed → squeezed    commitment.commitmentValTransformDomain(rng, …)
+//	unsqueezed → squeezed    commitmentRo.commitmentValTransformDomain(rng, …)
 //	squeezed   → unsqueezed  closure around ExpandShortenedKeysInBranch
 //	squeezed   → squeezed    nil
 //
-// The unsqueezed→squeezed path delegates to the existing read-side machinery
-// in domain_committed.go so the converter writes the same on-disk format the
-// live system produces. The squeezed→unsqueezed direction calls
-// ExpandShortenedKeysInBranch — the same code path the live read side uses
-// to materialise plain keys.
+// Squeezing uses the merge writer's encoding for account and storage references.
+// Expansion uses the live reader's helper to recover the plain keys.
 //
 // Account+storage file lookup happens here (not at the call site) so pure
 // key-encoding conversions (squeeze axis unchanged) don't need account/storage
 // files at all — useful when the datadir was produced by a partial rebuild
 // where commitment ranges don't align with account/storage ranges.
-//
-// KeyCommitmentState rows have no embedded plain keys; both directions are
-// effectively pass-through on their value, so the caller does not need a
-// state-value carve-out.
 func buildValueTransformer(
 	detectedSqueezed, targetSqueezed bool,
 	commitmentRo *DomainRoTx,
@@ -336,18 +328,13 @@ func formatRate(ki uint64, elapsed time.Duration) string {
 
 // convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
 //
-// It detects the source file's current state, builds the per-pair key and value
-// transformers for the target ConvertOpts, streams every (k, v) pair from the
-// source via the aggregator's compression-aware reader, applies keyXform per
-// pair (state keys pass through), and pushes (newKey, value) into a fresh
-// TemporalMemBatch's commitment-domain wal. The value-side transform is
-// supplied to dumpStepRangeToPath as `vt valueTransformer` so it runs during
-// collation alongside the ETL sort.
+// It applies the requested key and value conversions before buffering each
+// branch record. Commitment state records are copied as stored.
 //
 // dstDir must exist; the resulting `.kv` plus per-domain index files (.bt /
 // .kvi / .kvei depending on the commitment-domain config) are written there.
-// The aggregator's view of `snapshots/domain/` is not touched: dumpStepRangeToPath
-// is called with `integrate=false`, so originals remain readable for the entire
+// The aggregator's view of `snapshots/domain/` is not touched: output is not
+// published, so originals remain readable for the entire
 // duration of Phase 1 and a crashed run is recoverable by just deleting dstDir.
 //
 // If the detected state already matches `opts`, returns `errSkip` (a sentinel
@@ -438,9 +425,7 @@ func convertCommitmentFile(
 	}
 	defer view.Close()
 
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter(nil)
-	wal := batch.domainWriters[kv.CommitmentDomain]
+	wal := commitmentRo.NewWriter(nil)
 	defer wal.Close()
 
 	// Sub-threshold (steps < DomainMinStepsToCompress) commitment files are
@@ -458,18 +443,12 @@ func convertCommitmentFile(
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	// txNumForPut only affects the 8-byte step prefix on the wal entry; collateETL
-	// strips it before applying vt. endTxNum-1 guarantees the encoded step lands
-	// inside [stepFrom, stepTo).
+	// Use the file's last transaction number to put each entry in the final
+	// step of the range. Collation strips the step encoding from the output.
 	txNumForPut := endTxNum - 1
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
 
-	// Value transform is applied here (not in collateETL) so we can (a) carve out
-	// KeyCommitmentState — its value is opaque metadata, not BranchData — and (b)
-	// pass the actual source file range to vt, matching SqueezeCommitmentFiles.
-	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
-	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var k, v []byte
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
@@ -492,6 +471,9 @@ func convertCommitmentFile(
 			outKey = append([]byte(nil), tk...)
 		}
 
+		// Convert values here, where the key identifies opaque commitment state
+		// records to copy verbatim. Branch offsets refer to the account and storage
+		// files for the exact source range.
 		var outVal []byte
 		if !isState && vt != nil {
 			tv, verr := vt(v, startTxNum, endTxNum)
@@ -524,10 +506,11 @@ func convertCommitmentFile(
 		}
 	}
 
-	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
-	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
+	files, err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, wal, dstDir)
+	if err != nil {
 		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}
+	files.CleanupOnError()
 
 	newKVPath := commitmentRo.d.kvNewFilePathIn(dstDir, stepFrom, stepTo)
 	delta, pct, err := commitmentFileSizeDelta(file.Fullpath(), newKVPath)

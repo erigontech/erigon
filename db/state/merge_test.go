@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -1163,6 +1164,84 @@ func TestMergeFiles(t *testing.T) {
 
 	dc = d.beginForTests()
 	dc.Close()
+}
+
+func TestMergeReplacementClosesAfterReaders(t *testing.T) {
+	t.Parallel()
+	const domain = kv.CodeDomain
+	for _, tc := range []struct {
+		name            string
+		afterValueMerge bool
+		files           func(*AggregatorRoTx) visibleFiles
+	}{
+		{"values", false, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].files }},
+		{"history", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.files }},
+		{"history_index", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.iit.files }},
+		{"logaddrs", true, func(at *AggregatorRoTx) visibleFiles { return at.searchII(kv.LogAddrIdx).files }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const stepSize = uint64(10)
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			for step := range kv.Step(2) {
+				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
+			}
+			// Each domain merges its values before its own history and history index.
+			// Standalone indexes wait for a pass with no domain value merges.
+			if tc.afterValueMerge {
+				progressed, err := agg.mergeLoopStep(ctx, 2*stepSize)
+				require.NoError(t, err)
+				require.True(t, progressed, "expected a merge of the value files")
+			}
+			source := agg.BeginFilesRo()
+			defer source.Close()
+			require.Len(t, tc.files(source), 2)
+			ranges := source.findMergeRange(2*stepSize, stepSize, agg.StepsInFrozenFile())
+			inputs, err := source.filesInRange(ranges)
+			require.NoError(t, err)
+			merged, err := source.mergeFiles(ctx, inputs, ranges)
+			require.NoError(t, err)
+			t.Cleanup(merged.Close)
+			source.Close()
+
+			fileIn := func(view *AggregatorRoTx) *FilesItem {
+				t.Helper()
+				files := tc.files(view)
+				require.Len(t, files, 1)
+				return files[0].src
+			}
+			// OpenFolder publishes the mappings it opens from disk. Pin that view
+			// before the merge publishes its own mappings of the same files.
+			require.NoError(t, agg.OpenFolder(db))
+			oldView := agg.BeginFilesRo()
+			defer oldView.Close()
+			original := fileIn(oldView)
+			t.Cleanup(original.closeFiles)
+			originalMapping := original.decompressor
+			paths := original.FilePaths(agg.dirs.Snap)
+			require.Greater(t, len(paths), 1, "expected a data file and its accessors")
+
+			agg.integrateMergedDirtyFiles(merged)
+			newView := agg.BeginFilesRo()
+			defer newView.Close()
+			replacement := fileIn(newView)
+			replacementMapping := replacement.decompressor
+			require.NotSame(t, originalMapping, replacementMapping)
+			require.Equal(t, paths, replacement.FilePaths(agg.dirs.Snap))
+			require.True(t, originalMapping.IsOpen(), "the old reader still holds this mapping")
+
+			oldView.Close()
+			require.False(t, originalMapping.IsOpen(), "the last reader must release the old mapping")
+			require.Empty(t, original.FilePaths(agg.dirs.Snap), "the old accessor handles must close too")
+			require.True(t, replacementMapping.IsOpen())
+			for _, path := range paths {
+				require.FileExists(t, filepath.Join(agg.dirs.Snap, path))
+			}
+			newView.Close()
+			agg.Close()
+			require.False(t, replacementMapping.IsOpen())
+		})
+	}
 }
 
 func TestDomainMergeCancellationClosesOutput(t *testing.T) {
