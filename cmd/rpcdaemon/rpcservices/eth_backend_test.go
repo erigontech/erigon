@@ -92,7 +92,11 @@ type (
 
 // connectLogs opens a logs stream to srv until ctx ends and returns its filter requestor.
 func connectLogs(ctx context.Context, srv gatedAckServer, onNewLogs func(*remoteproto.SubscribeLogsReply)) logsSend {
-	back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+	return connectLogsOn(ctx, NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil), onNewLogs)
+}
+
+// connectLogsOn opens a logs stream on back until ctx ends and returns its filter requestor.
+func connectLogsOn(ctx context.Context, back *RemoteBackend, onNewLogs func(*remoteproto.SubscribeLogsReply)) logsSend {
 	var requestor atomic.Value
 	go back.SubscribeLogs(ctx, onNewLogs, &requestor) //nolint:errcheck
 	synctest.Wait()
@@ -150,8 +154,12 @@ func TestSubscribeReceiptsUpdateWaitsForFilterApplied(t *testing.T) {
 // An update that does not ask for an ack, such as an unsubscribe, returns once it is sent.
 func TestFilterUpdateWithoutAckDoesNotWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		send := connectLogs(t.Context(), newGatedAckServer(), ignoreLogs)
+		srv := newGatedAckServer()
+		send := connectLogs(t.Context(), srv, ignoreLogs)
 		require.NoError(t, send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true}))
+		requireSendWaitsForAck(t, srv, func() error {
+			return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
+		})
 	})
 }
 
@@ -215,15 +223,16 @@ func TestFilterStreamReadsTheVersionOnEachConnect(t *testing.T) {
 		srv := newGatedAckServer()
 		version := &typesproto.VersionReply{Major: 5}
 		srv.version = version
+		back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
 		ctx, end := context.WithCancel(t.Context())
-		send := connectLogs(ctx, srv, ignoreLogs)
+		send := connectLogsOn(ctx, back, ignoreLogs)
 		req := &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true}
 		require.NoError(t, send(t.Context(), req))
 		require.False(t, req.Ack)
 		end()
 
 		*version = typesproto.VersionReply{Major: 5, Patch: 1}
-		send = connectLogs(t.Context(), srv, ignoreLogs)
+		send = connectLogsOn(t.Context(), back, ignoreLogs)
 		requireSendWaitsForAck(t, srv, func() error {
 			return send(t.Context(), &remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true})
 		})

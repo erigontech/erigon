@@ -453,6 +453,7 @@ func TestWaitForReceiptOfTimeoutSpentOnTheFilterUpdate(t *testing.T) {
 	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, 100*time.Millisecond)
 	var timeoutErr *rpc.TxSyncTimeoutError
 	require.ErrorAs(t, err, &timeoutErr)
+	require.Equal(t, common.Hash{1}.Hex(), timeoutErr.ErrorData())
 }
 
 // Pins that a full subscription budget degrades the wait to polling instead of failing a transaction the
