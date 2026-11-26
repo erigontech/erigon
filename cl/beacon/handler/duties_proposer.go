@@ -71,11 +71,13 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
-	isAvailableInForkChoice := !isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot()
 	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 	var (
-		dependentRoot common.Hash
-		duties        []proposerDuties
+		dependentRoot  common.Hash
+		duties         []proposerDuties
+		optimistic     bool
+		stateToAdvance *state.CachingBeaconState
+		advanceWarning string
 	)
 
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
@@ -83,30 +85,24 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if epoch > stateEpoch+maxEpochsLookaheadForDuties {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
 		}
-		if epoch < stateEpoch && !isAvailableInForkChoice {
+		if epoch < stateEpoch && (isFinalized || expectedSlot < a.forkchoiceStore.LowestAvailableSlot()) {
 			return nil
 		}
 		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
-		root, err := a.getDependentRoot(s, headRoot, headSlot, epoch, v2 && targetVersion >= clparams.FuluVersion)
+		root, err := a.getDependentRoot(s.GetBlockRootAtSlot, headRoot, headSlot, epoch, v2 && targetVersion >= clparams.FuluVersion)
 		if err != nil {
 			return err
 		}
 		dependentRoot = root
+		optimistic = !isFinalized && a.forkchoiceStore.IsRootOptimistic(headRoot)
 		duties = make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
 		if targetVersion.After(s.Version()) {
-			advancedState, copyErr := a.copyHeadStateForDuties(s)
-			if copyErr != nil {
-				return copyErr
-			}
-			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
-				log.Warn("getDutiesProposer: failed to advance state to target fork",
-					"epoch", epoch, "headEpoch", stateEpoch, "err", processErr)
-				return processErr
-			}
-			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
+			advanceWarning = "getDutiesProposer: failed to advance state to target fork"
+			stateToAdvance, err = a.copyHeadStateForDuties(s)
+			return err
 		}
 		if targetVersion.Before(s.Version()) {
 			versionedState, copyErr := a.copyHeadStateForDuties(s)
@@ -139,16 +135,9 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 		// Advance a copy to apply epoch updates before computing duties beyond the lookahead vector.
 		if s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead {
-			advancedState, copyErr := a.copyHeadStateForDuties(s)
-			if copyErr != nil {
-				return copyErr
-			}
-			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
-				log.Warn("getDutiesProposer: failed to advance state for epoch beyond lookahead",
-					"epoch", epoch, "headEpoch", stateEpoch, "err", processErr)
-				return processErr
-			}
-			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
+			advanceWarning = "getDutiesProposer: failed to advance state for epoch beyond lookahead"
+			stateToAdvance, err = a.copyHeadStateForDuties(s)
+			return err
 		}
 
 		// Lets do proposer index computation (pre-Fulu or when epoch is within range)
@@ -194,9 +183,20 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(targetVersion).With("dependent_root", dependentRoot), nil
 	}
 
+	if stateToAdvance != nil {
+		headEpoch := state.Epoch(stateToAdvance)
+		if err := transition.DefaultMachine.ProcessSlots(stateToAdvance, expectedSlot); err != nil {
+			log.Warn(advanceWarning, "epoch", epoch, "headEpoch", headEpoch, "err", err)
+			return nil, err
+		}
+		if err := fillProposerDutiesFromState(duties, stateToAdvance, epoch, expectedSlot); err != nil {
+			return nil, err
+		}
+	}
+
 	return newBeaconResponse(duties).
 		WithFinalized(isFinalized).
-		WithOptimistic(!isFinalized && a.forkchoiceStore.IsHeadOptimistic()).
+		WithOptimistic(optimistic).
 		WithVersion(targetVersion).
 		With("dependent_root", dependentRoot), nil
 }

@@ -62,26 +62,16 @@ func computeDependentRootSlot(epoch, slotsPerEpoch uint64, attester bool) uint64
 	}
 }
 
-func (a *ApiHandler) getDependentRoot(s *state.CachingBeaconState, headRoot common.Hash, headSlot, epoch uint64, attester bool) (common.Hash, error) {
+func (a *ApiHandler) getDependentRoot(getBlockRootAtSlot func(uint64) (common.Hash, error), headRoot common.Hash, headSlot, epoch uint64, attester bool) (common.Hash, error) {
 	dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, attester)
 	if dependentRootSlot >= headSlot {
 		return headRoot, nil
 	}
-	maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
-	for range maxIterations {
-		if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
-			return common.Hash{}, nil
-		}
-		root, err := s.GetBlockRootAtSlot(dependentRootSlot)
-		if err == nil {
-			return root, nil
-		}
-		if dependentRootSlot == 0 {
-			break
-		}
-		dependentRootSlot--
+	root, err := getBlockRootAtSlot(dependentRootSlot)
+	if err != nil {
+		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return root, nil
 }
 
 func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter state_accessors.GetValFn, epoch uint64) (common.Hash, error) {
@@ -164,59 +154,68 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 
 	resp := []attesterDutyResponse{}
 
+	epochStartSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
+	lowestAvailableSlot := a.forkchoiceStore.LowestAvailableSlot()
+	var dependentRoot common.Hash
+	var optimistic, useHistory bool
+
 	// get the duties
-	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
+	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		headEpoch := state.Epoch(s)
+		if epoch > headEpoch+s.BeaconConfig().MinSeedLookahead+1 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("attestation duties for epoch %d are not available while the head is in epoch %d", epoch, headEpoch))
+		}
+		optimistic = a.forkchoiceStore.IsRootOptimistic(headRoot)
+		useHistory = epoch < headEpoch && epochStartSlot < lowestAvailableSlot
+		if useHistory {
+			return nil
+		}
+
 		// non-finality case
-		var dependentRoot common.Hash
-		if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
-			headEpoch := state.Epoch(s)
-			if epoch > headEpoch+s.BeaconConfig().MinSeedLookahead+1 {
-				return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("attestation duties for epoch %d are not available while the head is in epoch %d", epoch, headEpoch))
-			}
-			root, err := a.getDependentRoot(s, headRoot, headSlot, epoch, true)
-			if err != nil {
-				return err
-			}
-			dependentRoot = root
-			if len(idxSet) == 0 {
-				return nil
-			}
-			// get active validator indicies
-			committeeCount := s.CommitteeCount(epoch)
-			// now start obtaining the committees from the head state
-			for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
-				for committeeIndex := range committeeCount {
-					idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
+		root, err := a.getDependentRoot(s.GetBlockRootAtSlot, headRoot, headSlot, epoch, true)
+		if err != nil {
+			return err
+		}
+		dependentRoot = root
+		if len(idxSet) == 0 {
+			return nil
+		}
+		// get active validator indicies
+		committeeCount := s.CommitteeCount(epoch)
+		// now start obtaining the committees from the head state
+		for currSlot := epochStartSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+			for committeeIndex := range committeeCount {
+				idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
+				if err != nil {
+					return err
+				}
+				for vIdx, idx := range idxs {
+					if _, ok := idxSet[int(idx)]; !ok {
+						continue
+					}
+					publicKey, err := s.ValidatorPublicKey(int(idx))
 					if err != nil {
 						return err
 					}
-					for vIdx, idx := range idxs {
-						if _, ok := idxSet[int(idx)]; !ok {
-							continue
-						}
-						publicKey, err := s.ValidatorPublicKey(int(idx))
-						if err != nil {
-							return err
-						}
-						duty := attesterDutyResponse{
-							Pubkey:                  publicKey,
-							ValidatorIndex:          idx,
-							CommitteeIndex:          committeeIndex,
-							CommitteeLength:         uint64(len(idxs)),
-							ValidatorCommitteeIndex: uint64(vIdx),
-							CommitteesAtSlot:        committeeCount,
-							Slot:                    currSlot,
-						}
-						resp = append(resp, duty)
+					duty := attesterDutyResponse{
+						Pubkey:                  publicKey,
+						ValidatorIndex:          idx,
+						CommitteeIndex:          committeeIndex,
+						CommitteeLength:         uint64(len(idxs)),
+						ValidatorCommitteeIndex: uint64(vIdx),
+						CommitteesAtSlot:        committeeCount,
+						Slot:                    currSlot,
 					}
+					resp = append(resp, duty)
 				}
 			}
-			return nil
-		}); err != nil {
-			return nil, err
 		}
-
-		return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if !useHistory {
+		return newBeaconResponse(resp).WithOptimistic(optimistic).With("dependent_root", dependentRoot), nil
 	}
 
 	tx, err := a.indiciesDB.BeginRo(r.Context())
@@ -229,7 +228,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
+	if epochStartSlot >= stageStateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
@@ -238,18 +237,18 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
-	dependentRoot, err := a.getHistoricalAttesterDependentRoot(tx, stateGetter, epoch)
+	dependentRoot, err = a.getHistoricalAttesterDependentRoot(tx, stateGetter, epoch)
 	if err != nil {
 		return nil, err
 	}
 	if len(idxSet) == 0 {
-		return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse([]string{}).WithOptimistic(optimistic).With("dependent_root", dependentRoot), nil
 	}
 
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(
 		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch,
+		epochStartSlot,
 	)
 	if err != nil {
 		return nil, err
@@ -258,12 +257,12 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	committeesPerSlot := max(min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize), 1)
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epochStartSlot, mixPosition)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
 	}
 
-	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+	for currSlot := epochStartSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 		for committeeIndex := range committeesPerSlot {
 			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch
@@ -293,5 +292,5 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			}
 		}
 	}
-	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
+	return newBeaconResponse(resp).WithOptimistic(optimistic).With("dependent_root", dependentRoot), nil
 }
