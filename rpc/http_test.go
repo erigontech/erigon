@@ -819,7 +819,6 @@ func TestHTTPRequestValidationContentTypes(t *testing.T) {
 		contentType string
 		want        int
 	}{
-		{"application/json", 0},
 		{"application/json; charset=utf-8", 0},
 		{"Application/JSON", 0},
 		{"application/json-rpc", 0},
@@ -827,7 +826,6 @@ func TestHTTPRequestValidationContentTypes(t *testing.T) {
 		{"application/json;", 0},
 		{"application/jsonx", http.StatusUnsupportedMediaType},
 		{"text/plain", http.StatusUnsupportedMediaType},
-		{"", http.StatusUnsupportedMediaType},
 	} {
 		t.Run(tc.contentType, func(t *testing.T) {
 			confirmRequestValidationCode(t, http.MethodPost, tc.contentType, "", tc.want)

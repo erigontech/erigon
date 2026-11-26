@@ -75,9 +75,13 @@ func BenchmarkRPCPathInProcess(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			checkPathBenchResponse(b, h, tc.body)
 			b.ReportAllocs()
+			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
+				// net/http gives every request a cancelable context.
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
 				reader := bytes.NewReader(tc.body)
-				req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://localhost:8545/", nil)
+				req := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://localhost:8545/", nil)
 				req.Header.Set("Content-Type", "application/json")
 				req.RemoteAddr = "127.0.0.1:40000"
 				w := &pathBenchResponseWriter{header: http.Header{}}
@@ -94,17 +98,20 @@ func BenchmarkRPCPathInProcess(b *testing.B) {
 }
 
 // BenchmarkRPCPathLoopback sends keep-alive requests over loopback TCP to an
-// http.Server running the same handler chain: the full server-side path,
-// net/http and syscalls included, plus the cost of the Go client.
+// httptest server running the same handler chain: net/http and syscalls
+// included, plus the cost of the Go client.
 func BenchmarkRPCPathLoopback(b *testing.B) {
-	ts := httptest.NewServer(newPathBenchHandler(b))
+	h := newPathBenchHandler(b)
+	ts := httptest.NewServer(h)
 	b.Cleanup(ts.Close)
 	tr := &http.Transport{MaxIdleConnsPerHost: 256}
 	b.Cleanup(tr.CloseIdleConnections)
 	client := &http.Client{Transport: tr}
 	for _, tc := range pathBenchBodies {
 		b.Run(tc.name, func(b *testing.B) {
+			checkPathBenchResponse(b, h, tc.body)
 			b.ReportAllocs()
+			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL, bytes.NewReader(tc.body))
@@ -119,10 +126,10 @@ func BenchmarkRPCPathLoopback(b *testing.B) {
 						b.Error(err)
 						return
 					}
-					_, _ = io.Copy(io.Discard, resp.Body)
+					_, err = io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
-					if resp.StatusCode != http.StatusOK {
-						b.Errorf("status %d", resp.StatusCode)
+					if err != nil || resp.StatusCode != http.StatusOK {
+						b.Errorf("status %d: %v", resp.StatusCode, err)
 						return
 					}
 				}

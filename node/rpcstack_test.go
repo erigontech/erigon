@@ -70,7 +70,7 @@ func TestCorsHandler(t *testing.T) {
 
 // TestVhosts makes sure vhosts is properly handled on the http server.
 func TestVhosts(t *testing.T) {
-	url := startHTTPServer(t, nil, nil, []string{"test"})
+	url := startHTTPServer(t, nil, nil, []string{"test", "192.0.2.1"})
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
@@ -83,13 +83,9 @@ func TestVhosts(t *testing.T) {
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)
-}
 
-// TestVhostsAcceptIPHosts makes sure a Host that is an IP address is served
-// whether or not it is listed in vhosts.
-func TestVhostsAcceptIPHosts(t *testing.T) {
-	url := startHTTPServer(t, nil, nil, []string{"test"})
-	for _, host := range []string{"127.0.0.1", "127.0.0.1:8545", "[::1]:8545", "192.0.2.1"} {
+	// An IP address is served whether or not it is listed.
+	for _, host := range []string{"192.0.2.1", "127.0.0.1", "127.0.0.1:8545", "[::1]:8545"} {
 		resp := rpcRequest(t, url, "host", host)
 		resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode, host)

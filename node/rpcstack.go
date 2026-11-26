@@ -207,14 +207,14 @@ func fromOtherSite(r *http.Request) bool {
 // the service ip address (but without CORS headers). By verifying the targeted virtual host, we can
 // ensure that it's a destination that the node operator has defined.
 type virtualHostHandler struct {
-	vhosts map[string]struct{}
+	vhosts map[string]bool
 	next   http.Handler
 }
 
 func newVHostHandler(vhosts []string, next http.Handler) http.Handler {
-	vhostMap := make(map[string]struct{})
+	vhostMap := make(map[string]bool)
 	for _, allowedHost := range vhosts {
-		vhostMap[strings.ToLower(allowedHost)] = struct{}{}
+		vhostMap[strings.ToLower(allowedHost)] = true
 	}
 	return &virtualHostHandler{vhostMap, next}
 }
@@ -232,12 +232,9 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		host = r.Host
 	}
 	host = strings.ToLower(host)
-	_, star := h.vhosts["*"]
-	_, anyHost := h.vhosts["any"]
-	_, listed := h.vhosts[host]
-	// An IP address is always served; it is parsed last because parsing a
-	// hostname allocates its error.
-	if star || anyHost || listed || net.ParseIP(host) != nil {
+	// A host that parses as an IP address is served; it is parsed last because
+	// parsing a hostname allocates its error.
+	if h.vhosts["*"] || h.vhosts["any"] || h.vhosts[host] || net.ParseIP(host) != nil {
 		h.next.ServeHTTP(w, r)
 		return
 	}
