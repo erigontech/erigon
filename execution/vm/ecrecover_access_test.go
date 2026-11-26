@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -54,6 +55,58 @@ func (r *ecrecoverAccessReader) ReadAccountData(addr accounts.Address) (*account
 func (r *ecrecoverAccessReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	r.codeReads[addr]++
 	return r.code[addr], nil
+}
+
+func TestRunPrecompiledEcrecoverState(t *testing.T) {
+	fixtures, err := loadJson("ecRecover")
+	require.NoError(t, err)
+	index := slices.IndexFunc(fixtures, func(f precompiledTest) bool { return f.Name == "ValidKey" })
+	require.NotEqual(t, -1, index)
+	input, expected := common.FromHex(fixtures[index].Input), common.FromHex(fixtures[index].Expected)
+	signer := accounts.InternAddress(common.BytesToAddress(expected))
+	precompile := accounts.InternAddress(common.HexToAddress("0x01"))
+	for _, fork := range []struct {
+		name   string
+		bogota bool
+	}{
+		{name: "osaka"},
+		{name: "bogota", bogota: true},
+	} {
+		t.Run(fork.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			p := Precompiles(&chain.Rules{IsOsaka: true, IsBogota: fork.bogota})[precompile]
+			for _, tc := range []struct {
+				name    string
+				code    []byte
+				output  []byte
+				gasUsed uint64
+			}{
+				{name: "regular code", code: []byte{byte(STOP)}, gasUsed: 6100},
+				{name: "empty code", output: expected, gasUsed: 3200},
+				{name: "delegation", code: types.AddressToDelegation(accounts.ZeroAddress), output: expected, gasUsed: 3200},
+				{name: "regular code again", code: []byte{byte(STOP)}, gasUsed: 3200},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					require.NoError(t, ibs.SetCode(signer, tc.code, tracing.CodeChangeUnspecified))
+					initial := mdgas.MdGas{Execution: 10_000, State: 50_000}
+					output, remaining, err := RunPrecompiledContract(p, input, initial, ibs, nil)
+					require.NoError(t, err)
+					wantOutput, gasUsed := tc.output, tc.gasUsed
+					if !fork.bogota {
+						wantOutput, gasUsed = expected, 3000
+					}
+					require.Equal(t, wantOutput, output)
+					require.Equal(t, mdgas.MdGas{Execution: initial.Execution - gasUsed, State: initial.State}, remaining)
+					if fork.bogota && precompileCacheEnabled {
+						cached, ok := p.(*cachedStatefulPrecompile)
+						require.True(t, ok, "stateful precompile must preserve caching")
+						require.True(t, cachedPrecompileHit(cached.cachedPrecompile, input))
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestEcrecoverAccountAccess(t *testing.T) {

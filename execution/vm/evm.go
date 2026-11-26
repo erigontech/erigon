@@ -27,7 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -45,21 +44,12 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 }
 
 func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	if evm.chainRules.IsBogota {
-		contract := p
-		if cached, ok := contract.(*cachedPrecompile); ok {
-			contract = cached.PrecompiledContract
-		}
-		if _, ok := contract.(*ecrecover); ok {
-			return evm.runEcrecover(p, input, gas, tracer)
-		}
-	}
 	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
-		return RunPrecompiledContract(p, input, gas, tracer)
+		return RunPrecompiledContract(p, input, gas, evm.intraBlockState, tracer)
 	}
 	buf := evm.outputBuffer(evm.depth+1, uint64(len(input)))
 	if buf == nil {
-		return RunPrecompiledContract(p, input, gas, tracer)
+		return RunPrecompiledContract(p, input, gas, evm.intraBlockState, tracer)
 	}
 	gasCost := p.RequiredGas(input)
 	if gas.Execution < gasCost {
@@ -72,42 +62,6 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 	}
 	*buf = append((*buf)[:0], input...)
 	return slices.Clip(*buf), remaining, nil
-}
-
-func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	// Only signature recovery may be cached. Each recovered signer requires a
-	// paid check of its current code, including on cache hits.
-	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
-	if err != nil || len(output) == 0 {
-		return output, gas, err
-	}
-	signer := accounts.InternAddress(common.BytesToAddress(output))
-	if tracer != nil && tracer.OnAccountAccess != nil {
-		tracer.OnAccountAccess(signer)
-	}
-	accessGas := params.ExtCodeWarmAccessGasEIP8038
-	if !evm.intraBlockState.AddressInAccessList(signer) {
-		accessGas += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
-	}
-	remaining, _, ok := useMdGas(gas, accessGas, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
-	if !ok {
-		return nil, gas, ErrOutOfGas
-	}
-	evm.intraBlockState.AddAddressToAccessList(signer)
-	// Paid reads remain in the block access list when execution reverts.
-	// Account warmth rolls back separately.
-	evm.intraBlockState.MarkAddressAccess(signer, false)
-	if tracer != nil && tracer.OnAccountRead != nil {
-		tracer.OnAccountRead(signer)
-	}
-	code, err := evm.intraBlockState.GetCode(signer)
-	if err != nil {
-		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	if _, delegated := types.ParseDelegation(code); len(code) != 0 && !delegated {
-		return nil, remaining, nil
-	}
-	return output, remaining, nil
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
