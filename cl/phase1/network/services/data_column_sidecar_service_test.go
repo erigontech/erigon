@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -134,6 +135,8 @@ func (t *dataColumnSidecarTestSuite) setExpectedProposer(proposer uint64, err er
 }
 
 func (t *dataColumnSidecarTestSuite) TearDownTest() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	require.Eventually(t.T(), func() bool { return len(service.backgroundWrites) == 0 }, 5*time.Second, time.Millisecond)
 	t.gomockCtrl.Finish()
 	// reset mock functions
 	verifyDataColumnSidecar = das.VerifyDataColumnSidecar
@@ -243,6 +246,7 @@ func (t *dataColumnSidecarTestSuite) assertProcessMessageIgnoredBeforeStorage(si
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).Return(nil).AnyTimes()
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
@@ -273,10 +277,14 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 
 	// Mock storage for first call
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 
-	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	recovered := make(chan struct{})
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).DoAndReturn(func(uint64, common.Hash) error {
+		close(recovered)
+		return nil
+	}).Times(1)
 
 	// First call should succeed
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
@@ -286,6 +294,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	// Second call with same sidecar should return ErrIgnore
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.Equal(ErrIgnore, err)
+	t.waitFor(recovered)
 }
 
 // TestProcessMessage_WhenInvalidDataColumnSidecar_ReturnsError tests validation failure
@@ -540,11 +549,15 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
 		return nil
 	}).Return(nil).Times(1)
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	recovered := make(chan struct{})
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).DoAndReturn(func(uint64, common.Hash) error {
+		close(recovered)
+		return nil
+	}).Times(1)
 	// Execute
-	events := make(chan *beaconevents.EventStream, 1)
+	events := make(chan *beaconevents.EventStream, 2)
 	subscription := t.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
@@ -552,8 +565,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 
 	// Assert
 	t.NoError(err)
-	// Storage sends the event for a stored column, the service does not send another.
-	t.Empty(events)
+	t.waitFor(recovered)
+	// The service sends the event before storing, and the storage write it uses sends none.
+	t.Len(events, 1)
 }
 
 // A sidecar for the same (slot, proposer, index) claimed while this one is validated, for example by
@@ -580,6 +594,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenClaimedDuringValidat
 		return nil
 	}).Times(1)
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Times(0)
 
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -587,8 +602,10 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenClaimedDuringValidat
 	t.ErrorIs(err, ErrIgnore)
 }
 
-// TestProcessMessage_WhenStorageFails_ReturnsError tests storage failure handling
-func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_ReturnsError() {
+// TestProcessMessage_WhenBackgroundWriteLimitReachedAndStorageFails_ReturnsError tests that a failed write the caller
+// waits for is reported to it.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBackgroundWriteLimitReachedAndStorageFails_ReturnsError() {
+	defer t.fillBackgroundWrites()()
 	// Setup mock functions
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
@@ -609,7 +626,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_Returns
 		return nil
 	}).Return(nil)
 
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage error"))
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage error"))
 
 	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
@@ -636,6 +653,162 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_R
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
 
 	t.ErrorIs(err, ErrIgnore)
+}
+
+func (t *dataColumnSidecarTestSuite) waitFor(done <-chan struct{}) {
+	t.T().Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.FailNow("timed out waiting for the background write")
+	}
+}
+
+// fillBackgroundWrites takes every background write slot until the returned function is called.
+func (t *dataColumnSidecarTestSuite) fillBackgroundWrites() (drain func()) {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	for range cap(service.backgroundWrites) {
+		service.backgroundWrites <- struct{}{}
+	}
+	return func() {
+		for len(service.backgroundWrites) > 0 {
+			<-service.backgroundWrites
+		}
+	}
+}
+
+func (t *dataColumnSidecarTestSuite) seenFuluSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index})
+	return seen
+}
+
+// expectFuluCustodySidecarPasses makes every gossip check pass for a custody column of the default suite setup.
+func (t *dataColumnSidecarTestSuite) expectFuluCustodySidecarPasses() {
+	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
+	blsVerify = t.mockFuncs.BlsVerify
+	t.mockSyncedData.EXPECT().Syncing().Return(false).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockEthClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofs", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
+	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).Return(nil).AnyTimes()
+}
+
+// expectBlockedWrite expects one no-event write that closes started when it begins, waits until the returned release
+// is called, then returns err.
+func (t *dataColumnSidecarTestSuite) expectBlockedWrite(err error) (started <-chan struct{}, release func()) {
+	writeStarted := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+			close(writeStarted)
+			<-unblock
+			return err
+		}).Times(1)
+	return writeStarted, func() { once.Do(func() { close(unblock) }) }
+}
+
+func (t *dataColumnSidecarTestSuite) expectRecoverScheduled() <-chan struct{} {
+	recovered := make(chan struct{})
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).DoAndReturn(func(uint64, common.Hash) error {
+		close(recovered)
+		return nil
+	}).Times(1)
+	return recovered
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyWriteIsBlocked_AcceptsAndSendsEventBeforeWrite() {
+	t.expectFuluCustodySidecarPasses()
+	_, release := t.expectBlockedWrite(nil)
+	defer release()
+	recovered := t.expectRecoverScheduled()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
+
+	t.Require().NoError(err)
+	t.Require().Len(events, 1)
+	data, ok := (<-events).Data.(*beaconevents.DataColumnSidecarData)
+	t.Require().True(ok)
+	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	t.Require().NoError(err)
+	t.Equal(common.Hash(blockRoot), data.BlockRoot)
+	t.Equal(testSlot, data.Slot)
+	t.Equal(uint64(0), data.Index)
+	t.True(t.seenFuluSidecar(sidecar))
+	release()
+	t.waitFor(recovered)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodySidecarIsStored_SendsExactlyOneEvent() {
+	t.expectFuluCustodySidecarPasses()
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	recovered := t.expectRecoverScheduled()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)))
+	t.waitFor(recovered)
+
+	t.Len(events, 1)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBackgroundWriteFails_ReleasesSeenKey() {
+	t.expectFuluCustodySidecarPasses()
+	_, release := t.expectBlockedWrite(errors.New("storage error"))
+	defer release()
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Times(0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
+
+	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
+	t.True(t.seenFuluSidecar(sidecar))
+	release()
+
+	t.Require().Eventually(func() bool { return !t.seenFuluSidecar(sidecar) }, 5*time.Second, time.Millisecond)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyWriteIsBlocked_SchedulesRecoverOnlyAfterWrite() {
+	t.expectFuluCustodySidecarPasses()
+	started, release := t.expectBlockedWrite(nil)
+	defer release()
+	recovered := t.expectRecoverScheduled()
+
+	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)))
+	t.waitFor(started)
+
+	select {
+	case <-recovered:
+		t.Fail("recover was scheduled before the column was stored")
+	default:
+	}
+	release()
+	t.waitFor(recovered)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBackgroundWriteLimitReached_WritesBeforeReturning() {
+	t.expectFuluCustodySidecarPasses()
+	defer t.fillBackgroundWrites()()
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	recovered := t.expectRecoverScheduled()
+
+	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)))
+
+	select {
+	case <-recovered:
+	default:
+		t.Fail("the inline write and recover scheduling did not finish before ProcessMessage returned")
+	}
 }
 
 // expectFuluSidecarOutsideCustody makes every gossip check before the KZG check pass for a node whose only custody
@@ -769,9 +942,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndBlobsRecov
 }
 
 // A custody column is stored even when the archive node can recover the blobs, so a column that recovery failed to
-// write is still stored from gossip. Storage sends its event, so the service does not send another.
+// write is still stored from gossip. The service sends the event, and the storage write it uses sends none.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_StoresCustodySidecar() {
-	events := make(chan *beaconevents.EventStream, 1)
+	events := make(chan *beaconevents.EventStream, 2)
 	subscription := t.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	t.expectFuluSidecarOutsideCustody(true)
@@ -780,12 +953,17 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOve
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 	t.Require().NoError(err)
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), int64(0), sidecar).Return(nil).Times(1)
-	peerDas.EXPECT().TryScheduleRecover(testSlot, common.Hash(blockRoot)).Return(nil).Times(1)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecarsWithoutEvent(gomock.Any(), common.Hash(blockRoot), int64(0), sidecar).Return(nil).Times(1)
+	recovered := make(chan struct{})
+	peerDas.EXPECT().TryScheduleRecover(testSlot, common.Hash(blockRoot)).DoAndReturn(func(uint64, common.Hash) error {
+		close(recovered)
+		return nil
+	}).Times(1)
 
 	t.NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
 
-	t.Empty(events)
+	t.waitFor(recovered)
+	t.Len(events, 1)
 }
 
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedProposer_ReturnsError() {
