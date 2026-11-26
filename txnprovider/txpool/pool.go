@@ -1441,7 +1441,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
 	// transactions and leave others queued behind the missing nonce.
-	if !unwinding && !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots && p.all.get(txn.SenderID, txn.Nonce) == nil {
+	overLimit := uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots
+	if !unwinding && !isLocal && overLimit && p.all.get(txn.SenderID, txn.Nonce) == nil {
 		if reason := p.checkInsertion(txn, nil); reason != txpoolcfg.NotSet {
 			return reason, nil
 		}
@@ -2323,15 +2324,18 @@ func (p *TxPool) checkInsertion(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardR
 		return txpoolcfg.FeeTooLow
 	}
 
-	// A pooled authorization from the sender reserves the sender's account nonce, unless txn replaces
-	// the transaction that holds the authorization. Authorizations cannot reserve keyed nonces.
 	senderAddr, ok := p.senders.senderID2Addr[txn.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if owner, ok := p.auths[AuthAndNonce{senderAddr, txn.Nonce}]; !txn.hasKeyedNonce() && ok && owner != found {
-		return txpoolcfg.ErrAuthorityReserved
+
+	// A pooled authorization from the sender reserves the sender's account nonce, unless txn replaces
+	// the transaction that holds the authorization. Authorizations cannot reserve keyed nonces.
+	if !txn.hasKeyedNonce() {
+		if owner, ok := p.auths[AuthAndNonce{senderAddr, txn.Nonce}]; ok && owner != found {
+			return txpoolcfg.ErrAuthorityReserved
+		}
 	}
 
 	// A SetCode transaction cannot carry an authorization that another pooled transaction holds.

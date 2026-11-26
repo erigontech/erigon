@@ -3861,11 +3861,11 @@ func TestRemoteTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 		want        txpoolcfg.DiscardReason
 		kept        int // of the 17 pooled transactions; the penalty evicts 8
 	}{
-		{"mined", 0, 1, 2, txpoolcfg.NonceTooLow, 17},
-		{"unaffordable", 18, 1, common.Ether, txpoolcfg.InsufficientFunds, 17},
-		{"replaced", 17, 1, 1, txpoolcfg.NotReplaced, 17},
-		{"fee bump", 17, 2, 4, txpoolcfg.Success, 17},
-		{"next nonce", 18, 1, 2, txpoolcfg.Spammer, 9},
+		{name: "mined", nonce: 0, tip: 1, feeCap: 2, want: txpoolcfg.NonceTooLow, kept: 17},
+		{name: "unaffordable", nonce: 18, tip: 1, feeCap: common.Ether, want: txpoolcfg.InsufficientFunds, kept: 17},
+		{name: "replaced", nonce: 17, tip: 1, feeCap: 1, want: txpoolcfg.NotReplaced, kept: 17},
+		{name: "fee bump", nonce: 17, tip: 2, feeCap: 4, want: txpoolcfg.Success, kept: 17},
+		{name: "next nonce", nonce: 18, tip: 1, feeCap: 2, want: txpoolcfg.Spammer, kept: 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
