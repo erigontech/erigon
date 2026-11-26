@@ -437,7 +437,7 @@ func (s *Antiquary) antiquate() error {
 	}
 
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	to -= min(to, safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = min(to, canonicalHead+1)
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {

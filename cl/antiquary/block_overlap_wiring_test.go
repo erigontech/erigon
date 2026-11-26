@@ -378,3 +378,40 @@ func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
 }
+
+func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(0); slot <= limit; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = prevRoot
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, safetyMargin-1)
+	}))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+	require.NoError(t, a.antiquate())
+	require.Zero(t, sn.BlocksAvailable(), "a range closer than the safety margin to the finalized slot must not freeze")
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin)
+	}))
+	require.NoError(t, a.antiquate())
+	require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+}
