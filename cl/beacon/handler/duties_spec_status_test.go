@@ -105,7 +105,6 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 		body        string
 		wantStatus  int
 		wantMessage string
-		checkDuties func(t *testing.T, handler *ApiHandler, body string)
 	}{
 		{
 			name: "proposer genesis reconstruction pending",
@@ -252,41 +251,6 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 		},
 		{
-			name: "proposer duties with all-zero randao mix",
-			setup: func(t *testing.T) *ApiHandler {
-				db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-				fcu.FinalizedSlotVal = 95
-				zeroMixState, err := preState.Copy()
-				require.NoError(t, err)
-				require.Equal(t, uint64(64), preState.Slot())
-				require.NotEqual(t, common.Hash{}, preState.GetRandaoMix(0))
-				require.NoError(t, zeroMixState.SetRandaoMixAt(0, common.Hash{}))
-				validatorTable := state_accessors.NewStaticValidatorTable()
-				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-					return state_accessors.ReadValidatorsTable(tx, validatorTable)
-				}))
-				handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, zeroMixState, nil, handler.syncedData)
-				genesisRoot, err := preState.GetBlockRootAtSlot(0)
-				require.NoError(t, err)
-				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-					return beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot)
-				}))
-				return handler
-			},
-			method:     http.MethodGet,
-			path:       "/eth/v1/validator/duties/proposer/2",
-			wantStatus: http.StatusOK,
-			checkDuties: func(t *testing.T, handler *ApiHandler, body string) {
-				var response proposerDutiesResponse
-				require.NoError(t, json.Unmarshal([]byte(body), &response))
-				slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
-				require.Len(t, response.Data, int(slotsPerEpoch))
-				for i, duty := range response.Data {
-					require.Equal(t, 2*slotsPerEpoch+uint64(i), duty.Slot)
-				}
-			},
-		},
-		{
 			name: "attester head dependent root not found at genesis slot",
 			setup: func(t *testing.T) *ApiHandler {
 				_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -425,10 +389,24 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 				require.NoError(t, json.Unmarshal([]byte(body), &response))
 				require.Equal(t, tc.wantMessage, response.Message)
 			}
-			if tc.checkDuties != nil {
-				tc.checkDuties(t, handler, body)
-			}
 		})
+	}
+}
+
+func TestProposerDutiesWithZeroRandaoMix(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 95
+	require.Equal(t, uint64(64), preState.Slot())
+	require.NotEqual(t, common.Hash{}, preState.GetRandaoMix(0))
+	require.NoError(t, preState.SetRandaoMixAt(0, common.Hash{}))
+	genesisRoot, err := preState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot) }))
+	response := getProposerDutiesForEpoch(t, handler, 2)
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	require.Len(t, response.Data, int(slotsPerEpoch))
+	for i, duty := range response.Data {
+		require.Equal(t, 2*slotsPerEpoch+uint64(i), duty.Slot)
 	}
 }
 
