@@ -1192,7 +1192,7 @@ var (
 	}
 	ExperimentalCommitmentV3Flag = cli.BoolFlag{
 		Name:  "experimental.commitment-v3",
-		Usage: "Compute commitment on the v3 trie. When the flag is not set, the commitment files or chaindata of an existing datadir select the trie.",
+		Usage: "Compute commitment on the v3 trie.",
 		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -2004,20 +2004,29 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	}
 }
 
-func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dirs, chain string, logger log.Logger) {
+func setCommitmentV3(ctx *cli.Command, dirs datadir.Dirs, chain string, logger log.Logger) {
+	envSet := dbg.EnvString("COMMITMENT_V3", "") != ""
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
 		on := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
-		if !on && statecfg.ExperimentalCommitmentV3 && statecfg.CommitmentV3Pinned() {
+		if !on && envSet && statecfg.ExperimentalCommitmentV3 {
 			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
 		statecfg.SetCommitmentV3(on)
+		return
 	}
-	pinned := statecfg.CommitmentV3Pinned()
-	if err := dbstate.ResolveCommitmentV3(nodeCtx, dirs, nil, logger); err != nil {
-		Fatalf("resolving the commitment trie of the datadir: %v", err)
+	if envSet {
+		return
 	}
-	if !pinned && !statecfg.ExperimentalCommitmentV3 {
-		warnLegacyCommitmentDatadir(dirs, chain, logger)
+	v3, found, err := dbstate.CommitmentV3OfFiles(dirs)
+	if err != nil {
+		Fatalf("reading the commitment files of the datadir: %v", err)
+	}
+	if found {
+		statecfg.SetCommitmentV3(v3)
+		logger.Info("[commitment] the commitment files of the datadir select the trie", "v3", v3)
+		if !v3 {
+			warnLegacyCommitmentDatadir(dirs, chain, logger)
+		}
 	}
 }
 
@@ -2132,7 +2141,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
-	setCommitmentV3(nodeCtx, ctx, nodeConfig.Dirs, chain, logger)
+	setCommitmentV3(ctx, nodeConfig.Dirs, chain, logger)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

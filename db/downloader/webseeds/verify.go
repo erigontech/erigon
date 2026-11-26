@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/snapcfg"
-	dbstate "github.com/erigontech/erigon/db/state"
 )
 
 func Verify(
@@ -44,9 +43,6 @@ func Verify(
 	var dirs datadir.Dirs
 	if dataDir != "" {
 		dirs = datadir.Open(dataDir)
-		if err = dbstate.ResolveCommitmentV3(ctx, dirs, nil, log.Root()); err != nil {
-			return
-		}
 	}
 	chains := selectChains(targetChain, snapcfg.EmbeddedWebseeds)
 	if len(chains) == 0 {

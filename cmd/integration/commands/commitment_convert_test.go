@@ -57,7 +57,6 @@ func TestCommitmentBranchRejectsCommitmentV3(t *testing.T) {
 	for _, f := range files {
 		require.NoError(t, dir.RemoveFile(f))
 	}
-	t.Cleanup(statecfg.SetCommitmentV3(statecfg.ExperimentalCommitmentV3))
 	schema := statecfg.Schema
 	t.Cleanup(func() { statecfg.Schema = schema })
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -96,7 +95,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
-		require.ErrorContains(t, root.ExecuteContext(t.Context()), "commitment v3 is active", mode)
+		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
 	}
 
 	statecfg.ExperimentalCommitmentV3, convertSqueeze, convertNibblesV2 = false, false, false

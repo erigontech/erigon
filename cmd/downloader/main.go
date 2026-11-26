@@ -58,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/debug"
@@ -272,9 +271,6 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
-	if err := dbstate.ResolveCommitmentV3(ctx, dirs, nil, logger); err != nil {
-		return err
-	}
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 		webseedsList = append(webseedsList, known...)
@@ -538,9 +534,6 @@ var torrentMagnet = &cobra.Command{
 }
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
-	if err := dbstate.ResolveCommitmentV3(ctx, datadir.Open(cobraFlagValues.datadir), nil, logger); err != nil {
-		return err
-	}
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.Webseeds(ctx, chain); ok {

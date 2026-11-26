@@ -18,7 +18,6 @@ package app
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -26,16 +25,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -196,21 +191,4 @@ func TestResetKeepLocalSnapshotsFlag(t *testing.T) {
 		require.NoError(t, err, "%v", tc.args)
 		require.Equal(t, tc.keep, keep, "%v", tc.args)
 	}
-}
-
-func TestResetSelectsCommitmentTrieFromDatadir(t *testing.T) {
-	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
-	t.Setenv(snapcfg.RemotePreverifiedEnvKey, "")
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
-	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'domain/v3.0-commitment.0-1.kv' = '0000000000000000000000000000000000000000'\n"), 0o644))
-
-	dataDir, chainFlag, dryRun, keepLocal, local, mixed, preverified := utils.DataDirFlag, utils.ChainFlag, dryRunFlag, keepLocalSnapshotsFlag, removeLocalFlag, allowMixedStateFlag, PreverifiedFlag
-	cmd := &cli.Command{
-		Name:   "reset",
-		Flags:  []cli.Flag{&dataDir, &chainFlag, &dryRun, &keepLocal, &local, &mixed, &preverified},
-		Action: resetCliAction,
-	}
-	require.NoError(t, cmd.Run(t.Context(), []string{"reset", "--datadir", dirs.DataDir, "--chain", "mainnet", "--dry-run", "--preverified", "local"}))
-	require.True(t, statecfg.ExperimentalCommitmentV3, "reset must load the manifest of the datadir's commitment trie")
 }

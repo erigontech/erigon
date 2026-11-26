@@ -1063,7 +1063,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	otherKey, otherErr := commitment.KeyCommitmentV3State, "the datadir holds commitment v3 records: start erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true)"
 	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first, or start erigon with --experimental.commitment-v3=false (other tools: ERIGON_COMMITMENT_V3=false)"
+		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first"
 	}
 	other, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
 	if err != nil {

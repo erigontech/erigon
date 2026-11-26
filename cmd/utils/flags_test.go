@@ -511,7 +511,7 @@ func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger lo
 	app := &cli.Command{
 		Flags: []cli.Flag{&flag},
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			setCommitmentV3(context.Background(), cmd, dirs, chain, logger)
+			setCommitmentV3(cmd, dirs, chain, logger)
 			return nil
 		},
 	}
@@ -521,6 +521,7 @@ func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger lo
 }
 
 func TestSetCommitmentV3Flag(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	run := func(args ...string) bool {
 		return runSetCommitmentV3(t, datadir.New(t.TempDir()), "mainnet", log.Root(), args...)
@@ -532,7 +533,8 @@ func TestSetCommitmentV3Flag(t *testing.T) {
 }
 
 func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
-	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
 	datadirWith := func(file string) datadir.Dirs {
 		dirs := datadir.New(t.TempDir())
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
@@ -540,7 +542,7 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	}
 	legacyDirs, v3Dirs := datadirWith("v2.0-commitment.0-1.kv"), datadirWith("v3.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, args ...string) bool {
-		statecfg.ResetCommitmentV3ForTest()
+		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
 		return runSetCommitmentV3(t, dirs, "mainnet", log.Root(), args...)
 	}
 
@@ -549,10 +551,18 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	require.True(t, run(v3Dirs), "a datadir with v3 commitment files must use the v3 trie")
 	require.True(t, run(legacyDirs, "--"+ExperimentalCommitmentV3Flag.Name), "an explicit v3 choice must not be switched by the datadir")
 	require.False(t, run(v3Dirs, "--"+ExperimentalCommitmentV3Flag.Name+"=false"), "an explicit legacy choice must not be switched by the datadir")
+
+	t.Setenv("ERIGON_COMMITMENT_V3", "true")
+	statecfg.SetCommitmentV3(true)
+	require.True(t, runSetCommitmentV3(t, legacyDirs, "mainnet", log.Root()), "ERIGON_COMMITMENT_V3 must not be switched by the datadir")
+	t.Setenv("ERIGON_COMMITMENT_V3", "false")
+	statecfg.SetCommitmentV3(false)
+	require.False(t, runSetCommitmentV3(t, v3Dirs, "mainnet", log.Root()), "ERIGON_COMMITMENT_V3=false must not be switched by the datadir")
 }
 
 func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
-	t.Cleanup(statecfg.ResetCommitmentV3ForTest())
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
 	datadirWith := func(files ...string) datadir.Dirs {
 		dirs := datadir.New(t.TempDir())
 		for _, file := range files {
@@ -562,7 +572,7 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	}
 	legacyDirs := datadirWith("v2.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, chain string, args ...string) (bool, string) {
-		statecfg.ResetCommitmentV3ForTest()
+		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
 		var logs strings.Builder
 		logger := log.New()
 		logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
