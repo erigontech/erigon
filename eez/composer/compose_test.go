@@ -1040,7 +1040,7 @@ func TestComposeOutboundRefuses(t *testing.T) {
 		to   common.Address
 		err  string
 	}{
-		{"several L1 calls", l2Twice, ErrMultiCall.Error()},
+		{"several L1 calls", l2Twice, ErrMultiCall.Error() + ": it makes a second"},
 		{"a call to another rollup", otherProxy, "call to rollup 2"},
 		{"a failing L1 call", revertProxy, ErrCallFailed.Error()},
 		{"a transaction failing with its call loaded", outboundProxies[1], "the transaction fails with its L1 call loaded"},

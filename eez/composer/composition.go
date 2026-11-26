@@ -267,10 +267,16 @@ func (k *composition) outbound(h *Held, tx types.Transaction) error {
 		}
 		// The simulation runs without the load, and leaves the fork as it was.
 		var calls []*Call
+		dispatched := false
 		_, err = fork.simulation(x.Sync.EEZL2, x.Sync.RollupID).Run(k.ctx, tx, func(c *Call) ([]byte, error) {
-			if c.RollupID != protocol.MainnetRollupID {
+			switch {
+			case c.RollupID != protocol.MainnetRollupID:
 				return nil, Poison(fmt.Errorf("call to rollup %d: only calls to L1 leave the rollup", c.RollupID))
+			case dispatched:
+				// Refused before its target runs on L1.
+				return nil, Poison(fmt.Errorf("%w: it makes a second", ErrMultiCall))
 			}
+			dispatched = true
 			return k.src.Execute(c)
 		}, func(cs []*Call) error {
 			calls = cs
@@ -279,9 +285,7 @@ func (k *composition) outbound(h *Held, tx types.Transaction) error {
 		if !errors.Is(err, errSimulated) {
 			return err
 		}
-		if len(calls) != 1 {
-			return Poison(fmt.Errorf("%w, not %d", ErrMultiCall, len(calls)))
-		}
+		// Run refuses a transaction without calls; the dispatch, one with more.
 		call := calls[0]
 		if e, err = outboundEntry(call, x.Sync.RollupID); err != nil {
 			return Poison(err)
