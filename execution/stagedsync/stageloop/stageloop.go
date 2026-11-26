@@ -114,6 +114,18 @@ func (h *Hook) CheckpointStateChanges() func() {
 	return h.notifications.Accumulator.Checkpoint()
 }
 
+func (h *Hook) CheckpointNotifications() func() {
+	restoreChanges := h.CheckpointStateChanges()
+	if restoreChanges == nil || h.notifications.RecentReceipts == nil {
+		return restoreChanges
+	}
+	restoreReceipts := h.notifications.RecentReceipts.Snapshot()
+	return func() {
+		restoreChanges()
+		restoreReceipts()
+	}
+}
+
 // SendNotifications dispatches all pending notifications (state changes,
 // headers, logs, receipts) via the Dispatcher using committed state.
 //

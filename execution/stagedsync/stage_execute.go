@@ -505,26 +505,37 @@ func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
 }
 
+// RejectedBlockError identifies a block that failed execution during startup or catch-up.
+type RejectedBlockError struct {
+	Number uint64
+	Hash   common.Hash
+	Err    error
+}
+
+func (e *RejectedBlockError) Error() string { return e.Err.Error() }
+func (e *RejectedBlockError) Unwrap() error { return e.Err }
+
 // renderExecOutcome converts the parallel executor's typed outcome back to the
 // stage's error contracts. Precedence is fixed by the order of the checks: an
 // operational failure (execErr) outranks a verdict, which outranks a resumable
 // boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
 // unwind from the implicated block; any other verdict propagates for the caller to
 // unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
-// it unwinds nothing and returns the verdict unchanged.
+// it propagates the verdict without scheduling an unwind.
 func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if execErr != nil {
 		return execErr
 	}
 
 	if v := out.verdict; v != nil {
-		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
-			// During the initial cycle a wrong trie root is fatal: there is no fork to
-			// recover from, and handleIncorrectRootHashError can return nil (hiding the
-			// mismatch) or unwind a canonical block. Propagate it instead.
-			if !s.CurrentSyncCycle.IsInitialCycle {
-				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+		// Startup can discard an unaccepted catch-up suffix only when execution
+		// identifies the rejected block. An internal failure has no such identity.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			if v.blockHash != (common.Hash{}) {
+				return &RejectedBlockError{Number: v.blockNum, Hash: v.blockHash, Err: v.err}
 			}
+		} else if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
 		}
 		// A plain invalid block propagates the error without setting a stage unwind
 		// point — the caller owns the unwind. Setting one here would leave a stale

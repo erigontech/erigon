@@ -112,7 +112,8 @@ func TestRenderExecOutcome(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		boom := fmt.Errorf("worker reopen roTx: boom")
-		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, err: plainInvalid}}
+		s.CurrentSyncCycle.IsInitialCycle = true
+		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xbad5"), err: plainInvalid}}
 		got := renderExecOutcome(boom, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, boom)
 		require.NotErrorIs(t, got, rules.ErrInvalidBlock, "operational failure must not surface as an invalid block")
@@ -180,17 +181,17 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
 	})
 
-	t.Run("wrong root on initial cycle is fatal and not routed through the recovery handler", func(t *testing.T) {
-		// On the initial cycle there is no fork to recover from, and
-		// handleIncorrectRootHashError would return nil for blockNum (5) <=
-		// s.BlockNumber (10), hiding the mismatch. The wrong trie root must
-		// propagate as a fatal error instead, scheduling no unwind.
+	t.Run("initial cycle reports the rejected block without scheduling an unwind", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xdead"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		var bad *RejectedBlockError
+		require.ErrorAs(t, got, &bad)
+		require.Equal(t, out.verdict.blockNum, bad.Number)
+		require.Equal(t, out.verdict.blockHash, bad.Hash)
 		require.Empty(t, u.calls, "must not schedule an unwind on the initial cycle")
 	})
 

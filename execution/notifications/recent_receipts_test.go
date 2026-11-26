@@ -62,6 +62,18 @@ func (n *noSubscriptionNotifier) HasReceiptSubscriptions() bool { return false }
 
 func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
+	t.Run("empty snapshot preserves an earlier snapshot", func(t *testing.T) {
+		r := NewRecentReceipts(3)
+		r.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, nil, nil)
+		withBlock := r.Snapshot()
+		r.Clear()
+		empty := r.Snapshot()
+		withBlock()
+		empty()
+		require.Equal(t, []uint64{1}, r.Missing(1, 2))
+		withBlock()
+		require.Empty(t, r.Missing(1, 2))
+	})
 	t.Run("Evict", func(t *testing.T) {
 		e := NewRecentReceipts(3)
 		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, []types.Transaction{}, nil)

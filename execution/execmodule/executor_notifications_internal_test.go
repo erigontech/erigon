@@ -48,7 +48,9 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 					return err
 				}
 				blockNum++
-				notifications.Accumulator.StartChange(&types.Header{Number: *uint256.NewInt(blockNum)}, [][]byte{{byte(blockNum)}}, false)
+				header := &types.Header{Number: *uint256.NewInt(blockNum)}
+				notifications.Accumulator.StartChange(header, [][]byte{{byte(blockNum)}}, false)
+				notifications.RecentReceipts.Add(types.Receipts{{BlockNumber: &header.Number}}, nil, header)
 				if err := stages.SaveStageProgress(tx, stages.Finish, blockNum); err != nil {
 					return err
 				}
@@ -63,6 +65,7 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 			initial := notifications.Accumulator.Changes()[0].ToProto()
 
 			require.ErrorIs(t, pe.ProcessFrozenBlocks(t.Context(), hook, false), stageErr)
+			require.Equal(t, []uint64{committedCycles + 1}, notifications.RecentReceipts.Missing(1, committedCycles+2))
 			require.NoError(t, pe.db.View(t.Context(), func(tx kv.Tx) error {
 				progress, err := stages.GetStageProgress(tx, stages.Finish)
 				require.Equal(t, committedCycles, progress)

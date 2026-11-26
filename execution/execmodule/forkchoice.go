@@ -230,29 +230,34 @@ func (e *ExecModule) discardUnexecutedCanonical(ctx context.Context) (head commo
 		if err != nil {
 			return err
 		}
-		head, _, err = e.blockReader.CanonicalHash(ctx, tx, finish)
-		if err != nil {
-			return err
-		}
-		if head == (common.Hash{}) {
-			return fmt.Errorf("missing canonical hash at committed block %d", finish)
-		}
-		if err := rawdb.TruncateCanonicalChain(tx, finish+1); err != nil {
-			return err
-		}
-		if err := rawdbv3.TxNums.Truncate(tx, finish+1); err != nil {
-			return err
-		}
-		for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
-			if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
-				return err
-			}
-		}
-		// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
-		rawdb.WriteHeadBlockHash(tx, head)
-		return rawdb.WriteHeadHeaderHash(tx, head)
+		head, err = e.pipelineExecutor.resetCanonicalToCheckpoint(ctx, tx, finish)
+		return err
 	})
 	return head, err
+}
+
+func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
+	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !ok {
+		return common.Hash{}, fmt.Errorf("missing canonical hash at committed block %d", finish)
+	}
+	if err := rawdb.TruncateCanonicalChain(tx, finish+1); err != nil {
+		return common.Hash{}, err
+	}
+	if err := rawdbv3.TxNums.Truncate(tx, finish+1); err != nil {
+		return common.Hash{}, err
+	}
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
+		if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
+			return common.Hash{}, err
+		}
+	}
+	// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
+	rawdb.WriteHeadBlockHash(tx, head)
+	return head, rawdb.WriteHeadHeaderHash(tx, head)
 }
 
 // currentFinalisedBlockNum returns zero when finality is unset,

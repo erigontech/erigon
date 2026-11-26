@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -218,10 +220,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// Notifications follow database commit boundaries. Earlier committed cycles
 	// must survive a later failure.
-	restoreStateChanges := hook.CheckpointStateChanges()
+	restoreNotifications := hook.CheckpointNotifications()
 	defer func() {
-		if restoreStateChanges != nil {
-			restoreStateChanges()
+		if restoreNotifications != nil {
+			restoreNotifications()
 		}
 	}()
 
@@ -261,7 +263,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		restoreStateChanges = nil
+		restoreNotifications = nil
 		return nil
 	}
 
@@ -296,7 +298,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
-			restoreStateChanges = hook.CheckpointStateChanges()
+			restoreNotifications = hook.CheckpointNotifications()
 			pe.observeStateTransition(ctx, StateTransitionStartupCommitComplete)
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
@@ -330,7 +332,21 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		bad, ok := errors.AsType[*stagedsync.RejectedBlockError](err)
+		if !ok {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+		// Drop the failed cycle before reading the durable checkpoint. Earlier
+		// cycles still have committed notifications to publish below.
+		doms.Close()
+		tx.Rollback()
+		if err := pe.discardRejectedStartupTail(ctx, bad); err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+		pe.logger.Warn("Discarded unexecuted catch-up blocks at startup", "rejectedBlock", bad.Number, "hash", bad.Hash)
+		if restoreNotifications != nil {
+			restoreNotifications()
+		}
 	}
 
 	if hook != nil {
@@ -345,7 +361,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return err
 			}
 			// Restoring after publication would send the same changes again.
-			restoreStateChanges = nil
+			restoreNotifications = nil
 			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
@@ -355,6 +371,58 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 	return nil
+}
+
+func (pe *PipelineExecutor) discardRejectedStartupTail(ctx context.Context, bad *stagedsync.RejectedBlockError) error {
+	return pe.db.Update(ctx, func(tx kv.RwTx) error {
+		finish, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if !aligned || finish < pe.blockReader.FrozenBlocksInView(tx) || bad.Number <= finish {
+			return bad
+		}
+		hash, err := rawdb.ReadCanonicalHash(tx, bad.Number)
+		if err != nil {
+			return err
+		}
+		if hash != bad.Hash {
+			return bad
+		}
+
+		// The accepted fork may be taller than this checkpoint. Walk its parents
+		// until we know that truncation would preserve every accepted canonical block.
+		accepted := rawdb.ReadForkchoiceHead(tx)
+		if accepted == (common.Hash{}) {
+			return bad
+		}
+		number, err := pe.blockReader.HeaderNumber(ctx, tx, accepted)
+		if err != nil {
+			return err
+		}
+		if number == nil {
+			return bad
+		}
+		for height := *number; height > finish; height-- {
+			canonical, err := rawdb.ReadCanonicalHash(tx, height)
+			if err != nil {
+				return err
+			}
+			if accepted == canonical {
+				return bad
+			}
+			header, err := pe.blockReader.Header(ctx, tx, accepted, height)
+			if err != nil {
+				return err
+			}
+			if header == nil {
+				return bad
+			}
+			accepted = header.ParentHash
+		}
+		_, err = pe.resetCanonicalToCheckpoint(ctx, tx, finish)
+		return err
+	})
 }
 
 // lastValidationExecStageTiming reports the Execution stage duration of the most
