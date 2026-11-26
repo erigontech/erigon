@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -884,9 +885,10 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		if err := json.Unmarshal(buf, &keys); err != nil {
 			return err
 		}
-		for _, removed := range []string{"eth1_data", "deposits"} {
-			if _, ok := keys[removed]; ok {
-				return fmt.Errorf("heze beacon body contains removed field %s", removed)
+		for key := range keys {
+			// encoding/json matches field names case-insensitively.
+			if strings.EqualFold(key, "eth1_data") || strings.EqualFold(key, "deposits") {
+				return fmt.Errorf("heze beacon body contains removed field %s", key)
 			}
 		}
 	}

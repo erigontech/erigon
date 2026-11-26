@@ -929,23 +929,24 @@ func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
 }
 
 func TestSelectGloasBidSkipsBidsWithTheWrongForkLayout(t *testing.T) {
-	hezeBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 5)}
-	hezeBid.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
-	gloasBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, 50)}
+	newBid := func(builderIndex, value uint64, heze bool) *cltypes.SignedExecutionPayloadBid {
+		bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, builderIndex, value)}
+		if heze {
+			bid.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+		}
+		return bid
+	}
+	for _, version := range []clparams.StateVersion{clparams.GloasVersion, clparams.HezeVersion} {
+		compatible := newBid(1, 5, version >= clparams.HezeVersion)
+		higherOtherLayout := newBid(2, 50, version < clparams.HezeVersion)
 
-	selected := selectGloasBid(clparams.HezeVersion, nil, []gloasBidCandidate{
-		{bid: hezeBid, boostFactor: 100, maxExecutionPayment: 1},
-		{bid: gloasBid, boostFactor: 100, maxExecutionPayment: 1, builderURL: "http://builder"},
-	})
-	require.NotNil(t, selected)
-	require.Same(t, hezeBid, selected.bid)
-
-	selected = selectGloasBid(clparams.GloasVersion, nil, []gloasBidCandidate{
-		{bid: gloasBid, boostFactor: 100, maxExecutionPayment: 1},
-		{bid: hezeBid, boostFactor: 100, maxExecutionPayment: 1},
-	})
-	require.NotNil(t, selected)
-	require.Same(t, gloasBid, selected.bid)
+		selected := selectGloasBid(version, nil, []gloasBidCandidate{
+			{bid: compatible, boostFactor: 100, maxExecutionPayment: 1},
+			{bid: higherOtherLayout, boostFactor: 100, maxExecutionPayment: 1, builderURL: "http://builder"},
+		})
+		require.NotNil(t, selected, version)
+		require.Same(t, compatible, selected.bid, version)
+	}
 }
 
 func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {

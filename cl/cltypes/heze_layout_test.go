@@ -184,6 +184,8 @@ func TestHezeBeaconBodyJSONRejectsRemovedFields(t *testing.T) {
 	for name, value := range map[string]any{
 		"eth1_data": map[string]any{"deposit_root": "0x" + strings.Repeat("00", 32), "deposit_count": "9", "block_hash": "0x" + strings.Repeat("00", 32)},
 		"deposits":  []any{},
+		"DEPOSITS":  []any{},
+		"Eth1_Data": map[string]any{"deposit_root": "0x" + strings.Repeat("00", 32), "deposit_count": "9", "block_hash": "0x" + strings.Repeat("00", 32)},
 	} {
 		fields := marshalBodyFields(t, clparams.HezeVersion)
 		fields[name] = value

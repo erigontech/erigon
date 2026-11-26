@@ -428,7 +428,7 @@ func (s *executionPayloadBidService) validateBidContents(bid *cltypes.ExecutionP
 	}
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	if err := bid.ValidateInclusionListBits(s.beaconCfg.GetCurrentStateVersion(epoch)); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
 	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
