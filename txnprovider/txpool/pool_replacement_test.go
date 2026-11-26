@@ -159,7 +159,7 @@ func TestReplacementBatchSharesSpareFunds(t *testing.T) {
 // A replacement that costs less frees funds for a later replacement in the same batch.
 func TestReplacementBatchReusesFreedFunds(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	// Nonce 1 spends the spare funds but what one fee bump needs.
+	// Nonce 1 spends all spare funds except what one fee bump needs.
 	var txns TxnSlots
 	for nonce := range uint64(4) {
 		txn := newTestTxnSlot(nonce, 0, 0, fundedTxnFeeCap, fundedTxnGas)

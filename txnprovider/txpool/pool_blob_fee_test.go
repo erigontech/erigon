@@ -74,8 +74,8 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
-// A blob fee rise must not leave such a blob txn in pending, where an overflow would evict a txn that can be included
-// instead.
+// A blob fee rise must not leave such a blob txn, or a later txn of its sender, in pending, where an overflow would
+// evict a txn that can be included instead.
 func TestBlobFeeRiseDemotesBlobTxnBeforeOverflow(t *testing.T) {
 	ctx, pool, blob, txns := newPoolWithBlobTxn(t, "Osaka")
 	reasons, err := pool.AddLocalTxns(ctx, txns)
@@ -90,17 +90,21 @@ func TestBlobFeeRiseDemotesBlobTxnBeforeOverflow(t *testing.T) {
 		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}
 	newBlock(1, 1)
-	pool.pending.limit = 2
-	// Its tip ranks the blob txn above this one.
-	ordinary, reason := addRemoteTestTxn(t, pool, senders[0], 0, 1, 50, 1)
+	successor, reason := addRemoteTestTxn(t, pool, common.Address{1}, blob.Nonce+1, 5, 50, 1)
 	require.Equal(t, txpoolcfg.Success, reason)
-	require.Equal(t, 2, pool.pending.Len())
+	// Their tips rank the blob txn and its successor above this one.
+	ordinary, reason := addRemoteTestTxn(t, pool, senders[0], 0, 1, 50, 2)
+	require.Equal(t, txpoolcfg.Success, reason)
+	require.Equal(t, 3, pool.pending.Len())
 
 	newBlock(2, blob.GetBlobFeeCap().Uint64()+1)
-	_, reason = addRemoteTestTxn(t, pool, senders[1], 0, 2, 60, 2)
+	pool.pending.limit = 2
+	_, reason = addRemoteTestTxn(t, pool, senders[1], 0, 2, 60, 3)
 	require.Equal(t, txpoolcfg.Success, reason)
 	require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
-	require.Equal(t, BaseFeeSubPool, pool.byHash[string(blob.IDHash[:])].currentSubPool)
+	for _, slot := range []*TxnSlot{blob, successor} {
+		require.Equal(t, BaseFeeSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+	}
 	require.Equal(t, 2, pool.pending.Len())
 }
 
