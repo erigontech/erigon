@@ -2230,7 +2230,8 @@ func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
 	}
 }
 
-// The download path opens headers and bodies without alignment; the shared layout holds there too, and no block is hidden.
+// The download path opens headers and bodies of the block collection without alignment; the shared layout holds
+// there too, and no block is hidden.
 func TestOpenSegmentsWithoutAlignmentShareOneLayout(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -2243,7 +2244,7 @@ func TestOpenSegmentsWithoutAlignmentShareOneLayout(t *testing.T) {
 		}
 	}
 	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype2.Headers, false, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(t, s.OpenSegments(types, false))
 	for _, typ := range types {
@@ -2417,10 +2418,61 @@ func TestRemoveOverlapsKeepsTheSmallerFilesOfAHiddenMergedFile(t *testing.T) {
 	require.NoError(t, s.OpenFolder())
 	requireOneVisibleLayout(t, s, small)
 
-	require.NoError(t, s.RemoveOverlaps(nil))
+	var deleted []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error { deleted = append(deleted, l...); return nil }))
 	requireOneVisibleLayout(t, s, small)
 	for _, r := range small {
-		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, r.From(), r.To(), snaptype2.Bodies.Enum())))
+		seg := snaptype.SegmentFileName(version.V1_0, r.From(), r.To(), snaptype2.Bodies.Enum())
+		idx := snaptype.IdxFileName(version.V1_0, r.From(), r.To(), snaptype2.Bodies.Name())
+		require.FileExists(t, filepath.Join(dir, seg))
+		require.FileExists(t, filepath.Join(dir, idx))
+		require.NotContains(t, deleted, seg, "the seeder must not drop a file in use")
+		require.NotContains(t, deleted, idx, "the seeder must not drop an index in use")
 	}
 	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum())))
+}
+
+// Caplin merges beacon blocks alone, so a merged beacon file stays visible and the cleanup removes its inputs.
+func TestCaplinMergedFileReplacesItsInputs(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range snaptype.CaplinSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype.BeaconBlocks.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype.CaplinSnapshotTypes, snaptype.BeaconBlocks, false, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, []Range{NewRange(0, 100_000)}, visibleRanges(s, snaptype.BeaconBlocks))
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.NoFileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype.BeaconBlocks.Enum())))
+	require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype.BlobSidecars.Enum())))
+}
+
+// A capped download retires a hidden merged file that reaches past the cap, so a reopen does not show it again.
+func TestRetireFilesAboveRetiresAHiddenMergedFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var deleted []string
+	require.NoError(t, s.RetireFilesAbove(50_000, func(l []string) error { deleted = append(deleted, l...); return nil }))
+	require.Contains(t, deleted, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Bodies.Enum()))
+	require.NoError(t, s.OpenFolder())
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for _, r := range visibleRanges(s, typ) {
+			require.LessOrEqual(t, r.To(), uint64(50_000), typ.Name())
+		}
+	}
 }

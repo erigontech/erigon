@@ -785,8 +785,12 @@ func (s *BaseRoSnapshots) hasIndexedDirtyFile(t snaptype.Enum, path string) (fou
 
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and that have smaller segments of
 // their own type inside them, so the type shows those smaller segments instead and a merge range does not cut
-// through a visible file. A segment whose hiding would lose a block at some aligned height stays visible.
+// through a visible file. A segment whose hiding would lose a block at some aligned height stays visible. Only a
+// collection whose types share one height (block files) has one layout; Caplin merges its types apart.
 func (s *BaseRoSnapshots) mergedFilesNotInEveryType() map[*DirtySegment]bool {
+	if !s.alignMin {
+		return nil
+	}
 	indexed := make(map[snaptype.Enum][]*DirtySegment, len(s.enums))
 	ranges := make(map[snaptype.Enum][]Range, len(s.enums))
 	types := map[Range]int{}
@@ -1855,15 +1859,22 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	v := s.View()
 	defer v.Close()
 	var names, paths []string
-	for _, t := range s.types {
-		for _, sn := range v.Segments(t) {
-			if BlockFileRetainedUnderCap(sn.To(), blockNum) {
-				continue
-			}
-			names = append(names, sn.src.FileName())
-			paths = append(paths, sn.src.FilePaths(s.dir)...)
+	retire := func(sn *DirtySegment) {
+		if !BlockFileRetainedUnderCap(sn.To(), blockNum) {
+			names = append(names, sn.FileName())
+			paths = append(paths, sn.FilePaths(s.dir)...)
 		}
 	}
+	for _, t := range s.types {
+		for _, sn := range v.Segments(t) {
+			retire(sn.src)
+		}
+	}
+	s.dirtyLock.RLock()
+	for sn := range s.mergedFilesNotInEveryType() { // not visible, but shown again once the files under it are gone
+		retire(sn)
+	}
+	s.dirtyLock.RUnlock()
 	if len(names) == 0 {
 		return nil
 	}
