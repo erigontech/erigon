@@ -124,7 +124,27 @@ func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, b
 	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
 		return v, len(v) > 0, nil // an empty value is a cached absence
 	}
-	return g.tx.GetAsOf(domain, key, ts)
+	if g.sd.stateCache == nil || !g.sd.stateCache.Caches(domain) || g.sd.hasLocalCacheUnwind() {
+		return g.tx.GetAsOf(domain, key, ts)
+	}
+	// The same lookup as tx.GetAsOf, split so that a latest answer can fill the cache.
+	v, ok, err := g.tx.HistorySeek(domain, key, ts)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		if len(v) == 0 {
+			return nil, false, nil
+		}
+		return v, true, nil
+	}
+	v, step, err := g.tx.GetLatest(domain, key, kv.GetLatestOptions{})
+	if err != nil {
+		return nil, false, err
+	}
+	view, readTxNum := g.sd.fillTarget(g.tx, g.view, domain, step)
+	view.Fill(domain, key, v, readTxNum)
+	return v, v != nil, nil
 }
 
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.

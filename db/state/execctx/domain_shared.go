@@ -1500,16 +1500,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	// A bounded read observes a staged unwind, not stable committed state.
 	if willFill {
-		readTxNum := step.LastTxNum(sd.StepSize())
-		if !kv.UnderlyingTxIsWritable(tx) {
-			readTxNum = cache.ClampFillTxNum(tx.Debug(), domain, readTxNum)
-		}
-		fillView := view
-		if fillView.NeedsFrontier() {
-			// Frontier-less views retry on the miss path, where binding cost is
-			// amortized by the backing read. Stale views do not request a retry.
-			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
-		}
+		fillView, readTxNum := sd.fillTarget(tx, view, domain, step)
 		switch {
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
@@ -1521,6 +1512,20 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 	return v, step, nil
+}
+
+// fillTarget returns the view to fill a value read from tx at step, and the fill's validity stamp.
+func (sd *SharedDomains) fillTarget(tx kv.TemporalTx, view cache.ReadView, domain kv.Domain, step kv.Step) (cache.ReadView, uint64) {
+	readTxNum := step.LastTxNum(sd.StepSize())
+	if !kv.UnderlyingTxIsWritable(tx) {
+		readTxNum = cache.ClampFillTxNum(tx.Debug(), domain, readTxNum)
+	}
+	if view.NeedsFrontier() {
+		// Frontier-less views retry on the miss path, where binding cost is
+		// amortized by the backing read. Stale views do not request a retry.
+		view = view.WithFrontier(sd.cacheFrontierFor(tx))
+	}
+	return view, readTxNum
 }
 
 // GetCodeSize returns the length of the contract code at addr, probing a
