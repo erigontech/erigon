@@ -158,7 +158,7 @@ func ProgressiveContainerProofAll(fieldIndex int, schema ...any) ([][32]byte, er
 }
 
 // ProgressiveContainerProof proves the field at position fieldIndex of activeFields.
-// The schema holds the roots of the active fields only.
+// The schema holds the values of the active fields only.
 func ProgressiveContainerProof(activeFields []bool, fieldIndex int, schema ...any) ([][32]byte, error) {
 	if fieldIndex < 0 || fieldIndex >= len(activeFields) || !activeFields[fieldIndex] {
 		return nil, errors.New("progressive container field index out of range")

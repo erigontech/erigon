@@ -487,11 +487,11 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() int {
-	fixed, dynamic := b.sszSize()
+	fixed, dynamic := b.sszSize(true)
 	return fixed + dynamic
 }
 
-func (b *BeaconBody) sszSize() (fixed, dynamic int) {
+func (b *BeaconBody) sszSize(withDynamic bool) (fixed, dynamic int) {
 	b.ensureNilFields()
 	for _, field := range b.getSchema(false) {
 		switch f := field.(type) {
@@ -502,7 +502,9 @@ func (b *BeaconBody) sszSize() (fixed, dynamic int) {
 				fixed += f.EncodingSizeSSZ()
 			} else {
 				fixed += 4
-				dynamic += f.EncodingSizeSSZ()
+				if withDynamic {
+					dynamic += f.EncodingSizeSSZ()
+				}
 			}
 		}
 	}
@@ -522,7 +524,7 @@ func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	if b.Version >= clparams.GloasVersion {
 		b.resetGloasProgressiveLists()
 	}
-	if fixed, _ := b.sszSize(); len(buf) < fixed {
+	if fixed, _ := b.sszSize(false); len(buf) < fixed {
 		return fmt.Errorf("[BeaconBody] err: %w", ssz.ErrLowBufferSize)
 	}
 

@@ -4828,11 +4828,10 @@ func validTestExecutionPayloadEnvelopeBody(t *testing.T, cfg *clparams.BeaconCha
 }
 
 func TestPostExecutionPayloadBidRejectsGloasLayoutForHezeSlot(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	cfg := *handler.beaconChainCfg
+	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
 	cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch, cfg.HezeForkEpoch = 0, 0, 0, 0
-	handler.beaconChainCfg = &cfg
+	handler := &ApiHandler{beaconChainCfg: &cfg}
 	body, err := json.Marshal(&cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)})
 	require.NoError(t, err)
 
@@ -4847,13 +4846,11 @@ func TestPostExecutionPayloadBidRejectsGloasLayoutForHezeSlot(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidPublishesOnTheBidSlotFork(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	cfg := *handler.beaconChainCfg
+	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
 	cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch, cfg.HezeForkEpoch = 0, 0, 0, 1
-	handler.beaconChainCfg = &cfg
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
-	handler.ethClock = clock
+	handler := &ApiHandler{beaconChainCfg: &cfg, ethClock: clock, logger: log.Root()}
 	currentDigest, err := clock.CurrentForkDigest()
 	require.NoError(t, err)
 	hezeDigest, err := clock.ComputeForkDigest(1)
