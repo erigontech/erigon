@@ -217,6 +217,46 @@ func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
 	}
 }
 
+func TestGetDutiesProposerRecentFuluUsesEpochLookahead(t *testing.T) {
+	_, _, _, _, postState, handler, _, manager, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	epoch := state.Epoch(postState)
+	slot := epoch * cfg.SlotsPerEpoch
+	cfg.FuluForkEpoch = epoch
+	cfg.InitializeForkSchedule()
+
+	epochState, err := handler.copyHeadStateForDuties(postState)
+	require.NoError(t, err)
+	target := increaseProposerTestBalance(t, epochState)
+	require.NoError(t, epochState.UpgradeToFulu())
+	expected := firstEpochProposers(epochState)
+	balanceBefore, err := epochState.ValidatorEffectiveBalance(int(target))
+	require.NoError(t, err)
+
+	head, err := epochState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(head, slot+cfg.SlotsPerEpoch))
+	balanceAfter, err := head.ValidatorEffectiveBalance(int(target))
+	require.NoError(t, err)
+	require.Greater(t, balanceAfter, balanceBefore)
+	recomputed, err := head.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+	require.NotEqual(t, recomputed, expected)
+
+	epochRoot, err := head.GetBlockRootAtSlot(head.Slot() - 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, epochRoot)
+	fcu.StateAtBlockRootVal[epochRoot] = epochState
+	fcu.FinalizedSlotVal = slot - 1
+	fcu.LowestAvailableSlotVal = &slot
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(head, common.Hash{1}))
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.False(t, response.Finalized)
+	require.Equal(t, clparams.FuluVersion.String(), response.Version)
+	requireProposerDuties(t, response.Data, epochState, slot, expected)
+}
+
 func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
@@ -272,6 +312,17 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+func increaseProposerTestBalance(t *testing.T, s *state.CachingBeaconState) uint64 {
+	t.Helper()
+	cfg := s.BeaconConfig()
+	active := s.GetActiveValidatorsIndices(state.Epoch(s) + 1)
+	require.Greater(t, len(active), 1)
+	target := active[1]
+	require.NoError(t, s.SetWithdrawalCredentialForValidatorAtIndex(int(target), common.Hash{byte(cfg.CompoundingWithdrawalPrefix)}))
+	require.NoError(t, s.SetValidatorBalance(int(target), cfg.MaxEffectiveBalanceElectra))
+	return target
 }
 
 func firstEpochProposers(s *state.CachingBeaconState) []uint64 {
