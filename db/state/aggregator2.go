@@ -10,12 +10,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
@@ -250,7 +255,38 @@ func CheckMixedCommitmentFiles(d datadir.Dirs) error {
 	return nil
 }
 
-func CommitmentV3OfFiles(d datadir.Dirs) (v3, found bool, err error) {
+func CommitmentV3OfDatadir(ctx context.Context, d datadir.Dirs, logger log.Logger) (v3, found bool, err error) {
+	if v3, found, err = commitmentV3OfFiles(d); err != nil || found {
+		return v3, found, err
+	}
+	return commitmentV3OfChaindata(ctx, d.Chaindata, logger)
+}
+
+func commitmentV3OfChaindata(ctx context.Context, path string, logger log.Logger) (v3, found bool, err error) {
+	exists, err := dir.FileExist(filepath.Join(path, "mdbx.dat"))
+	if err != nil || !exists {
+		return false, false, err
+	}
+	db, err := mdbx.New(dbcfg.ChainDB, logger).Path(path).Accede(true).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{kv.TblCommitmentVals: {Flags: kv.DupSort}}
+		}).Open(ctx)
+	if err != nil {
+		return false, false, fmt.Errorf("opening chaindata to read its commitment state: %w", err)
+	}
+	defer db.Close()
+	err = db.View(ctx, func(tx kv.Tx) (err error) {
+		if v3, err = tx.Has(kv.TblCommitmentVals, commitment.KeyCommitmentV3State); err != nil || v3 {
+			found = v3
+			return err
+		}
+		found, err = tx.Has(kv.TblCommitmentVals, commitment.KeyCommitmentState)
+		return err
+	})
+	return v3, found, err
+}
+
+func commitmentV3OfFiles(d datadir.Dirs) (v3, found bool, err error) {
 	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
 		legacyName, v3Name, err := commitmentFileNames(dirPath)
 		if err != nil {

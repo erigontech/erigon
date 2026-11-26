@@ -2004,7 +2004,7 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	}
 }
 
-func setCommitmentV3(ctx *cli.Command, dirs datadir.Dirs, logger log.Logger) {
+func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dirs, logger log.Logger) {
 	envSet := dbg.EnvString("COMMITMENT_V3", "") != ""
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
 		on := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
@@ -2017,13 +2017,13 @@ func setCommitmentV3(ctx *cli.Command, dirs datadir.Dirs, logger log.Logger) {
 	if envSet {
 		return
 	}
-	v3, found, err := dbstate.CommitmentV3OfFiles(dirs)
+	v3, found, err := dbstate.CommitmentV3OfDatadir(nodeCtx, dirs, logger)
 	if err != nil {
-		Fatalf("reading the commitment files of the datadir: %v", err)
+		Fatalf("reading the commitment state of the datadir: %v", err)
 	}
 	if found {
 		statecfg.SetCommitmentV3(v3)
-		logger.Info("[commitment] the commitment files of the datadir select the trie", "v3", v3)
+		logger.Info("[commitment] the datadir selects the commitment trie", "v3", v3)
 	}
 }
 
@@ -2128,7 +2128,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
-	setCommitmentV3(ctx, nodeConfig.Dirs, logger)
+	setCommitmentV3(nodeCtx, ctx, nodeConfig.Dirs, logger)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
