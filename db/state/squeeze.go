@@ -891,10 +891,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
-	a := rwDb.(HasAgg).Agg().(*Aggregator)
-
-	// Commitment files after a hole would feed their newer branches into the fold below them.
+// prepareCommitmentRebuild lets commitment and the state domains have different file ranges, and
+// refuses a hole in the commitment files: files after it would feed their newer branches into the
+// fold below them.
+func (a *Aggregator) prepareCommitmentRebuild() error {
+	a.DisableAllDependencies()
 	aligned := a.BeginFilesRo()
 	visibleEnd := aligned.d[kv.CommitmentDomain].files.EndTxNum()
 	aligned.Close()
@@ -902,13 +903,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	filesEnd := a.d[kv.CommitmentDomain].dirtyFiles.EndTxNumMax()
 	a.dirtyFilesLock.Unlock()
 	if filesEnd > visibleEnd {
-		return nil, fmt.Errorf("commitment rebuild does not resume over a hole: commitment files reach step %d but the visible ones end at step %d; remove the commitment files from step %d on and rebuild",
+		return fmt.Errorf("commitment rebuild does not resume over a hole: commitment files reach step %d but the visible ones end at step %d; remove the commitment files from step %d on and rebuild",
 			filesEnd/a.StepSize(), visibleEnd/a.StepSize(), visibleEnd/a.StepSize())
 	}
+	return nil
+}
 
-	// disable hard alignment; allowing commitment and storage/account to have
-	// different visibleFiles
-	a.DisableAllDependencies()
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+
+	if err := a.prepareCommitmentRebuild(); err != nil {
+		return nil, err
+	}
 	defer a.Unalign(kv.CommitmentDomain)()
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;

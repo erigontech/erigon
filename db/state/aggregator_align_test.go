@@ -761,3 +761,16 @@ func TestVisibleFilesAligned_HistoryGapLowersEveryListWithoutDependencies(t *tes
 
 	requireVisibleEnd(t, agg, alignStepSize)
 }
+
+// a commitment prefix merged differently from the accounts is not a hole
+func TestRebuildCommitmentResumesOverADifferentlyMergedPrefix(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.NoError(t, agg.prepareCommitmentRebuild())
+}
