@@ -1432,11 +1432,11 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 
-	// A Spammer result makes validateTxns call punishSpammer, which evicts up to half of the
-	// sender's pooled transactions. Any peer can relay any transaction that the sender ever
-	// signed, including ones that the pool would reject anyway. So a transaction counts as spam
-	// only if it passes the checks above and checkInsertion, and would take a new slot: no pooled
-	// transaction of the sender has its nonce. Keep this check after the other checks in this function.
+	// A Spammer result leads to punishSpammer, which evicts up to half of the sender's pooled
+	// transactions. Any peer can relay any transaction that the sender ever signed, including
+	// ones that the pool would reject anyway. So a transaction counts as spam only if it passes
+	// the checks above and checkInsertion, and would take a new slot: no pooled transaction of
+	// the sender has its nonce. Keep this check after the other checks in this function.
 	//
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
@@ -2314,6 +2314,31 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	return txpoolcfg.NotSet
 }
 
+// dropping transaction from all sub-structures and from db
+// Important: don't call it while iterating by all
+func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
+	p.releaseFrame(mt.TxnSlot)
+	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
+		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+	}
+	hashStr := string(mt.TxnSlot.IDHash[:])
+	delete(p.byHash, hashStr)
+	p.deletedTxns = append(p.deletedTxns, mt)
+	p.all.delete(mt, reason, p.logger)
+	p.discardReasonsLRU.Add(hashStr, reason)
+	if mt.TxnSlot.HasBlobs() {
+		blobHashes := mt.TxnSlot.GetBlobHashes()
+		t := p.totalBlobsInPool.Load()
+		p.totalBlobsInPool.Store(t - uint64(len(blobHashes)))
+		p.blobs.remove(mt.TxnSlot.IDHash, blobHashes)
+	}
+	if mt.TxnSlot.TxType() == SetCodeTxnType {
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			delete(p.auths, a)
+		}
+	}
+}
+
 // checkInsertion runs the checks that addLocked makes before it inserts txn, after the frame admission
 // and replacement checks. found is the pooled transaction that txn would replace, or nil when txn takes
 // a new slot. It returns NotSet if txn can be inserted. It requires the pool lock and leaves pool state
@@ -2357,31 +2382,6 @@ func (p *TxPool) checkInsertion(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardR
 		}
 	}
 	return txpoolcfg.NotSet
-}
-
-// dropping transaction from all sub-structures and from db
-// Important: don't call it while iterating by all
-func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
-	p.releaseFrame(mt.TxnSlot)
-	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
-		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
-	}
-	hashStr := string(mt.TxnSlot.IDHash[:])
-	delete(p.byHash, hashStr)
-	p.deletedTxns = append(p.deletedTxns, mt)
-	p.all.delete(mt, reason, p.logger)
-	p.discardReasonsLRU.Add(hashStr, reason)
-	if mt.TxnSlot.HasBlobs() {
-		blobHashes := mt.TxnSlot.GetBlobHashes()
-		t := p.totalBlobsInPool.Load()
-		p.totalBlobsInPool.Store(t - uint64(len(blobHashes)))
-		p.blobs.remove(mt.TxnSlot.IDHash, blobHashes)
-	}
-	if mt.TxnSlot.TxType() == SetCodeTxnType {
-		for _, a := range mt.TxnSlot.AuthAndNonces {
-			delete(p.auths, a)
-		}
-	}
 }
 
 // sweepDormantQueued evicts all queued transactions from senders that have had no on-chain
