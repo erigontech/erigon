@@ -358,8 +358,11 @@ func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
+		if err != nil {
+			return err
+		}
 		require.NotEmpty(t, body, "the block at slot %d must stay in the database", tail)
-		return err
+		return nil
 	}))
 
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
