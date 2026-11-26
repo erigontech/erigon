@@ -17,10 +17,15 @@
 package execctx
 
 import (
+	"fmt"
 	"slices"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -118,13 +123,51 @@ func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
 }
 
 func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	return g.GetAsOfBy(AsOfProbeExec, domain, key, ts)
+}
+
+// Temporary as-of miss probe: per caller and domain, how many reads mem, the cache and the tx serve.
+const (
+	AsOfProbeExec      = 0
+	AsOfProbeCommitter = 1
+)
+
+var (
+	asOfProbe     [2][kv.DomainLen][3]atomic.Uint64
+	asOfProbeTxNs [2][kv.DomainLen]atomic.Int64
+	asOfProbeOnce sync.Once
+)
+
+func asOfProbeLog() {
+	for range time.Tick(30 * time.Second) {
+		for c, name := range [2]string{"exec", "committer"} {
+			for d := kv.Domain(0); d < kv.DomainLen; d++ {
+				m, h, t := asOfProbe[c][d][0].Load(), asOfProbe[c][d][1].Load(), asOfProbe[c][d][2].Load()
+				if m+h+t == 0 {
+					continue
+				}
+				log.Info("[asof-probe]", "caller", name, "domain", d.String(), "mem", m, "cache", h, "tx", t,
+					"txPct", fmt.Sprintf("%.2f", 100*float64(t)/float64(m+h+t)), "txMs", asOfProbeTxNs[c][d].Load()/1e6)
+			}
+		}
+	}
+}
+
+func (g *AsOfGetter) GetAsOfBy(caller int, domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	asOfProbeOnce.Do(func() { go asOfProbeLog() })
 	if v, ok, err := g.sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+		asOfProbe[caller][domain][0].Add(1)
 		return v, ok, err
 	}
 	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
+		asOfProbe[caller][domain][1].Add(1)
 		return v, len(v) > 0, nil // an empty value is a cached absence
 	}
-	return g.tx.GetAsOf(domain, key, ts)
+	start := time.Now()
+	v, ok, err := g.tx.GetAsOf(domain, key, ts)
+	asOfProbe[caller][domain][2].Add(1)
+	asOfProbeTxNs[caller][domain].Add(int64(time.Since(start)))
+	return v, ok, err
 }
 
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.

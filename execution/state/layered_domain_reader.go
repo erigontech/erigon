@@ -43,6 +43,9 @@ func (l *LayeredDomainReader) CloneWithTx(tx kv.TemporalTx) *LayeredDomainReader
 // baseGetAsOf reads the committed base without the prior-block window: sd.mem, then (with a tx) the shared
 // state cache and the domain files.
 func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	if g, ok := l.base.(*execctx.AsOfGetter); ok {
+		return g.GetAsOfBy(execctx.AsOfProbeCommitter, name, k, ts)
+	}
 	return l.base.GetAsOf(name, k, ts)
 }
 
