@@ -2288,7 +2288,8 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 	}
 
 	if found != nil {
-		// Checked last, as an accepted replacement updates the sender's funded prefix.
+		// Checked last: an accepted replacement is already counted in the batch's funded prefix, so no
+		// later check may reject it.
 		funded, err := p.keepsSenderFunded(cacheView, prefixes, mt.TxnSlot, found)
 		if err != nil {
 			p.logger.Warn("[txpool] addLocked: sender info", "err", err)
@@ -2342,9 +2343,10 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 	return txpoolcfg.NotSet
 }
 
-// discardOverflow evicts mt from pending or the base fee sub-pool. The sender's next txn, if any, loses
-// its nonce chain. A block refreshes only senders with queued txns or account changes, so refresh the
-// sender before the next txn can be selected or promoted.
+// discardOverflow evicts mt from pending or the base fee sub-pool for capacity. If the sender has a txn at
+// the next nonce, that txn now follows a nonce gap but keeps its NoNonceGaps marker until the sender is
+// refreshed. A block refreshes only senders with queued txns or account changes, so mark the sender for
+// the refresh in promote, which runs before the txn can be selected or promoted.
 func (p *TxPool) discardOverflow(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.discardLocked(mt, reason)
 	if !mt.keyedNonce && p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce+1) != nil {
@@ -2933,7 +2935,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.discardOverflow(tx, txpoolcfg.PendingPoolOverflow)
 	}
 
-	// Discard worst transactions from pending sub pool until it is within capacity limits
+	// Discard worst transactions from the base fee sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
 		p.discardOverflow(tx, txpoolcfg.BaseFeePoolOverflow)

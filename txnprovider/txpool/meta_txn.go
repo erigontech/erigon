@@ -132,8 +132,11 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp < than.timestamp
 }
 
-// worse orders transactions for eviction. Within a sub-pool it ranks fees as better does,
-// so an overflow discards the transactions that selection and promotion value least.
+// worse orders transactions for eviction: an overflow discards the worst one first. Like better, it
+// compares the sub-pool markers first and then the fees: the effective tip in pending, the fee cap in the
+// base fee sub-pool. So an overflow discards the transactions that selection and promotion value least.
+// Unlike better, it keeps the local marker of a transaction that follows a remote one of its sender, so an
+// overflow can evict the remote transaction first and leave a nonce gap; discardOverflow handles the gap.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
@@ -149,8 +152,8 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 
 	feeOrder := mt.currentSubPool
 	if feeOrder == 0 {
-		// Parked frames have no sub-pool. Rank their fees as in the sub-pool their
-		// markers qualify for, even though they cannot be selected or promoted yet.
+		// A parked frame is in no sub-pool until it is validated again. Rank its fees as in the
+		// sub-pool that its markers qualify for, although it cannot be selected or promoted yet.
 		switch {
 		case subPool >= BaseFeePoolBits+EnoughFeeCapBlock:
 			feeOrder = PendingSubPool
@@ -165,7 +168,8 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 		if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
 			return cmp < 0
 		}
-		// Of equal tips, a base fee rise excludes the lower fee cap first.
+		// Of two equal tips, a base fee rise moves the transaction with the lower fee cap out of
+		// pending first, so that one is worse.
 		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
 			return cmp < 0
 		}

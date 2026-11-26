@@ -790,8 +790,8 @@ func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
 	require.Equal(t, 2, pool.pending.Len())
 }
 
-// Nonce 2 is unfunded only because of the frame reservation, so it does not use up funds that
-// a replacement of nonce 0 needs.
+// Nonce 2 is unfunded only because the frame reservation is paid first. The funding check must not
+// count it against the funds that a costlier replacement of nonce 0 needs.
 func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
 	_, pool, payer := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
@@ -805,7 +805,8 @@ func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
 		txn.IDHash[0] = byte(nonce + 1)
 		txns = append(txns, txn)
 	}
-	// Together they cost what the balance leaves after half of the reservation.
+	// Together they cost the balance minus half the reservation: more than the reservation leaves,
+	// so nonce 2 is unfunded, but within the balance.
 	txns[2].Txn.GetValue().SetUint64(common.Ether - frameCost/2 - 3*42_000)
 	for _, txn := range txns {
 		require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, txn)[0])

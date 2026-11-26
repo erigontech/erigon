@@ -92,6 +92,8 @@ func addFundedTxns(t *testing.T, pool *TxPool, sender common.Address, tip uint64
 	return txns
 }
 
+// A replacement may raise its cost by at most the sender's spare funds, through the value or the fee cap,
+// whatever its tip.
 func TestReplacementKeepsSenderTxnsFunded(t *testing.T) {
 	for _, tip := range []uint64{0, 1_000} {
 		for _, tc := range []struct {
@@ -170,7 +172,9 @@ func TestReplacementBatchReusesFreedFunds(t *testing.T) {
 	require.Equal(t, []int{4, 0, 0}, []int{pending, baseFee, queued})
 }
 
-// Neither a transaction the balance cannot cover nor one after a nonce gap has funds to lose.
+// Only transactions that the balance covers, with no nonce gap before them, are protected. A costlier
+// replacement is accepted when it replaces a transaction that the balance cannot cover, or when it takes
+// funds that a transaction after a nonce gap would need.
 func TestReplacementIgnoresUnfundedTxns(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

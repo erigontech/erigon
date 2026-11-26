@@ -30,7 +30,9 @@ type replacementDecision struct {
 	rebroadcast bool
 }
 
-// checkReplacement requires the pool lock and leaves pool state unchanged.
+// checkReplacement checks the replacement rules other than funding: the fee bumps, and the rules for blob
+// and frame transactions. It requires the pool lock and leaves pool state unchanged. addLocked checks the
+// funding afterwards, with keepsSenderFunded.
 func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDecision {
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
@@ -80,19 +82,22 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	return replacementDecision{}
 }
 
-// fundedPrefix is the run of a sender's transactions from the account nonce up to end that its
-// balance covers, and what the run costs.
+// fundedPrefix is the run of a sender's transactions that its balance covers after frame reservations:
+// account nonces from the sender's state nonce up to end, exclusive, with no gap. spent is what the run
+// costs.
 type fundedPrefix struct {
 	end   uint64
 	spent uint256.Int
 }
 
 // keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
-// takes the place of previous. A batch of additions records the prefix in prefixes at its first costlier
-// replacement for the sender and updates it with each replacement it accepts, so the batch walks the
-// sender's transactions once. The prefix does not grow afterwards: a transaction that the batch adds, or
-// funds with a cheaper replacement, is not covered. Neither can be pending before the batch ends. The
-// caller must replace previous when it returns true.
+// takes the place of previous. A replacement that does not raise the cost, or that replaces a transaction
+// outside the prefix, is always accepted. A batch of additions records the prefix in prefixes at its first
+// costlier replacement of one of the sender's transactions, and updates it with each accepted replacement
+// inside it, so the batch walks the sender's transactions only once. The prefix does not grow afterwards:
+// a transaction that the batch adds, or funds with a cheaper replacement, is not covered. Neither can be
+// pending before the batch ends. When it returns true, the caller must make the replacement, because the
+// prefix already counts it.
 func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, replacement *TxnSlot, previous *metaTxn) (bool, error) {
 	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
 	costlier := newCost.Gt(oldCost)
@@ -134,7 +139,7 @@ func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uin
 	spent.Sub(&prefix.spent, oldCost)
 	_, overflow := spent.AddOverflow(&spent, newCost)
 	if costlier {
-		// A replaced frame releases its own reservation.
+		// A replaced frame that the sender pays for releases its reservation, which can fund the replacement.
 		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
 			reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
 		}
@@ -146,6 +151,7 @@ func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uin
 	return true, nil
 }
 
+// unreservedFunds returns what balance leaves after reserved, or zero if reserved exceeds balance.
 func unreservedFunds(balance, reserved uint256.Int) uint256.Int {
 	var funds uint256.Int
 	if balance.Gt(&reserved) {

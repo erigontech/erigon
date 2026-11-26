@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-// addTestTxns adds the sender's slots in one batch.
+// addTestTxns adds the sender's slots as one batch and returns their discard reasons.
 func addTestTxns(t testing.TB, pool *TxPool, sender common.Address, isLocal bool, slots ...*TxnSlot) []txpoolcfg.DiscardReason {
 	t.Helper()
 	var txns TxnSlots
@@ -120,7 +120,8 @@ func TestBaseFeeOverflowEvictsLowestFeeCap(t *testing.T) {
 	}
 }
 
-// Evicting a txn breaks its sender's nonce chain, so the sender's next txn cannot reach pending later.
+// Evicting a txn leaves a nonce gap before its sender's next txn. That txn must move to the queued sub-pool
+// and stay out of pending, also after a base fee fall.
 func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 	for _, tc := range []struct {
 		name                        string
