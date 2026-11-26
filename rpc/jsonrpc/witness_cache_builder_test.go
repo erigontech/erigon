@@ -1046,6 +1046,28 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
 	m, testChain := newV3HistoryTestExecModule(t)
+	runHeadCaptureOverParentRecords(t, m, testChain)
+
+	t.Run("task2 chain collapse traces", func(t *testing.T) {
+		golden := newWitnessGoldenRun(t)
+		require.NoError(t, golden.m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+		}))
+		require.NoError(t, golden.m.InsertChain(golden.chain))
+		api := newDebugApiForTest(golden.m)
+		for _, shape := range golden.shapes {
+			candidates := witnessGoldenCollapseCandidates(t, api, golden.m, shape.blockNum, witnessModeLegacy)
+			if shape.name == "transient-before" {
+				require.Empty(t, candidates, shape.name)
+			} else {
+				require.NotEmpty(t, candidates, shape.name)
+			}
+		}
+	})
+}
+
+func runHeadCaptureOverParentRecords(t *testing.T, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) {
+	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 

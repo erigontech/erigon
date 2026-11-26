@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -568,12 +569,36 @@ func TestWitnessGoldenChainMatchesHPH(t *testing.T) {
 		run := newWitnessGoldenRun(t)
 		require.NoError(t, run.m.InsertChain(run.chain))
 		v3 = collectChainWitnesses(t, true, run.m, run.chain)
+		requireGoldenChainStateless(t, run)
 	}))
 	require.Len(t, hph.Legacy, len(v3.Legacy))
 	for n := range hph.Legacy {
 		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
 		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
 		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+	}
+}
+
+func requireGoldenChainStateless(t *testing.T, run witnessGoldenRun) {
+	t.Helper()
+	debugAPI := newDebugApiForTest(run.m)
+	for i := 1; i < len(run.chain.Blocks); i++ {
+		block := run.chain.Blocks[i]
+		parentRoot := run.chain.Blocks[i-1].Root()
+		for _, mode := range []string{"legacy", "canonical"} {
+			result, err := debugAPI.ExecutionWitness(context.Background(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), &mode)
+			require.NoError(t, err, "block %d mode %s", block.NumberU64(), mode)
+			replay := *result
+			replay.State = slices.Clone(result.State)
+			rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool {
+				return crypto.Keccak256Hash(node) == parentRoot
+			})
+			require.NotEqual(t, -1, rootIndex, "block %d mode %s state root node", block.NumberU64(), mode)
+			replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
+			root, _, err := execBlockStatelessly(&replay, block, run.m.ChainConfig, run.m.Engine)
+			require.NoError(t, err, "block %d mode %s stateless replay", block.NumberU64(), mode)
+			require.Equal(t, block.Root(), root, "block %d mode %s post-state root", block.NumberU64(), mode)
+		}
 	}
 }
 

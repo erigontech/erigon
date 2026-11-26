@@ -250,19 +250,21 @@
 
 ### Task 6: collapse validity harness
 **Files:**
+- Add: `execution/commitment/v3/collapse_validity_test.go`
 - Modify: `execution/commitment/v3/witness_test.go`
 - Modify: `rpc/jsonrpc/witness_golden_test.go`
 - Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 
-- [ ] trie-level search over delete-heavy random batches (both planes, cascades, self-destruct). Oracle: `trie.RLPDecode` of
+- [x] trie-level search over delete-heavy random batches (both planes, cascades, self-destruct). Oracle: `trie.RLPDecode` of
       the lean set plus the siblings, then apply the batch insert-first and delete-first; a `HashNode` resolve fails the
       case. If a case fails, record its shape, the assertion that fires and the value it sees; Task 7 adds it as a test
-- [ ] on the Task 2 chain, call `execBlockStatelessly` in the test for every block, both modes, under v3, and assert the
+- [x] on the Task 2 chain, call `execBlockStatelessly` in the test for every block, both modes, under v3, and assert the
       returned post-state root
-- [ ] run `TestHeadCaptureOverParentRecordsMatchesDurablePerBlock` on the Task 2 chain, so the `TraceCollapsesRoot` route sees
-      candidates > 0 per shape
+- [x] run `TestHeadCaptureOverParentRecordsMatchesDurablePerBlock` on the Task 2 chain, so the `TraceCollapsesRoot` route sees
+      candidates > 0 for each shape except transient-before, where HPH reports none today
 - [ ] run the EEST zkevm canonical corpus under v3 and record the result; if its runner has no v3 mode, add one
-- [ ] if no failing case is found, record that Task 7 removes HPH mechanics from v3 and fixes no validity defect
+- [x] no failing validity case was found: 6 account-plane and 5 storage-plane batches under `-short`, and 34 account-plane
+      and 33 storage-plane batches without `-short`; Task 7 removes HPH mechanics from v3 and fixes no validity defect
 
 ### Task 7: v3-native collapse siblings
 **Files:**
