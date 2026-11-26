@@ -2700,12 +2700,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	// A legacy frame awaiting restoration or revalidation cannot advance the account
 	// nonce. Keep its chain queued and defer gap eviction until it is usable or removed.
 	nonceChainBlocked := p.hasParkedLegacyFrame(senderID)
-	reserved := p.frameReservations[sender]
-	if senderBalance.Gt(&reserved.cost) {
-		senderBalance.Sub(&senderBalance, &reserved.cost)
-	} else {
-		senderBalance.Clear()
-	}
+	senderBalance = unreservedFunds(senderBalance, p.frameReservations[sender].cost)
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
