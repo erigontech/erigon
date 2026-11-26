@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/protocol/da"
 	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -274,7 +275,10 @@ func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
 			return Poison(fmt.Errorf("%w, not %d", ErrMultiCall, len(calls)))
 		}
 		call := calls[0]
-		e, value = outboundEntry(call, x.Sync.RollupID), call.Value
+		if e, err = outboundEntry(call, x.Sync.RollupID); err != nil {
+			return Poison(err)
+		}
+		value = call.Value
 		if !value.IsZero() {
 			escrow, err := k.escrowLeft()
 			if err != nil {
@@ -359,14 +363,10 @@ func (k *composition) escrowLeft() (*uint256.Int, error) {
 }
 
 // outboundEntry is the L1 entry settling c, a successful call from rollup
-// to L1.
-func outboundEntry(c *Call, rollup uint64) *protocol.ExecutionEntry {
-	return &protocol.ExecutionEntry{
-		L2ToL1Calls: []protocol.CrossChainCall{{
-			SourceAddress: c.Source, SourceRollupID: rollup, TargetAddress: c.Target, Value: c.Value.ToBig(), Data: c.Data,
-		}},
-		DestinationRollupID: rollup,
-		Success:             true,
-		ReturnData:          c.Return,
-	}
+// to L1, as derivation rebuilds it.
+func outboundEntry(c *Call, rollup uint64) (*protocol.ExecutionEntry, error) {
+	return protocol.EntryFromAction(&da.Action{
+		SourceRollupID: rollup, TargetRollupID: protocol.MainnetRollupID, SourceAddress: c.Source, TargetAddress: c.Target,
+		Value: c.Value, Data: c.Data, Success: true, ReturnData: c.Return,
+	}, rollup)
 }
