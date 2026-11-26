@@ -18,6 +18,7 @@ package engineapi_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,8 +39,7 @@ import (
 )
 
 func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
+	ctx := t.Context()
 	genesis, key, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
 	args := engineapitester.EngineApiTesterInitArgs{
@@ -54,8 +54,8 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 	require.NoError(t, err)
 	payloads, _, _, _ := buildChurnChain(ctx, t, ref, 30, func(k int) int64 { return int64(k) })
 	payloads = append([]*engineapitester.MockClPayload{empty}, payloads...)
-	encoded := readCrashRecoveryBlocks(t, ref.ChainDB, payloads)
-	blocks, err := decodeCrashRecoveryBlocks(encoded)
+	downloaded := readCrashRecoveryBlocks(t, ref.ChainDB, payloads)
+	blocks, err := decodeCrashRecoveryBlocks(downloaded)
 	require.NoError(t, err)
 	want := readCrashRecoveryState(t, ref.ChainDB)
 	clState := *ref.MockCl.State()
@@ -74,26 +74,32 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, acceptedTip.ExecutionPayload.BlockHash, lastAccepted.HeadHash)
 
-	rejectTip := func(t *testing.T, node engineapitester.EngineApiTester, chain []*types.Block) (*types.Block, *enginetypes.PayloadStatus) {
-		t.Helper()
-		last := chain[len(chain)-1]
-		header := types.CopyHeader(last.HeaderNoCopy())
+	withWrongRoot := func(block *types.Block) *types.Block {
+		header := block.Header()
 		header.Root[0] ^= 1
-		bad := types.NewBlockFromNetwork(header, last.Body(), last.BlockAccessListSidecar())
-		downloaded := append([]*types.Block(nil), chain[1:]...)
-		downloaded[len(downloaded)-1] = bad
-		status, err := node.ExecutionModule.InsertBlocks(ctx, downloaded)
+		return block.WithSeal(header)
+	}
+	rejectForkchoice := func(t *testing.T, node engineapitester.EngineApiTester, chain []*types.Block) *enginetypes.PayloadStatus {
+		t.Helper()
+		status, err := node.ExecutionModule.InsertBlocks(ctx, chain[1:])
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 		result, err := node.EngineApiClient.ForkchoiceUpdatedV4(ctx, &enginetypes.ForkChoiceState{
-			HeadHash: bad.Hash(), SafeBlockHash: chain[2].Hash(), FinalizedBlockHash: chain[1].Hash(),
+			HeadHash: chain[len(chain)-1].Hash(), SafeBlockHash: chain[2].Hash(), FinalizedBlockHash: chain[1].Hash(),
 		}, nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, result.PayloadStatus.Status)
 		node.ExecutionModule.Drain()
-		return bad, result.PayloadStatus
+		return result.PayloadStatus
 	}
-	badTip, result := rejectTip(t, eat, blocks)
+	// Request the child of the invalid block so execution rejects an ancestor of the requested head.
+	firstInvalid := len(blocks) - 2
+	badParent := withWrongRoot(blocks[firstInvalid])
+	tip := blocks[len(blocks)-1]
+	header := tip.Header()
+	header.ParentHash = badParent.Hash()
+	rejected := []*types.Block{badParent, tip.WithSeal(header)}
+	result := rejectForkchoice(t, eat, slices.Concat(blocks[:firstInvalid], rejected))
 	require.Nil(t, result.LatestValidHash)
 
 	assertCheckpoint := func(t *testing.T, node engineapitester.EngineApiTester) uint64 {
@@ -106,13 +112,16 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 			require.True(t, aligned, "execution and download stages must agree with Finish")
 			committed = progress
 			require.Greater(t, committed, uint64(2), "catch-up must commit before reaching the invalid block")
-			require.Less(t, committed, badTip.NumberU64())
+			require.Less(t, committed, badParent.NumberU64())
 			checkpoint := blocks[committed-1].Hash()
 			require.Equal(t, checkpoint, rawdb.ReadHeadBlockHash(tx))
 			require.Equal(t, checkpoint, rawdb.ReadHeadHeaderHash(tx))
-			canonical, err := rawdb.ReadCanonicalHash(tx, badTip.NumberU64())
-			require.NoError(t, err)
-			require.Zero(t, canonical, "rejected blocks must not be replayed at startup")
+			for _, block := range rejected {
+				canonical, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
+				require.NoError(t, err)
+				require.Zero(t, canonical, "canonical marker at height %d", block.NumberU64())
+				require.NotNil(t, rawdb.ReadBlock(tx, block.Hash(), block.NumberU64()), "downloaded block %d must remain readable by hash", block.NumberU64())
+			}
 			lastBlock, _, err := rawdbv3.TxNums.Last(tx)
 			require.NoError(t, err)
 			require.Equal(t, committed, lastBlock)
@@ -124,7 +133,7 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		return committed
 	}
 	committed := assertCheckpoint(t, eat)
-	require.Less(t, committed, badTip.NumberU64()-1, "the durable checkpoint must precede the valid parent")
+	require.Less(t, committed, badParent.NumberU64()-1, "the failing cycle must also contain a valid block")
 
 	require.NoError(t, eat.Close())
 	restart := func(t *testing.T, dir string) engineapitester.EngineApiTester {
@@ -144,20 +153,23 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		node, err := engineapitester.InitialiseEngineApiTester(ctx, restartArgs)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, node.Close()) })
-		// The first commit proves startup has acquired the execution semaphore.
-		// Drain can then wait for startup to finish before we inspect the checkpoint.
+		deadline, _ := t.Deadline()
+		waitCtx, cancel := context.WithDeadline(t.Context(), crashRecoveryAttemptDeadline(time.Now(), deadline))
+		defer cancel()
+		// Wait for startup to acquire the execution semaphore before waiting for its release.
 		select {
 		case <-started:
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+		case <-waitCtx.Done():
+			t.Fatalf("waiting for the first startup commit: %v", waitCtx.Err())
 		}
-		node.ExecutionModule.Drain()
+		node.ExecutionModule.WaitIdle(waitCtx)
+		require.NoError(t, waitCtx.Err(), "waiting for startup to finish")
 		return node
 	}
 	resumeValidChain := func(t *testing.T, node engineapitester.EngineApiTester) {
 		t.Helper()
-		// The earlier valid blocks are still available by hash. Only the replacement tip needs importing.
-		status, err := node.ExecutionModule.InsertBlocks(ctx, blocks[len(blocks)-1:])
+		// The valid prefix is still available by hash. Import only the two replacement blocks.
+		status, err := node.ExecutionModule.InsertBlocks(ctx, blocks[firstInvalid:])
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 		require.NoError(t, node.MockCl.UpdateForkChoice(ctx, payloads[len(payloads)-1]))
@@ -165,7 +177,7 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		assertCrashRecoveryState(t, want, readCrashRecoveryState(t, node.ChainDB))
 		built, err := node.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
-		require.Equal(t, blocks[len(blocks)-1].Hash(), built.ExecutionPayload.ParentHash)
+		require.Equal(t, tip.Hash(), built.ExecutionPayload.ParentHash)
 	}
 
 	t.Run("restart_after_rejection", func(t *testing.T) {
@@ -184,9 +196,11 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		_, err = node.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 		// End the same fork one block after the measured commit boundary.
-		bad, status := rejectTip(t, node, blocks[:committed+1])
+		chain := slices.Clone(blocks[:committed+1])
+		chain[committed] = withWrongRoot(chain[committed])
+		status := rejectForkchoice(t, node, chain)
 		require.NotNil(t, status.LatestValidHash)
-		require.Equal(t, bad.ParentHash(), *status.LatestValidHash)
+		require.Equal(t, blocks[committed-1].Hash(), *status.LatestValidHash)
 	})
 
 	t.Run("interrupted_before_rejection", func(t *testing.T) {
@@ -194,27 +208,30 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 			t.Skip("subprocess crash recovery")
 		}
 		dir := newSmallStepDataDir(t)
-		downloaded := append([]crashRecoveryBlock(nil), encoded[1:]...)
-		badRLP, err := rlp.EncodeToBytes(badTip)
-		require.NoError(t, err)
-		downloaded[len(downloaded)-1].RLP = badRLP
+		for i, block := range rejected {
+			data, err := rlp.EncodeToBytes(block)
+			require.NoError(t, err)
+			downloaded[firstInvalid+i].RLP = data
+		}
 		killAtUnwindBoundary(t, crashRecoveryRequest{
 			Genesis: genesis, CoinbaseKey: crypto.FromECDSA(key), DataDir: dir,
 			Point: execmodule.StateTransitionFCUCatchupCommitComplete, CatchupCycle: 1,
-			Canonical: []*engineapitester.MockClPayload{empty, acceptedTip}, Downloaded: downloaded,
+			Canonical: []*engineapitester.MockClPayload{empty, acceptedTip}, Downloaded: downloaded[1:],
 		})
 		var interruptedAt uint64
 		inspectCrashRecoveryDataDir(t, dir, func(db kv.TemporalRoDB) {
 			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-				canonical, err := rawdb.ReadCanonicalHash(tx, badTip.NumberU64())
-				require.NoError(t, err)
-				require.Equal(t, badTip.Hash(), canonical)
+				for _, block := range rejected {
+					canonical, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
+					require.NoError(t, err)
+					require.Equal(t, block.Hash(), canonical)
+				}
 				interruptedAt, err = stages.GetStageProgress(tx, stages.Finish)
 				return err
 			}))
 		})
 		node := restart(t, dir)
-		require.Greater(t, assertCheckpoint(t, node), interruptedAt, "startup must keep the cycles it committed before rejecting the tip")
+		require.Greater(t, assertCheckpoint(t, node), interruptedAt, "startup must keep the cycles it committed before finding the invalid block")
 		resumeValidChain(t, node)
 	})
 }
