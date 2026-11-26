@@ -1440,7 +1440,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		if reason := p.checkInsertion(txn, false, nil); reason != txpoolcfg.NotSet {
 			return reason, nil
 		}
-		// Pooled nonces can only narrow the gap from the account nonce.
+		// Pooled nonces can only narrow the gap from the account nonce, so walk them only if that gap would evict txn.
 		if reason, _ := p.nonceGapReason(txn, senderNonce); reason != txpoolcfg.NotSet && !p.hasParkedLegacyFrame(txn.SenderID) {
 			next := senderNonce
 			for p.all.get(txn.SenderID, next) != nil {

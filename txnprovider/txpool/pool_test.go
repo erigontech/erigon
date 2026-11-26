@@ -3947,6 +3947,51 @@ func TestRemoteBlobTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 	}
 }
 
+func TestRemoteSetCodeTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		authNonce uint64 // of a self-authorization in the transaction at nonce 17
+		want      txpoolcfg.DiscardReason
+		kept      int
+	}{
+		{"wrong self-authorization nonce", 17, txpoolcfg.InvalidAuthorizationNonce, 17},
+		{"next nonce", 18, txpoolcfg.Spammer, 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			require.NoError(t, pool.start(ctx))
+			pool.cfg.AccountSlots = 16
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			change.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			var pooled TxnSlots
+			for nonce := range uint64(17) {
+				pooled.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
+			}
+			pool.AddRemoteTxns(ctx, pooled, nil, nil)
+			_, err = pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+
+			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, tc.authNonce)
+			require.NoError(t, err)
+			setCode := newTestSetCodeTxnSlot(17, 0, 1, 2, 100_000)
+			setCode.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+			setCode.Txn.SetSender(accounts.InternAddress(sender))
+			var setCodes TxnSlots
+			setCodes.Append(encodeRemoteTxn(t, setCode), sender[:], false)
+			pool.AddRemoteTxns(ctx, setCodes, nil, nil)
+			reasons, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
+			require.Equal(t, tc.kept, pool.all.count(pool.senders.senderIDs[sender]))
+		})
+	}
+}
+
 func TestRemoteTxnForReservedNonceKeepsSenderTxns(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	require.NoError(t, pool.start(ctx))
