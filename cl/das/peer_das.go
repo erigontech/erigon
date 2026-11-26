@@ -380,7 +380,11 @@ func (d *peerdas) recoveryDone(ctx context.Context, slot uint64, blockRoot commo
 		return len(columns) == int(d.beaconConfig.NumberOfColumns), err
 	}
 	count, err := d.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
-	return count > 0, err
+	if err != nil || count == 0 || !d.keepsAllColumns(slot) {
+		return count > 0, err
+	}
+	// The count row does not prove that the files exist, and this node can rebuild a missing one.
+	return blob_storage.BlobsStored(ctx, d.blobStorage, slot, blockRoot, int(count))
 }
 
 type blobRecoveryMetadata struct {
@@ -1339,7 +1343,7 @@ func hasSignedHeaderOfBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common
 
 func isBlockColumn(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash, isGloas bool, gloasCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	if isGloas {
-		return VerifyDataColumnSidecarWithCommitments(sidecar, gloasCommitments)
+		return sidecar.BeaconBlockRoot == blockRoot && VerifyDataColumnSidecarWithCommitments(sidecar, gloasCommitments)
 	}
 	return VerifyDataColumnSidecar(sidecar) && hasSignedHeaderOfBlock(sidecar, blockRoot) && VerifyDataColumnSidecarInclusionProof(sidecar)
 }
@@ -1616,6 +1620,16 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 }
 
 func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadata *blobRecoveryMetadata) error {
+	return d.scheduleRecover(slot, blockRoot, metadata, true)
+}
+
+// scheduleRepair asks for the rebuild of a column that a blob request needs. It never restarts the quiet period of an
+// owned recovery, because a failed request brings no column.
+func (d *peerdas) scheduleRepair(slot uint64, blockRoot common.Hash) error {
+	return d.scheduleRecover(slot, blockRoot, nil, false)
+}
+
+func (d *peerdas) scheduleRecover(slot uint64, blockRoot common.Hash, metadata *blobRecoveryMetadata, mayRestartWait bool) error {
 	if !d.blobRecoveryEnabled() {
 		return nil
 	}
@@ -1638,7 +1652,7 @@ func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadat
 	}
 	if metadata == nil {
 		request.waitFrom = time.Now()
-		request.holdable = !d.IsArchivedMode() && d.blocksToCheckSync.holdable(blockRoot)
+		request.holdable = mayRestartWait && !d.IsArchivedMode() && d.blocksToCheckSync.holdable(blockRoot)
 	}
 	return d.enqueueBlobRecovery(request)
 }

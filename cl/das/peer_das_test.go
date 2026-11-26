@@ -3538,6 +3538,19 @@ func forkToGloasAt(t *testing.T, r *recoveryRun, gloasForkEpoch uint64) {
 	require.NoError(t, err)
 	gloasData.Add(r.root, &gloasBlockData{BlobKzgCommitments: r.columns[0].KzgCommitments, SignedBeaconBlockHeader: r.columns[0].SignedBlockHeader})
 	r.d.gloasDataCache = gloasData
+	r.d.columnStorage = namedGloasColumns{r.d.columnStorage}
+}
+
+// namedGloasColumns reads the stored columns as Gloas columns do, with the root of their block. The fixture stores them in
+// the Fulu schema, which has no such field.
+type namedGloasColumns struct{ blob_storage.DataColumnStorage }
+
+func (s namedGloasColumns) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	sidecar, err := s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+	if err == nil {
+		sidecar.BeaconBlockRoot = blockRoot
+	}
+	return sidecar, err
 }
 
 // scheduleCall is the interval in which a TryScheduleRecover call ran. The call takes its waitFrom time inside it.
@@ -4135,6 +4148,99 @@ func TestLazyBlobRecoveryEndsAfterOneStoreAttempt(t *testing.T) {
 			require.NotContains(t, saved, columns.column)
 			r.requireNoBlobSidecars(t)
 			r.requireNoCachedRecoveryResult(t)
+		})
+	}
+}
+
+// useBlobFiles gives the run a blob store on a file system of its own, and returns a function that removes the file of a
+// blob sidecar, so a test can lose a file and keep the count row.
+func useBlobFiles(t *testing.T, r *recoveryRun) (removeFile func(index uint64) error) {
+	t.Helper()
+	files := afero.NewMemMapFs()
+	r.d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), files)
+	return func(index uint64) error {
+		return files.Remove(fmt.Sprintf("%d/%s_%d", recoveryTestSlot/10_000, r.root.String(), index))
+	}
+}
+
+// Outside lazy mode the count row is no proof that the blob files exist, so a retry of a failed blob write goes on
+// when a file is missing under a positive row.
+func TestBlobRecoveryRetriesAFailedBlobWriteThatLeftACountRowWithAMissingFile(t *testing.T) {
+	var damageErr error
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{BlobPruningDisabled: true},
+		supernode:    true,
+		unscheduled:  true,
+		instrument: func(r *recoveryRun) {
+			atFuluFromGenesis(r)
+			removeFile := useBlobFiles(t, r)
+			store := r.d.blobStorage
+			r.d.blobStorage = &failFirstBlobWriteStorage{BlobStorage: store, onFail: func() {
+				damageErr = store.WriteBlobSidecars(t.Context(), r.root, r.blobs)
+				if damageErr == nil {
+					damageErr = removeFile(1)
+				}
+			}}
+		},
+	})
+	r.scheduleWithoutMetadata(t)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+
+	require.NoError(t, damageErr)
+	r.requireBlobsRecovered(t)
+}
+
+func TestRecoveryDone(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		caplinConfig clparams.CaplinConfig
+		supernode    bool
+		prepare      func(t *testing.T, r *recoveryRun, removeFile func(index uint64) error)
+		want         bool
+	}{
+		{name: "lazy with some columns", supernode: true},
+		{name: "lazy with every column", supernode: true, want: true, prepare: func(t *testing.T, r *recoveryRun, _ func(uint64) error) {
+			for _, sidecar := range r.unstoredColumns() {
+				r.storeColumn(t, sidecar.Index)
+			}
+		}},
+		{
+			name: "supernode outside lazy mode with every blob file", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true, want: true,
+			prepare: func(t *testing.T, r *recoveryRun, _ func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+			},
+		},
+		{
+			name: "supernode outside lazy mode with a blob file missing", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true,
+			prepare: func(t *testing.T, r *recoveryRun, removeFile func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+				require.NoError(t, removeFile(1))
+			},
+		},
+		{name: "supernode outside lazy mode with no count row", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true},
+		{
+			name: "archive custody node with a blob file missing", caplinConfig: clparams.CaplinConfig{ArchiveBlobs: true}, want: true,
+			prepare: func(t *testing.T, r *recoveryRun, removeFile func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+				require.NoError(t, removeFile(1))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var removeFile func(index uint64) error
+			r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &tc.caplinConfig, supernode: tc.supernode, unscheduled: true, instrument: func(r *recoveryRun) {
+				atFuluFromGenesis(r)
+				removeFile = useBlobFiles(t, r)
+			}})
+			if tc.prepare != nil {
+				tc.prepare(t, r, removeFile)
+			}
+
+			done, err := r.d.recoveryDone(t.Context(), recoveryTestSlot, r.root)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, done)
 		})
 	}
 }

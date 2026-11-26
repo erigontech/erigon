@@ -342,6 +342,9 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 			if err != nil && !errors.Is(err, das.ErrColumnsNotKept) {
 				return nil, blobsFromColumnsError(err)
 			}
+			if err == nil && len(columnBlobs) == 0 && reqVersion < clparams.GloasVersion {
+				return nil, blobsFromColumnsError(das.ErrBlobsUnavailable)
+			}
 			for _, blob := range columnBlobs {
 				blobs.Append(blob)
 			}

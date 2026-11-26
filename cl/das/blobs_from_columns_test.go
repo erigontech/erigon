@@ -135,6 +135,36 @@ func TestBlobsFromColumnsServesASupernodeOutsideLazyMode(t *testing.T) {
 	}
 }
 
+// Outside lazy mode the count row is no proof that the blob files exist: a column that a blob request needs is rebuilt
+// when a file is missing, and the file is written again.
+func TestBlobsFromColumnsRepairsAColumnOutsideLazyModeWhenABlobFileIsMissing(t *testing.T) {
+	var removeFile func(index uint64) error
+	g := startGossipRecovery(t, false, atFuluFromGenesis, func(r *recoveryRun) {
+		r.d.caplinConfig = &clparams.CaplinConfig{BlobPruningDisabled: true}
+		removeFile = useBlobFiles(t, r)
+	})
+	require.False(t, g.d.lazyBlobSidecars(recoveryTestSlot))
+	g.scheduleWithoutMetadata(t)
+	requireBlobRecoveryReleased(t, g.d, g.root)
+	g.requireBlobsRecovered(t)
+	g.requireAllColumnsStored(t)
+	receiveRecoveredColumnsPublish(t, g.published)
+	require.NoError(t, removeFile(1))
+	require.NoError(t, g.d.columnStorage.RemoveColumnSidecars(t.Context(), recoveryTestSlot, g.root, 5))
+	g.requireNoBlobSidecars(t)
+	count, err := g.d.blobStorage.KzgCommitmentsCount(t.Context(), g.root)
+	require.NoError(t, err)
+	require.Positive(t, count)
+
+	_, _, err = g.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	requireBlobRecoveryReleased(t, g.d, g.root)
+	g.requireAllColumnsStored(t)
+	g.requireBlobsRecovered(t)
+	g.requireBlobsRebuilt(t)
+}
+
 func TestBlobsFromColumnsServesFromTheCustodyRaiseSlot(t *testing.T) {
 	r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &clparams.CaplinConfig{}, supernode: true, unscheduled: true, instrument: func(r *recoveryRun) {
 		atFuluFromGenesis(r)
@@ -208,6 +238,49 @@ func TestBlobsFromColumnsRebuildsAMissingColumn(t *testing.T) {
 	g.requireBlobsRebuilt(t)
 }
 
+func (g *gossipRecovery) ownedRequest() recoverBlobsRequest {
+	g.d.recoveringMutex.Lock()
+	defer g.d.recoveringMutex.Unlock()
+	return g.d.recoveryRequests[g.root]
+}
+
+// missingColumnOfAHoldableRoot starts a gated recovery of a block with many blobs that is queued for the column sync, so
+// a scheduled root is holdable. Column 5 is missing from the 64 stored columns, so a blob request fails on it.
+func missingColumnOfAHoldableRoot(t *testing.T) *gossipRecovery {
+	t.Helper()
+	g := startGossipRecoveryWithBlobs(t, true, holdBlobs, atFuluFromGenesis)
+	g.queueForColumnSync(time.Now().Add(firstAttemptAhead))
+	require.NoError(t, g.d.columnStorage.RemoveColumnSidecars(t.Context(), recoveryTestSlot, g.root, 5))
+	g.storeColumn(t, 64)
+	return g
+}
+
+// A blob request that fails brings no column, so it must not restart the quiet period of a recovery that waits.
+func TestBlobsFromColumnsDoesNotRestartTheWaitOfAnOwnedRecovery(t *testing.T) {
+	g := missingColumnOfAHoldableRoot(t)
+	g.schedule(t)
+	owned := g.ownedRequest()
+	require.True(t, owned.holdable)
+
+	_, _, err := g.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	require.Equal(t, owned, g.ownedRequest())
+}
+
+func TestBlobsFromColumnsSchedulesANewRecoveryThatCannotRestartAWait(t *testing.T) {
+	g := missingColumnOfAHoldableRoot(t)
+	begin := time.Now()
+
+	_, _, err := g.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	owned := g.ownedRequest()
+	require.Equal(t, g.root, owned.blockRoot)
+	require.False(t, owned.waitFrom.Before(begin), "the quiet period starts at the request")
+	require.False(t, owned.holdable)
+}
+
 // damagedUntilRemovedStorage fails the reads of one column until the column is removed: with readErr, or by damaging
 // the sidecar it returns.
 type damagedUntilRemovedStorage struct {
@@ -257,6 +330,26 @@ func TestBlobsFromColumnsRemovesAMalformedColumnAndRebuildsIt(t *testing.T) {
 	requireBlobRecoveryReleased(t, g.d, g.root)
 	g.requireAllColumnsStored(t)
 	g.requireBlobsRebuilt(t)
+}
+
+// TestBlobsFromColumnsRemovesAGloasColumnOfAnotherBlock checks that a Gloas column that names another block is malformed.
+func TestBlobsFromColumnsRemovesAGloasColumnOfAnotherBlock(t *testing.T) {
+	var columns *damagedUntilRemovedStorage
+	g := startGossipRecovery(t, false, func(r *recoveryRun) {
+		forkToGloasAt(t, r, recoveryTestSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch)
+		columns = &damagedUntilRemovedStorage{DataColumnStorage: r.d.columnStorage, column: 3, damage: func(s *cltypes.DataColumnSidecar) {
+			s.BeaconBlockRoot = common.HexToHash("0xabc")
+		}}
+		r.d.columnStorage = columns
+	})
+	g.storeColumn(t, 64)
+
+	_, _, err := g.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	require.True(t, columns.removed.Load())
+	requireBlobRecoveryReleased(t, g.d, g.root)
+	g.requireAllColumnsStored(t)
 }
 
 // TestBlobsFromColumnsRemovesAnIndexedColumnThatCannotBeRead checks that a column that the index lists but the storage
@@ -313,9 +406,14 @@ func TestBlobsFromColumnsDoesNotScheduleRecoveryWhenTheRemovalFails(t *testing.T
 	records := capturePeerDasLogs(func() { _, _, err = g.blobsFromColumns([]uint64{0, 1}, false) })
 
 	require.ErrorIs(t, err, ErrBlobsUnavailable)
-	require.Len(t, records, 1)
+	require.Len(t, records, 2)
 	require.Equal(t, log.LvlWarn, records[0].Lvl)
-	require.Equal(t, errColumnSingleFailed, logContextValue(records[0], "err"))
+	require.Equal(t, "[peerdas] removing malformed column sidecar", records[0].Msg)
+	require.Equal(t, recoveryTestSlot, logContextValue(records[0], "slot"))
+	require.Equal(t, g.root, logContextValue(records[0], "blockRoot"))
+	require.Equal(t, uint64(3), logContextValue(records[0], "column"))
+	require.Equal(t, log.LvlWarn, records[1].Lvl)
+	require.Equal(t, errColumnSingleFailed, logContextValue(records[1], "err"))
 	g.d.recoveringMutex.Lock()
 	defer g.d.recoveringMutex.Unlock()
 	require.NotContains(t, g.d.isRecovering, g.root)

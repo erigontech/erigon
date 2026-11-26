@@ -295,6 +295,9 @@ func (d *peerdas) readBlockColumn(ctx context.Context, slot uint64, blockRoot co
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	if err == nil {
+		log.Warn("[peerdas] removing malformed column sidecar", "slot", slot, "blockRoot", blockRoot, "column", column)
+	}
 	// Recovery never rebuilds an indexed column, so an unreadable one is removed. A column that a concurrent recovery
 	// rebuilt after the read is removed too, and the next request schedules its rebuild.
 	if err == nil || indexed {
@@ -303,7 +306,7 @@ func (d *peerdas) readBlockColumn(ctx context.Context, slot uint64, blockRoot co
 			return nil, ErrBlobsUnavailable
 		}
 	}
-	if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
+	if err := d.scheduleRepair(slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery for a column that cannot serve blobs", "slot", slot, "blockRoot", blockRoot, "column", column, "err", err)
 	}
 	return nil, ErrBlobsUnavailable

@@ -278,15 +278,29 @@ func setupBlobsTest(t *testing.T) blobsTestFixture {
 
 func setupBlobsTestWithCommitments(t *testing.T, commitments []cltypes.KZGCommitment) blobsTestFixture {
 	t.Helper()
+	return setupBlobsTestOfVersion(t, clparams.ElectraVersion, commitments)
+}
+
+// setupBlobsTestOfVersion is setupBlobsTestWithCommitments for a block of the given version, which keeps its commitments
+// where that version does.
+func setupBlobsTestOfVersion(t *testing.T, version clparams.StateVersion, commitments []cltypes.KZGCommitment) blobsTestFixture {
+	t.Helper()
 
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	block := blocks[0]
 	slot := block.Block.Slot
+	if version != clparams.ElectraVersion {
+		versioned := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+		versioned.Block.Slot = slot
+		block.Block = versioned.Block
+	}
+	require.Equal(t, version, block.Version())
 
-	block.Block.Body.BlobKzgCommitments.Clear()
+	blockCommitments := block.Block.Body.GetBlobKzgCommitments()
+	blockCommitments.Clear()
 	versionedHashes := make([]common.Hash, len(commitments))
 	for i := range commitments {
-		block.Block.Body.BlobKzgCommitments.Append(&commitments[i])
+		blockCommitments.Append(&commitments[i])
 		var err error
 		versionedHashes[i], err = utils.KzgCommitmentToVersionedHash(common.Bytes48(commitments[i]))
 		require.NoError(t, err)

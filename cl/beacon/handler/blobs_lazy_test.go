@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
@@ -260,6 +261,53 @@ func TestBlobsAnswerEmptyWithoutBuildingBlobsWhenNoBlobIsSelected(t *testing.T) 
 
 			require.Equal(t, http.StatusOK, out.status)
 			require.Empty(t, out.data)
+		})
+	}
+}
+
+// setupLazyBlobsOfVersion is setupLazyBlobsTest for a block that has the version of its slot, with three commitments.
+func setupLazyBlobsOfVersion(t *testing.T, version clparams.StateVersion) lazyBlobsFixture {
+	t.Helper()
+	f := lazyBlobsOf(t, setupBlobsTestOfVersion(t, version, []cltypes.KZGCommitment{{69}, {1}, {2}}), version == clparams.GloasVersion)
+	cfg := f.handler.beaconChainCfg
+	require.Equal(t, version, cfg.GetCurrentStateVersion(f.slot/cfg.SlotsPerEpoch))
+	return f
+}
+
+func TestBlobsOfABlockWithCommitmentsWhenNoBlobIsBuiltFromColumns(t *testing.T) {
+	notAvailable := "blob data not available, retry later"
+	for _, tc := range []struct {
+		name    string
+		version clparams.StateVersion
+		query   func(f lazyBlobsFixture) string
+		asked   []uint64
+		err     error
+		status  int
+		message string
+	}{
+		{name: "fulu block", version: clparams.FuluVersion, asked: []uint64{0, 1, 2}, status: http.StatusNotFound, message: notAvailable},
+		{
+			name: "fulu block with versioned hashes", version: clparams.FuluVersion, asked: []uint64{0, 2}, status: http.StatusNotFound, message: notAvailable,
+			query: func(f lazyBlobsFixture) string {
+				return "versioned_hashes=" + f.versionedHashes[2].Hex() + "," + f.versionedHashes[0].Hex()
+			},
+		},
+		{name: "fulu block when the node keeps no columns", version: clparams.FuluVersion, asked: []uint64{0, 1, 2}, err: das.ErrColumnsNotKept, status: http.StatusOK},
+		{name: "gloas block", version: clparams.GloasVersion, asked: []uint64{0, 1, 2}, status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupLazyBlobsOfVersion(t, tc.version)
+			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, tc.asked, false).Return(nil, nil, tc.err)
+			query := ""
+			if tc.query != nil {
+				query = tc.query(f)
+			}
+
+			out := requestLazyBlobEndpoint(t, f, "blobs", query)
+
+			require.Equal(t, tc.status, out.status)
+			require.Empty(t, out.data)
+			require.Contains(t, out.message, tc.message)
 		})
 	}
 }
