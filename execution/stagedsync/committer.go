@@ -59,6 +59,7 @@ type aheadProbe struct {
 	ws, acc, emit, fold, flush, own time.Duration
 	rounds                          int
 	lag, prep, ckpt, final, tail    time.Duration
+	prepCPU, finalCPU, tailCPU      time.Duration
 	end, recvAt, reqAt              time.Time
 	blk                             uint64
 }
@@ -556,7 +557,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"overlap", overlap, "gap", gap, "residual", residual)
 			if p := cc.probe; p.blk == r.BlockNum {
 				cc.logger.Info("[np-phase] aheadsplit", "blk", r.BlockNum, "npLag", p.lag, "npStartVsExec", p.end.Add(-p.prep-p.ckpt-p.final-p.tail).Sub(r.execStartedAt),
-					"npPrep", p.prep, "npCkpt", p.ckpt, "npFinal", p.final, "npTail", p.tail, "npRounds", p.rounds,
+					"npPrep", p.prep, "npPrepCpu", p.prepCPU, "npFinalCpu", p.finalCPU, "npTailCpu", p.tailCPU, "npCkpt", p.ckpt, "npFinal", p.final, "npTail", p.tail, "npRounds", p.rounds,
 					"npWs", p.ws, "npAcc", p.acc, "npEmit", p.emit, "npFold", p.fold, "npFlush", p.flush, "npOwn", p.own,
 					"npEndVsExec", p.end.Sub(r.execEndedAt), "npRecvVsExec", p.recvAt.Sub(r.execStartedAt), "npPw", p.reqAt.Sub(p.recvAt), "npDrain", commitStart.Sub(p.end))
 			}
@@ -667,7 +668,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	t0 := time.Now()
+	t0, c0 := time.Now(), npCPU()
 	cc.probe = aheadProbe{blk: req.blockNum}
 	fail := func(err error) {
 		pb.failed = true
@@ -693,15 +694,15 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	tPrep := time.Now()
+	tPrep, cPrep := time.Now(), npCPU()
 	after, err := cc.checkpointStepsFromBAL(ctx, req, vm, base)
 	if err != nil {
 		fail(err)
 		return
 	}
-	tCk := time.Now()
+	tCk, cCk := time.Now(), npCPU()
 	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, base, after, math.MaxUint32, targetOf(br))
-	tFinal := time.Now()
+	tFinal, cFinal := time.Now(), npCPU()
 	if err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -724,6 +725,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	cc.hasComputed = true
 	if logNpPhases {
 		now := time.Now()
+		cc.probe.prepCPU, cc.probe.finalCPU, cc.probe.tailCPU = cPrep-c0, cFinal-cCk, npCPU()-cFinal
 		cc.probe.end, cc.probe.recvAt, cc.probe.reqAt = now, pb.recvAt, pb.reqAt
 		cc.probe.lag, cc.probe.prep, cc.probe.ckpt, cc.probe.final, cc.probe.tail = t0.Sub(pb.reqAt), tPrep.Sub(t0), tCk.Sub(tPrep), tFinal.Sub(tCk), now.Sub(tFinal)
 		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))

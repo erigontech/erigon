@@ -368,7 +368,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
-	stagedsync.NpEndStart()
+	stagedsync.NpEndStart(uint64(req.GasUsed))
 	defer stagedsync.NpEndLog(e.logger, req.BlockNumber.Uint64())
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
