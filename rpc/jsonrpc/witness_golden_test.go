@@ -21,7 +21,12 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/json"
+	"flag"
+	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -40,7 +46,13 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+)
+
+var (
+	witnessGoldenUpdate = flag.Bool("witness-golden-update", false, "update witness golden fixtures")
+	witnessGoldenDir    = flag.String("witness-golden-dir", "testdata/witness_golden", "witness golden fixture directory")
 )
 
 const (
@@ -59,6 +71,20 @@ type witnessGoldenRun struct {
 	m      *execmoduletester.ExecModuleTester
 	chain  *blockgen.ChainPack
 	shapes []witnessGoldenShape
+	proofs []witnessGoldenProof
+}
+
+type witnessGoldenProof struct {
+	address     common.Address
+	storageKeys StorageKeys
+}
+
+type witnessGoldenFixture struct {
+	name   string
+	block  uint64
+	method string
+	mode   string
+	data   []byte
 }
 
 type witnessGoldenCandidates struct {
@@ -229,6 +255,7 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	plain := witnessGoldenAddress(0x1004)
 	empty := witnessGoldenAddress(0x1005)
 	inline := witnessGoldenAddress(0x1006)
+	emptyStorage := witnessGoldenAddress(0x1007)
 	selfDestruct := witnessGoldenAddressWithPrefix(t, sender)
 	alloc := types.GenesisAlloc{
 		sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
@@ -253,6 +280,7 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 		inline: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
 			[2]common.Hash{inlineSlots[0], witnessGoldenValue(1)}, [2]common.Hash{inlineSlots[1], witnessGoldenValue(2)},
 		)},
+		emptyStorage: {Balance: new(big.Int), Nonce: 1, Code: []byte{0x00}},
 	}
 	spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
@@ -284,7 +312,112 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 		}
 	})
 	require.NoError(t, err)
-	return witnessGoldenRun{m: m, chain: generated, shapes: shapes}
+	absentSlot := witnessGoldenValue(0x99)
+	return witnessGoldenRun{
+		m: m, chain: generated, shapes: shapes,
+		proofs: []witnessGoldenProof{
+			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(transientBeforeSlots[1][:])}},
+			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
+			{address: sender},
+			{address: witnessGoldenAddress(0xdead)},
+			{address: emptyStorage},
+			{address: selfDestruct},
+		},
+	}
+}
+
+func witnessGoldenFixturesFor(t *testing.T, commitmentV3 bool) []witnessGoldenFixture {
+	t.Helper()
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	dbg.AssertEnabled = true
+	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
+	statecfg.EnableHistoricalCommitment()
+	run := newWitnessGoldenRun(t)
+	ctx := context.Background()
+	require.NoError(t, run.m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	require.NoError(t, run.m.InsertChain(run.chain))
+	requireCommitmentVariant(t, run.m, commitmentV3)
+
+	debugAPI := newDebugApiForTest(run.m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(run.m), run.m.DB, nil, nil)
+	fixtures := make([]witnessGoldenFixture, 0, len(run.shapes)*4)
+	for _, shape := range run.shapes {
+		bn := rpc.BlockNumber(shape.blockNum)
+		at := rpc.BlockNumberOrHash{BlockNumber: &bn}
+		for _, mode := range []string{"legacy", "canonical"} {
+			result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+			require.NoError(t, err, "block %d mode %s", shape.blockNum, mode)
+			data, err := json.Marshal(result)
+			require.NoError(t, err)
+			fixtures = append(fixtures, witnessGoldenFixture{
+				name: fmt.Sprintf("%d-debug_executionWitness-%s.json", shape.blockNum, mode), block: shape.blockNum, method: "debug_executionWitness", mode: mode, data: data,
+			})
+		}
+		witness, err := ethAPI.GetWitness(ctx, at)
+		require.NoError(t, err, "block %d eth_getWitness", shape.blockNum)
+		data, err := json.Marshal(witness)
+		require.NoError(t, err)
+		fixtures = append(fixtures, witnessGoldenFixture{
+			name: fmt.Sprintf("%d-eth_getWitness.json", shape.blockNum), block: shape.blockNum, method: "eth_getWitness", mode: "default", data: data,
+		})
+
+		proofs := make([]*accounts.AccProofResult, 0, len(run.proofs))
+		for _, request := range run.proofs {
+			proof, err := ethAPI.GetProof(ctx, request.address, request.storageKeys, &at)
+			require.NoError(t, err, "block %d eth_getProof address %s", shape.blockNum, request.address)
+			proofs = append(proofs, proof)
+		}
+		data, err = json.Marshal(proofs)
+		require.NoError(t, err)
+		fixtures = append(fixtures, witnessGoldenFixture{
+			name: fmt.Sprintf("%d-eth_getProof.json", shape.blockNum), block: shape.blockNum, method: "eth_getProof", mode: "default", data: data,
+		})
+	}
+	return fixtures
+}
+
+func witnessGoldenFixturePath(f witnessGoldenFixture, commitmentV3 bool) string {
+	root := *witnessGoldenDir
+	if commitmentV3 {
+		path := filepath.Join(root, "v3", f.name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return filepath.Join(root, f.name)
+}
+
+func TestWitnessGoldenFixtures(t *testing.T) {
+	hph := witnessGoldenFixturesFor(t, false)
+	v3 := witnessGoldenFixturesFor(t, true)
+	if *witnessGoldenUpdate {
+		require.Equal(t, hph, v3, "v3 witness fixtures must match HPH")
+		require.NoError(t, os.MkdirAll(*witnessGoldenDir, 0o755))
+		for _, fixture := range hph {
+			require.NoError(t, os.WriteFile(filepath.Join(*witnessGoldenDir, fixture.name), fixture.data, 0o644))
+		}
+		return
+	}
+	for _, variant := range []struct {
+		name string
+		data []witnessGoldenFixture
+		v3   bool
+	}{
+		{name: "hph", data: hph},
+		{name: "v3", data: v3, v3: true},
+	} {
+		for _, fixture := range variant.data {
+			path := witnessGoldenFixturePath(fixture, variant.v3)
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("witness golden fixture missing: block %d method %s mode %s: %v", fixture.block, fixture.method, fixture.mode, err)
+			}
+			require.Equal(t, want, fixture.data, "block %d method %s mode %s variant %s", fixture.block, fixture.method, fixture.mode, variant.name)
+		}
+	}
 }
 
 func witnessGoldenCandidatesFor(t *testing.T, commitmentV3 bool) witnessGoldenCandidates {
@@ -296,6 +429,7 @@ func witnessGoldenCandidatesFor(t *testing.T, commitmentV3 bool) witnessGoldenCa
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 	require.NoError(t, run.m.InsertChain(run.chain))
+	requireCommitmentVariant(t, run.m, commitmentV3)
 	debugAPI := newDebugApiForTest(run.m)
 	got := witnessGoldenCandidates{legacy: make(map[string][][]byte), canonical: make(map[string][][]byte)}
 	for _, shape := range run.shapes {

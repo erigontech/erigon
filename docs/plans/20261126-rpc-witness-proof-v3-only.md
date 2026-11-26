@@ -189,15 +189,15 @@
 - [x] its blocks hold: a delete and an insert under one branch (transient collapse, with the insert both before and after
       the delete in key order), a cascade, a storage-plane collapse, a storage trie that becomes empty, a self-destruct,
       an inline storage leaf as survivor; assert collapse candidates > 0 for each shape
-- [ ] per block write `debug_executionWitness` legacy and canonical, `eth_getWitness` bytes, and `eth_getProof` for a fixed
+- [x] per block write `debug_executionWitness` legacy and canonical, `eth_getWitness` bytes, and `eth_getProof` for a fixed
       key set (present, absent, storage present and absent, empty storage, deleted account); this test holds the
       eth_getProof byte check
-- [ ] capture on main before any later task, under HPH and under v3; assert both captures are equal at capture time
-- [ ] add the per-variant override directory for the legacy-sibling outputs (empty)
-- [ ] the test regenerates the files only under an explicit update flag; by default it compares bytes
-- [ ] one-time mutation check: change one byte in a temp copy, confirm the failure names block and method, paste the
+- [x] capture on main before any later task, under HPH and under v3; assert both captures are equal at capture time
+- [x] add the per-variant override directory for the legacy-sibling outputs (empty)
+- [x] the test regenerates the files only under an explicit update flag; by default it compares bytes
+- [x] one-time mutation check: change one byte in a temp copy, confirm the failure names block and method, paste the
       failure text in the PR body
-- [ ] run the golden test with v3 on and off: green
+- [x] run the golden test with v3 on and off: green
 
 ### Task 3: v3-native lean node set
 **Files:**

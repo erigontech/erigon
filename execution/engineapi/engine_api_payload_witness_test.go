@@ -16,11 +16,16 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -91,7 +96,62 @@ func requirePayloadWitness(ctx context.Context, t *testing.T, eat engineapiteste
 	require.NoError(t, err)
 	require.Equal(t, enginetypes.ValidStatus, status.Status, status.ValidationError)
 	require.NotNil(t, witness)
+	requireEngineCommitmentVariant(t, eat, statecfg.ExperimentalCommitmentV3)
+	requirePayloadWitnessParentRoot(ctx, t, eat, p, witness)
 	return witness
+}
+
+func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload, witness *jsonrpc.ExecutionWitnessResult) {
+	t.Helper()
+	parentHash := p.ExecutionPayload.ParentHash
+	parent, err := eat.ExecutionModule.GetHeader(ctx, &parentHash, nil)
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+	state := make([][]byte, len(witness.State))
+	for i, node := range witness.State {
+		state[i] = node
+	}
+	rootIndex := -1
+	for i, node := range state {
+		if crypto.Keccak256Hash(node) == parent.Root {
+			rootIndex = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, rootIndex, "witness parent root")
+	state[0], state[rootIndex] = state[rootIndex], state[0]
+	decoded, err := trie.RLPDecode(state)
+	require.NoError(t, err)
+	require.Equal(t, parent.Root, decoded.Hash())
+}
+
+func requireEngineCommitmentVariant(t *testing.T, eat engineapitester.EngineApiTester, wantV3 bool) {
+	t.Helper()
+	tx, err := eat.ChainDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	wantVariant := commitment.VariantHexPatriciaTrie
+	wantKey := commitment.KeyCommitmentState
+	otherKey := commitment.KeyCommitmentV3State
+	if wantV3 {
+		wantVariant = commitment.VariantCommitmentV3
+		wantKey, otherKey = otherKey, wantKey
+	}
+	require.Equal(t, wantVariant, domains.GetCommitmentCtx().Trie().Variant())
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, wantKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, state)
+	otherState, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, otherState)
+	if wantV3 {
+		_, _, _, err = commitment.DecodeCommitmentV3State(state)
+		require.NoError(t, err)
+	}
 }
 
 func runCommitmentVariants(t *testing.T, test func(*testing.T)) {

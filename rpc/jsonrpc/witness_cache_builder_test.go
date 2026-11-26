@@ -669,7 +669,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	runCommitmentV3Tests(t, testWitnessCacheBuilderParity)
 }
 
-func testWitnessCacheBuilderParity(t *testing.T) {
+func testWitnessCacheBuilderParity(t *testing.T, v3 bool) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
@@ -683,6 +683,7 @@ func testWitnessCacheBuilderParity(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	})
 	require.NoError(t, err)
+	requireCommitmentVariant(t, m, v3)
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 

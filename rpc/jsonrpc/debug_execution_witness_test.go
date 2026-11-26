@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -737,7 +738,7 @@ func TestGetWitness(t *testing.T) {
 	runCommitmentV3Tests(t, testGetWitness)
 }
 
-func testGetWitness(t *testing.T) {
+func testGetWitness(t *testing.T, v3 bool) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
@@ -748,6 +749,7 @@ func testGetWitness(t *testing.T) {
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
+	requireCommitmentVariant(t, m, v3)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	// An empty witness is the one-byte version header, not zero bytes.
@@ -830,6 +832,7 @@ func testGetWitness(t *testing.T) {
 func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 	m, testChain := newV3HistoryTestExecModule(t)
 	require.NoError(t, m.InsertChain(testChain))
+	requireCommitmentVariant(t, m, true)
 	ctx := context.Background()
 	debugAPI := newDebugApiForTest(m)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -842,12 +845,27 @@ func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 	txWitness, err := ethAPI.GetTxWitness(ctx, at, 0)
 	require.NoError(t, err)
 	require.Equal(t, witness, txWitness)
+	decoded, err := trie.NewWitnessFromReader(bytes.NewReader(witness), false)
+	require.NoError(t, err)
+	decodedTrie, err := trie.BuildTrieFromWitness(decoded, false)
+	require.NoError(t, err)
+	require.Equal(t, testChain.Blocks[1].Root(), decodedTrie.Hash())
 
 	for _, mode := range []string{"legacy", "canonical"} {
 		result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
 		require.NoError(t, err, "mode %s", mode)
 		require.NotEmpty(t, result.State, "mode %s state", mode)
 		require.NotEmpty(t, result.Keys, "mode %s keys", mode)
+		replay := *result
+		replay.State = slices.Clone(result.State)
+		rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool {
+			return crypto.Keccak256Hash(node) == testChain.Blocks[1].Root()
+		})
+		require.NotEqual(t, -1, rootIndex, "mode %s state root node", mode)
+		replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
+		root, _, err := execBlockStatelessly(&replay, testChain.Blocks[2], m.ChainConfig, m.Engine)
+		require.NoError(t, err, "mode %s stateless replay", mode)
+		require.Equal(t, testChain.Blocks[2].Root(), root, "mode %s post-state root", mode)
 	}
 }
 
@@ -1147,6 +1165,7 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool, m *execmoduletester.
 	}))
 	require.Positive(t, latest)
 	require.Equal(t, uint64(testChain.Length()), latest)
+	requireCommitmentVariant(t, m, commitmentV3)
 
 	debugAPI := newDebugApiForTest(m)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
