@@ -60,9 +60,7 @@ func TestGetHashFnWalksBackOverAncestors(t *testing.T) {
 	readHeaders := 0
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		readHeaders++
-		if hashes[number] != hash {
-			return nil, nil
-		}
+		require.Equal(t, hashes[number], hash, "header %d", number)
 		return &types.Header{Number: *uint256.NewInt(number), ParentHash: hashes[number-1]}, nil
 	}
 	ref := &types.Header{Number: *uint256.NewInt(chainLength), ParentHash: hashes[chainLength-1]}
