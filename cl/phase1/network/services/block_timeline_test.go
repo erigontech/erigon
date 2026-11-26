@@ -476,3 +476,60 @@ func TestBlockSeenInForkChoiceDuringAnImportGetsTheTimedLine(t *testing.T) {
 	require.False(t, line.importStart.IsZero(), "the line has the times of the import")
 	require.False(t, line.imported.IsZero())
 }
+
+func movingTimelineClock(t *testing.T, currentSlot *uint64) *eth_clock.MockEthereumClock {
+	t.Helper()
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return *currentSlot }).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+		return timelineSlotStart.Add(time.Duration(int64(slot)-timelineSlot) * 12 * time.Second)
+	}).AnyTimes()
+	return clock
+}
+
+func TestBlockTimelineLogsAnImportThatEndsAfterTheWindow(t *testing.T) {
+	logger, records := timelineLogger(log.LvlDebug)
+	currentSlot := uint64(timelineSlot)
+	timelines := newBlockTimelines(movingTimelineClock(t, &currentSlot), logger)
+	go timelines.run(t.Context())
+
+	block := timelineBlock(timelineSlot, 0)
+	timelines.seen(block, at(time.Second))
+	timelines.importStarted(block, at(2*time.Second))
+	currentSlot = timelineSlot + blockTimelineSlots + 1
+	timelines.importEnded(block, common.Hash{0x51}, at(2*time.Second), at(40*time.Second), true, nil)
+
+	require.Equal(t, int64(40_000), recordFields(t, nextRecord(t, records))["importedMs"])
+}
+
+func TestBlockTimelineKeepsAnImportInFlightWhenPruning(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	currentSlot := uint64(timelineSlot)
+	timelines := newBlockTimelines(movingTimelineClock(t, &currentSlot), logger)
+	slow, idle := timelineBlockByProposer(timelineSlot, 0, 0), timelineBlockByProposer(timelineSlot, 1, 0)
+
+	timelines.importStarted(slow, at(time.Second))
+	timelines.seen(idle, at(time.Second))
+	currentSlot = timelineSlot + blockTimelineSlots + 1
+	timelines.seen(timelineBlock(currentSlot, 0), at(time.Second))
+
+	require.Contains(t, timelines.pending, slow.Signature, "its import is still in flight")
+	require.NotContains(t, timelines.pending, idle.Signature)
+	timelines.importEnded(slow, common.Hash{0x52}, at(time.Second), at(40*time.Second), true, nil)
+	require.Len(t, timelines.lines, 1)
+}
+
+func TestBlockTimelinePrunesALoggedBlockWithAnImportInFlight(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	currentSlot := uint64(timelineSlot)
+	timelines := newBlockTimelines(movingTimelineClock(t, &currentSlot), logger)
+	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x53}
+
+	timelines.importStarted(block, at(time.Second))
+	timelines.importStarted(block, at(1100*time.Millisecond))
+	timelines.importEnded(block, root, at(1100*time.Millisecond), at(1200*time.Millisecond), true, nil)
+	currentSlot = timelineSlot + blockTimelineSlots + 1
+	timelines.seen(timelineBlock(currentSlot, 0), at(time.Second))
+
+	require.NotContains(t, timelines.pending, block.Signature, "a logged entry needs no more updates")
+}

@@ -31,8 +31,8 @@ import (
 )
 
 const (
-	// blockTimelineSlots is how many slots behind the current one a block is still tracked. A block of the next slot
-	// is tracked too, as gossip accepts it early within the clock disparity.
+	// blockTimelineSlots is how many slots behind the current one a block can still get an entry. A block of the next
+	// slot can too, as gossip accepts it early within the clock disparity.
 	blockTimelineSlots       = 2
 	maxPendingBlockTimelines = 64
 	blockTimelineBuffer      = 64
@@ -190,19 +190,17 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, create entryCr
 		return
 	}
 	currentSlot := t.clock.GetCurrentSlot()
-	if !timelineSlotTracked(block.Block.Slot, currentSlot) {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := block.Signature
 	line, ok := t.pending[key]
 	if !ok {
-		if create == existingEntry {
+		// The window limits only new entries: an import that started inside it can end after it.
+		if create == existingEntry || !timelineSlotTracked(block.Block.Slot, currentSlot) {
 			return
 		}
 		for pendingKey, pending := range t.pending {
-			if !timelineSlotTracked(pending.slot, currentSlot) {
+			if !timelineSlotTracked(pending.slot, currentSlot) && (pending.inFlight == 0 || pending.logged) {
 				delete(t.pending, pendingKey)
 			}
 		}
