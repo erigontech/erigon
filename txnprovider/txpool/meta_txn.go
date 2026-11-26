@@ -147,20 +147,27 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 		return subPool < thanSubPool
 	}
 
-	switch mt.currentSubPool {
-	case 0, PendingSubPool:
-		// Parked frames have no sub-pool. Keep pending fee ordering while their
-		// eligibility markers qualify, even though they cannot be selected yet.
-		if mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock {
-			mtTip := effectiveTip(&mt.minFeeCap, &pendingBaseFee, mt.minTip)
-			thanTip := effectiveTip(&than.minFeeCap, &pendingBaseFee, than.minTip)
-			if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
-				return cmp < 0
-			}
-			// Of equal tips, a base fee rise excludes the lower fee cap first.
-			if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
-				return cmp < 0
-			}
+	feeOrder := mt.currentSubPool
+	if feeOrder == 0 {
+		// Parked frames have no sub-pool. Rank their fees as in the sub-pool their
+		// markers qualify for, even though they cannot be selected or promoted yet.
+		switch {
+		case subPool >= BaseFeePoolBits+EnoughFeeCapBlock:
+			feeOrder = PendingSubPool
+		case subPool >= BaseFeePoolBits:
+			feeOrder = BaseFeeSubPool
+		}
+	}
+	switch feeOrder {
+	case PendingSubPool:
+		mtTip := effectiveTip(&mt.minFeeCap, &pendingBaseFee, mt.minTip)
+		thanTip := effectiveTip(&than.minFeeCap, &pendingBaseFee, than.minTip)
+		if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
+			return cmp < 0
+		}
+		// Of equal tips, a base fee rise excludes the lower fee cap first.
+		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
+			return cmp < 0
 		}
 	case BaseFeeSubPool:
 		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {

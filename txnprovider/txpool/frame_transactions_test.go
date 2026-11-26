@@ -2512,6 +2512,62 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 	require.Equal(t, reserved, pool.frameReservations[payer].cost)
 }
 
+// Parked frames compete for total capacity by the fees of the sub-pool their markers qualify for.
+func TestFramePoolParkedFeeEvictionPriority(t *testing.T) {
+	type fees struct{ tip, feePerGas uint64 }
+	for _, tc := range []struct {
+		name     string
+		baseFee  uint64
+		frames   [2]fees // the first one ranks lower but arrives first, so arrival order would keep it
+		ordinary fees
+		subPool  SubPoolType
+	}{
+		{"below the base fee", 10, [2]fees{{1, 2}, {1, 8}}, fees{1, 5}, BaseFeeSubPool},
+		{"above the base fee", 1, [2]fees{{1, 100}, {5, 10}}, fees{50, 100}, PendingSubPool},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.balance = common.Ether
+			ordinarySender := common.Address{2}
+			newBlock := func(height uint64) {
+				change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, payer, ordinarySender)
+				change.PendingBlockBaseFee = tc.baseFee
+				change.ChangeBatch[0].BlockHeight = height
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			}
+			newBlock(1)
+			pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 1, 0
+
+			var frames []*TxnSlot
+			for i, f := range tc.frames {
+				backend.err = nil
+				sender := common.Address{100, byte(i)}
+				frame := framePoolSlot(t, sender, f.tip, f.feePerGas, uint256.Int{1})
+				frames = append(frames, frame)
+				var txns TxnSlots
+				txns.Append(frame, sender[:], false)
+				reasons, err := pool.addNewTxns(ctx, txns, nil)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				backend.err = context.DeadlineExceeded
+				newBlock(uint64(i) + 2)
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+			}
+
+			ordinary := newTestTxnSlot(0, 0, tc.ordinary.tip, tc.ordinary.feePerGas, 21_000)
+			ordinary.IDHash[0] = 1
+			var txns TxnSlots
+			txns.Append(ordinary, ordinarySender[:], false)
+			reasons, err := pool.addNewTxns(ctx, txns, nil)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Equal(t, tc.subPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+			requireEvicted(t, pool, frames[0], frames[1])
+		})
+	}
+}
+
 func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
 	for _, name := range []string{"no parked frames", "one parked frame"} {
 		t.Run(name, func(t *testing.T) {
