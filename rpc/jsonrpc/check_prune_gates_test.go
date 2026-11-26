@@ -113,10 +113,6 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
-// TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor pins that the latest executed
-// state stays readable when execution lags the forkchoice head by more than the
-// history distance: the prune floor follows the head, but this state comes from the
-// current domains. Older blocks below that floor are still rejected.
 func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
 	t.Parallel()
 
@@ -136,11 +132,12 @@ func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
 	}))
 	require.Greater(t, pruneGatingDistance.PruneTo(forkchoiceHead), chainInfo.head, "the executed block must fall below the forkchoice prune floor")
 
-	for name, selector := range map[string]rpc.BlockNumberOrHash{
-		"latest_executed": executed,
-		"executed_number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.head)),
+	for name, blockNumber := range map[string]rpc.BlockNumber{
+		"latest_executed": rpc.LatestExecutedBlockNumber,
+		"executed_number": rpc.BlockNumber(chainInfo.head),
 	} {
 		t.Run(name, func(t *testing.T) {
+			selector := rpc.BlockNumberOrHashWithNumber(blockNumber)
 			balance, err := apis.eth.GetBalance(ctx, testAddr, &selector)
 			require.NoError(t, err)
 			require.Equal(t, *wantBalance, *balance)
@@ -152,15 +149,32 @@ func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
 			values, err := apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
 			require.NoError(t, err)
 			require.Equal(t, []hexutil.Bytes{make([]byte, 32)}, values[testAddr])
+
+			graphqlBalance, graphqlNonce, _, err := apis.graphql.GetAccountInfo(ctx, testAddr, blockNumber)
+			require.NoError(t, err)
+			require.Equal(t, wantBalance.String(), graphqlBalance)
+			require.Equal(t, uint64(pruneGatingChainLen-1), graphqlNonce)
+
+			_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", blockNumber)
+			require.NoError(t, err)
 		})
 	}
 
-	t.Run("pruned_block", func(t *testing.T) {
-		old := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
-		_, err := apis.eth.GetBalance(ctx, testAddr, &old)
+	t.Run("block_below_forkchoice_floor", func(t *testing.T) {
+		belowFloor := rpc.BlockNumber(chainInfo.head - 1)
+		require.GreaterOrEqual(t, uint64(belowFloor), pruneGatingDistance.PruneTo(chainInfo.head), "the block must be above the execution prune floor")
+		selector := rpc.BlockNumberOrHashWithNumber(belowFloor)
+
+		_, err := apis.eth.GetBalance(ctx, testAddr, &selector)
 		require.ErrorIs(t, err, state.ErrPruned)
 
-		_, err = apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &old)
+		_, err = apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, _, _, err = apis.graphql.GetAccountInfo(ctx, testAddr, belowFloor)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", belowFloor)
 		require.ErrorIs(t, err, state.ErrPruned)
 	})
 }
