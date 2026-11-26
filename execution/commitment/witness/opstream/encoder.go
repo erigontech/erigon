@@ -192,17 +192,18 @@ func (d *nodeEncoder) account(key, path []byte, account *accounts.Account) ([]Wi
 	emptyAccount := account.Root == empty.RootHash || account.Root == (common.Hash{})
 	emptyCode := account.IsEmptyCodeHash()
 	codeSize := uint64(0)
+	accountHashBytes := nibbles.HexToKeybytes(path)
+	accountHash := common.BytesToHash(accountHashBytes)
+	codeRead, hasCodeRead := d.codeReads[accountHash]
+	if hasCodeRead && len(codeRead.Code) > 0 && crypto.Keccak256Hash(codeRead.Code) != account.CodeHash.Value() {
+		return nil, fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", account.CodeHash.Value(), crypto.Keccak256Hash(codeRead.Code))
+	}
 	if emptyAccount && emptyCode {
 		return []WitnessOperator{accountLeaf(key, account, codeSize)}, nil
 	}
 
-	accountHashBytes := nibbles.HexToKeybytes(path)
-	accountHash := common.BytesToHash(accountHashBytes)
 	if !emptyCode {
-		if codeRead, ok := d.codeReads[accountHash]; ok && len(codeRead.Code) > 0 {
-			if crypto.Keccak256Hash(codeRead.Code) != account.CodeHash.Value() {
-				return nil, fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", account.CodeHash.Value(), crypto.Keccak256Hash(codeRead.Code))
-			}
+		if hasCodeRead && len(codeRead.Code) > 0 {
 			operators = append(operators, &OperatorCode{Code: append([]byte(nil), codeRead.Code...)})
 			codeSize = uint64(len(codeRead.Code))
 		} else {

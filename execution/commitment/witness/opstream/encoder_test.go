@@ -18,6 +18,7 @@ package opstream_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -127,6 +128,34 @@ func TestEncodeRejectsCodeHashMismatch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected code hash mismatch")
+	}
+}
+
+func TestEncodeRejectsCodeReadForEmptyCodeHash(t *testing.T) {
+	addr := common.HexToAddress("0x1234")
+	key := crypto.Keccak256Hash(addr[:])
+	account := accounts.NewAccount()
+	account.Nonce = 1
+	nodes, err := stateForAccount(key, account).RLPEncode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := trie.RLPDecode(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{0x60, 0x01}
+	if acc, ok := old.GetAccount(key[:]); !ok || acc == nil {
+		t.Fatal("missing account in reference trie")
+	}
+	if err := old.UpdateAccountCode(key[:], trie.CodeNode(code)); err == nil || !strings.Contains(err.Error(), "inserted code mismatch") {
+		t.Fatalf("reference code mismatch error = %v", err)
+	}
+	_, err = opstream.Encode(nodes, map[common.Hash]opstream.CodeWithHash{
+		key: {Code: code, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))},
+	})
+	if err == nil || !strings.Contains(err.Error(), "inserted code mismatch") {
+		t.Fatalf("Encode error = %v, want code hash mismatch", err)
 	}
 }
 
