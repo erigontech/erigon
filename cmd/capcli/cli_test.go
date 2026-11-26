@@ -104,6 +104,37 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 	}
 }
 
+func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	for name, request := range beaconAPIRequests(t) {
+		t.Run(name, func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() { err = request(srv.URL + "?apikey=query-secret") })
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "query-secret")
+		})
+	}
+}
+
+func TestGetStateRootAtSlotReturnsZeroHashOnNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":404,"message":"not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	root, err := getStateRootAtSlot(t.Context(), srv.URL+"?apikey=query-secret", 0)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, root)
+}
+
 // A malformed redirect is quoted by net/http, and a server can repeat the request's path and query in it.
 func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfMalformedRedirects(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

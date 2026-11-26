@@ -778,12 +778,18 @@ type ArchiveSanitizer struct {
 	FaultOut     string
 }
 
+type beaconHeadsResponse struct {
+	Data []struct {
+		Slot string `json:"slot"`
+	} `json:"data"`
+}
+
 func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	base, err := url.Parse(beaconApiURL)
 	if err != nil {
 		return 0, blobfetch.RedactURLError(err)
 	}
-	headResponse := map[string]any{}
+	var headResponse beaconHeadsResponse
 	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath("eth/v2/debug/beacon/heads").String(), nil)
 	if err != nil {
 		return 0, blobfetch.RedactURLError(err)
@@ -794,23 +800,26 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 		return 0, blobfetch.RedactURLError(err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("get head failed, bad status code %d", resp.StatusCode)
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
 		return 0, err
 	}
-	data := headResponse["data"].([]any)
-	if len(data) == 0 {
+	if len(headResponse.Data) == 0 {
 		return 0, errors.New("no head found")
 	}
-	head := data[0].(map[string]any)
-	slotStr, ok := head["slot"].(string)
-	if !ok {
-		return 0, errors.New("no slot found")
-	}
-	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	slot, err := strconv.ParseUint(headResponse.Data[0].Slot, 10, 64)
 	if err != nil {
 		return 0, err
 	}
 	return slot, nil
+}
+
+type beaconStateRootResponse struct {
+	Data struct {
+		Root string `json:"root"`
+	} `json:"data"`
 }
 
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
@@ -818,7 +827,7 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err != nil {
 		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
-	response := map[string]any{}
+	var response beaconStateRootResponse
 	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath(fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)).String(), nil)
 	if err != nil {
 		return common.Hash{}, blobfetch.RedactURLError(err)
@@ -828,20 +837,20 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err != nil {
 		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return common.Hash{}, nil
 	}
-	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return common.Hash{}, fmt.Errorf("get state root failed, bad status code %d", resp.StatusCode)
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return common.Hash{}, err
 	}
-	data := response["data"].(map[string]any)
-	if len(data) == 0 {
-		return common.Hash{}, errors.New("no head found")
+	if response.Data.Root == "" {
+		return common.Hash{}, errors.New("no state root found")
 	}
-	rootStr := data["root"].(string)
-
-	return common.HexToHash(rootStr), nil
+	return common.HexToHash(response.Data.Root), nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
