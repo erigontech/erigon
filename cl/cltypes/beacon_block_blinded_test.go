@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestBlindedBeaconBlockJSONAttesterSlashingLimits(t *testing.T) {
@@ -197,5 +199,37 @@ func TestBlindedBeaconBodyJSONRejectsIncompleteOperations(t *testing.T) {
 				require.ErrorContains(t, json.Unmarshal([]byte(tc.input), body), tc.wantErr)
 			})
 		}
+	}
+}
+
+func TestBlindedBeaconBodyKzgCommitmentMerkleProofMatchesFullBody(t *testing.T) {
+	const commitments = 3
+	cfg := &clparams.MainnetBeaconConfig
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBeaconBlock(cfg, version).Body
+			body.ExecutionPayload.BlockHash = common.Hash{1}
+			body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1, 2, 3}, {4}})
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+			body.ExecutionPayload.Withdrawals.Append(&Withdrawal{Index: 7, Amount: 9})
+			for i := range commitments {
+				body.BlobKzgCommitments.Append(&KZGCommitment{byte(i + 1)})
+			}
+			_, err := body.HashSSZ()
+			require.NoError(t, err)
+			blinded, err := body.Blinded()
+			require.NoError(t, err)
+
+			for i := range commitments {
+				want, err := body.KzgCommitmentMerkleProof(i)
+				require.NoError(t, err)
+				got, err := blinded.KzgCommitmentMerkleProof(i)
+				require.NoError(t, err)
+				require.Len(t, got, CommitmentBranchSize)
+				require.Equal(t, want, got, "commitment %d", i)
+			}
+			_, err = blinded.KzgCommitmentMerkleProof(commitments)
+			require.Error(t, err)
+		})
 	}
 }
