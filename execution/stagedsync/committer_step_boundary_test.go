@@ -101,7 +101,7 @@ func newRawViewVM(firstTxNum uint64) *state.VersionMap {
 func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
 	var writes state.WriteSetView
 	if ws != nil {
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 		txIdx := 0
 		for _, vw := range ws.Balances() {
 			txIdx = vw.Version.TxIndex
@@ -1262,14 +1262,14 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 			})
 			require.Empty(t, out)
 			av := addr.Value()
-			putCorruptAccount(t, doms, tx, av[:], 15)
+			putCorruptAccount(t, doms, tx, av[:], 14)
 			doms.SavePastChangesetAccumulator(blockHash, 1, cs)
 			pending := &commitment.PendingCommitmentUpdate{BlockNum: pendingBlock}
 			doms.GetCommitmentContext().SetPendingUpdate(pending)
 			cc.handleMessage(ctx, recordTx(newRawViewVM(15), 1, blockHash, 15, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
 			require.True(t, cc.pending[1].failed)
 			require.Len(t, out, 1)
-			require.ErrorContains(t, (<-out).err, "step-checkpoint")
+			require.ErrorContains(t, (<-out).err, "base read")
 			if pendingBlock == 1 {
 				require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
 			} else {

@@ -113,11 +113,12 @@ func (ctx *TxnParseContext) WithPoolRules() *TxnParseContext {
 // transaction type's DecodeRLP directly instead of going through
 // UnmarshalTransactionFromBinary (which creates a second bytes.Reader + stream
 // for typed txns).
-func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error) {
+func (ctx *TxnParseContext) decodeTxn(txBytes []byte, legacy bool) (types.Transaction, error) {
 	var txn types.Transaction
 
-	// Legacy transactions: full RLP list starting with 0xc0..0xff
-	if txBytes[0] >= 0xc0 {
+	// Only an outer RLP list denotes a legacy transaction. An RLP string must
+	// contain a typed transaction, even if its contents look like a legacy list.
+	if legacy {
 		ctx.bytesReader.Reset(txBytes)
 		s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
 		defer rlp.PutStream(s)
@@ -171,13 +172,21 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 }
 
 // ParseTransaction decodes and validates the transaction at pos, fills slot, and optionally recovers its sender.
-// With wrappedWithBlobs set, transactions carrying blobs must include a network sidecar
-// containing the blobs, commitments, and proofs (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+// When wrappedWithBlobs is set, type-3 transactions and frame transactions with blobs must
+// include their sidecar (blobs, commitments, and proofs).
+// See https://eips.ethereum.org/EIPS/eip-4844#networking for the type-3 network format.
 //
 // On success, p is the offset just past the transaction in payload. Packet parsing also needs
 // this offset on ErrRejected so it can continue with the next transaction.
 // The txpool RPC reports INVALID if the rejection also wraps ErrParseTxn.
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
+	return ctx.parseTransaction(payload, pos, slot, sender, hasEnvelope, wrappedWithBlobs, validateHash, nil)
+}
+
+func (ctx *TxnParseContext) parseTransaction(
+	payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool,
+	validateHash func([]byte) error, remainingAuthorizations *int,
+) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}
@@ -231,6 +240,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, err
 		}
 	}
+	if remainingAuthorizations != nil && txBytes[0] == SetCodeTxnType {
+		count := types.SetCodeAuthorizationCount(txBytes)
+		if count > *remainingAuthorizations {
+			return p, ErrRejected
+		}
+		*remainingAuthorizations -= count
+	}
 
 	// Step 3: Decode the transaction using standard types.
 	// Parse type-3 and frame wrappers separately. Only the inner transaction body
@@ -274,7 +290,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
 
 		// Decode only the inner tx (no blobs/commitments/proofs).
-		txn, err = ctx.decodeTxn(innerTxBytes)
+		txn, err = ctx.decodeTxn(innerTxBytes, false)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
@@ -394,7 +410,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: extraneous elements in blobs wrapper", ErrParseTxn)
 		}
 	} else {
-		txn, err = ctx.decodeTxn(txBytes)
+		txn, err = ctx.decodeTxn(txBytes, legacy)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
@@ -445,8 +461,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 6: Keep the full network encoding for gossip and cache its size,
-	// including any blob sidecar. Rlp may be cleared after flushing to the database.
+	// Step 6: Keep the encoded transaction for gossip and its size for selection after a flush.
 	slot.Rlp = txBytes
 	slot.Size = uint32(len(txBytes))
 
@@ -486,16 +501,19 @@ type PoolBlobBundle struct {
 // TxnSlot holds an unwrapped transaction and its pool metadata.
 // Txn must be non-nil except in the B-tree search sentinel (SenderID and Nonce)
 // and deletion records for rows rejected on reload (IDHash and SenderID).
+//
+// A flush moves ordinary transaction encodings to the database for lookup by hash
+// and keeps blob wrappers in memory for gossip and reorgs.
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
-	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
+	Rlp      []byte            // Encoded transaction. Pooled transactions with blobs include the sidecar. Block notifications carry only the body.
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
+	Size     uint32            // Byte length of the original Rlp, including any sidecar it carried. Stays valid after Rlp is cleared.
 
-	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
+	BlobBundles []PoolBlobBundle // Parsed blob bytes share the slot's copy of the network wrapper in Rlp.
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.
@@ -505,6 +523,14 @@ type TxnSlot struct {
 	// A pooled frame without a validation result is restored and parked. It has
 	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation
+}
+
+// Direct callers may supply Rlp without Size. Queue accounting and selection
+// need the wire length even after a flush clears Rlp.
+func (tx *TxnSlot) ensureSize() {
+	if tx.Size == 0 {
+		tx.Size = uint32(len(tx.Rlp))
+	}
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -642,8 +668,8 @@ func (h Addresses) Len() int {
 }
 
 type TxnsRlp struct {
-	Txns      [][]byte
-	ParsedTxn []types.Transaction // populated by best() when slot.Txn is available
+	Txns      [][]byte            // Wire encodings when available. PeekBest fills in any missing encodings.
+	ParsedTxn []types.Transaction // A nil entry means the provider must decode the wrapper in Txns[i] to include the sidecar.
 	Senders   Addresses
 	IsLocal   []bool
 }

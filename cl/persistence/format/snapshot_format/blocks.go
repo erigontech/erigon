@@ -17,6 +17,7 @@
 package snapshot_format
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -245,23 +246,48 @@ func ReadBeaconBlockBodyFromSnapshotForIntegrity(r io.Reader, cfg *clparams.Beac
 	return readBeaconBlockBodyFromSnapshot(r, cfg, true)
 }
 
+// ReadBlindedBlockFromSnapshot reads a pre-GLOAS block as stored, without promoting it to a full block, so its
+// body root is the real one. A GLOAS block is stored full and has no blinded form.
+func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBlindedBeaconBlock, error) {
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
+
+	v, _, err := readStoredBlock(r, buffer)
+	if err != nil {
+		return nil, err
+	}
+	if v >= clparams.GloasVersion {
+		return nil, cltypes.ErrGloasCannotBlind
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
+	if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
+func readStoredBlock(r io.Reader, buffer *bytes.Buffer) (v clparams.StateVersion, bodyRoot common.Hash, err error) {
+	metadataSlab := make([]byte, 33)
+	v, bodyRoot, err = readMetadataForBlock(r, metadataSlab)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	length := make([]byte, 8)
+	if _, err := io.ReadFull(r, length); err != nil {
+		return 0, common.Hash{}, err
+	}
+	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
+		return 0, common.Hash{}, err
+	}
+	return v, bodyRoot, nil
+}
+
 func readBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig, verifyBodyRoot bool) (*cltypes.SignedBeaconBlock, error) {
 	buffer := pool.GetBuffer()
 	defer pool.PutBuffer(buffer)
 
-	// Read the metadata
-	metadataSlab := make([]byte, 33)
-	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
+	v, bodyRoot, err := readStoredBlock(r, buffer)
 	if err != nil {
-		return nil, err
-	}
-	// Read the length
-	length := make([]byte, 8)
-	if _, err := io.ReadFull(r, length); err != nil {
-		return nil, err
-	}
-	// Read the block bytes
-	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
 		return nil, err
 	}
 

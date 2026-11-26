@@ -12,13 +12,13 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite pins that reverting
+// TestSelfdestruct_RevertPreservesPriorBalanceWrite pins that reverting
 // a SELFDESTRUCT does not delete a balance write that predates the snapshot. The
 // self-destruct records BalancePath=0; the revert must restore the pre-destruct
 // versioned balance write rather than delete the cell outright (which would also
 // wipe a legitimate prior balance write and diverge the trie root / BAL). This
 // mirrors the pre-destruct incarnation-cell restore.
-func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
+func TestSelfdestruct_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x5DBA1"))
 	reader := newAccountStateReader()
@@ -31,7 +31,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	// Balance written BEFORE the snapshot; no prior SelfDestructPath write, so the
 	// revert takes the wasCommited branch that previously deleted the balance cell.
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1000), tracing.BalanceChangeUnspecified))
-	pre, ok := ibs.versionedWrites.GetBalance(addr)
+	pre, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok, "precondition: a versioned balance write exists")
 	require.Equal(t, uint64(1000), pre.Val.Uint64())
 
@@ -41,7 +41,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 
 	ibs.RevertToSnapshot(snap, nil)
 
-	got, ok := ibs.versionedWrites.GetBalance(addr)
+	got, ok := ibs.writes.GetBalance(addr)
 	require.True(t, ok, "reverting the self-destruct must not delete the pre-snapshot balance write")
 	require.Equal(t, uint64(1000), got.Val.Uint64(), "the pre-snapshot balance value must be restored")
 }
@@ -53,7 +53,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 // zeroing them there is invisible to the collision but zeroing the versioned
 // WRITE made the re-creation abort with a phantom collision. It must also survive
 // a revert with the bumped nonce intact.
-func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
+func TestEIP8246_Selfdestruct_PreservesBumpedNonce(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
 	reader := newAccountStateReader()
@@ -84,7 +84,7 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 // An account bumps its nonce and SELFDESTRUCTs; a later frame bumps the nonce
 // again (e.g. a CREATE) and reverts. On a versioned IBS the revert must restore
 // the nonce from before the frame.
-func TestSelfdestructVersioned_RevertedNonceBumpAfterDestruct(t *testing.T) {
+func TestSelfdestruct_RevertedNonceBumpAfterDestruct(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x5DBA2"))
 	for _, versioned := range []bool{true, false} {
