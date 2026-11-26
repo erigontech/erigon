@@ -94,7 +94,7 @@ The trace settings object accepts the following members. Member names are matche
 Members of the object used by the `debug_trace*` methods, such as `timeout` or `noRefunds`, are accepted and ignored.
 
 :::warning
-State overrides must be wrapped in the trace settings object: `{"stateOverrides": {"0x…": {"balance": "0x…"}}}`. An address-keyed override map passed directly as the fourth parameter of `trace_call` (or the third of `trace_callMany`) is read as a trace settings object with no known members, so the overrides are silently ignored. The replay, block and filter methods also accept `stateOverrides` without applying it.
+`trace_call` and `trace_callMany` take state overrides in two forms: wrapped in the trace settings object, `{"stateOverrides": {"0x…": {"balance": "0x…"}}}`, or as an address-keyed map passed directly as the fourth parameter of `trace_call` (the third of `trace_callMany`). An object that mixes account addresses with settings members is rejected with `-32602`. The replay, block and filter methods accept `stateOverrides` without applying it.
 :::
 
 ## Precompile frames

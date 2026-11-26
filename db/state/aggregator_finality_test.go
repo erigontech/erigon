@@ -75,6 +75,10 @@ func (c finalityContextStub) RetireToBlockNum() uint64 {
 	return 0
 }
 
+func (c finalityContextStub) CollateToBlockNum() uint64 {
+	return 0
+}
+
 func (c finalityContextStub) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }

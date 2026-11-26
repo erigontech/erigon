@@ -318,7 +318,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	// Add unindexed covering segments for ALL types. With alignMin=true,
-	// RecalcVisibleSegments must fall back to indexed subsegments for every
+	// recalcVisibleFiles must fall back to indexed subsegments for every
 	// type, and SegmentsMax must take the correct minimum.
 	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
 		createTestSegmentOnlyFile(t, 1, 2000, enum, dirs.Snap, ver, logger)
