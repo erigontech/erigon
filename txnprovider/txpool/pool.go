@@ -2064,6 +2064,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	// Refresh senders after inserting the batch so their nonce-chain and balance
 	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
+	prefixes := make(map[uint64]*fundedPrefix)
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
@@ -2077,7 +2078,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(cacheView, mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(cacheView, prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -2121,13 +2122,14 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
 	sendersWithActivity := map[uint64]struct{}{}
+	prefixes := make(map[uint64]*fundedPrefix)
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(cacheView, mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(cacheView, prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -2233,7 +2235,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(cacheView kvcache.CacheView, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
@@ -2243,7 +2245,7 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, mt *metaTxn, announcemen
 		}
 	}
 	if found != nil {
-		decision := p.checkReplacement(cacheView, mt, found)
+		decision := p.checkReplacement(mt, found)
 		if decision.rebroadcast {
 			// A local replacement attempt can help the existing transaction propagate.
 			announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
@@ -2287,6 +2289,15 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, mt *metaTxn, announcemen
 	}
 
 	if found != nil {
+		// Checked last, as an accepted replacement updates the sender's funded prefix.
+		funded, err := p.keepsSenderFunded(cacheView, prefixes, mt.TxnSlot, found)
+		if err != nil {
+			p.logger.Warn("[txpool] addLocked: sender info", "err", err)
+			return txpoolcfg.ErrGetSenderInfo
+		}
+		if !funded {
+			return txpoolcfg.InsufficientFunds
+		}
 		p.removeFromSubPool(found, "add")
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}

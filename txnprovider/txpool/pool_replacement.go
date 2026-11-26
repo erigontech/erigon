@@ -31,7 +31,7 @@ type replacementDecision struct {
 }
 
 // checkReplacement requires the pool lock and leaves pool state unchanged.
-func (p *TxPool) checkReplacement(cacheView kvcache.CacheView, replacement, previous *metaTxn) replacementDecision {
+func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDecision {
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
 		if reason := validateFrameReplacement(oldTxn, newTxn, p.cfg.PriceBump, p.cfg.BlobPriceBump); reason != txpoolcfg.Success {
@@ -77,23 +77,26 @@ func (p *TxPool) checkReplacement(cacheView kvcache.CacheView, replacement, prev
 			rebroadcast: rebroadcast,
 		}
 	}
-	funded, err := p.keepsSenderFunded(cacheView, newTxn, previous)
-	if err != nil {
-		p.logger.Warn("[txpool] checkReplacement: sender info", "err", err)
-		return replacementDecision{reason: txpoolcfg.ErrGetSenderInfo}
-	}
-	if !funded {
-		return replacementDecision{reason: txpoolcfg.InsufficientFunds}
-	}
 	return replacementDecision{}
 }
 
-// keepsSenderFunded reports whether the sender's balance still covers every transaction it covers now
-// once replacement takes the place of previous. Covered transactions run from the account nonce up to
-// the first nonce gap or the first transaction the balance cannot pay for.
-func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, replacement *TxnSlot, previous *metaTxn) (bool, error) {
-	var increase uint256.Int
-	if _, underflow := increase.SubOverflow(requiredBalance(replacement), requiredBalance(previous.TxnSlot)); underflow || increase.IsZero() {
+// fundedPrefix is the run of a sender's transactions from the account nonce up to end that its
+// balance covers, and what the run costs.
+type fundedPrefix struct {
+	end   uint64
+	spent uint256.Int
+}
+
+// keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
+// takes the place of previous. A batch of additions records the prefix in prefixes at its first costlier
+// replacement for the sender and updates it with each replacement it accepts, so the batch walks the
+// sender's transactions once. Transactions that the batch adds later are not covered. The caller must
+// replace previous when it returns true.
+func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, replacement *TxnSlot, previous *metaTxn) (bool, error) {
+	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
+	costlier := newCost.Gt(oldCost)
+	prefix := prefixes[replacement.SenderID]
+	if prefix == nil && !costlier {
 		return true, nil
 	}
 	senderNonce, balance, _, err := p.senders.info(cacheView, replacement.SenderID)
@@ -101,44 +104,53 @@ func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, replacement *Txn
 		return false, err
 	}
 	// As in onSenderStateChange, frame reservations come out of the balance first.
-	// A replaced frame releases its own reservation.
 	sender := p.senders.senderID2Addr[replacement.SenderID]
-	var funds, fundsAfter uint256.Int
 	reserved := p.frameReservations[sender].cost
+	if prefix == nil {
+		prefix = &fundedPrefix{end: senderNonce}
+		funds := unreservedFunds(balance, reserved)
+		p.all.ascend(replacement.SenderID, func(mt *metaTxn) bool {
+			if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
+				return true
+			}
+			if mt.TxnSlot.Nonce != prefix.end {
+				return false
+			}
+			var spent uint256.Int
+			if _, overflow := spent.AddOverflow(&prefix.spent, requiredBalance(mt.TxnSlot)); overflow || spent.Gt(&funds) {
+				return false
+			}
+			prefix.spent = spent
+			prefix.end++
+			return true
+		})
+		prefixes[replacement.SenderID] = prefix
+	}
+	if previous.keyedNonce || previous.TxnSlot.Nonce < senderNonce || previous.TxnSlot.Nonce >= prefix.end {
+		return true, nil
+	}
+	var spent uint256.Int
+	spent.Sub(&prefix.spent, oldCost)
+	_, overflow := spent.AddOverflow(&spent, newCost)
+	if costlier {
+		// A replaced frame releases its own reservation.
+		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
+			reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
+		}
+		if funds := unreservedFunds(balance, reserved); overflow || spent.Gt(&funds) {
+			return false, nil
+		}
+	}
+	prefix.spent = spent
+	return true, nil
+}
+
+func unreservedFunds(balance, reserved uint256.Int) uint256.Int {
+	var funds uint256.Int
 	if balance.Gt(&reserved) {
 		funds.Sub(&balance, &reserved)
 	}
-	if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
-		reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
-	}
-	if balance.Gt(&reserved) {
-		fundsAfter.Sub(&balance, &reserved)
-	}
-
-	var spent uint256.Int
-	previousFunded := false
-	nonce := senderNonce
-	p.all.ascend(replacement.SenderID, func(mt *metaTxn) bool {
-		if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
-			return true
-		}
-		if mt.TxnSlot.Nonce != nonce {
-			return false
-		}
-		var next uint256.Int
-		if _, overflow := next.AddOverflow(&spent, requiredBalance(mt.TxnSlot)); overflow || next.Gt(&funds) {
-			return false
-		}
-		spent = next
-		previousFunded = previousFunded || mt == previous
-		nonce++
-		return true
-	})
-	if !previousFunded {
-		return true, nil
-	}
-	_, overflow := spent.AddOverflow(&spent, &increase)
-	return !overflow && !spent.Gt(&fundsAfter), nil
+	return funds
 }
 
 // validateFrameReplacement checks replacements involving at least one frame.

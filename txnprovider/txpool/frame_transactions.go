@@ -134,6 +134,7 @@ func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 // not lose transactions we already held. The caller holds the pool lock.
 func (p *TxPool) restoreFramesLocked(cacheView kvcache.CacheView, blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
 	var announcements Announcements
+	prefixes := make(map[uint64]*fundedPrefix)
 	cells := make(blobCells)
 	for i, txn := range txns.Txns {
 		if p.byHash[string(txn.IDHash[:])] != nil {
@@ -148,7 +149,7 @@ func (p *TxPool) restoreFramesLocked(cacheView kvcache.CacheView, blockNum uint6
 		if reason == txpoolcfg.Success {
 			txn.frameValidation = nil
 			mt := newMetaTxn(txn, isLocal, blockNum)
-			if reason = p.addLocked(cacheView, mt, &announcements, cells); reason == txpoolcfg.NotSet {
+			if reason = p.addLocked(cacheView, prefixes, mt, &announcements, cells); reason == txpoolcfg.NotSet {
 				p.senderLastActivity[txn.SenderID] = blockNum
 				p.frameAccountsToRefresh[sender] = struct{}{}
 				parked = append(parked, mt)

@@ -156,6 +156,36 @@ func TestReplacementBatchSharesSpareFunds(t *testing.T) {
 	require.Equal(t, []int{4, 0, 0}, []int{pending, baseFee, queued})
 }
 
+// A replacement that costs less frees funds for a later replacement in the same batch.
+func TestReplacementBatchReusesFreedFunds(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	// Nonce 1 spends the spare funds but what one fee bump needs.
+	var txns TxnSlots
+	for nonce := range uint64(4) {
+		txn := newTestTxnSlot(nonce, 0, 0, fundedTxnFeeCap, fundedTxnGas)
+		if nonce == 1 {
+			txn.Txn.GetValue().SetUint64(spareFunds - bumpCost)
+		}
+		txn.IDHash[0] = byte(nonce + 1)
+		txns.Append(txn, sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 4), reasons)
+
+	var replacements []*TxnSlot
+	for nonce, value := range []uint64{0, 0, spareFunds - 3*bumpCost} {
+		replacement := newTestTxnSlot(uint64(nonce), 0, 0, bumpedFeeCap, fundedTxnGas)
+		replacement.Txn.GetValue().SetUint64(value)
+		replacement.IDHash[0] = byte(nonce + 9)
+		replacements = append(replacements, replacement)
+	}
+	require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, 3),
+		replaceFundedTxns(t, ctx, pool, sender, replacements...))
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, []int{4, 0, 0}, []int{pending, baseFee, queued})
+}
+
 // Neither a transaction the balance cannot cover nor one after a nonce gap has funds to lose.
 func TestReplacementIgnoresUnfundedTxns(t *testing.T) {
 	for _, tc := range []struct {
