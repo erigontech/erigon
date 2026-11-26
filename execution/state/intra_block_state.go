@@ -2035,6 +2035,11 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	}
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
 	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct, replaced)
+	for addr := range vanished {
+		if ibs.versionMap.load(addr) != nil {
+			writes.SetEmptyRemoval(addr, ibs.Version())
+		}
+	}
 	return writes, ibs.StateReadError()
 }
 
@@ -2043,8 +2048,9 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // the tx leaves. At an address that existed (true), the creation stays, as it replaces the old
 // storage, with the zero incarnation that the destruct leaves and the dead contract's zeroed slots,
 // which readers of the state changes see; such an account that ends empty keeps the destruct, which
-// removes it. An absent one that ends empty with no version-map cells vanishes: it leaves no writes,
-// so Finalize skips it. withholdCreatedEmptyAccounts settles the other absent ones like any created account.
+// removes it. An absent one that ends empty vanishes: Finalize skips it, and only the EIP-161 removal
+// is kept when the version map holds cells for it. withholdCreatedEmptyAccounts settles the other
+// absent ones like any created account.
 func (ibs *IntraBlockState) createDestructs(chainRules *chain.Rules) (replaced map[accounts.Address]bool, vanished map[accounts.Address]struct{}) {
 	for addr, sd := range ibs.writes.selfDestruct {
 		cc, ok := ibs.writes.createContract[addr]
@@ -2059,7 +2065,7 @@ func (ibs *IntraBlockState) createDestructs(chainRules *chain.Rules) (replaced m
 		if existed && balance.Val.IsZero() {
 			continue
 		}
-		if !existed && balance.Val.IsZero() && ibs.versionMap.load(addr) == nil && EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+		if !existed && balance.Val.IsZero() && EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			if vanished == nil {
 				vanished = map[accounts.Address]struct{}{}
 			}
