@@ -88,7 +88,6 @@ func frameTestEnv(t testing.TB) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
-	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	sender := common.HexToAddress("0x1000")
@@ -229,48 +228,43 @@ func TestFrameTransactionKeyedNonce(t *testing.T) {
 }
 
 func TestFrameTransactionMissingNonceManager(t *testing.T) {
-	for _, versioned := range []bool{false, true} {
-		for _, mode := range []string{"execution", "call", "pool validation"} {
-			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
-				ibs := state.New(state.NewNoopReader())
-				defer ibs.Close()
-				if !versioned {
-					ibs.SetVersionMap(nil)
-				}
-				cfg := chain.AllProtocolChanges.Copy()
-				cfg.BogotaTime = common.NewUint64(0)
-				evm := newTestEVM(ibs, cfg, 30_000_000)
-				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
-				balance := uint256.Int{10_000_000}
-				require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
-				require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-				tx := &types.FrameTransaction{
-					ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
-					Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
-					Fees:   types.FrameFees{MaxFee: uint256.Int{1}, TipCap: uint256.Int{1}},
-				}
-				if mode == "pool validation" {
-					result, err := ValidateFrameTransaction(evm, tx)
-					require.ErrorContains(t, err, "nonce manager does not exist")
-					require.Nil(t, result)
-				} else {
-					msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
-					require.NoError(t, err)
-					msg.SetCheckNonce(mode == "execution")
-					gp := NewGasPool(30_000_000, 0)
-					result, err := ApplyMessage(evm, msg, gp, true, false, nil)
-					require.ErrorContains(t, err, "nonce manager does not exist")
-					require.Nil(t, result)
-					require.EqualValues(t, 30_000_000, gp.Gas())
-				}
-				gotBalance, err := ibs.GetBalance(sender)
+	for _, mode := range []string{"execution", "call", "pool validation"} {
+		t.Run(mode, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			evm := newTestEVM(ibs, cfg, 30_000_000)
+			sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+			balance := uint256.Int{10_000_000}
+			require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			tx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+				Fees:   types.FrameFees{MaxFee: uint256.Int{1}, TipCap: uint256.Int{1}},
+			}
+			if mode == "pool validation" {
+				result, err := ValidateFrameTransaction(evm, tx)
+				require.ErrorContains(t, err, "nonce manager does not exist")
+				require.Nil(t, result)
+			} else {
+				msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 				require.NoError(t, err)
-				require.Equal(t, balance, gotBalance)
-				exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
-				require.NoError(t, err)
-				require.False(t, exists)
-			})
-		}
+				msg.SetCheckNonce(mode == "execution")
+				gp := NewGasPool(30_000_000, 0)
+				result, err := ApplyMessage(evm, msg, gp, true, false, nil)
+				require.ErrorContains(t, err, "nonce manager does not exist")
+				require.Nil(t, result)
+				require.EqualValues(t, 30_000_000, gp.Gas())
+			}
+			gotBalance, err := ibs.GetBalance(sender)
+			require.NoError(t, err)
+			require.Equal(t, balance, gotBalance)
+			exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
 	}
 }
 
@@ -388,6 +382,10 @@ func TestFrameTransactionRPCNonceCheck(t *testing.T) {
 				if keyed {
 					tx.NonceKeys = []uint256.Int{{1}}
 					manager := accounts.InternAddress(types.FrameNonceManager)
+					// EIP-8250 requires the manager to be predeployed: on the versioned
+					// path a bare storage write does not make the account exist, so set
+					// its nonce to materialize the predeployed account record.
+					require.NoError(t, ibs.SetNonce(manager, 1, tracing.NonceChangeUnspecified))
 					slot := accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, tx.NonceKeys[0]))
 					require.NoError(t, ibs.SetState(manager, slot, uint256.Int{5}))
 				}

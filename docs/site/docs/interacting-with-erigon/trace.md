@@ -163,13 +163,13 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | --- | --- |
 | `-32602` | Invalid parameters: a malformed value, a missing required parameter or too many parameters; an unknown trace type; the `pending` block tag; `data` and `input` both set and different; a `chainId` that does not match the chain; `maxPriorityFeePerGas` above `maxFeePerGas`; an integer element in a `trace_get` path; a malformed raw transaction; the `trace_filter` errors listed under [trace\_filter](#trace_filter). |
 | `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. Also a known hash that is not canonical, in `trace_replayBlockTransactions` and with `requireCanonical: true` in `trace_call` and `trace_callMany`. |
-| `4444` | `trace_call`, `trace_callMany`: a known hash that is not canonical, without `requireCanonical`. The node keeps state only for canonical blocks. |
+| `4444` | History outside the retention window, with the message `Pruned history unavailable: old data not available due to pruning: … available from block N`. Also, in `trace_call` and `trace_callMany`, a known hash that is not canonical, without `requireCanonical`: the node keeps state only for canonical blocks. |
 | `-38012` | `trace_call`, `trace_callMany`: the fee cap or gas price is below the block base fee. |
 | `-38013` | `trace_call`, `trace_callMany`: the gas limit is below the intrinsic gas. |
 | `-38014` | `trace_call`, `trace_callMany`: the sender cannot pay for the gas and the value. |
 | `-38025` | `trace_call`, `trace_callMany`: the init code is larger than the limit. |
 | `-38026` | `trace_rawTransaction`: the gas limit, or the size of the authorization list, exceeds `--rpc.gascap`. |
-| `-32000` | Any other error, with a descriptive message. This includes: history outside the retention window (`old data not available due to pruning: … available from block N`); the validation errors of `trace_rawTransaction` (`nonce too low`, `nonce too high`, `insufficient funds …`, fee errors, a transaction signed for another chain); validation errors of a call object without a dedicated code (for example `gasPrice` together with `maxFeePerGas`, blob fields without blob hashes, an empty `authorizationList`, a feature not active at the selected block); a malformed `trace_callMany` item; an unsupported `blockOverrides` member; the `tracer` member; a timeout. |
+| `-32000` | Any other error, with a descriptive message. This includes: the validation errors of `trace_rawTransaction` (`nonce too low`, `nonce too high`, `insufficient funds …`, fee errors, a transaction signed for another chain); validation errors of a call object without a dedicated code (for example `gasPrice` together with `maxFeePerGas`, blob fields without blob hashes, an empty `authorizationList`, a feature not active at the selected block); a malformed `trace_callMany` item; an unsupported `blockOverrides` member; the `tracer` member; a timeout. |
 
 ## Configuration flags
 

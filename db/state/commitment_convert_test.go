@@ -218,9 +218,8 @@ func TestXform_KeyXform_V2ToV1_ErrorPropagates(t *testing.T) {
 }
 
 func TestXform_BuildValueTransformer_PassThrough(t *testing.T) {
-	// Matching axes return a nil transformer without touching account/storage —
-	// dumpStepRangeToPath treats nil as "value pass-through" and the converter's
-	// pure-key-encoding mode does not require account/storage files to exist.
+	// A conversion that changes only the key encoding can copy values verbatim
+	// even when the matching account and storage files are unavailable.
 	for _, sq := range []bool{false, true} {
 		vt, err := buildValueTransformer(sq, sq, nil, nil, nil, MergeRange{}, 0, 0, 0, 0, "")
 		require.NoError(t, err)

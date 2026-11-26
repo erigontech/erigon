@@ -910,11 +910,14 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			return errors.New("gloas beacon body contains null parent execution requests")
 		}
 	}
-	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
-		// Set version with config for preset-aware limits
-		value.SetVersionWithConfig(b.Version, b.beaconCfg)
-		return true
-	})
+	if err := solid.RangeErr(tmp.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
+		if err := slashing.setVersionAndValidate(b.Version, b.beaconCfg); err != nil {
+			return fmt.Errorf("attester slashing %d: %w", i, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
 		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
 			return att.ValidateForConfig(b.beaconCfg, b.Version)

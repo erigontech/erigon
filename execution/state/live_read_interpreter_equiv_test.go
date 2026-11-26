@@ -26,7 +26,7 @@ import (
 )
 
 // TestLiveReadMatchesInterpreter proves the completeness premise for retiring the
-// live-path self-destruct reconstruction: the live IBS read (getVersionedAccount,
+// live-path self-destruct reconstruction: the live IBS read (getAccount,
 // which today routes through eip8246PreservedAccount + the manual SD gate) resolves
 // account existence and fields identically to the one finalized interpreter
 // (ApplyView.ReadAccountData) across the self-destruct / preserve / revival shapes.
@@ -58,7 +58,7 @@ func TestLiveReadMatchesInterpreter(t *testing.T) {
 		{"burn (balance ValueDeleted)", func() *accountStateReader { return newAccountStateReader() }, func(vm *VersionMap, addr accounts.Address) {
 			ws := &WriteSet{}
 			ws.SetContractRemoval(addr, Version{TxIndex: 0})
-			vm.FlushVersionedWrites(ws, true)
+			vm.FlushWrites(ws, true)
 		}},
 		{"destruct then recreate", func() *accountStateReader { return newAccountStateReader() }, func(vm *VersionMap, addr accounts.Address) {
 			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)

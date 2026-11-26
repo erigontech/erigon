@@ -280,11 +280,8 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 			blockNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 		}
 	}
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, _, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return state.IteratorDump{}, err
-	}
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return state.IteratorDump{}, err
 	}
 
