@@ -2343,13 +2343,6 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 	return txpoolcfg.NotSet
 }
 
-// discardOverflow evicts mt for capacity. The sender's later transactions lose their nonce chain,
-// so promote refreshes the sender before they can be selected or promoted.
-func (p *TxPool) discardOverflow(mt *metaTxn, reason txpoolcfg.DiscardReason) {
-	p.discardLocked(mt, reason)
-	p.frameAccountsToRefresh[p.senders.senderID2Addr[mt.TxnSlot.SenderID]] = struct{}{}
-}
-
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
@@ -2947,13 +2940,18 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardOverflow(tx, txpoolcfg.PendingPoolOverflow)
+		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
+		// The sender's next txn loses its nonce chain. It can wait in the base fee sub-pool, whose
+		// senders are not refreshed on every block, so refresh the sender before a base fee fall promotes it.
+		if !tx.keyedNonce && p.all.get(tx.TxnSlot.SenderID, tx.TxnSlot.Nonce+1) != nil {
+			p.frameAccountsToRefresh[p.senders.senderID2Addr[tx.TxnSlot.SenderID]] = struct{}{}
+		}
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
-		p.discardOverflow(tx, txpoolcfg.BaseFeePoolOverflow)
+		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
 	}
 
 	// A parked frame temporarily blocks its account-nonce chain. Count that chain
@@ -2971,7 +2969,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	}
 	for p.queued.Len() > p.queued.limit {
 		tx := p.queued.PopWorst()
-		p.discardOverflow(tx, txpoolcfg.QueuedPoolOverflow)
+		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
 	for _, tx := range blocked {
 		p.queued.Add(tx, "frame validation pending", p.logger)
