@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -93,9 +94,29 @@ func requirePayloadWitness(ctx context.Context, t *testing.T, eat engineapiteste
 	return witness
 }
 
+func runCommitmentVariants(t *testing.T, test func(*testing.T)) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "v3-off", v3: false},
+		{name: "v3-on", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			test(t)
+		})
+	}
+}
+
 // The reference is debug_executionWitness in canonical mode, rebuilt from commitment
 // history after the payload is committed.
 func TestEngineApiPayloadWitness(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitness)
+}
+
+func testEngineApiPayloadWitness(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -132,6 +153,10 @@ func requireDebugExecutionWitness(ctx context.Context, t *testing.T, eat enginea
 // A payload validated by a plain newPayload gets its witness from the held state when it is resubmitted before
 // the forkchoice update.
 func TestEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForValidatedPayload)
+}
+
+func testEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -169,6 +194,10 @@ func buildCommittedChangerPayload(ctx context.Context, t *testing.T, eat enginea
 
 // A payload committed before its witness was requested gets the witness rebuilt from the committed state.
 func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForCommittedPayload)
+}
+
+func testEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -181,6 +210,10 @@ func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 }
 
 func TestEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory)
+}
+
+func testEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		payload := buildCommittedChangerPayload(ctx, t, eat)
@@ -191,6 +224,10 @@ func TestEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *t
 
 // A resubmitted payload whose cached witness was evicted gets the same witness again.
 func TestEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessAfterCacheEviction)
+}
+
+func testEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		first, _ := buildChangerPayload(ctx, t, eat)
@@ -208,6 +245,10 @@ func TestEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
 }
 
 func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForKnownPayload)
+}
+
+func testEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		payload, _ := buildChangerPayload(ctx, t, eat)
@@ -221,6 +262,10 @@ func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 // A forkchoice update back to the committed head unwinds a payload, which leaves it a known VALID payload with no
 // state and its child a child of an uncommitted payload.
 func TestEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild)
+}
+
+func testEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,

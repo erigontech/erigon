@@ -732,6 +732,10 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 // tests do not reach: genesis, a block hash, an unknown block, and the transaction
 // index bound.
 func TestGetWitness(t *testing.T) {
+	runCommitmentV3Tests(t, testGetWitness)
+}
+
+func testGetWitness(t *testing.T) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
@@ -818,6 +822,30 @@ func TestGetWitness(t *testing.T) {
 			require.ErrorIs(t, err, state.ErrPruned)
 			require.Nil(t, got)
 		})
+	}
+}
+
+func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain))
+	ctx := context.Background()
+	debugAPI := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	bn := rpc.BlockNumber(3)
+	at := rpc.BlockNumberOrHash{BlockNumber: &bn}
+
+	witness, err := ethAPI.GetWitness(ctx, at)
+	require.NoError(t, err)
+	require.NotEmpty(t, witness)
+	txWitness, err := ethAPI.GetTxWitness(ctx, at, 0)
+	require.NoError(t, err)
+	require.Equal(t, witness, txWitness)
+
+	for _, mode := range []string{"legacy", "canonical"} {
+		result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+		require.NoError(t, err, "mode %s", mode)
+		require.NotEmpty(t, result.State, "mode %s state", mode)
+		require.NotEmpty(t, result.Keys, "mode %s keys", mode)
 	}
 }
 

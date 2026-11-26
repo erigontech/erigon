@@ -666,6 +666,10 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
 // module and asserts the cached witness bytes are identical to the on-demand build.
 func TestWitnessCacheBuilderParity(t *testing.T) {
+	runCommitmentV3Tests(t, testWitnessCacheBuilderParity)
+}
+
+func testWitnessCacheBuilderParity(t *testing.T) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()

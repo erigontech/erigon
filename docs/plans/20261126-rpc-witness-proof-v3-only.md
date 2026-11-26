@@ -170,13 +170,13 @@
 - Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 - Modify: `execution/engineapi/engine_api_payload_witness_test.go`
 
-- [ ] run `TestGetProof` and the request-shape tests with v3 on and off as subtests (`statecfg.SetCommitmentV3`)
-- [ ] add a historical `eth_getProof` test under v3 on a chain with v3 commitment history (`newV3HistoryTestExecModule`)
-- [ ] add `eth_getTxWitness` and an on-demand `debug_executionWitness` at a past block under v3 (both modes)
-- [ ] add v3 runs of `TestWitnessCacheBuilderParity` (durable, which also feeds `debug_executionWitnesses`) and
+- [x] run `TestGetProof` and the request-shape tests with v3 on and off as subtests (`statecfg.SetCommitmentV3`)
+- [x] add a historical `eth_getProof` test under v3 on a chain with v3 commitment history (`newV3HistoryTestExecModule`)
+- [x] add `eth_getTxWitness` and an on-demand `debug_executionWitness` at a past block under v3 (both modes)
+- [x] add v3 runs of `TestWitnessCacheBuilderParity` (durable, which also feeds `debug_executionWitnesses`) and
       `TestEngineApiPayloadWitness*` (`ValidatedBlockWitness`), unless they already pin a variant
-- [ ] a red result in any of these is a defect: record it here with ⚠️, fix it in its own PR before the Task 2 capture
-- [ ] run `go test ./rpc/jsonrpc/ ./execution/engineapi/` with `ERIGON_COMMITMENT_V3` unset and `=true`: all green
+- [x] no red result in the added v3 coverage; no defect entry is required
+- [x] run `go test ./rpc/jsonrpc/ ./execution/engineapi/` with `ERIGON_COMMITMENT_V3` unset and `=true`: all green
 
 ### Task 2: golden fixtures from today's output, on a dedicated collapse chain
 **Files:**

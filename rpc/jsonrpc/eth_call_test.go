@@ -1118,7 +1118,27 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func runCommitmentV3Tests(t *testing.T, test func(*testing.T)) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "v3-off", v3: false},
+		{name: "v3-on", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			test(t)
+		})
+	}
+}
+
 func TestGetProof(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProof)
+}
+
+func testGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
@@ -1283,6 +1303,29 @@ func TestGetProof(t *testing.T) {
 	}
 }
 
+func TestGetProofHistoricalCommitmentV3(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain))
+
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	const blockNum = 2
+	proof, err := api.GetProof(context.Background(), bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(blockNum)))
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.NotEmpty(t, proof.AccountProof)
+	require.NotZero(t, (*uint256.Int)(proof.Balance).Uint64())
+
+	require.NoError(t, m.DB.View(context.Background(), func(tx kv.Tx) error {
+		header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(blockNum), tx)
+		require.NoError(t, err)
+		require.Equal(t, testChain.Blocks[blockNum-1].Root(), header.Root)
+		return trie.VerifyAccountProof(header.Root, proof)
+	}))
+}
+
 type missingHeaderBlockReader struct {
 	dbservices.FullBlockReader
 }
@@ -1292,6 +1335,10 @@ func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint6
 }
 
 func TestGetProofMissingHeader(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofMissingHeader)
+}
+
+func testGetProofMissingHeader(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1314,6 +1361,10 @@ func TestGetProofMissingHeader(t *testing.T) {
 }
 
 func TestGetProofPinsReadSnapshot(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofPinsReadSnapshot)
+}
+
+func testGetProofPinsReadSnapshot(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1357,6 +1408,10 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 }
 
 func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofIgnoresNewerSharedBranchCache)
+}
+
+func testGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1401,6 +1456,10 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofGenesisPrunedCommitmentHistory)
+}
+
+func testGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -1461,6 +1520,10 @@ func requirePrunedProofError(t *testing.T, err error) {
 }
 
 func TestGetProofWithoutCommitmentHistory(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofWithoutCommitmentHistory)
+}
+
+func testGetProofWithoutCommitmentHistory(t *testing.T) {
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
 	ctx := context.Background()
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
@@ -1478,6 +1541,10 @@ func TestGetProofWithoutCommitmentHistory(t *testing.T) {
 }
 
 func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofCommitmentNotAtRequestedBlock)
+}
+
+func testGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
 	previousSchema := statecfg.Schema
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	cfg := statecfg.Schema.CommitmentDomain
@@ -1572,6 +1639,10 @@ func TestStorageKeysUnmarshalJSON(t *testing.T) {
 // fields for each account shape, the block parameter forms execution-apis allows, and
 // the storage-key list rules.
 func TestGetProofRequestShapes(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofRequestShapes)
+}
+
+func testGetProofRequestShapes(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -1726,6 +1797,10 @@ func TestGetProofRequestShapes(t *testing.T) {
 // empty storage-key list serializes as an array rather than null, and a short key is
 // echoed minimized next to a zero value.
 func TestGetProofJSONShape(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofJSONShape)
+}
+
+func testGetProofJSONShape(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -2692,6 +2767,10 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 }
 
 func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofSystemContractSlotMatchesProof)
+}
+
+func testGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
