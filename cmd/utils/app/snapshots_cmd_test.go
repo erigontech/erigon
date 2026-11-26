@@ -1915,3 +1915,15 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.False(t, hasState)
 	require.False(t, broken)
 }
+
+func TestIntegrityCacheReadErrorStopsRun(t *testing.T) {
+	cache := t.TempDir()
+	command := cli.Command{Name: "integrity", Flags: snapshotCommand.Command("integrity").Flags, Action: doIntegrity}
+	err := command.Run(t.Context(), []string{"integrity", "--datadir", t.TempDir(), "--file-integrity-cache", cache, "--failFast=false", "--sample", "2"})
+	var readErr *os.PathError
+	require.ErrorAs(t, err, &readErr)
+	require.Equal(t, cache, readErr.Path)
+	if strings.Contains(err.Error(), "--sample") {
+		t.Fatalf("continued to sample validation after cache read error: %v", err)
+	}
+}

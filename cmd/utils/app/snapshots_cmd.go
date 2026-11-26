@@ -1570,6 +1570,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	var cache *integrity.IntegrityCache
 	// A torrent-verification failure must survive whatever the checks below return,
@@ -1582,30 +1583,24 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
 		var err error
-		cache, err = integrity.LoadIntegrityCache(cachePath)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if err := cache.Save(); err != nil {
-				logger.Warn("[integrity] failed to save cache", "err", err)
-			}
-		}()
-
+		_, skipTorrentPieces := skipSet[integrity.TorrentPieces]
 		// When using cache, verify torrent piece hashes first (unless skipped)
-		if _, skip := skipSet[integrity.TorrentPieces]; !skip {
-			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
-			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				err = fmt.Errorf("torrent verification failed: %w", err)
-				if failFast {
-					return err
+		cache, err = integrity.PrepareIntegrityCache(ctx, cachePath, dirs.Snap, skipTorrentPieces, failFast, logger)
+		if cache != nil {
+			defer func() {
+				if err := cache.Save(); err != nil {
+					logger.Warn("[integrity] failed to save cache", "err", err)
 				}
-				// failFast=false means "warn and keep checking", so the run still has to
-				// produce its check results; the error is reported at the end instead.
-				logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
-				torrentVerifyErr = err
+			}()
+		}
+		if err != nil {
+			if cache == nil || failFast {
+				return err
 			}
+			// failFast=false means "warn and keep checking", so the run still has to
+			// produce its check results; the error is reported at the end instead.
+			logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
+			torrentVerifyErr = err
 		}
 	}
 
@@ -1626,7 +1621,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	logger.Info("[integrity] starting", "seed", sc.Seed, "sampleRatio", sc.SampleRatio, "checks", requestedChecks)
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
