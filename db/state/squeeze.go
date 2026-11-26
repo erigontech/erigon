@@ -894,6 +894,18 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
+	// Commitment files after a hole would feed their newer branches into the fold below them.
+	aligned := a.BeginFilesRo()
+	visibleEnd := aligned.d[kv.CommitmentDomain].files.EndTxNum()
+	aligned.Close()
+	a.dirtyFilesLock.Lock()
+	filesEnd := a.d[kv.CommitmentDomain].dirtyFiles.EndTxNumMax()
+	a.dirtyFilesLock.Unlock()
+	if filesEnd > visibleEnd {
+		return nil, fmt.Errorf("commitment rebuild does not resume over a hole: commitment files reach step %d but the visible ones end at step %d; remove the commitment files from step %d on and rebuild",
+			filesEnd/a.StepSize(), visibleEnd/a.StepSize(), visibleEnd/a.StepSize())
+	}
+
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
@@ -947,11 +959,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 
-	// The commitment domain is unaligned, so its files can start past 0. A resume continues at their end,
-	// and a fold below them would read their newer branches, so a hole before them can not be rebuilt.
-	if files := acRo.d[kv.CommitmentDomain].files; len(files) > 0 && (files[0].startTxNum > 0 || contiguousEnd(files) < files.EndTxNum()) {
-		return nil, fmt.Errorf("commitment files from txNum %d to %d do not start at 0 or have a gap: remove the commitment files and rebuild", files[0].startTxNum, files.EndTxNum())
-	}
 	if existing := acRo.TxNumsInFiles(kv.CommitmentDomain); existing > 0 {
 		skipped := 0
 		for _, r := range ranges {

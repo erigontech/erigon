@@ -1300,5 +1300,5 @@ func TestRebuildCommitmentFilesResumeRefusesMissingFirstRange(t *testing.T) {
 	require.NoError(t, agg.OpenFolder(db))
 
 	_, err = state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
-	require.ErrorContains(t, err, "do not start at 0")
+	require.ErrorContains(t, err, "remove the commitment files from step 0 on")
 }
