@@ -86,13 +86,12 @@ func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, slot, validator
 	// make sure we return each subnet id, exactly once.
 	alreadySeenSubnetIndex := make(map[uint64]struct{})
 
-	committee := syncCommittee.GetCommittee()
-	for index := uint64(0); index < uint64(len(committee)); index++ {
+	for index := uint64(0); index < uint64(syncCommittee.CommitteeSize()); index++ {
 		subnetIdx := index / (cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount)
 		if _, ok := alreadySeenSubnetIndex[subnetIdx]; ok {
 			continue
 		}
-		if targetPublicKey == committee[index] {
+		if targetPublicKey == syncCommittee.PublicKeyAt(int(index)) {
 			subnets = append(subnets, subnetIdx)
 			alreadySeenSubnetIndex[subnetIdx] = struct{}{}
 		}

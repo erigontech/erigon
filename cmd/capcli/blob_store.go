@@ -54,7 +54,7 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if err != nil {
 		return err
 	}
-	blobs, err := blobfetch.Retrieve(ctx, c.Endpoint, blockRoot, block)
+	blobs, err := blobfetch.Retrieve(ctx, c.Endpoint, blockRoot, block, func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) { return block.Blinded() })
 	if err != nil {
 		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
 	}
