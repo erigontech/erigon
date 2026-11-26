@@ -229,14 +229,14 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(context.Context, *remoteproto.ReceiptsFilterRequest) error) {
+			err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
 				ff.mu.Lock()
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
 					// The request lock can be held by an update that waits for an ack this stream reads only after onReady returns.
 					go func() {
-						if err := ff.sendReceiptsFilterUpdate(context.Background(), false); err != nil {
+						if err := ff.sendReceiptsFilterUpdate(false); err != nil {
 							logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
 						}
 					}()
@@ -759,13 +759,13 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 // SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
 // is installed and the error is returned.
-func (ff *Filters) SubscribeReceipts(ctx context.Context, size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[[]*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[[]*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
 	if err := ff.reserveSubscription(); err != nil {
 		return nil, "", err
 	}
 	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
-	if err := ff.sendReceiptsFilterUpdate(ctx, true); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(true); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
 		ff.releaseSubscription()
 		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
@@ -781,7 +781,7 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 		return false
 	}
 	ff.releaseSubscription()
-	if err := ff.sendReceiptsFilterUpdate(context.Background(), false); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(false); err != nil {
 		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
 	return true
@@ -792,7 +792,7 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 // will send the update once the receipts subscription goroutine connects.
 // The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
 // storing the requestor concurrently. ack makes the update wait until the server applies it.
-func (ff *Filters) sendReceiptsFilterUpdate(ctx context.Context, ack bool) error {
+func (ff *Filters) sendReceiptsFilterUpdate(ack bool) error {
 	ff.receiptsRequestMu.Lock()
 	defer ff.receiptsRequestMu.Unlock()
 	rfr := ff.receiptsSubs.createFilterRequest()
@@ -805,13 +805,13 @@ func (ff *Filters) sendReceiptsFilterUpdate(ctx context.Context, ack bool) error
 		return nil
 	}
 	ff.mu.Unlock()
-	return loaded.(func(context.Context, *remoteproto.ReceiptsFilterRequest) error)(ctx, rfr)
+	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
-func (ff *Filters) SubscribeLogs(ctx context.Context, size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
 	if err := criteria.ValidateTopicPositions(); err != nil {
 		return nil, "", err
 	}
@@ -836,7 +836,7 @@ func (ff *Filters) SubscribeLogs(ctx context.Context, size int, criteria filters
 	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
-	if err := ff.pushRemoteLogsFilter(ctx, true); err != nil {
+	if err := ff.pushRemoteLogsFilter(true); err != nil {
 		ff.removeLogsSubscription(id, false)
 		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
@@ -894,7 +894,7 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 
 // updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
 func (ff *Filters) updateRemoteLogsFilter() {
-	if err := ff.pushRemoteLogsFilter(context.Background(), false); err != nil {
+	if err := ff.pushRemoteLogsFilter(false); err != nil {
 		ff.logger.Warn("Could not update remote logs filter", "err", err)
 	}
 }
@@ -902,7 +902,7 @@ func (ff *Filters) updateRemoteLogsFilter() {
 // pushRemoteLogsFilter sends the aggregated filter state to the remote log source.
 // If any filters in the aggregate need all addresses or all topics then the request
 // to the central log subscription needs to honour this. ack makes the update wait until the server applies it.
-func (ff *Filters) pushRemoteLogsFilter(ctx context.Context, ack bool) error {
+func (ff *Filters) pushRemoteLogsFilter(ack bool) error {
 	ff.logsRequestMu.Lock()
 	defer ff.logsRequestMu.Unlock()
 	lfr := ff.logsSubs.createFilterRequest()
@@ -918,7 +918,7 @@ func (ff *Filters) pushRemoteLogsFilter(ctx context.Context, ack bool) error {
 	if loaded == nil {
 		return nil
 	}
-	return loaded.(func(context.Context, *remoteproto.LogsFilterRequest) error)(ctx, lfr)
+	return loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr)
 }
 
 // deleteLogStore deletes the log store associated with the given subscription ID.

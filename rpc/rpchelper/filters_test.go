@@ -17,7 +17,6 @@
 package rpchelper
 
 import (
-	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -86,7 +85,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 		Topics:    [][]common.Hash{{subbedTopic}},
 	}
 
-	outChan, _, _ := f.SubscribeLogs(t.Context(), 10, criteria, "")
+	outChan, _, _ := f.SubscribeLogs(10, criteria, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -120,7 +119,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 		Topics:    [][]common.Hash{{nilTopic, subbedTopic, nilTopic}},
 	}
 
-	outChan, _, _ := f.SubscribeLogs(t.Context(), 10, criteria, "")
+	outChan, _, _ := f.SubscribeLogs(10, criteria, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -153,7 +152,7 @@ func TestFilters_SingleSubscription_TopicPositionWildcardIsPreserved(t *testing.
 		Topics:    [][]common.Hash{{topic0}, nil, {topic2}},
 	}
 
-	outChan, _, _ := f.SubscribeLogs(t.Context(), 10, criteria, "")
+	outChan, _, _ := f.SubscribeLogs(10, criteria, "")
 
 	matchingLog := createLog()
 	matchingLog.Topics = []*typesproto.H256{
@@ -190,7 +189,7 @@ func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
 		Topics:    [][]common.Hash{nil},
 	}
 
-	outChan, _, _ := f.SubscribeLogs(t.Context(), 10, criteria, "")
+	outChan, _, _ := f.SubscribeLogs(10, criteria, "")
 
 	log1 := createLog()
 	f.OnNewLogs(log1)
@@ -210,12 +209,12 @@ func TestFilters_WildcardOnlyTopicsRequestAllTopicsFromRemote(t *testing.T) {
 	t.Parallel()
 	var lastFilterRequest *remoteproto.LogsFilterRequest
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-	f.logsRequestor.Store(func(_ context.Context, r *remoteproto.LogsFilterRequest) error {
+	f.logsRequestor.Store(func(r *remoteproto.LogsFilterRequest) error {
 		lastFilterRequest = r
 		return nil
 	})
 
-	outChan, _, err := f.SubscribeLogs(t.Context(), 10, filters.FilterCriteria{
+	outChan, _, err := f.SubscribeLogs(10, filters.FilterCriteria{
 		Addresses: []common.Address{address1},
 		Topics:    [][]common.Hash{nil, {}},
 	}, "")
@@ -249,8 +248,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{{topic1}},
 	}
 
-	chan1, _, _ := f.SubscribeLogs(t.Context(), 256, criteria1, "")
-	chan2, _, _ := f.SubscribeLogs(t.Context(), 256, criteria2, "")
+	chan1, _, _ := f.SubscribeLogs(256, criteria1, "")
+	chan2, _, _ := f.SubscribeLogs(256, criteria2, "")
 	// now create a log for some other topic and distribute it
 	log := createLog()
 
@@ -294,9 +293,9 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{},
 	}
 
-	chan1, _, _ := f.SubscribeLogs(t.Context(), 256, criteria1, "")
-	chan2, _, _ := f.SubscribeLogs(t.Context(), 256, criteria2, "")
-	chan3, _, _ := f.SubscribeLogs(t.Context(), 256, criteria3, "")
+	chan1, _, _ := f.SubscribeLogs(256, criteria1, "")
+	chan2, _, _ := f.SubscribeLogs(256, criteria2, "")
+	chan3, _, _ := f.SubscribeLogs(256, criteria3, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -348,7 +347,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	t.Parallel()
 	var lastFilterRequest *remoteproto.LogsFilterRequest
-	loadRequester := func(_ context.Context, r *remoteproto.LogsFilterRequest) error {
+	loadRequester := func(r *remoteproto.LogsFilterRequest) error {
 		lastFilterRequest = r
 		return nil
 	}
@@ -362,7 +361,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{},
 	}
-	_, id1, _ := f.SubscribeLogs(t.Context(), 1, criteria1, "")
+	_, id1, _ := f.SubscribeLogs(1, criteria1, "")
 
 	// request should have all addresses and topics enabled
 	if lastFilterRequest.AllAddresses == false {
@@ -377,7 +376,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{address1},
 		Topics:    [][]common.Hash{},
 	}
-	_, id2, _ := f.SubscribeLogs(t.Context(), 1, criteria2, "")
+	_, id2, _ := f.SubscribeLogs(1, criteria2, "")
 
 	// request should have all addresses and all topics still and the new address
 	if lastFilterRequest.AllAddresses == false {
@@ -395,7 +394,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{{topic1}},
 	}
-	_, id3, _ := f.SubscribeLogs(t.Context(), 1, criteria3, "")
+	_, id3, _ := f.SubscribeLogs(1, criteria3, "")
 
 	// request should have all addresses and all topics as well as the previous address and new topic
 	if lastFilterRequest.AllAddresses == false {
@@ -480,7 +479,7 @@ func TestFilters_AddLogs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, logID, _ := f.SubscribeLogs(t.Context(), 8, filters.FilterCriteria{}, "")
+			_, logID, _ := f.SubscribeLogs(8, filters.FilterCriteria{}, "")
 			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
 			for i := 0; i < tt.numToAdd; i++ {
@@ -633,7 +632,7 @@ func TestFilters_SingleReceiptsSubscription_OnlyTransactionHashesSubscribedAreBr
 		TransactionHashes: []common.Hash{txHash1},
 	}
 
-	outChan, _, _ := f.SubscribeReceipts(t.Context(), 10, criteria)
+	outChan, _, _ := f.SubscribeReceipts(10, criteria)
 
 	// Create a receipt for a different transaction hash
 	receipt := createReceipt(txHash2)
@@ -664,7 +663,7 @@ func TestFilters_ReceiptsSubscription_EmptyFilterSubscribesToAll(t *testing.T) {
 		TransactionHashes: []common.Hash{},
 	}
 
-	outChan, _, _ := f.SubscribeReceipts(t.Context(), 10, criteria)
+	outChan, _, _ := f.SubscribeReceipts(10, criteria)
 
 	// Any receipt should be received
 	receipt1 := createReceipt(txHash1)
@@ -696,8 +695,8 @@ func TestFilters_TwoReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 		TransactionHashes: []common.Hash{txHash1},
 	}
 
-	chan1, _, _ := f.SubscribeReceipts(t.Context(), 256, criteria1)
-	chan2, _, _ := f.SubscribeReceipts(t.Context(), 256, criteria2)
+	chan1, _, _ := f.SubscribeReceipts(256, criteria1)
+	chan2, _, _ := f.SubscribeReceipts(256, criteria2)
 
 	// Create a receipt for txHash2
 	receipt := createReceipt(txHash2)
@@ -739,9 +738,9 @@ func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 		TransactionHashes: []common.Hash{txHash1, txHash2},
 	}
 
-	chan1, _, _ := f.SubscribeReceipts(t.Context(), 256, criteria1)
-	chan2, _, _ := f.SubscribeReceipts(t.Context(), 256, criteria2)
-	chan3, _, _ := f.SubscribeReceipts(t.Context(), 256, criteria3)
+	chan1, _, _ := f.SubscribeReceipts(256, criteria1)
+	chan2, _, _ := f.SubscribeReceipts(256, criteria2)
+	chan3, _, _ := f.SubscribeReceipts(256, criteria3)
 
 	// Receipt for txHash3 (not subscribed by chan2 or chan3)
 	receipt := createReceipt(txHash3)
@@ -792,7 +791,7 @@ func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testing.T) {
 	t.Parallel()
 	var lastFilterRequest *remoteproto.ReceiptsFilterRequest
-	loadRequester := func(_ context.Context, r *remoteproto.ReceiptsFilterRequest) error {
+	loadRequester := func(r *remoteproto.ReceiptsFilterRequest) error {
 		lastFilterRequest = r
 		return nil
 	}
@@ -805,7 +804,7 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	criteria1 := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},
 	}
-	_, id1, _ := f.SubscribeReceipts(t.Context(), 1, criteria1)
+	_, id1, _ := f.SubscribeReceipts(1, criteria1)
 
 	// Request should have AllTransactions=true and empty TransactionHashes
 	if !lastFilterRequest.AllTransactions {
@@ -819,7 +818,7 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	criteria2 := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{txHash1},
 	}
-	_, id2, _ := f.SubscribeReceipts(t.Context(), 1, criteria2)
+	_, id2, _ := f.SubscribeReceipts(1, criteria2)
 
 	// Request should have AllTransactions=true and include txHash1
 	// Backend uses OR logic: send if (AllTransactions OR hash matches)
@@ -848,7 +847,7 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	criteria3 := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{txHash2, txHash3},
 	}
-	_, id3, _ := f.SubscribeReceipts(t.Context(), 1, criteria3)
+	_, id3, _ := f.SubscribeReceipts(1, criteria3)
 
 	// Request should have all three transaction hashes
 	if len(lastFilterRequest.TransactionHashes) != 3 {
@@ -876,8 +875,8 @@ func TestFilters_UnsubscribeRemovesAddressFilterFromIndex(t *testing.T) {
 	t.Parallel()
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
 	criteria := filters.FilterCriteria{Addresses: []common.Address{address1}}
-	_, removed, _ := f.SubscribeLogs(t.Context(), 256, criteria, "")
-	kept, keptID, _ := f.SubscribeLogs(t.Context(), 256, criteria, "")
+	_, removed, _ := f.SubscribeLogs(256, criteria, "")
+	kept, keptID, _ := f.SubscribeLogs(256, criteria, "")
 
 	require.True(t, f.UnsubscribeLogs(removed))
 	require.Len(t, f.logsSubs.filtersByAddr[address1], 1)
@@ -894,8 +893,8 @@ func TestFilters_UnsubscribeRemovesAddressFilterFromIndex(t *testing.T) {
 func TestFilters_UnsubscribeRemovesNoAddressFilterFromIndex(t *testing.T) {
 	t.Parallel()
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-	_, removed, _ := f.SubscribeLogs(t.Context(), 256, filters.FilterCriteria{}, "")
-	kept, keptID, _ := f.SubscribeLogs(t.Context(), 256, filters.FilterCriteria{}, "")
+	_, removed, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
+	kept, keptID, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
 
 	require.True(t, f.UnsubscribeLogs(removed))
 	require.Len(t, f.logsSubs.anyAddrFilters, 1)

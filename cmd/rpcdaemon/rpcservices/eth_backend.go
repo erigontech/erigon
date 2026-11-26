@@ -279,10 +279,11 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 }
 
 func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remoteproto.SubscribeLogsReply), requestor *atomic.Value) error {
-	serverAcks, err := back.serverAcksFilters(ctx)
+	acks, err := back.newFilterAcks(ctx)
 	if err != nil {
 		return err
 	}
+	defer close(acks.done)
 	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -290,18 +291,9 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		return err
 	}
-	acks := newFilterAcks()
-	defer close(acks.done)
-	if serverAcks {
-		requestor.Store(func(callCtx context.Context, req *remoteproto.LogsFilterRequest) error {
-			return sendFilterUpdate(callCtx, acks, subscription.Send, req, req.Ack)
-		})
-	} else {
-		requestor.Store(func(_ context.Context, req *remoteproto.LogsFilterRequest) error {
-			req.Ack = false
-			return subscription.Send(req)
-		})
-	}
+	requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
+		return sendFilterUpdate(acks, subscription.Send, req, req.Ack)
+	})
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -320,11 +312,12 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(context.Context, *remoteproto.ReceiptsFilterRequest) error)) error {
-	serverAcks, err := back.serverAcksFilters(ctx)
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+	acks, err := back.newFilterAcks(ctx)
 	if err != nil {
 		return err
 	}
+	defer close(acks.done)
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -332,19 +325,10 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	acks := newFilterAcks()
-	defer close(acks.done)
 	if onReady != nil {
-		if serverAcks {
-			onReady(func(callCtx context.Context, req *remoteproto.ReceiptsFilterRequest) error {
-				return sendFilterUpdate(callCtx, acks, subscription.Send, req, req.Ack)
-			})
-		} else {
-			onReady(func(_ context.Context, req *remoteproto.ReceiptsFilterRequest) error {
-				req.Ack = false
-				return subscription.Send(req)
-			})
-		}
+		onReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+			return sendFilterUpdate(acks, subscription.Send, req, req.Ack)
+		})
 	}
 	for {
 		receipts, err := subscription.Recv()
@@ -364,34 +348,28 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 	return nil
 }
 
-// serverAcksFilters reports whether the server a stream is about to open on acks filter
-// requests (EthBackendAPIVersion 5.0.1+). The startup version check does not cover a stream
-// that reconnects to a restarted erigon of another version. It runs before the stream opens,
-// so a rate limit on streams can not hold it behind that stream.
-func (back *RemoteBackend) serverAcksFilters(ctx context.Context) (bool, error) {
-	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
-	if err != nil {
-		return false, fmt.Errorf("rpcdaemon: the filter stream needs the server version: %w", err)
-	}
-	return v.Major > 5 || v.Major == 5 && (v.Minor > 0 || v.Patch >= 1), nil
-}
-
 // filterAckTimeout bounds how long a filter update waits for the server's ack.
 const filterAckTimeout = 5 * time.Second
 
-// filterAcks matches the filter updates sent on one stream to the server's acks, which
-// arrive in request order. Counting keeps an update that stopped waiting from being
-// satisfied by a later ack of its own, and a later update from being satisfied by it.
+// filterAcks matches the filter updates sent on one stream to the server's acks, which arrive in
+// request order: counting keeps the late ack of an update that stopped waiting from satisfying a later one.
 type filterAcks struct {
-	mu     sync.Mutex
-	sent   uint64
-	acked  atomic.Uint64
-	notify chan struct{}
-	done   chan struct{} // closed when the stream ends
+	mu         sync.Mutex
+	serverAcks bool // EthBackendAPIVersion 5.0.1+
+	sent       uint64
+	acked      atomic.Uint64
+	notify     chan struct{}
+	done       chan struct{} // closed when the stream ends
 }
 
-func newFilterAcks() *filterAcks {
-	return &filterAcks{notify: make(chan struct{}, 1), done: make(chan struct{})}
+// newFilterAcks asks the server's version before each stream opens: a stream can reconnect to an erigon of another version.
+func (back *RemoteBackend) newFilterAcks(ctx context.Context) (*filterAcks, error) {
+	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("rpcdaemon: the filter stream needs the server version: %w", err)
+	}
+	serverAcks := v.Major > 5 || v.Major == 5 && (v.Minor > 0 || v.Patch >= 1)
+	return &filterAcks{serverAcks: serverAcks, notify: make(chan struct{}, 1), done: make(chan struct{})}, nil
 }
 
 func (a *filterAcks) ack() {
@@ -402,16 +380,15 @@ func (a *filterAcks) ack() {
 	}
 }
 
-// sendFilterUpdate sends req. If req asks for an ack, it returns once the server has applied req, so
-// events published after it are filtered by req. ctx is the caller's: its deadline ends the wait; the
-// stream's end does too.
-func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) error, req R, ack bool) error {
+// sendFilterUpdate sends req. With ack it returns once the server has applied req, so events
+// published after it are filtered by req; the stream's end or filterAckTimeout ends the wait.
+func sendFilterUpdate[R any](a *filterAcks, send func(R) error, req R, ack bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := send(req); err != nil {
 		return err
 	}
-	if !ack {
+	if !ack || !a.serverAcks {
 		return nil
 	}
 	a.sent++
@@ -422,8 +399,6 @@ func sendFilterUpdate[R any](ctx context.Context, a *filterAcks, send func(R) er
 		case <-a.notify:
 		case <-a.done:
 			return errors.New("filter subscription closed before the update was applied")
-		case <-ctx.Done():
-			return ctx.Err()
 		case <-timer.C:
 			return fmt.Errorf("no ack of the filter update within %s", filterAckTimeout)
 		}
