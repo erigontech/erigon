@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/crypto"
@@ -52,6 +53,28 @@ type cowChunk struct {
 	root      [32]byte
 	rootValid atomic.Bool
 }
+
+// cowSlot caches its chunk's data pointer so a random element read is one
+// dependent load instead of slot, chunk, data.
+type cowSlot struct {
+	chunk atomic.Pointer[cowChunk]
+	base  atomic.Pointer[byte]
+}
+
+func (s *cowSlot) Load() *cowChunk { return s.chunk.Load() }
+
+func (s *cowSlot) Store(ch *cowChunk) {
+	var base *byte
+	if ch != nil {
+		base = unsafe.SliceData(ch.data)
+	}
+	s.base.Store(base)
+	s.chunk.Store(ch)
+}
+
+func copySlots(dst, src []cowSlot) { copy(dst, src) }
+
+func (s *cowSlot) dataBase() *byte { return s.base.Load() }
 
 type cowLayout struct {
 	elemSize    int
@@ -89,7 +112,7 @@ type cowList struct {
 	c      int
 	l      int
 
-	chunks  []atomic.Pointer[cowChunk]
+	chunks  []cowSlot
 	owner   atomic.Pointer[cowOwner]
 	cloneMu sync.Mutex
 
@@ -107,8 +130,8 @@ func (l *cowList) init(elemSize, c int, leafFn func(elem, out []byte)) {
 	l.owner.Store(new(cowOwner))
 }
 
-func newSlots(n int) []atomic.Pointer[cowChunk] {
-	return make([]atomic.Pointer[cowChunk], n, n+16)
+func newSlots(n int) []cowSlot {
+	return make([]cowSlot, n, n+16)
 }
 
 func (l *cowList) locate(e int) (chunk, offset int) {
@@ -119,7 +142,7 @@ func (l *cowList) locate(e int) (chunk, offset int) {
 func (l *cowList) elem(e int) []byte {
 	ci, off := l.locate(e)
 	size := l.layout.elemSize
-	return l.chunks[ci].Load().data[off*size : (off+1)*size : (off+1)*size]
+	return unsafe.Slice((*byte)(unsafe.Add(unsafe.Pointer(l.chunks[ci].dataBase()), off*size)), size)
 }
 
 func chunkLeafFn(ch *cowChunk, elemSize int, leafFn func(elem, out []byte)) func(int, []byte) {
@@ -178,9 +201,7 @@ func (l *cowList) growSlots() {
 		return
 	}
 	grown := newSlots(n + 1)
-	for i := range l.chunks {
-		grown[i].Store(l.chunks[i].Load())
-	}
+	copySlots(grown, l.chunks)
 	l.chunks = grown
 }
 
@@ -221,7 +242,7 @@ func (l *cowList) encode(dst []byte) []byte {
 	return dst[:len(dst)+size]
 }
 
-func (l *cowList) build(layout cowLayout, n int, read func(dst []byte, from int)) []atomic.Pointer[cowChunk] {
+func (l *cowList) build(layout cowLayout, n int, read func(dst []byte, from int)) []cowSlot {
 	per, size := layout.chunkLeaves(), layout.elemSize
 	count := 0
 	if n > 0 {
@@ -288,9 +309,7 @@ func (l *cowList) copyTo(dst *cowList) {
 		}
 		dst.chunks = dst.chunks[:n]
 	}
-	for i := range l.chunks {
-		dst.chunks[i].Store(l.chunks[i].Load())
-	}
+	copySlots(dst.chunks, l.chunks)
 	dst.layout, dst.l, dst.c = l.layout, l.l, l.c
 
 	l.hashMu.Lock()

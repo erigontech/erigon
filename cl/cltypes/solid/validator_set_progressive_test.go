@@ -97,6 +97,8 @@ func TestValidatorSetCopyToSharesChunksAndReusesSlots(t *testing.T) {
 
 			source.CopyTo(target)
 
+			requireSlotsCacheChunkData(t, &source.list, "source after copy")
+			requireSlotsCacheChunkData(t, &target.list, "target after copy")
 			require.Len(t, target.list.chunks, len(source.list.chunks))
 			for i := range source.list.chunks {
 				require.Same(t, source.list.chunks[i].Load(), target.list.chunks[i].Load())
@@ -113,11 +115,13 @@ func TestValidatorSetCopyToSharesChunksAndReusesSlots(t *testing.T) {
 			}
 			require.Equal(t, sourceRoot, mustProgressiveRoot(t, source))
 			require.Equal(t, validatorSetProgressiveRootReference(t, target), mustProgressiveRoot(t, target))
+			requireSlotsCacheChunkData(t, &target.list, "target after writes")
 
 			targetRoot := mustProgressiveRoot(t, target)
 			source.Set(testCase.sourceCount/2, validatorForProgressiveTest(0xdd))
 			require.Equal(t, targetRoot, mustProgressiveRoot(t, target))
 			require.Equal(t, validatorSetProgressiveRootReference(t, source), mustProgressiveRoot(t, source))
+			requireSlotsCacheChunkData(t, &source.list, "source after writes")
 		})
 	}
 }

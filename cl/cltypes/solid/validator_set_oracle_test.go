@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"slices"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -136,8 +137,21 @@ func (l *liveSet) hash() ([32]byte, error) {
 	return l.set.HashSSZ()
 }
 
+func requireSlotsCacheChunkData(t testing.TB, l *cowList, label string) {
+	t.Helper()
+	slots := l.chunks[:cap(l.chunks)]
+	for i := range slots {
+		var want *byte
+		if ch := slots[i].Load(); ch != nil {
+			want = unsafe.SliceData(ch.data)
+		}
+		require.True(t, want == slots[i].base.Load(), "%s: slot %d caches a stale data pointer", label, i)
+	}
+}
+
 func (l *liveSet) check(t testing.TB, label string) {
 	t.Helper()
+	requireSlotsCacheChunkData(t, &l.set.list, label)
 	encoded, err := l.set.EncodeSSZ(nil)
 	require.NoError(t, err, label)
 	require.True(t, bytes.Equal(l.model.encode(), encoded), "%s: encoding differs from the model", label)

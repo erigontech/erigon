@@ -149,6 +149,7 @@ func TestValidatorSetAllAllowsWritingTheCurrentIndex(t *testing.T) {
 
 func TestValidatorSetGetAliasesPrivateChunkAndFreezesSharedChunk(t *testing.T) {
 	live := allTestSet(t, 10, false)
+	require.Equal(t, validatorSize, cap(live.set.Get(3).b))
 	view := live.set.Get(3)
 	live.set.SetEffectiveBalanceForValidatorAtIndex(3, 77)
 	require.Equal(t, uint64(77), view.EffectiveBalance(), "a private chunk is written in place")

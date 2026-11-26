@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,6 +77,45 @@ func TestValidatorSetSiblingsShareChunksUnderConcurrentUse(t *testing.T) {
 	}
 }
 
+func TestValidatorSetGetDuringChunkClones(t *testing.T) {
+	for _, progressive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("progressive=%v", progressive), func(t *testing.T) {
+			const count = 5_000
+			source := allTestSet(t, count, progressive)
+			live := &liveSet{set: NewValidatorSet(1 << 20), model: newValidatorModel(1 << 20)}
+			for round := range 4 {
+				source.copyInto(live)
+				const readerCount = 4
+				var writing, started atomic.Int32
+				writing.Store(1)
+				var readers sync.WaitGroup
+				for r := range readerCount {
+					readers.Go(func() {
+						started.Add(1)
+						for {
+							for i := 1 + 2*r; i < count; i += 8 {
+								assert.Equal(t, live.model.vals[i].EffectiveBalance(), live.set.Get(i).EffectiveBalance(), "index %d", i)
+							}
+							if writing.Load() == 0 {
+								return
+							}
+						}
+					})
+				}
+				for started.Load() < readerCount {
+					runtime.Gosched()
+				}
+				for i := 0; i < count; i += 2 {
+					live.set.SetEffectiveBalanceForValidatorAtIndex(i, uint64(round+1)<<32|uint64(i))
+				}
+				writing.Store(0)
+				readers.Wait()
+			}
+			source.check(t, "source")
+		})
+	}
+}
+
 func TestValidatorSetParallelWritersMatchSerialRun(t *testing.T) {
 	for _, progressive := range []bool{false, true} {
 		t.Run(fmt.Sprintf("progressive=%v", progressive), func(t *testing.T) {
@@ -97,6 +137,7 @@ func TestValidatorSetParallelWritersMatchSerialRun(t *testing.T) {
 					for i := w; i < count; i += workers {
 						_ = parallel.set.Get(i).EffectiveBalance()
 						parallel.set.SetEffectiveBalanceForValidatorAtIndex(i, uint64(i)*3)
+						assert.Equal(t, uint64(i)*3, parallel.set.Get(i).EffectiveBalance(), "read-back of index %d", i)
 					}
 				})
 			}
