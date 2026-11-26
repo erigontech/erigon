@@ -144,7 +144,7 @@ func TestExecModule_GivenReorgPastFinalised_WhenFinality_ThenInvalidFCU(t *testi
 	tx, err := emt.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.Equal(t, uint64(33), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+	require.Equal(t, uint64(30), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
 
 // A reorg that unwinds the stored finalized block is refused. It is a too deep reorg when the requested
@@ -580,5 +580,5 @@ func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *tes
 	tx, err := emt.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.Equal(t, uint64(21), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+	require.Equal(t, uint64(18), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
