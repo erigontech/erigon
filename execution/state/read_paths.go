@@ -359,6 +359,8 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 	// heap alloc per non-storage read). On a miss it returns a pre-seeded (UnknownDep,
 	// -1) result, so res is always valid.
 	var res ReadResult
+	waited := false
+reread:
 	switch path {
 	case AddressPath:
 		r.mapAddressVal, res, _ = s.versionMap.ReadAddress(addr, s.txIndex)
@@ -384,6 +386,10 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 		r.mapStorageVal, res, _, r.life = s.versionMap.ReadStorageLife(addr, key, s.txIndex)
 	default:
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
+	}
+	if res.Status() == MVReadResultDependency && !waited && s.writerWait != nil && s.writerWait(s.txIndex, res.DepIdx()) {
+		waited = true
+		goto reread
 	}
 
 	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}

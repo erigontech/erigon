@@ -2411,6 +2411,7 @@ type taskVersion struct {
 	*execTask
 	version      state.Version
 	versionMap   *state.VersionMap
+	writerWait   func(reader, writer int) bool
 	profile      bool
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
@@ -2477,6 +2478,7 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 		return err
 	}
 	ibs.SetVersionMap(ev.versionMap)
+	ibs.SetWriterWait(ev.writerWait)
 	// Point the per-task reader at this task's block: it reads finished-but-uncommitted
 	// blocks < this one in front of the raw base.
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
@@ -2630,6 +2632,7 @@ type blockExecutor struct {
 	// their last re-exec signal.
 	wakeValidated  map[int][]*poolTask
 	validatedTasks map[int]bool
+	writerReady    map[int]chan struct{}
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2682,6 +2685,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		wakeAt:              map[int][]*poolTask{},
 		wakeValidated:       map[int][]*poolTask{},
 		validatedTasks:      map[int]bool{},
+		writerReady:         map[int]chan struct{}{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3023,6 +3027,7 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
 	delete(be.wakeValidated, tx)
+	be.wakeReaders(tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3072,6 +3077,7 @@ func (be *blockExecutor) signalValidated(tx int) {
 	be.validatedTasks[tx] = true
 	waiters := be.wakeValidated[tx]
 	delete(be.wakeValidated, tx)
+	be.wakeReaders(tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3089,6 +3095,46 @@ func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 	}
 	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
 	return true
+}
+
+// waitForWriter blocks a reader's worker until the writer validates or commits; it returns false without
+// waiting when every other worker already waits, so one worker always runs the lowest queued task.
+func (be *blockExecutor) waitForWriter(reader, writer int) bool {
+	tx, target := be.taskIndexOf(reader), be.taskIndexOf(writer)
+	be.checkWaitTarget(tx, target)
+	p := be.pool
+	if p.blocked.Add(1) >= int64(p.workers) {
+		p.blocked.Add(-1)
+		return false
+	}
+	defer p.blocked.Add(-1)
+	be.wakeMu.Lock()
+	for int(be.committedFrontier.Load()) < target && !be.validatedTasks[target] {
+		ready, ok := be.writerReady[target]
+		if !ok {
+			ready = make(chan struct{})
+			be.writerReady[target] = ready
+		}
+		be.wakeMu.Unlock()
+		if poolOnWriterWait != nil {
+			poolOnWriterWait()
+		}
+		select {
+		case <-ready:
+		case <-p.pe.workersCtx.Done():
+			return false
+		}
+		be.wakeMu.Lock()
+	}
+	be.wakeMu.Unlock()
+	return true
+}
+
+func (be *blockExecutor) wakeReaders(tx int) {
+	if ready, ok := be.writerReady[tx]; ok {
+		close(ready)
+		delete(be.writerReady, tx)
+	}
 }
 
 func (be *blockExecutor) frontier() int {
@@ -3704,6 +3750,7 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 			tv := &taskVersion{
 				execTask:     execTask,
 				versionMap:   be.versionMap,
+				writerWait:   be.waitForWriter,
 				profile:      be.profile,
 				stats:        be.stats,
 				statsMutex:   &be.Mutex,

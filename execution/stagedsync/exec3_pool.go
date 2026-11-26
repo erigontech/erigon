@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -64,16 +65,20 @@ type taskPool struct {
 	cond   *sync.Cond
 	queue  taskHeap
 	closed bool
+
+	workers int
+	blocked atomic.Int64
 }
 
 // Test hooks; nil in production.
 var (
-	poolOnRoTxOpen func()
-	poolOnRun      func(runs int)
+	poolOnRoTxOpen   func()
+	poolOnRun        func(runs int)
+	poolOnWriterWait func()
 )
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
-	p := &taskPool{pe: pe}
+	p := &taskPool{pe: pe, workers: len(base)}
 	p.cond = sync.NewCond(&p.mu)
 	context.AfterFunc(pe.workersCtx, func() {
 		p.mu.Lock()

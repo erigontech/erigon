@@ -418,3 +418,100 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 		}
 	}
 }
+
+func waitForWriterAsync(be *blockExecutor, reader, writer int) chan bool {
+	done := make(chan bool, 1)
+	go func() { done <- be.waitForWriter(reader, writer) }()
+	return done
+}
+
+func requireBlocked(t *testing.T, done chan bool, msg string) {
+	t.Helper()
+	select {
+	case <-done:
+		require.FailNow(t, msg)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func requireWoken(t *testing.T, done chan bool, want bool, msg string) {
+	t.Helper()
+	select {
+	case got := <-done:
+		require.Equal(t, want, got, msg)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, msg, "the reader is still waiting")
+	}
+}
+
+func TestPoolReaderWaitsUntilWriterValidates(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pe.pool.workers = 4
+
+	done := waitForWriterAsync(be, 3, 1)
+	requireBlocked(t, done, "the reader did not wait for its unvalidated writer")
+	be.signalValidated(0)
+	requireBlocked(t, done, "a lower tx's validation woke the reader")
+	be.signalValidated(1)
+	requireWoken(t, done, true, "the writer's validation did not wake the reader")
+
+	require.True(t, be.waitForWriter(2, 1), "a validated writer must not block the reader")
+}
+
+func TestPoolReaderWaitsThroughAbortedWriter(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pe.pool.workers = 4
+	be.signalValidated(1)
+	be.signalSelfLoopReexec(1)
+
+	done := waitForWriterAsync(be, 3, 1)
+	requireBlocked(t, done, "the reader continued on a writer that must re-run")
+	be.committedFrontier.Store(1)
+	be.signalCommitted(1)
+	requireWoken(t, done, true, "the writer's commit did not wake the reader")
+}
+
+func TestPoolLastFreeWorkerDoesNotWait(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pe.pool.workers = 2
+
+	done := waitForWriterAsync(be, 3, 1)
+	requireBlocked(t, done, "the reader did not wait for its writer")
+	require.False(t, be.waitForWriter(2, 0), "the last free worker waited: no worker is left to run the writers")
+	be.signalValidated(1)
+	requireWoken(t, done, true, "the writer's validation did not wake the reader")
+	require.Zero(t, pe.pool.blocked.Load())
+}
+
+func TestPoolWaitingReaderReturnsOnShutdown(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pe.pool.workers = 4
+	ctx, cancel := context.WithCancel(t.Context())
+	pe.workersCtx = ctx
+
+	done := waitForWriterAsync(be, 3, 1)
+	requireBlocked(t, done, "the reader did not wait for its writer")
+	cancel()
+	requireWoken(t, done, false, "a cancelled block left the reader waiting")
+}
+
+func TestPoolReaderNeverWaitsOnHigherTx(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.pool.workers = 4
+	require.Panics(t, func() { be.waitForWriter(1, 2) })
+}
+
+func TestPoolDependencyChainReadersWaitForWriters(t *testing.T) {
+	fx := counterChainFixture(t, poolTestTxs)
+	for _, workers := range []string{"2", "4", "16"} {
+		var waits atomic.Int64
+		poolOnWriterWait = func() { waits.Add(1) }
+		t.Cleanup(func() { poolOnWriterWait = nil })
+		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers, func(r *state.ReaderV3) {
+			counter, _, err := r.ReadAccountStorage(accounts.InternAddress(counterAddr), accounts.InternKey(common.Hash{}))
+			require.NoError(t, err)
+			require.Equal(t, uint64(poolTestTxs+1), counter.Uint64(), "the chain lost an increment with %s workers", workers)
+		}))
+		require.Positive(t, waits.Load(), "no reader waited for its writer with %s workers", workers)
+	}
+}

@@ -164,6 +164,7 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level.
 	versionMap *VersionMap
+	writerWait func(reader, writer int) bool
 	writes     WriteSet
 	reads      ReadSet
 	// origins collects committed pre-block base cells (at originIndex) that a cold
@@ -294,6 +295,12 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 		panic("IntraBlockState requires a non-nil version map")
 	}
 	ibs.versionMap = versionMap
+}
+
+// SetWriterWait makes a read of tx writer's in-flight write call wait(reader, writer) and read again when it
+// returns true. Only a goroutine that never validates or commits txs may wait.
+func (ibs *IntraBlockState) SetWriterWait(wait func(reader, writer int) bool) {
+	ibs.writerWait = wait
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
