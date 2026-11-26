@@ -215,8 +215,7 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	expectedSlot := targetEpoch * handler.beaconChainCfg.SlotsPerEpoch
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, expectedSlot))
 	require.Equal(t, clparams.GloasVersion, expectedState.Version())
-	expectedProposers, err := expectedState.GetBeaconProposerIndices(targetEpoch)
-	require.NoError(t, err)
+	expectedProposers := expectedState.GetProposerLookahead()
 
 	response := getProposerDutiesForEpoch(t, handler, targetEpoch)
 	require.False(t, response.Finalized)
@@ -227,7 +226,7 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	}))
 	for i, duty := range response.Data {
 		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
-		require.Equal(t, expectedProposers[i], duty.ValidatorIndex)
+		require.Equal(t, expectedProposers.Get(i), duty.ValidatorIndex)
 	}
 	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
 	recorder := httptest.NewRecorder()
@@ -246,12 +245,18 @@ func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
 
 	fuluHead, err := handler.copyHeadStateForDuties(postState)
 	require.NoError(t, err)
-	require.NoError(t, fuluHead.UpgradeToFulu())
 	activeIndices := fuluHead.GetActiveValidatorsIndices(targetEpoch)
-	require.Greater(t, len(activeIndices), 1)
-	for _, index := range activeIndices[1:] {
-		require.NoError(t, fuluHead.SetEffectiveBalanceForValidatorAtIndex(int(index), 0))
+	require.Greater(t, len(activeIndices), 2)
+	source, target := activeIndices[0], activeIndices[1]
+	require.NoError(t, fuluHead.SetExitEpochForValidatorAtIndex(int(source), headEpoch))
+	require.NoError(t, fuluHead.SetWithdrawableEpochForValidatorAtIndex(int(source), targetEpoch))
+	for _, index := range []uint64{source, target} {
+		require.NoError(t, fuluHead.SetWithdrawalCredentialForValidatorAtIndex(int(index), common.Hash{byte(cfg.CompoundingWithdrawalPrefix)}))
 	}
+	require.NoError(t, fuluHead.SetValidatorBalance(int(source), cfg.MaxEffectiveBalanceElectra))
+	require.NoError(t, fuluHead.SetEffectiveBalanceForValidatorAtIndex(int(source), cfg.MaxEffectiveBalanceElectra))
+	fuluHead.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: source, TargetIndex: target})
+	require.NoError(t, fuluHead.UpgradeToFulu())
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(fuluHead, headRoot))
 
 	t.Run("beyond_seed", func(t *testing.T) {
@@ -269,9 +274,21 @@ func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
 
 		advancedState, err := fuluHead.Copy()
 		require.NoError(t, err)
-		require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
-		expected, err := advancedState.GetBeaconProposerIndices(targetEpoch)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot-cfg.SlotsPerEpoch))
+		balanceBefore, err := advancedState.ValidatorEffectiveBalance(int(target))
 		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+		balanceAfter, err := advancedState.ValidatorEffectiveBalance(int(target))
+		require.NoError(t, err)
+		require.Greater(t, balanceAfter, balanceBefore)
+		recomputed, err := advancedState.GetBeaconProposerIndices(targetEpoch)
+		require.NoError(t, err)
+		lookahead := advancedState.GetProposerLookahead()
+		expected := make([]uint64, cfg.SlotsPerEpoch)
+		for i := range expected {
+			expected[i] = lookahead.Get(i)
+		}
+		require.NotEqual(t, expected, recomputed)
 		response := getProposerDutiesForEpoch(t, handler, targetEpoch)
 		require.Len(t, response.Data, len(expected))
 		for i, duty := range response.Data {

@@ -44,11 +44,6 @@ type proposerDuties struct {
 	Slot           uint64         `json:"slot,string"`
 }
 
-// isProposerDutyInLookaheadVector checks if the proposer duty is within the lookahead vector.
-func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState, epoch uint64) bool {
-	return s.Version() >= clparams.FuluVersion && epoch >= state.Epoch(s) && epoch <= state.Epoch(s)+a.beaconChainCfg.MinSeedLookahead
-}
-
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	return a.getDutiesProposerForVersion(r, false)
 }
@@ -136,27 +131,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			s = versionedState
 		}
 
-		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
-		if a.isProposerDutyInLookaheadVector(s, epoch) {
-			lookaheadVector := s.GetProposerLookahead()
-			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
-			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
-				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
-				var pk common.Bytes48
-				pk, err = s.ValidatorPublicKey(int(proposerIndex))
-				if err != nil {
-					panic(err)
-				}
-				duties[i] = proposerDuties{
-					Pubkey:         pk,
-					ValidatorIndex: proposerIndex,
-					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
-				}
-			}
-			return nil
-		}
-
-		// Advance a copy to apply epoch updates before computing duties beyond the lookahead vector.
+		// Advance a copy to apply epoch updates needed for duties beyond the lookahead vector.
 		if s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
@@ -170,21 +145,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
 		}
 
-		// Lets do proposer index computation (pre-Fulu or when epoch is within range)
-		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
-			a.beaconChainCfg.EpochsPerHistoricalVector
-
-		mix := s.GetRandaoMix(int(mixPosition))
-
-		input := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
-		seedArray := [32]byte{}
-		copy(seedArray[:], input[:])
-		indices := s.GetActiveValidatorsIndices(epoch)
-		proposerIndices, err := shuffling2.ComputeProposerIndices(s.BeaconState, epoch, seedArray, indices)
-		if err != nil {
-			return err
-		}
-		return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
+		return fillProposerDutiesFromState(duties, s, epoch, expectedSlot)
 	}); err != nil {
 		return nil, err
 	}
@@ -207,16 +168,22 @@ func (a *ApiHandler) copyHeadStateForDuties(s *state.CachingBeaconState) (*state
 }
 
 func fillProposerDutiesFromState(duties []proposerDuties, s *state.CachingBeaconState, epoch, expectedSlot uint64) error {
+	if _, ok := s.ProposerIndexFromLookahead(expectedSlot); ok {
+		return fillProposerDuties(duties, s.BeaconState, expectedSlot, func(i int) uint64 {
+			proposerIndex, _ := s.ProposerIndexFromLookahead(expectedSlot + uint64(i))
+			return proposerIndex
+		})
+	}
 	proposerIndices, err := s.GetBeaconProposerIndices(epoch)
 	if err != nil {
 		return err
 	}
-	return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
+	return fillProposerDuties(duties, s.BeaconState, expectedSlot, func(i int) uint64 { return proposerIndices[i] })
 }
 
-func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, proposerIndices []uint64, expectedSlot uint64) error {
-	for i := uint64(0); i < s.BeaconConfig().SlotsPerEpoch; i++ {
-		proposerIndex := proposerIndices[i]
+func fillProposerDuties(duties []proposerDuties, s *raw.BeaconState, expectedSlot uint64, proposerIndexAt func(int) uint64) error {
+	for i := range duties {
+		proposerIndex := proposerIndexAt(i)
 		pk, err := s.ValidatorPublicKey(int(proposerIndex))
 		if err != nil {
 			return err
@@ -224,7 +191,7 @@ func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, 
 		duties[i] = proposerDuties{
 			Pubkey:         pk,
 			ValidatorIndex: proposerIndex,
-			Slot:           expectedSlot + i,
+			Slot:           expectedSlot + uint64(i),
 		}
 	}
 	return nil
@@ -359,7 +326,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	}
 
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-	if err := fillProposerDutiesFromIndices(duties, historicalState, proposerIndices, expectedSlot); err != nil {
+	if err := fillProposerDuties(duties, historicalState, expectedSlot, func(i int) uint64 { return proposerIndices[i] }); err != nil {
 		return nil, err
 	}
 	return duties, nil
