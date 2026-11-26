@@ -149,10 +149,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
-	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far beyond head epoch %d", epoch, headEpoch))
-	}
 	if currentEpoch := a.ethClock.GetCurrentEpoch(); epoch > currentEpoch+1 {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is more than one epoch beyond clock epoch %d", epoch, currentEpoch))
 	}
@@ -184,10 +180,14 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		if err != nil {
 			return nil, err
 		}
-		if len(idxSet) == 0 {
-			return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
-		}
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			headEpoch := state.Epoch(s)
+			if epoch > headEpoch+s.BeaconConfig().MinSeedLookahead+1 {
+				return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("attestation duties for epoch %d are not available while the head is in epoch %d", epoch, headEpoch))
+			}
+			if len(idxSet) == 0 {
+				return nil
+			}
 			// get active validator indicies
 			committeeCount := s.CommitteeCount(epoch)
 			// now start obtaining the committees from the head state

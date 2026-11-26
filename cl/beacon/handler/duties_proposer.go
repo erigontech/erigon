@@ -131,10 +131,10 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			s = versionedState
 		}
 
+		stateEpoch := state.Epoch(s)
 		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
 		if a.isProposerDutyInLookaheadVector(s, epoch) {
 			lookaheadVector := s.GetProposerLookahead()
-			stateEpoch := state.Epoch(s)
 			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
 			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
 				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
@@ -155,7 +155,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		// When the target epoch is beyond the lookahead range (e.g. head is far
 		// behind), we must advance a copy of the state to the target epoch so
 		// that RANDAO mixes and proposer lookahead are correct.
-		if s.Version() >= clparams.FuluVersion && epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
+		if s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
 				return copyErr
@@ -166,6 +166,10 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 				return processErr
 			}
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
+		}
+
+		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
 
 		// Lets do proposer index computation (pre-Fulu or when epoch is within range)

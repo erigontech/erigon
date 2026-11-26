@@ -341,7 +341,7 @@ func TestGetDutiesProposerFutureEpochUsesHeadStateBeforeLowestAvailableSlot(t *t
 	}
 }
 
-func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
+func TestGetDutiesProposerFutureEpochBounds(t *testing.T) {
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -350,11 +350,21 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	fcu.HeadSlotVal = postState.Slot()
 
 	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
-	epoch := headEpoch + maxEpochsLookaheadForDuties + 1
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
-	recorder := httptest.NewRecorder()
-	handler.mux.ServeHTTP(recorder, request)
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	for _, tc := range []struct {
+		epoch uint64
+		code  int
+	}{
+		{headEpoch + 2, http.StatusOK},
+		{headEpoch + 3, http.StatusServiceUnavailable},
+		{headEpoch + maxEpochsLookaheadForDuties + 1, http.StatusBadRequest},
+	} {
+		t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(tc.epoch, 10), http.NoBody)
+			recorder := httptest.NewRecorder()
+			handler.mux.ServeHTTP(recorder, request)
+			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
+		})
+	}
 }
 
 // Processing the empty slots after the head would carry the head root into their block roots.

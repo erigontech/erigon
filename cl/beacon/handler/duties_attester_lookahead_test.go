@@ -32,41 +32,45 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func TestGetAttesterDutiesRejectsEpochBeyondNext(t *testing.T) {
-	// clockLead is how many epochs the wall clock is ahead of the head: the bound
-	// must follow the clock, not the head.
-	for _, clockLead := range []uint64{0, 1} {
-		t.Run("clockLead="+strconv.FormatUint(clockLead, 10), func(t *testing.T) {
-			_, blocks, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
-			var err error
-			fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+func TestGetAttesterDutiesEpochBounds(t *testing.T) {
+	for _, tc := range []struct {
+		clockLead     uint64
+		nextEpochCode int
+	}{
+		{0, http.StatusOK},
+		{1, http.StatusOK},
+		{2, http.StatusServiceUnavailable},
+	} {
+		t.Run("clockLead="+strconv.FormatUint(tc.clockLead, 10), func(t *testing.T) {
+			_, blocks, _, _, headState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
 			require.NoError(t, err)
-			headSlot := blocks[len(blocks)-1].Block.Slot
-			fcu.HeadSlotVal = headSlot
+			fcu.HeadVal = headRoot
+			fcu.HeadSlotVal = headState.Slot()
 			cfg := h.beaconChainCfg
-			genesisTime := uint64(time.Now().Unix()) - (headSlot/cfg.SlotsPerEpoch+clockLead)*cfg.SlotsPerEpoch*cfg.SecondsPerSlot
-			h.ethClock = eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg)
+			headEpoch := headState.Slot() / cfg.SlotsPerEpoch
+			clockSlot := (headEpoch + tc.clockLead) * cfg.SlotsPerEpoch
+			h.ethClock = eth_clock.NewEthereumClockWithNow(0, common.Hash{}, cfg, func() time.Time {
+				return time.Unix(int64(clockSlot*cfg.SecondsPerSlot), 0)
+			})
 			currentEpoch := h.ethClock.GetCurrentEpoch()
-			require.Equal(t, headSlot/cfg.SlotsPerEpoch+clockLead, currentEpoch)
+			require.Equal(t, headEpoch+tc.clockLead, currentEpoch)
+			require.NotEqual(t, headState.GetRandaoMixes(headEpoch), headState.GetRandaoMixes(headEpoch+1))
 
-			server := httptest.NewServer(h.mux)
-			defer server.Close()
-			for _, tc := range []struct {
+			for _, request := range []struct {
 				epoch uint64
 				code  int
 			}{
 				{currentEpoch, http.StatusOK},
-				{currentEpoch + 1, http.StatusOK},
+				{currentEpoch + 1, tc.nextEpochCode},
 				{currentEpoch + 2, http.StatusBadRequest},
 			} {
-				t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
-					req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/eth/v1/validator/duties/attester/"+strconv.FormatUint(tc.epoch, 10), strings.NewReader(`["0","1","2"]`))
-					require.NoError(t, err)
+				t.Run(strconv.FormatUint(request.epoch, 10), func(t *testing.T) {
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(request.epoch, 10), strings.NewReader(`["0","1","2"]`))
 					req.Header.Set("Content-Type", "application/json")
-					resp, err := server.Client().Do(req)
-					require.NoError(t, err)
-					defer resp.Body.Close()
-					require.Equal(t, tc.code, resp.StatusCode)
+					recorder := httptest.NewRecorder()
+					h.mux.ServeHTTP(recorder, req)
+					require.Equal(t, request.code, recorder.Code, recorder.Body.String())
 				})
 			}
 		})
