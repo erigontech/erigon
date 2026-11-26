@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -172,26 +174,47 @@ func witnessGoldenFixturePath(f witnessGoldenFixture, commitmentV3 bool) string 
 	return filepath.Join(root, f.name)
 }
 
+func writeWitnessGoldenFixtures(t *testing.T, dir string, hph, v3 []witnessGoldenFixture) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for i, fixture := range hph {
+		v3Fixture := v3[i]
+		if fixture.method == "eth_getWitness" || fixture.method == "debug_executionWitness" && fixture.mode == "legacy" {
+			requireWitnessGoldenFixtureSuperset(t, fixture, v3Fixture)
+			override := filepath.Join(dir, "v3", fixture.name)
+			if bytes.Equal(fixture.data, v3Fixture.data) {
+				if err := os.Remove(override); !errors.Is(err, fs.ErrNotExist) {
+					require.NoError(t, err)
+				}
+			} else {
+				require.NoError(t, os.MkdirAll(filepath.Dir(override), 0o755))
+				require.NoError(t, os.WriteFile(override, v3Fixture.data, 0o644))
+				t.Logf("wrote v3 override %s", fixture.name)
+			}
+		} else {
+			require.Equal(t, fixture.data, v3Fixture.data, "v3 witness fixtures must match HPH: block %d method %s mode %s", fixture.block, fixture.method, fixture.mode)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(dir, fixture.name), fixture.data, 0o644))
+	}
+}
+
+func TestWitnessGoldenUpdateDropsMatchingOverride(t *testing.T) {
+	dir := t.TempDir()
+	fixture := witnessGoldenFixture{name: "1-debug_executionWitness-legacy.json", block: 1, method: "debug_executionWitness", mode: "legacy", data: []byte(`{"state":[],"codes":[]}`)}
+	override := filepath.Join(dir, "v3", fixture.name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(override), 0o755))
+	require.NoError(t, os.WriteFile(override, []byte(`{"state":["0x80"],"codes":[]}`), 0o644))
+	writeWitnessGoldenFixtures(t, dir, []witnessGoldenFixture{fixture}, []witnessGoldenFixture{fixture})
+	require.NoFileExists(t, override)
+	missing := witnessGoldenFixture{name: "2-debug_executionWitness-legacy.json", block: 2, method: "debug_executionWitness", mode: "legacy", data: fixture.data}
+	writeWitnessGoldenFixtures(t, dir, []witnessGoldenFixture{missing}, []witnessGoldenFixture{missing})
+}
+
 func TestWitnessGoldenFixtures(t *testing.T) {
 	hph := witnessGoldenFixturesFor(t, false)
 	v3 := witnessGoldenFixturesFor(t, true)
 	if *witnessGoldenUpdate {
-		require.NoError(t, os.MkdirAll(*witnessGoldenDir, 0o755))
-		for i, fixture := range hph {
-			v3Fixture := v3[i]
-			if fixture.method == "eth_getWitness" || fixture.method == "debug_executionWitness" && fixture.mode == "legacy" {
-				requireWitnessGoldenFixtureSuperset(t, fixture, v3Fixture)
-				if !bytes.Equal(fixture.data, v3Fixture.data) {
-					v3Dir := filepath.Join(*witnessGoldenDir, "v3")
-					require.NoError(t, os.MkdirAll(v3Dir, 0o755))
-					require.NoError(t, os.WriteFile(filepath.Join(v3Dir, fixture.name), v3Fixture.data, 0o644))
-					t.Logf("wrote v3 override %s", fixture.name)
-				}
-			} else {
-				require.Equal(t, fixture.data, v3Fixture.data, "v3 witness fixtures must match HPH: block %d method %s mode %s", fixture.block, fixture.method, fixture.mode)
-			}
-			require.NoError(t, os.WriteFile(filepath.Join(*witnessGoldenDir, fixture.name), fixture.data, 0o644))
-		}
+		writeWitnessGoldenFixtures(t, *witnessGoldenDir, hph, v3)
 		return
 	}
 	for _, variant := range []struct {
