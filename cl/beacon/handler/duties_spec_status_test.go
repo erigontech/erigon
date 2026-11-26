@@ -543,3 +543,45 @@ func TestHistoricalProposerDutiesValidatorTableRewind(t *testing.T) {
 	require.Error(t, err, "returned %d proposer duties after rewind", len(duties))
 	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
 }
+
+func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	lowest := uint64(129)
+	fcu.LowestAvailableSlotVal = &lowest
+	var active []byte
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		indices, err := tx.GetOne(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+		if err != nil {
+			return err
+		}
+		active = append([]byte(nil), indices...)
+		if err := tx.Put(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(128), indices); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(95), make([]byte, 32)); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 64)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{
+		kv.BlockRoot: func(uint64) ([]byte, []byte, error) { return nil, make([]byte, 32), nil },
+		kv.ActiveValidatorIndicies: func(slot uint64) ([]byte, []byte, error) {
+			if slot == 128 {
+				return nil, active, nil
+			}
+			return nil, nil, nil
+		},
+	}}
+	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, snapshots.OpenFolder())
+	handler.caplinStateSnapshots = snapshots
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/4", `["0"]`)
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
