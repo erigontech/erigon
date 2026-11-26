@@ -349,18 +349,14 @@ func TestExecuteBuysThePostingsGas(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, num(1e9-3_000_000), out)
 	}
-	n, err := f.src.ibs.GetNonce(accounts.InternAddress(poster))
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), n)
+	require.Equal(t, uint64(1), f.nonce(t, poster))
 
 	f = newTargetFixture(t)
 	f.m.fund(poster, 2_999_999)
 	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
-	_, err = f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+	_, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
 	require.ErrorContains(t, err, "does not buy the posting's gas")
-	n, err = f.src.ibs.GetNonce(accounts.InternAddress(poster))
-	require.NoError(t, err)
-	require.Zero(t, n, "a posting that does not open leaves its sender")
+	require.Zero(t, f.nonce(t, poster), "a posting that does not open leaves its sender")
 	require.False(t, IsPoison(err))
 }
 

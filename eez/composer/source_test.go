@@ -256,8 +256,7 @@ var (
 	nobody     = common.HexToAddress("0xc000000000000000000000000000000000000008")
 	// invalider calls the proxy, then hits INVALID.
 	invalider = common.HexToAddress("0xc000000000000000000000000000000000000009")
-	// spender sends its balance through the proxy, then calls it again if
-	// any is left.
+	// spender sends its balance through the proxy twice.
 	spender = common.HexToAddress("0xc00000000000000000000000000000000000000a")
 )
 
@@ -287,8 +286,7 @@ func newSourceFixture(t *testing.T) *sourceFixture {
 	m.deploy(invalider, append(callTo(proxy), 0xfe))
 	m.deploy(registrar, slices.Concat(callTo(manager), callTo(late), []byte{0x00}))
 	spend := slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f, 0x47}, push20(proxy), []byte{0x5a, 0xf1, 0x50})
-	// SELFBALANCE ISZERO PUSH1 end JUMPI, then the second call, then end.
-	m.deploy(spender, slices.Concat(spend, []byte{0x47, 0x15, 0x60, byte(2*len(spend) + 5), 0x57}, spend, []byte{0x5b, 0x00}))
+	m.deploy(spender, slices.Concat(spend, spend, []byte{0x00}))
 	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	f.src = NewSource(chain.TestChainOsakaConfig, header, m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, manager, 0)
 	return f
@@ -343,8 +341,9 @@ func TestSourceMovesTheValue(t *testing.T) {
 	f := newSourceFixture(t)
 	calls, err := f.src.Run(t.Context(), f.tx(t, 0, spender, 5, nil), (&echo{}).dispatch, nil)
 	require.NoError(t, err)
-	require.Len(t, calls, 1, "nothing left for a second call")
+	require.Len(t, calls, 2)
 	require.Equal(t, uint64(5), calls[0].Value.Uint64())
+	require.Zero(t, calls[1].Value.Uint64(), "nothing left for the second")
 }
 
 // TestSourceStopsOnCancellation: a run whose context ends, before or while

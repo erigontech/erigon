@@ -152,10 +152,13 @@ func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatc
 			if failure != nil {
 				return nil, false, nil
 			}
-			p, ok, err := s.proxyAt(addr.Value())
-			if err != nil {
+			fail := func(err error) ([]byte, bool, error) {
 				failure = err
 				return nil, true, vm.ErrExecutionReverted
+			}
+			p, ok, err := s.proxyAt(addr.Value())
+			if err != nil {
+				return fail(err)
 			}
 			if !ok {
 				return nil, false, nil
@@ -163,19 +166,16 @@ func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatc
 			c := &Call{Target: p.Address, RollupID: p.RollupID, Source: caller.Value(), SourceRollup: s.rollup, Value: value, Data: bytes.Clone(input)}
 			out, err := dispatch(c)
 			if err != nil {
-				failure = err
-				return nil, true, vm.ErrExecutionReverted
+				return fail(err)
 			}
 			c.Return = out
 			calls = append(calls, c)
 			if !value.IsZero() {
-				err := s.ibs.SubBalance(caller, value, tracing.BalanceChangeTransfer)
-				if err == nil {
-					err = s.ibs.AddBalance(s.manager, value, tracing.BalanceChangeTransfer)
+				if err := s.ibs.SubBalance(caller, value, tracing.BalanceChangeTransfer); err != nil {
+					return fail(err)
 				}
-				if err != nil {
-					failure = err
-					return nil, true, vm.ErrExecutionReverted
+				if err := s.ibs.AddBalance(s.manager, value, tracing.BalanceChangeTransfer); err != nil {
+					return fail(err)
 				}
 			}
 			return out, true, nil
