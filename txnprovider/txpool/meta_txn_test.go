@@ -112,55 +112,51 @@ func TestBaseFeeOverflowEvictsLowestFeeCap(t *testing.T) {
 	}
 }
 
-// Selection ranks a local txn after a remote txn of its sender as remote, so overflow evicts it before
-// the remote txn it depends on.
-func TestPendingOverflowEvictsLocalTxnAfterRemoteTxn(t *testing.T) {
-	ctx, pool, _, _ := newTestPool(t)
-	senders := []common.Address{{2}, {3}}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, senders...), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	pool.pending.limit = 2
-
-	remote, reason := addRemoteTestTxn(t, pool, senders[0], 0, 0, 300, 1)
-	require.Equal(t, txpoolcfg.Success, reason)
-	other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, 50, 2)
-	require.Equal(t, txpoolcfg.Success, reason)
-	local := newTestTxnSlot(1, 0, 0, 300, 21_000)
-	local.IDHash[0] = 3
-	var txns TxnSlots
-	txns.Append(local, senders[0][:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.PendingPoolOverflow}, reasons)
-	requireEvicted(t, pool, local, remote)
-	require.Contains(t, pool.byHash, string(other.IDHash[:]))
-}
-
 // Evicting a txn breaks its sender's nonce chain, so the sender's next txn cannot reach pending later.
-func TestPendingOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
-	ctx, pool, _, _ := newTestPool(t)
-	senders := []common.Address{{2}, {3}}
-	newBlock := func(height, baseFee uint64, accounts ...common.Address) {
-		change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, accounts...)
-		change.PendingBlockBaseFee = baseFee
-		change.ChangeBatch[0].BlockHeight = height
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		firstFeeCap, otherFeeCap    uint64
+		pendingLimit, baseFeeLimit  int
+		localNext                   bool // a local txn ranks above remote ones, so it outlasts its predecessor
+		evictedSubPool, nextSubPool SubPoolType
+	}{
+		{"pending overflow", 300, 50, 1, 2, false, PendingSubPool, BaseFeeSubPool},
+		{"base fee overflow", 5, 8, 10, 2, true, BaseFeeSubPool, BaseFeeSubPool},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _ := newTestPool(t)
+			senders := []common.Address{{2}, {3}}
+			newBlock := func(height, baseFee uint64, accounts ...common.Address) {
+				change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, accounts...)
+				change.PendingBlockBaseFee = baseFee
+				change.ChangeBatch[0].BlockHeight = height
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			}
+			newBlock(0, 10, senders...)
+			pool.pending.limit, pool.baseFee.limit = tc.pendingLimit, tc.baseFeeLimit
+
+			first, reason := addRemoteTestTxn(t, pool, senders[0], 0, 0, tc.firstFeeCap, 1)
+			require.Equal(t, txpoolcfg.Success, reason)
+			require.Equal(t, tc.evictedSubPool, pool.byHash[string(first.IDHash[:])].currentSubPool)
+			next := newTestTxnSlot(1, 0, 0, 5, 21_000)
+			next.IDHash[0] = 2
+			var txns TxnSlots
+			txns.Append(next, senders[0][:], tc.localNext)
+			reasons, err := pool.addNewTxns(ctx, txns, nil)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Equal(t, tc.nextSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+			other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, tc.otherFeeCap, 3)
+			require.Equal(t, txpoolcfg.Success, reason)
+			requireEvicted(t, pool, first, other)
+			require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+
+			// A base fee fall promotes base fee txns without refreshing their senders.
+			pool.pending.limit = 10
+			newBlock(1, 1, senders[1])
+			require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
+			require.Equal(t, 1, pool.pending.Len())
+		})
 	}
-	newBlock(0, 10, senders...)
-	pool.pending.limit = 1
-
-	first, reason := addRemoteTestTxn(t, pool, senders[0], 0, 0, 300, 1)
-	require.Equal(t, txpoolcfg.Success, reason)
-	next, reason := addRemoteTestTxn(t, pool, senders[0], 1, 0, 5, 2)
-	require.Equal(t, txpoolcfg.Success, reason)
-	require.Equal(t, BaseFeeSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
-	other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 1, 50, 3)
-	require.Equal(t, txpoolcfg.Success, reason)
-	requireEvicted(t, pool, first, other)
-	require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
-
-	// A base fee fall promotes base fee txns without refreshing their senders.
-	pool.pending.limit = 10
-	newBlock(1, 1, senders[1])
-	require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
-	require.Equal(t, 1, pool.pending.Len())
 }
