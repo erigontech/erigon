@@ -209,7 +209,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	}
 	defer sd.Close()
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	statedb = state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	statedb = state.New(stateReader)
 	statedb.SetNoConflictDetection()
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))

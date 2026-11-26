@@ -195,7 +195,7 @@ func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWrite
 		}
 	}
 	ibs.EndTransaction()
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	return nil
 }
 

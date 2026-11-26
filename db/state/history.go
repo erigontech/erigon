@@ -946,18 +946,18 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}, nil
 }
 
-func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
+func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) retiredFiles {
 	if h.SnapshotsDisabled {
-		return
+		return nil
 	}
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
 	if sf.historyDecomp == nil {
-		return // build was skipped — don't overwrite existing dirty files
+		return nil // build was skipped — don't overwrite existing dirty files
 	}
 
-	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
+	retired := h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
 		index:     sf.efHistoryIdx,
 		existence: sf.efExistence,
@@ -966,7 +966,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.historyDecomp
 	fi.vAccessor = sf.historyIdx
-	h.dirtyFiles.Set(fi)
+	return append(retired, h.dirtyFiles.replace(fi)...)
 }
 
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {

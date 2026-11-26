@@ -110,7 +110,7 @@ func TestAddressAccessResetInIBSReset(t *testing.T) {
 	// Tx aborts: AccessedAddresses is never harvested. The worker resets
 	// the shared IBS before the next task.
 	ibs.Reset()
-	assert.Empty(t, ibs.versionedReads.access, "no recorded accesses should survive Reset")
+	assert.Empty(t, ibs.reads.access, "no recorded accesses should survive Reset")
 }
 
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
@@ -275,7 +275,7 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 //
 // Regression: IBS.Selfdestruct used to versionWritten(StoragePath, key, 0)
 // for every dirty slot to feed the parallel commitment calculator. Because
-// versionedRead consults versionedWrites before the stateObject, those
+// versionedRead consults writes before the stateObject, those
 // spurious zero writes made same-tx re-reads return 0 — wrong gas
 // (SSTORE_SET vs dirty-update, +19900) and a wrong written value
 // (EEST cancun/eip6780_selfdestruct/*). The calc now
@@ -314,7 +314,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	assert.True(t, destructed)
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
-	for waddr, slots := range ibs.VersionedWrites().Storages() {
+	for waddr, slots := range ibs.Writes().Storages() {
 		if waddr != addr {
 			continue
 		}
@@ -338,7 +338,7 @@ func TestMapRead_EqualValueReExecKeepsIncarnation(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: v, valStatus: ValueChanged},
 			Val:         val,
 		})
-		vm.FlushVersionedWrites(ws, false)
+		vm.FlushWrites(ws, false)
 	}
 	balanceIncarnation := func(vm *VersionMap) Incarnation {
 		cell, ok := vm.load(addr).Balance.Get(5)
@@ -484,7 +484,7 @@ func TestValueTiebreaker_ValidatedBalanceRevivalDoesNotHideDestruct(t *testing.T
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5}},
 		Val:         *uint256.NewInt(1),
 	})
-	vm.FlushVersionedWrites(credit, false)
+	vm.FlushWrites(credit, false)
 	vm.MarkWritesValidated(credit, nil)
 
 	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))

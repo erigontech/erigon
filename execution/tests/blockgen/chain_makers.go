@@ -133,7 +133,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	// Clear any stale versioned reads/writes accumulated between transactions
 	// (e.g. from TxNonce calls in the gen callback). These reads were recorded
 	// with the previous tx's txIndex and must not pollute the next tx's read set.
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -149,10 +149,10 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
-	b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+	b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 	b.blockIO.RecordWrites(txVersion, writes)
-	b.versionMap.FlushVersionedWrites(writes, true)
-	b.ibs.ResetVersionedIO()
+	b.versionMap.FlushWrites(writes, true)
+	b.ibs.ResetIO()
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -172,7 +172,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -189,10 +189,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		if err != nil {
 			panic(err)
 		}
-		b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+		b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 		b.blockIO.RecordWrites(txVersion, writes)
-		b.versionMap.FlushVersionedWrites(writes, true)
-		b.ibs.ResetVersionedIO()
+		b.versionMap.FlushWrites(writes, true)
+		b.ibs.ResetIO()
 	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -389,9 +389,8 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	return domains.Commit(ctx, tx)
 }
 
-// GenerateChain creates a chain of n blocks. The first block's
-// parent will be the provided parent. db is used to store
-// intermediate states and should contain the parent's state trie.
+// GenerateChain builds n blocks on top of parent. It reads the parent's state
+// from db and carries changes between generated blocks in a temporary overlay.
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
@@ -402,20 +401,17 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
-	return generateChain(config, parent, engine, db, n, nil, gen)
+	return GenerateChainWithTimeOffsets(config, parent, engine, db, make([]int64, n), gen)
 }
 
 // GenerateChainWithTimeOffsets generates one block per offset. Each offset adds
 // signed seconds to the usual ten-second interval from that block's parent.
 // The header and fork transitions use the resulting timestamp before gen runs.
 func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
-	return generateChain(config, parent, engine, db, len(timeOffsets), timeOffsets, gen)
-}
-
-func generateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.AllProtocolChanges
 	}
+	n := len(timeOffsets)
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
@@ -488,7 +484,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.SetTxContext(b.header.Number.Uint64(), -1)
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, logger, nil)
 			if err != nil {
@@ -500,10 +496,10 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(initVersion, ibs.Reads())
 			b.blockIO.RecordWrites(initVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -516,7 +512,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// uses floor(txIdx-1).
 			b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.StartAccessRecording()
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -532,15 +528,13 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(finalizeVersion, ibs.Reads())
 			b.blockIO.RecordWrites(finalizeVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 
-			// Write state changes to db
-			// Commit from the versionMap write-set via ApplyWrites, the same domain apply
-			// the executor uses, so generation matches import. Each recorded phase
-			// (init txIdx=-1, txs, finalize) is applied in order.
+			// Apply initialization, transaction, and finalization writes to the overlay
+			// in execution order so the state root matches the one computed at import.
 			blockNum := b.header.Number.Uint64()
 			for _, ws := range b.blockIO.Outputs() {
 				if ws == nil || ws.IsEmpty() {
@@ -575,11 +569,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	const defaultBlockInterval = 10
-	for i := range n {
-		var offset int64
-		if timeOffsets != nil {
-			offset = timeOffsets[i]
-		}
+	for i, offset := range timeOffsets {
 		timestamp := parent.Time() + defaultBlockInterval + uint64(offset)
 		if offset <= -defaultBlockInterval || timestamp <= parent.Time() {
 			return nil, fmt.Errorf("block %d time offset %d out of range for parent timestamp %d", parent.NumberU64()+1, offset, parent.Time())
@@ -587,7 +577,7 @@ func generateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		chainreader.current = parent
 		// Versioned without the stateObject cache, which would let a reused state serve stale account
 		// state across txs and give a header the executor's cache-free run disagrees with.
-		ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}

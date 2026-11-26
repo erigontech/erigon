@@ -40,6 +40,7 @@ import (
 
 type readerMock struct {
 	config *chain.Config
+	parent *types.Header
 }
 
 func (r readerMock) Config() *chain.Config {
@@ -58,7 +59,10 @@ func (r readerMock) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeader(common.Hash, uint64) *types.Header {
+func (r readerMock) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if r.parent != nil && r.parent.Number.Uint64() == number && r.parent.Hash() == hash {
+		return r.parent
+	}
 	return nil
 }
 
