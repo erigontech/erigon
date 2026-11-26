@@ -36,25 +36,6 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-func traceValidityCollapses(t *testing.T, b *witnessBed, batch []commitmenttest.Op) ([]collapseTestEvent, []byte) {
-	t.Helper()
-	ctx := context.Background()
-	b.v3Mem.Apply(batch)
-	tr := b.openV3(ctx)
-	_, _, err := tr.RestoreState(b.v3State)
-	require.NoError(t, err)
-	updates := testUpdates(t, commitment.ModeCollect, batch)
-	candidates := make([]collapseTestEvent, 0)
-	root, err := tr.TraceCollapsesRoot(ctx, updates, func(sibling, prefix []byte) {
-		candidates = append(candidates, collapseTestEvent{
-			sibling: bytes.Clone(sibling),
-			prefix:  bytes.Clone(prefix),
-		})
-	})
-	require.NoError(t, err)
-	return candidates, root
-}
-
 func validityWitness(t *testing.T, b *witnessBed, batch []commitmenttest.Op, candidates []collapseTestEvent, drop int) [][]byte {
 	t.Helper()
 	tr := b.openV3(context.Background())
@@ -201,7 +182,7 @@ func TestCollapseOracleHasTeeth(t *testing.T) {
 	rng := rand.New(rand.NewSource(17))
 	b := newWitnessBed(t, witnessState(rng, tc.shape))
 	batch := tc.batch(b)
-	candidates, postRoot := traceValidityCollapses(t, b, batch)
+	candidates, postRoot := b.v3Collapses(t, batch, true)
 	require.NotEmpty(t, candidates)
 	nodes := validityWitness(t, b, batch, candidates, -1)
 	require.NoError(t, oracleValidityError(nodes, batch, common.BytesToHash(postRoot)))
@@ -223,7 +204,7 @@ func TestCollapseValiditySearch(t *testing.T) {
 			rng := rand.New(rand.NewSource(17))
 			b := newWitnessBed(t, witnessState(rng, tc.shape))
 			batch := tc.batch(b)
-			candidates, postRoot := traceValidityCollapses(t, b, batch)
+			candidates, postRoot := b.v3Collapses(t, batch, true)
 			require.NotEmpty(t, candidates)
 			nodes := validityWitness(t, b, batch, candidates, -1)
 			require.NoError(t, oracleValidityError(nodes, batch, common.BytesToHash(postRoot)))
@@ -244,7 +225,7 @@ func TestCollapseValiditySearch(t *testing.T) {
 				}
 				b := newWitnessBed(t, witnessState(rng, shape))
 				batch := validityRandomBatch(rng, b, plane == "storage")
-				candidates, postRoot := traceValidityCollapses(t, b, batch)
+				candidates, postRoot := b.v3Collapses(t, batch, true)
 				nodes := validityWitness(t, b, batch, candidates, -1)
 				require.NoError(t, oracleValidityError(nodes, batch, common.BytesToHash(postRoot)), "seed %d batch=%+v", seed, batch)
 			}

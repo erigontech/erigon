@@ -564,15 +564,17 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 	return ops
 }
 
-func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceOnly bool) ([]string, []byte) {
+func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceOnly bool) ([]collapseTestEvent, []byte) {
 	t.Helper()
 	ctx := context.Background()
 	b.v3Mem.Apply(batch)
 	tr := b.openV3(ctx)
 	_, _, err := tr.RestoreState(b.v3State)
 	require.NoError(t, err)
-	var events []string
-	record := func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) }
+	events := make([]collapseTestEvent, 0)
+	record := func(sibling, prefix []byte) {
+		events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
+	}
 	u := testUpdates(t, commitment.ModeCollect, batch)
 	if traceOnly {
 		before, err := tr.RootHash()
@@ -617,8 +619,10 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 		_, _, err := tr.RestoreState(b.v3State)
 		require.NoError(t, err)
 		counting.reads = map[string]int{}
-		var events []string
-		tr.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
+		events := make([]collapseTestEvent, 0)
+		tr.SetCollapseTracer(func(sibling, prefix []byte) {
+			events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
+		})
 		u := testUpdates(t, commitment.ModeCollect, batch)
 		root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
