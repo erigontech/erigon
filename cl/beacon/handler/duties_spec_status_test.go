@@ -42,6 +42,15 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+func dumpDutiesSnapshots(t *testing.T, dirs datadir.Dirs, types snapshotsync.SnapshotTypes, dumpEnd, width uint64, logger log.Logger) *snapshotsync.CaplinStateSnapshots {
+	t.Helper()
+	s := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	t.Cleanup(s.Close)
+	require.NoError(t, s.DumpCaplinState(t.Context(), dumpEnd, width, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, s.OpenFolder())
+	return s
+}
+
 func dutiesSpecStatusRequest(t *testing.T, handler *ApiHandler, method, path, body string) (int, string) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -431,10 +440,7 @@ func TestHistoricalDutiesUseSnapshotCoverage(t *testing.T) {
 		kv.SlotData:                  types.KeyValueGetters[kv.SlotData],
 		kv.ValidatorEffectiveBalance: types.KeyValueGetters[kv.ValidatorEffectiveBalance],
 	}
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	t.Cleanup(snapshots.Close)
-	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, snapshots.OpenFolder())
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	require.Equal(t, uint64(999), snapshots.BlocksAvailable())
 	handler.caplinStateSnapshots = snapshots
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -486,10 +492,7 @@ func TestHistoricalAttesterDutiesSnapshotStartsAfterRequestedSlot(t *testing.T) 
 			kv.ActiveValidatorIndicies: func(uint64) ([]byte, []byte, error) { return nil, nil, nil },
 		},
 	}
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	t.Cleanup(snapshots.Close)
-	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, snapshots.OpenFolder())
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 100_000, 50_000, logger)
 	files := snapshots.SegFileNames(50_000, 100_000)
 	require.Len(t, files, 1)
 	require.NoError(t, snapshots.OpenList([]string{filepath.Base(files[0])}, false))
@@ -555,10 +558,7 @@ func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
 			return nil, nil, nil
 		},
 	}}
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	t.Cleanup(snapshots.Close)
-	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, snapshots.OpenFolder())
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	handler.caplinStateSnapshots = snapshots
 	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/4", `["0"]`)
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
@@ -592,17 +592,11 @@ func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
 			}))
 			dirs := datadir.New(t.TempDir())
 			getter := func(uint64) ([]byte, []byte, error) { return nil, nil, nil }
-			active := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter}}, logger)
-			defer active.Close()
-			require.NoError(t, active.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-			require.NoError(t, active.OpenFolder())
+			active := dumpDutiesSnapshots(t, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter}}, 100_000, 50_000, logger)
 			activeFiles := active.SegFileNames(0, 50_000)
 			require.Len(t, activeFiles, 1)
 			rootGetter := func(uint64) ([]byte, []byte, error) { return nil, root[:], nil }
-			roots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.BlockRoot: rootGetter}}, logger)
-			defer roots.Close()
-			require.NoError(t, roots.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-			require.NoError(t, roots.OpenFolder())
+			roots := dumpDutiesSnapshots(t, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.BlockRoot: rootGetter}}, 100_000, 50_000, logger)
 			rootFiles := roots.SegFileNames(50_000, 100_000)
 			require.Len(t, rootFiles, 1)
 			types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter, kv.BlockRoot: getter}}
@@ -634,10 +628,7 @@ func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
 	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData], kv.StateEvents: types.KeyValueGetters[kv.StateEvents]}
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	t.Cleanup(snapshots.Close)
-	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, snapshots.OpenFolder())
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	handler.caplinStateSnapshots = snapshots
 	validatorTable := state_accessors.NewStaticValidatorTable()
 	refilled, err := antiquary.FillStaticValidatorsTableIfNeeded(logger, snapshots, validatorTable)
@@ -672,10 +663,7 @@ func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
 	delete(types.KeyValueGetters, kv.RandaoMixes)
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	t.Cleanup(snapshots.Close)
-	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, snapshots.OpenFolder())
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	handler.caplinStateSnapshots = snapshots
 	validatorTable := state_accessors.NewStaticValidatorTable()
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, validatorTable) }))
@@ -690,10 +678,7 @@ func TestHistoricalReadinessRangeFindsGapBeforeSnapshot(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	getter := func(uint64) ([]byte, []byte, error) { return nil, []byte{1}, nil }
 	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ValidatorEffectiveBalance: getter}}
-	dumped := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	defer dumped.Close()
-	require.NoError(t, dumped.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
-	require.NoError(t, dumped.OpenFolder())
+	dumped := dumpDutiesSnapshots(t, dirs, types, 100_000, 50_000, logger)
 	files := dumped.SegFileNames(50_000, 100_000)
 	require.Len(t, files, 1)
 	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
@@ -768,10 +753,7 @@ func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
 				getters[kv.EffectiveBalancesDump] = types.KeyValueGetters[kv.EffectiveBalancesDump]
 			}
 			types.KeyValueGetters = getters
-			snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-			t.Cleanup(snapshots.Close)
-			require.NoError(t, snapshots.DumpCaplinState(t.Context(), 2000, 2000, 0, dirs, 1, log.LvlDebug, logger))
-			require.NoError(t, snapshots.OpenFolder())
+			snapshots := dumpDutiesSnapshots(t, dirs, types, 2000, 2000, logger)
 			handler.caplinStateSnapshots = snapshots
 			view := snapshots.View()
 			_, slotCovered := view.VisibleSegment(slot, kv.SlotData)
