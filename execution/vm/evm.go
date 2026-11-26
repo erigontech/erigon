@@ -75,6 +75,8 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 }
 
 func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	// Only signature recovery may be cached. Each recovered signer requires a
+	// paid check of its current code, including on cache hits.
 	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
 	if err != nil || len(output) == 0 {
 		return output, gas, err
@@ -92,6 +94,8 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 		return nil, gas, ErrOutOfGas
 	}
 	evm.intraBlockState.AddAddressToAccessList(address)
+	// Paid reads remain in the block access list when execution reverts.
+	// Account warmth rolls back separately.
 	evm.intraBlockState.MarkAddressAccess(address, false)
 	if tracer != nil && tracer.OnAccountRead != nil {
 		tracer.OnAccountRead(address)
