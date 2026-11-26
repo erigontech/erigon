@@ -2588,9 +2588,6 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
 		defer chainDB.Close()
 	}
-	if err := state.ResolveCommitmentV3(ctx, dat, chainDB, log.Root()); err != nil {
-		return err
-	}
 
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
@@ -3703,9 +3700,6 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 }
 
 func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
-	if err := state.ResolveCommitmentV3(ctx, dirs, chainDB, logger); err != nil {
-		return nil, err
-	}
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err

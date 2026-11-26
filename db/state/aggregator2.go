@@ -250,6 +250,20 @@ func CheckMixedCommitmentFiles(d datadir.Dirs) error {
 	return nil
 }
 
+func CommitmentV3OfFiles(d datadir.Dirs) (v3, found bool, err error) {
+	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
+		legacyName, v3Name, err := commitmentFileNames(dirPath)
+		if err != nil {
+			return false, false, err
+		}
+		if v3Name != "" {
+			return true, true, nil
+		}
+		found = found || legacyName != ""
+	}
+	return false, found, nil
+}
+
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	if err := CheckMixedCommitmentFiles(d); err != nil {
 		return err
@@ -259,8 +273,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
 				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 					"convert the datadir with `integration commitment convert --v3`, "+
-					"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice+
-					"; to keep the legacy commitment trie, run erigon with --experimental.commitment-v3=false (other tools: ERIGON_COMMITMENT_V3=false)", name, major)
+					"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
 			}
 			if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
 				return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
