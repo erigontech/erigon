@@ -152,7 +152,7 @@ type TxPool struct {
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
-	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
+	deletedTxns             []*metaTxn                       // rows to delete at the next flush: discarded txns and rows rejected on reload
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -2049,6 +2049,9 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
+// addTxns adds newTxns to the pool and returns one discard reason per txn, indexed like
+// newTxns.Txns: DuplicateHash if the pool already holds the hash, the addLocked reason if the
+// txn was rejected, and NotSet if it was admitted, even if this call then discards it.
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
@@ -3424,6 +3427,8 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
+	// discardLocked has already queued the rows of admitted txns that addTxns then discarded.
+	// A rejected txn never entered the pool, so its row is queued here.
 	for i, reason := range reasons {
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.DuplicateHash {
 			txn := txns.Txns[i]

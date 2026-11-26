@@ -656,7 +656,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	}))
 }
 
-// addLocked drops blob txns below p.pendingBlobFee.
+// On reload, addLocked drops blob txns below p.pendingBlobFee, and the next flush deletes their rows.
 func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	const blobFee = 1_000_000
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
