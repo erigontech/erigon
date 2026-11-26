@@ -229,6 +229,72 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
 		require.Equal(t, expectedProposers[i], duty.ValidatorIndex)
 	}
+	setDutiesClockEpoch(handler, headEpoch+2)
+	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, manager, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	cfg := handler.beaconChainCfg
+	headEpoch := postState.Slot() / cfg.SlotsPerEpoch
+	cfg.FuluForkEpoch = headEpoch
+	cfg.InitializeForkSchedule()
+
+	fuluHead, err := handler.copyHeadStateForDuties(postState)
+	require.NoError(t, err)
+	require.NoError(t, fuluHead.UpgradeToFulu())
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = fuluHead.Slot()
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(fuluHead, headRoot))
+	setDutiesClockEpoch(handler, headEpoch+2)
+
+	t.Run("beyond_seed", func(t *testing.T) {
+		path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
+		recorder := httptest.NewRecorder()
+		handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	})
+	t.Run("at_seed_boundary", func(t *testing.T) {
+		getProposerDutiesForEpoch(t, handler, headEpoch+2)
+	})
+	t.Run("advance_uses_state_epoch", func(t *testing.T) {
+		targetEpoch := headEpoch + 2
+		targetSlot := targetEpoch * cfg.SlotsPerEpoch
+		changedHead, err := fuluHead.Copy()
+		require.NoError(t, err)
+		activeIndices := changedHead.GetActiveValidatorsIndices(targetEpoch)
+		require.Greater(t, len(activeIndices), 1)
+		for _, index := range activeIndices[1:] {
+			require.NoError(t, changedHead.SetEffectiveBalanceForValidatorAtIndex(int(index), 0))
+		}
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(changedHead, headRoot))
+		handler.syncedData = proposerHeadSlotOverride{SyncedData: manager, slot: targetSlot}
+
+		advancedState, err := changedHead.Copy()
+		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+		expected, err := advancedState.GetBeaconProposerIndices(targetEpoch)
+		require.NoError(t, err)
+		response := getProposerDutiesForEpoch(t, handler, targetEpoch)
+		require.Len(t, response.Data, len(expected))
+		for i, duty := range response.Data {
+			require.Equal(t, expected[i], duty.ValidatorIndex, "slot %d", targetSlot+uint64(i))
+		}
+	})
+}
+
+type proposerHeadSlotOverride struct {
+	synced_data.SyncedData
+	slot uint64
+}
+
+func (s proposerHeadSlotOverride) HeadSlot() uint64 {
+	return s.slot
 }
 
 func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {

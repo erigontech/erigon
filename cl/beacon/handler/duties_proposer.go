@@ -109,6 +109,11 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		stateEpoch := state.Epoch(s)
+		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+		}
+
 		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if targetVersion.After(s.Version()) {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
@@ -131,7 +136,6 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			s = versionedState
 		}
 
-		stateEpoch := state.Epoch(s)
 		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
 		if a.isProposerDutyInLookaheadVector(s, epoch) {
 			lookaheadVector := s.GetProposerLookahead()
@@ -152,9 +156,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return nil
 		}
 
-		// When the target epoch is beyond the lookahead range (e.g. head is far
-		// behind), we must advance a copy of the state to the target epoch so
-		// that RANDAO mixes and proposer lookahead are correct.
+		// Advance a copy to apply epoch updates before computing duties beyond the lookahead vector.
 		if s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
@@ -166,10 +168,6 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 				return processErr
 			}
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
-		}
-
-		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
-			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
 
 		// Lets do proposer index computation (pre-Fulu or when epoch is within range)

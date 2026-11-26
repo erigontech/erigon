@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -47,12 +48,8 @@ func TestGetAttesterDutiesEpochBounds(t *testing.T) {
 			require.NoError(t, err)
 			fcu.HeadVal = headRoot
 			fcu.HeadSlotVal = headState.Slot()
-			cfg := h.beaconChainCfg
-			headEpoch := headState.Slot() / cfg.SlotsPerEpoch
-			clockSlot := (headEpoch + tc.clockLead) * cfg.SlotsPerEpoch
-			h.ethClock = eth_clock.NewEthereumClockWithNow(0, common.Hash{}, cfg, func() time.Time {
-				return time.Unix(int64(clockSlot*cfg.SecondsPerSlot), 0)
-			})
+			headEpoch := headState.Slot() / h.beaconChainCfg.SlotsPerEpoch
+			setDutiesClockEpoch(h, headEpoch+tc.clockLead)
 			currentEpoch := h.ethClock.GetCurrentEpoch()
 			require.Equal(t, headEpoch+tc.clockLead, currentEpoch)
 			require.NotEqual(t, headState.GetRandaoMixes(headEpoch), headState.GetRandaoMixes(headEpoch+1))
@@ -75,4 +72,51 @@ func TestGetAttesterDutiesEpochBounds(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
+	_, blocks, _, _, headState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = headState.Slot()
+	headEpoch := headState.Slot() / h.beaconChainCfg.SlotsPerEpoch
+
+	for _, tc := range []struct {
+		name      string
+		clockLead uint64
+		epochLead uint64
+		body      string
+		code      int
+	}{
+		{"empty_beyond_seed", 2, 3, `[]`, http.StatusServiceUnavailable},
+		{"empty_at_seed_boundary", 2, 2, `[]`, http.StatusOK},
+		{"beyond_old_head_cap", 32, 33, `["0"]`, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setDutiesClockEpoch(h, headEpoch+tc.clockLead)
+			path := "/eth/v1/validator/duties/attester/" + strconv.FormatUint(headEpoch+tc.epochLead, 10)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			h.mux.ServeHTTP(recorder, req)
+			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
+			if tc.code == http.StatusOK {
+				var response struct {
+					Data          json.RawMessage `json:"data"`
+					DependentRoot common.Hash     `json:"dependent_root"`
+				}
+				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
+				require.JSONEq(t, `[]`, string(response.Data))
+				require.Equal(t, common.Hash(headRoot), response.DependentRoot)
+			}
+		})
+	}
+}
+
+func setDutiesClockEpoch(h *ApiHandler, epoch uint64) {
+	cfg := h.beaconChainCfg
+	h.ethClock = eth_clock.NewEthereumClockWithNow(0, common.Hash{}, cfg, func() time.Time {
+		return time.Unix(int64(epoch*cfg.SlotsPerEpoch*cfg.SecondsPerSlot), 0)
+	})
 }
