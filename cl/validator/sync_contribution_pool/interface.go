@@ -29,7 +29,8 @@ import (
 type SyncContributionPool interface {
 	// AddSyncContribution adds a sync committee contribution to the pool.
 	AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error
-	// AddSyncCommitteeMessage aggretates a sync committee message to a contribution to the pool.
+	// AddSyncCommitteeMessage aggregates a sync committee message into a contribution of the pool.
+	// The message signature must already be verified: it is not group-checked again.
 	AddSyncCommitteeMessage(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error
 
 	// GetSyncContribution retrieves a sync contribution from the pool.
