@@ -298,11 +298,14 @@
       with transfers, storage writes and deletes, and self-destructs
 - [x] the file builds its own chains and uses only code present on main `2841804a8eb`, so `ab-bench.sh -f` runs the same
       file in every arm
-- [ ] the supervisor runs `ab-bench.sh -f rpc/jsonrpc/witness_build_bench_test.go -n 12` on a quiet Linux box: base
+- [x] the supervisor runs `ab-bench.sh -f rpc/jsonrpc/witness_build_bench_test.go -n 12` on a quiet Linux box: base
       `2841804a8eb` (old pipeline: HPH with the erigon2 prune and trie, and v3 with the superset, the erigon2 prune and
       `collapseSim`) against the branch head, with `-x` checkpoints after Task 3, Task 5 and Task 7
-- [ ] verdicts per method from `ab-verdict`: new v3 against old v3 (bar: not worse) and new v3 against old HPH; a chart
+- [x] verdicts per method from `ab-verdict`: new v3 against old v3 (bar: not worse) and new v3 against old HPH; a chart
       page with ns/op and allocs/op per method and arm; the numbers go in the PR body with the box and the run count
+      ➕ ran as an equivalent driver on the remote box (12 interleaved rounds, cpuset 8-15, load average 7.4-7.6, not quiet).
+      time/op: new v3 vs old v3 3 wins, 5 inconclusive, 0 losses; new v3 vs old HPH 2 wins, 6 inconclusive, 0 losses.
+      allocs/op: new v3 vs old HPH 8 losses (+14% to +47%); new v3 vs old v3 6 wins, 2 losses (getProof +0.4%, +0.5%).
 
 ### Task 9: PR 5 acceptance and spec
 **Files:**
