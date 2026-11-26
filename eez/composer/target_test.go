@@ -97,9 +97,9 @@ func newTargetFixture(t *testing.T) *targetFixture {
 
 func (f *targetFixture) proxyOf(t *testing.T, p common.Address) (protocol.Proxy, bool) {
 	t.Helper()
-	word, err := f.src.ibs.GetState(accounts.InternAddress(protocol.EEZL2Address), accounts.InternKey(protocol.ProxyKey(p)))
+	r, ok, err := f.src.proxyAt(p)
 	require.NoError(t, err)
-	return protocol.DecodeProxy(word.Bytes32())
+	return r, ok
 }
 
 func (f *targetFixture) balance(t *testing.T, a common.Address) uint64 {

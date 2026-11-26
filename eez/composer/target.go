@@ -55,6 +55,18 @@ const (
 	frameGas = 30_000_000
 )
 
+// postingPhase is where a source is in its posting.
+type postingPhase uint8
+
+const (
+	// postingIdle is before any outbound call.
+	postingIdle postingPhase = iota
+	// postingOpen runs outbound calls in the posting's transaction.
+	postingOpen
+	// postingClosed is after a trigger ran.
+	postingClosed
+)
+
 // PostedBy sets the posting's sender, from, and tip: outbound calls run
 // with from as their origin and the block's base fee plus tip as their gas
 // price.
@@ -69,23 +81,23 @@ func (s *Source) PostedBy(from common.Address, tip *uint256.Int) {
 // Execute stay when it returns nil. Once Run ran, it refuses with
 // errPostingClosed.
 func (s *Source) Atomic(f func() error) error {
-	if s.closed {
+	switch s.posting {
+	case postingClosed:
 		return errPostingClosed
-	}
-	if !s.posting {
+	case postingIdle:
 		s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
-		s.posting = true
+		s.posting = postingOpen
 	}
 	return s.entry(f)
 }
 
 // closePosting ends the posting, which precedes the triggers.
 func (s *Source) closePosting() error {
-	s.closed = true
-	if !s.posting {
+	open := s.posting == postingOpen
+	s.posting = postingClosed
+	if !open {
 		return nil
 	}
-	s.posting = false
 	return s.finalize()
 }
 
@@ -133,12 +145,12 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	if err != nil {
 		return nil, Poison(err)
 	}
-	word, err := s.ibs.GetState(s.manager, accounts.InternKey(protocol.ProxyKey(proxy)))
+	_, registered, err := s.proxyAt(proxy)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := protocol.DecodeProxy(word.Bytes32()); !ok {
-		if _, _, err := s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, frameGas, nil); err != nil {
+	if !registered {
+		if _, _, err := s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil); err != nil {
 			return nil, Poison(fmt.Errorf("create the proxy of %s on rollup %d: %w", c.Source, c.SourceRollup, err))
 		}
 	}
@@ -148,21 +160,17 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	}
 	reentered := false
 	// The top frame is the manager's call to the proxy itself.
-	hook := func(evm *vm.EVM, depth int, _, addr accounts.Address, _ []byte, _ uint256.Int) ([]byte, bool, error) {
+	hook := func(_ *vm.EVM, depth int, _, addr accounts.Address, _ []byte, _ uint256.Int) ([]byte, bool, error) {
 		if depth == 0 {
 			return nil, false, nil
 		}
-		word, err := evm.IntraBlockState().GetState(s.manager, accounts.InternKey(protocol.ProxyKey(addr.Value())))
-		if err != nil {
-			return nil, false, nil
-		}
-		if _, ok := protocol.DecodeProxy(word.Bytes32()); !ok {
+		if _, ok, err := s.proxyAt(addr.Value()); err != nil || !ok {
 			return nil, false, nil
 		}
 		reentered = true
 		return nil, true, vm.ErrExecutionReverted
 	}
-	ret, used, err := s.frame(manager, proxy, data, c.Value, frameGas, hook)
+	ret, used, err := s.frame(manager, proxy, data, c.Value, hook)
 	switch {
 	case errors.Is(err, vm.ErrInsufficientBalance):
 		return nil, fmt.Errorf("%w: %w", ErrFunding, err)
@@ -188,8 +196,8 @@ func (s *Source) view(data []byte) ([]byte, error) {
 
 // frame calls `to` from `from` with value inside the posting, as a
 // contract would: no intrinsic gas, nonce or fee.
-func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, gas uint64, override vm.CallOverride) ([]byte, uint64, error) {
-	gas = min(gas, s.header.GasLimit)
+func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, override vm.CallOverride) ([]byte, uint64, error) {
+	gas := min(frameGas, s.header.GasLimit)
 	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override})
 	evm.Reset(evmtypes.TxContext{Origin: s.origin, GasPrice: s.gasPrice}, s.ibs)
 	ret, left, _, err := evm.Call(accounts.InternAddress(from), accounts.InternAddress(to), data, mdgas.MdGas{Execution: gas}, value, false)

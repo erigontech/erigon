@@ -95,8 +95,7 @@ type Source struct {
 	// origin and gasPrice are the posting's sender and price.
 	origin   accounts.Address
 	gasPrice uint256.Int
-	// posting marks the posting open; closed, ended by the first trigger.
-	posting, closed bool
+	posting  postingPhase
 }
 
 // NewSource returns the simulation of the chain of config in the context of
@@ -107,6 +106,17 @@ func NewSource(config *chain.Config, header *types.Header, reader state.StateRea
 	blockCtx := core.NewEVMBlockContext(header, blockHash, nil, accounts.InternAddress(header.Coinbase), config)
 	rules := blockCtx.Rules(config)
 	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup, rules: rules, origin: accounts.ZeroAddress}
+}
+
+// proxyAt returns the manager's record of addr, ok when addr is a
+// registered proxy.
+func (s *Source) proxyAt(addr common.Address) (p protocol.Proxy, ok bool, err error) {
+	word, err := s.ibs.GetState(s.manager, accounts.InternKey(protocol.ProxyKey(addr)))
+	if err != nil {
+		return protocol.Proxy{}, false, err
+	}
+	p, ok = protocol.DecodeProxy(word.Bytes32())
+	return p, ok, nil
 }
 
 // Nonce returns addr's nonce in the simulation.
@@ -135,16 +145,15 @@ func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatc
 			starts  []int
 			spanned bool
 		)
-		hook := func(evm *vm.EVM, depth int, caller, addr accounts.Address, input []byte, value uint256.Int) ([]byte, bool, error) {
+		hook := func(_ *vm.EVM, depth int, caller, addr accounts.Address, input []byte, value uint256.Int) ([]byte, bool, error) {
 			if failure != nil {
 				return nil, false, nil
 			}
-			word, err := evm.IntraBlockState().GetState(s.manager, accounts.InternKey(protocol.ProxyKey(addr.Value())))
+			p, ok, err := s.proxyAt(addr.Value())
 			if err != nil {
 				failure = err
 				return nil, true, vm.ErrExecutionReverted
 			}
-			p, ok := protocol.DecodeProxy(word.Bytes32())
 			if !ok {
 				return nil, false, nil
 			}
