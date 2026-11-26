@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -149,7 +148,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
-			RlpTx:   bytes.Clone(rlp),
+			RlpTx:   rlp,
 		})
 	}, tx)
 	return reply, nil

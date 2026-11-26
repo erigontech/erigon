@@ -527,7 +527,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 		acc.Balance = *priorCoinbaseBalance
 	}
 
-	vm.FlushVersionedWrites(result.TxOut, true)
+	vm.FlushWrites(result.TxOut, true)
 
 	task := result.Task.(*taskVersion)
 
@@ -688,13 +688,13 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		// flush and the calcFees flush below are one Estimate→Done transition at
 		// (txIdx,0), not two Done writes at the same version. An incomplete flush
 		// publishes the whole write-set as Estimate, which covers the coinbase balance.
-		vm.FlushVersionedWrites(result.TxOut, false)
+		vm.FlushWrites(result.TxOut, false)
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		coinbaseWrite := findBalance(writes, s.coinbase)
 		require.NotNil(t, coinbaseWrite, "tx %d: coinbase BalancePath write must exist (workerWroteCoinbase gate fires when newBal==oldBal)", txIdx)
@@ -738,7 +738,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 		state.Version{TxIndex: 0, Incarnation: 0},
 		*uint256.NewInt(abandonedPostBal), true)
 
-	vm.FlushVersionedWrites(result.TxOut, true)
+	vm.FlushWrites(result.TxOut, true)
 
 	writes, err := result.calcFees(task, vm, reader, s.rules)
 	require.NoError(t, err)
@@ -786,11 +786,11 @@ func TestFinalizeTx_BurntRecipient_HeldEstimateUntilSeal(t *testing.T) {
 
 	vm := state.NewVersionMap(nil)
 	// Worker flushes every write as an Estimate — nothing is Done before seal.
-	vm.FlushVersionedWrites(r.TxOut, false)
+	vm.FlushWrites(r.TxOut, false)
 	// calcFees credits the base-fee burn and flushes the tip as an Estimate too.
 	writes, err := r.calcFees(task, vm, s.makeReader(), s.rules)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 
 	// Before seal a later reader sees the burnt cell as an in-flight dependency,
 	// never a pre-fee Done value.
@@ -906,13 +906,13 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		task.version.TxIndex = txIdx
 
 		// Flush TxOut to versionMap (simulates line 1928).
-		vm.FlushVersionedWrites(result.TxOut, true)
+		vm.FlushWrites(result.TxOut, true)
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
-		vm.FlushVersionedWrites(writes, true)
+		vm.FlushWrites(writes, true)
 
 		// Verify accumulated balance.
 		coinbaseWrite := findBalance(writes, s.coinbase)
@@ -950,7 +950,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	cbWS := &state.WriteSet{}
 	cbWS.SetBalance(s.coinbase, coinbaseWrite)
-	vm.FlushVersionedWrites(cbWS, true)
+	vm.FlushWrites(cbWS, true)
 
 	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
 		if readV != writeV {
@@ -1016,8 +1016,8 @@ func TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency(t *testing.T) {
 		return h.Address == coinbase && (h.Path == state.BalancePath || h.Path == state.AddressPath)
 	}
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true)
-	vm.FlushVersionedWrites(ws.Filter(isCoinbaseBal), false)
+	vm.FlushWrites(ws.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true)
+	vm.FlushWrites(ws.Filter(isCoinbaseBal), false)
 
 	_, cbRR, ok := vm.ReadBalance(coinbase, 1)
 	require.True(t, ok, "coinbase cell must exist")
@@ -1063,11 +1063,11 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
+	vm.FlushWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true)
+	vm.FlushWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 1)
 	got, ok := viewStorageVal(view, addr, slotA)
@@ -1086,11 +1086,11 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	val200 := *uint256.NewInt(200)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
+	vm.FlushWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=200 (changed from TX 0's 100)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val200).build()
-	vm.FlushVersionedWrites(writeSet, true)
+	vm.FlushWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 1)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "changed storage write is in the view")
@@ -1109,7 +1109,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 
 	// TX 0 writes slotA=100 (no prior TX)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true)
+	vm.FlushWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 0)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "new storage key is in the view")
@@ -1129,7 +1129,7 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 	val200 := *uint256.NewInt(200)
 
 	// TX 5 incarnation 0: writes slotA=100 and slotB=200
-	vm.FlushVersionedWrites(newWS().
+	vm.FlushWrites(newWS().
 		stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 0}, val100).
 		stor(addr, slotB, state.Version{TxIndex: 5, Incarnation: 0}, val200).
 		build(), true)
@@ -1137,7 +1137,7 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 	// TX 5 incarnation 1 (validated) re-executes writing only slotA. Its result
 	// overwrites blockIO.WriteSet(5), so slotB (stale inc-0) is not in the key-set.
 	validated := newWS().stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 1}, val100).build()
-	vm.FlushVersionedWrites(validated, true)
+	vm.FlushWrites(validated, true)
 
 	view := state.NewVersionMapWriteView(validated, vm, 5)
 	assert.Equal(t, 1, countViewPath(view, state.StoragePath), "only the validated incarnation's slotA is in the view")
@@ -1154,10 +1154,10 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x15})
 
 	// TX 0 writes balance=100
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true)
+	vm.FlushWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true)
 
 	// TX 1 writes balance=150 (accumulated from TX 0's 100 + delta)
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true)
+	vm.FlushWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true)
 
 	// Worker's WriteSet had stale balance=120 (from speculative execution)
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(120)).build()
@@ -1180,7 +1180,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 		addr(addr, state.Version{TxIndex: 0, Incarnation: 0}, &accounts.Account{}).
 		bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).
 		build()
-	vm.FlushVersionedWrites(writeSet, true)
+	vm.FlushWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 0)
 	assert.Equal(t, 0, countViewPath(view, state.AddressPath), "AddressPath is structurally absent from the view")
@@ -1204,7 +1204,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 		codeHash(authority, ver, designatorHash).
 		nonce(authority, ver, 1).
 		build()
-	vm.FlushVersionedWrites(writeSet, true)
+	vm.FlushWrites(writeSet, true)
 
 	view := state.NewVersionMapWriteView(writeSet, vm, 5)
 	gotHash, okHash := viewCodeHashVal(view, authority)
@@ -1218,7 +1218,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 
 // TestCalcFees_EmitsAddressPathForCoinbase pins that calcFees emits an
 // AddressPath sibling alongside the coinbase BalancePath credit, mirroring
-// serial's create-on-first-credit so a later parallel tx's getVersionedAccount
+// serial's create-on-first-credit so a later parallel tx's getAccount
 // sees the account exists (else Empty(coinbase)=true wrongly charges
 // CallNewAccountGas). The AddressPath account's Balance must match BalancePath.
 func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
@@ -1244,7 +1244,7 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 	require.NotNil(t, addrAcc, "AddressPath account must not be nil")
 	require.Equal(t, s.feeTipped, addrAcc.Balance,
 		"AddressPath account.Balance must equal the BalancePath value, "+
-			"otherwise downstream getVersionedAccount returns a stale balance")
+			"otherwise downstream getAccount returns a stale balance")
 	require.True(t, addrAcc.IsEmptyCodeHash(),
 		"freshly-created coinbase has empty code (no pre-block contract)")
 	require.Equal(t, coinbaseBalance.WriteHeader.Version, coinbaseAddress.WriteHeader.Version,
@@ -1311,7 +1311,7 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 			require.NoError(t, destructor.AddBalance(coinbase, *uint256.NewInt(kept), tracing.BalanceChangeTransfer))
 			_, err := destructor.Selfdestruct(coinbase, tc.rules.IsAmsterdam)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(finalizedWrites(t, destructor, tc.rules), true)
+			vm.FlushWrites(finalizedWrites(t, destructor, tc.rules), true)
 
 			writes, err := result.calcFees(task, vm, newMapStateReader(), tc.rules)
 			require.NoError(t, err)
@@ -1558,7 +1558,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		r.TxOut = copyWrites(s.txOut)
 
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(r.TxOut, false)
+		vm.FlushWrites(r.TxOut, false)
 		be := &blockExecutor{coinbase: s.coinbase}
 		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 
@@ -1585,7 +1585,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		r.TxOut = copyWrites(s.txOut)
 
 		vm := state.NewVersionMap(nil)
-		vm.FlushVersionedWrites(r.TxOut, false)
+		vm.FlushWrites(r.TxOut, false)
 		be := &blockExecutor{coinbase: s.coinbase}
 		vm.MarkWritesValidated(r.TxOut, be.isFeeRecipient(r))
 		_, res, ok := vm.ReadSelfDestruct(s.burntAddr, 1)
@@ -1647,7 +1647,7 @@ func TestCalcFees_BALCoinbaseAddressPath(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.wantAddress, findAddress(writes, coinbase) != nil)
 
-			vm.FlushVersionedWrites(writes, true)
+			vm.FlushWrites(writes, true)
 			next := state.NewWithVersionMap(reader, vm)
 			next.SetTxContext(1, 2)
 			bal, err := next.GetBalance(coinbase)
@@ -1681,7 +1681,7 @@ func TestCalcFees_ZeroTipRemovalInvalidatesExistenceRead(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	io := state.NewVersionedIO(3)
-	io.RecordReads(state.Version{TxIndex: 2}, later.VersionedReads())
+	io.RecordReads(state.Version{TxIndex: 2}, later.Reads())
 
 	result, task := coinbaseTipResult(coinbase, 0)
 	result.TxOut = &state.WriteSet{}
@@ -1690,7 +1690,7 @@ func TestCalcFees_ZeroTipRemovalInvalidatesExistenceRead(t *testing.T) {
 	require.NoError(t, err)
 	sd, ok := writes.GetSelfDestruct(coinbase)
 	require.True(t, ok && sd.Val, "precondition: the zero-tip touch removes the empty coinbase")
-	vm.FlushVersionedWrites(writes, true)
+	vm.FlushWrites(writes, true)
 
 	equalVersion := func(readVersion, writeVersion state.Version) state.VersionValidity {
 		if readVersion != writeVersion {
@@ -1808,8 +1808,8 @@ func TestCalcFees_RevivedCoinbaseKeepsStorageForLaterTxs(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	writes, err := result.calcFees(task, vm, base, &chain.Rules{IsSpuriousDragon: true})
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(result.TxOut, true)
-	vm.FlushVersionedWrites(writes, true)
+	vm.FlushWrites(result.TxOut, true)
+	vm.FlushWrites(writes, true)
 
 	later := state.NewWithVersionMap(base, vm)
 	defer later.Close()
