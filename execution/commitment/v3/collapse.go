@@ -93,6 +93,151 @@ func traceCollapses(ctx commitment.PatriciaContext, items []feedEntry, tracer co
 	return nil
 }
 
+func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
+	type deleteGroup struct {
+		plane  byte
+		owner  []byte
+		paths  [][]byte
+		unique map[string]struct{}
+	}
+	groups := make(map[string]*deleteGroup)
+	deletedAccounts := make(map[string]struct{})
+	for _, item := range items {
+		if item.update != nil && item.update.Deleted() && len(item.plainKey) == length.Addr {
+			deletedAccounts[string(item.hashedKey)] = struct{}{}
+		}
+	}
+	for _, item := range items {
+		if item.update == nil || !item.update.Deleted() {
+			continue
+		}
+		plane, owner, path := planeAccount, []byte(nil), item.hashedKey
+		if len(item.plainKey) != length.Addr {
+			if len(path) < 64 {
+				continue
+			}
+			if _, ok := deletedAccounts[string(path[:64])]; ok {
+				continue
+			}
+			addrHash := hashAddressPath(path[:64])
+			plane, owner, path = planeStorage, addrHash[:], path[64:]
+		}
+		groupKey := string(append([]byte{plane}, owner...))
+		group := groups[groupKey]
+		if group == nil {
+			group = &deleteGroup{plane: plane, owner: slices.Clone(owner), unique: make(map[string]struct{})}
+			groups[groupKey] = group
+		}
+		if _, ok := group.unique[string(path)]; ok {
+			continue
+		}
+		group.unique[string(path)] = struct{}{}
+		group.paths = append(group.paths, slices.Clone(path))
+	}
+	ordered := make([]*deleteGroup, 0, len(groups))
+	for _, group := range groups {
+		slices.SortFunc(group.paths, bytes.Compare)
+		ordered = append(ordered, group)
+	}
+	slices.SortFunc(ordered, func(a, b *deleteGroup) int {
+		if a.plane != b.plane {
+			return int(a.plane) - int(b.plane)
+		}
+		return bytes.Compare(a.owner, b.owner)
+	})
+	for _, group := range ordered {
+		g := graph{plane: group.plane, addrHash: group.owner}
+		ownerPath := []byte(nil)
+		if group.plane == planeStorage {
+			ownerPath = make([]byte, 64)
+			nibbles.Expand(group.owner, ownerPath)
+		}
+		root, err := g.loadRoot(ctx)
+		if err != nil {
+			return err
+		}
+		if root == nil {
+			continue
+		}
+		for _, path := range group.paths {
+			if err := g.ensurePath(ctx, root, path); err != nil {
+				return err
+			}
+		}
+		if _, err := walkDeletedNode(root, group.paths, tracer, ownerPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func walkDeletedNode(n *node, deletes [][]byte, tracer commitment.CollapseTracer, ownerPath []byte) (bool, error) {
+	if n == nil || n.childMask == 0 {
+		return false, nil
+	}
+	if n.isExtension() {
+		nib := bits.TrailingZeros16(n.childMask)
+		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
+			return walkDeletedNode(child, deletes, tracer, ownerPath)
+		}
+	}
+	if n.childMask == n.leafMask && bits.OnesCount16(n.childMask) == 1 {
+		nib := bits.TrailingZeros16(n.childMask)
+		return !containsDelete(deletes, deleteChildPath(n, nib)), nil
+	}
+	survivorCount := 0
+	var survivor []byte
+	for mask := n.childMask; mask != 0; mask &= mask - 1 {
+		nib := bits.TrailingZeros16(mask)
+		childPath := deleteChildPath(n, nib)
+		live := true
+		if n.leafMask&(uint16(1)<<nib) != 0 {
+			live = !containsDelete(deletes, childPath)
+		} else if child := n.child(nib); child != nil && hasDeleteUnder(childPath, deletes) {
+			var err error
+			live, err = walkDeletedNode(child, deletes, tracer, ownerPath)
+			if err != nil {
+				return false, err
+			}
+		}
+		if live {
+			survivorCount++
+			survivor = childPath
+		}
+	}
+	if bits.OnesCount16(n.childMask) >= 2 && survivorCount == 1 {
+		tracer(slices.Concat(ownerPath, survivor), slices.Concat(ownerPath, n.path))
+	}
+	return survivorCount != 0, nil
+}
+
+func deleteChildPath(n *node, nib int) []byte {
+	if n.leafMask&(uint16(1)<<nib) == 0 {
+		return n.childPath(nib, nil)
+	}
+	suffix, _ := n.leafAt(nib)
+	path := append(slices.Clone(n.path), byte(nib))
+	return append(path, unpackPath(suffix, 63-len(n.path), nil)...)
+}
+
+func containsDelete(deletes [][]byte, path []byte) bool {
+	for _, deleted := range deletes {
+		if bytes.Equal(deleted, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDeleteUnder(prefix []byte, deletes [][]byte) bool {
+	for _, deleted := range deletes {
+		if bytes.HasPrefix(deleted, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func splitPrefix(prefix []byte) (plane byte, addrHash, path []byte) {
 	if len(prefix) < 64 {
 		return planeAccount, nil, prefix

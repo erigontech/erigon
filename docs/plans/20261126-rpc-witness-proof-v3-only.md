@@ -262,17 +262,19 @@
       returned post-state root
 - [x] run `TestHeadCaptureOverParentRecordsMatchesDurablePerBlock` on the Task 2 chain, so the `TraceCollapsesRoot` route sees
       candidates > 0 for each shape except transient-before, where HPH reports none today
-- [ ] run the EEST zkevm canonical corpus under v3 and record the result; if its runner has no v3 mode, add one
+- [x] run the EEST zkevm canonical corpus under v3 and record the result: `zkevm-witness-v3`: ran 26853 tests, 0 failed,
+      at `b42a56ad0dd` under v3 (remote Linux box)
 - [x] no failing validity case was found: 6 account-plane and 5 storage-plane batches under `-short`, and 34 account-plane
       and 33 storage-plane batches without `-short`; Task 7 removes HPH mechanics from v3 and fixes no validity defect
 
 ### Task 7: v3-native collapse siblings
 **Files:**
 - Modify: `execution/commitment/v3/collapse.go`, `execution/commitment/v3/trie.go`, `execution/commitment/v3/witness_test.go`
+- Add: `execution/commitment/v3/collapse_test.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 - Modify: `rpc/jsonrpc/testdata/witness_golden/`
 
-- [ ] write the rule tests first, red: every candidate is the single deletes-only survivor of a pre-state branch; cascades;
+- [x] write the rule tests first, red: every candidate is the single deletes-only survivor of a pre-state branch; cascades;
       a branch that drops to 0; both planes; key order of a delete and an insert does not change the result
 - [ ] replace `collapseSim` with the deletes-only walk in Technical Details; keep the `sorted` callback hook, the
       `CollapseTracer` interface and the shared record reads of `TraceCollapsesRoot`
