@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -212,10 +211,7 @@ func testDeletesOnlyInsertOrder(t *testing.T, before bool) {
 	c := relativeAccountKey(rng, prefix, accountNibbles(a), before)
 	batch := []commitmenttest.Op{
 		commitmenttest.DeleteAt(a),
-		{Key: c, Account: func() *commitmenttest.AccountValue {
-			account := commitmenttest.RandomAccount(rng)
-			return &account
-		}()},
+		{Key: c, Account: randomWitnessAccount(rng)},
 	}
 	want := []collapseTestEvent{accountCollapseEvent(a, survivor)}
 	require.ElementsMatch(t, want, collapseRuleEvents(t, pre, batch, false))
@@ -432,56 +428,42 @@ func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []col
 	for key := range deletes[planeAccount] {
 		delete(live[planeAccount], key)
 	}
+	groups := make(map[string][][]byte)
+	for key := range deletes[planeAccount] {
+		groups[""] = append(groups[""], []byte(key))
+	}
+	for key := range deletes[planeStorage] {
+		path := []byte(key)
+		groups[string(path[:64])] = append(groups[string(path[:64])], path[64:])
+	}
 	var result []collapseTestEvent
-	for plane, keys := range deletes {
-		if len(keys) == 0 {
+	for ownerKey, dels := range groups {
+		plane := planeAccount
+		owner := []byte(nil)
+		ownerPath := []byte(nil)
+		if ownerKey != "" {
+			plane = planeStorage
+			ownerPath = []byte(ownerKey)
+			packed := hashAddressPath(ownerPath)
+			owner = packed[:]
+		}
+		g := graph{plane: plane, addrHash: owner}
+		root, err := g.loadRoot(ctx)
+		require.NoError(t, err)
+		if root == nil {
 			continue
 		}
-		owners := map[string][]byte{"": nil}
+		require.NoError(t, loadAllCollapseNodes(ctx, &g, root))
+		planeLive := live[plane]
 		if plane == planeStorage {
-			owners = make(map[string][]byte)
-			for key := range keys {
-				path := []byte(key)
-				owner := hashAddressPath(path[:64])
-				owners[string(owner[:])] = owner[:]
-			}
-		}
-		for ownerKey, owner := range owners {
-			g := graph{plane: plane, addrHash: owner}
-			root, err := g.loadRoot(ctx)
-			require.NoError(t, err)
-			if root == nil {
-				continue
-			}
-			require.NoError(t, loadAllCollapseNodes(ctx, &g, root))
-			dels := make([][]byte, 0)
-			for key := range keys {
-				path := []byte(key)
-				if plane == planeStorage {
-					pathOwner := hashAddressPath(path[:64])
-					if string(pathOwner[:]) != ownerKey {
-						continue
-					}
-					path = path[64:]
-				}
-				dels = append(dels, path)
-			}
-			ownerPath := []byte(nil)
-			if plane == planeStorage {
-				ownerPath = make([]byte, 64)
-				nibbles.Expand(owner, ownerPath)
-			}
-			planeLive := live[plane]
-			if plane == planeStorage {
-				planeLive = make(map[string]struct{})
-				for key := range live[plane] {
-					if bytes.HasPrefix([]byte(key), ownerPath) {
-						planeLive[key[len(ownerPath):]] = struct{}{}
-					}
+			planeLive = make(map[string]struct{})
+			for key := range live[plane] {
+				if bytes.HasPrefix([]byte(key), ownerPath) {
+					planeLive[key[len(ownerPath):]] = struct{}{}
 				}
 			}
-			result = append(result, referenceCollapseNodes(root, planeLive, dels, ownerPath)...)
 		}
+		result = append(result, referenceCollapseNodes(root, planeLive, dels, ownerPath)...)
 	}
 	return result
 }

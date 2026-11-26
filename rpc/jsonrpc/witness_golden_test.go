@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -29,7 +28,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -38,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -54,13 +50,6 @@ var (
 	witnessGoldenUpdate = flag.Bool("witness-golden-update", false, "update witness golden fixtures")
 	witnessGoldenDir    = flag.String("witness-golden-dir", "testdata/witness_golden", "witness golden fixture directory")
 )
-
-const (
-	witnessGoldenContractBytecodeHex = "361560225760005b80369010601057005b80359080602001359091556040016007565b33ff"
-	witnessGoldenContractOpcodes     = "CALLDATASIZE ISZERO PUSH1 SELFDESTRUCT JUMPI PUSH1 JUMPDEST DUP1 CALLDATASIZE SWAP1 LT PUSH1 JUMPI STOP JUMPDEST DUP1 CALLDATALOAD SWAP1 DUP1 PUSH1 ADD CALLDATALOAD SWAP1 SWAP2 SSTORE PUSH1 ADD PUSH1 JUMP JUMPDEST CALLER SELFDESTRUCT"
-)
-
-var witnessGoldenContractBytecode = common.Hex2Bytes(witnessGoldenContractBytecodeHex)
 
 type witnessGoldenShape struct {
 	name     string
@@ -92,32 +81,14 @@ type witnessGoldenCandidates struct {
 	canonical map[string][][]byte
 }
 
-func witnessGoldenSignedCall(t *testing.T, block *blockgen.BlockGen, sender common.Address, key *ecdsa.PrivateKey, to common.Address, data []byte) types.Transaction {
-	t.Helper()
-	tx := types.NewTransaction(block.TxNonce(sender), to, uint256.NewInt(1), 1_000_000, uint256.NewInt(1), data)
-	signer := types.LatestSignerForChainID(chain.TestChainBerlinConfig.ChainID)
-	signed, err := types.SignTx(tx, *signer, key)
-	require.NoError(t, err)
-	return signed
-}
-
 func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	t.Helper()
-	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	sender := crypto.PubkeyToAddress(key.PublicKey)
 	transientBeforeSlots := witnessBenchTransientBeforeSlots
-	inlineSlots := [2]common.Hash{
-		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000003c6b4"),
-		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000007dc4f"),
-	}
-	inlineHashes := [2]common.Hash{crypto.Keccak256Hash(inlineSlots[0][:]), crypto.Keccak256Hash(inlineSlots[1][:])}
-	require.GreaterOrEqual(t, witnessBenchPrefixLength(inlineHashes[0], inlineHashes[1]), 10)
-
-	transientBefore := witnessBenchAddress(0x1001)
 	emptyStorage := witnessBenchAddress(0x1007)
-	selfDestruct := witnessBenchAddressWithPrefix(sender)
 	run := witnessBenchBuildCollapse(t, &emptyStorage)
+	sender := run.m.Address
+	transientBefore := witnessBenchAddress(0x1001)
+	selfDestruct := witnessBenchAddressWithPrefix(sender)
 	shapes := []witnessGoldenShape{
 		{name: "transient-before", blockNum: 1},
 		{name: "transient-after", blockNum: 2},
@@ -150,9 +121,6 @@ func witnessGoldenFixturesFor(t *testing.T, commitmentV3 bool) []witnessGoldenFi
 	statecfg.EnableHistoricalCommitment()
 	run := newWitnessGoldenRun(t)
 	ctx := context.Background()
-	require.NoError(t, run.m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
 	require.NoError(t, run.m.InsertChain(run.chain))
 	requireCommitmentVariant(t, run.m, commitmentV3)
 
@@ -251,9 +219,6 @@ func witnessGoldenCandidatesFor(t *testing.T, commitmentV3 bool) witnessGoldenCa
 	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
 	statecfg.EnableHistoricalCommitment()
 	run := newWitnessGoldenRun(t)
-	require.NoError(t, run.m.DB.Update(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
 	require.NoError(t, run.m.InsertChain(run.chain))
 	requireCommitmentVariant(t, run.m, commitmentV3)
 	debugAPI := newDebugApiForTest(run.m)
@@ -318,7 +283,6 @@ func TestWitnessGoldenCollapseShapes(t *testing.T) {
 }
 
 func TestWitnessGoldenContractSStore(t *testing.T) {
-	require.NotEmpty(t, witnessGoldenContractOpcodes)
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -329,13 +293,13 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			sender:   {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
-			contract: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...)},
+			contract: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessBenchContractBytecode...)},
 		},
 		GasLimit: 10_000_000,
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
 	generated, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
-		block.AddTx(witnessGoldenSignedCall(t, block, sender, key, contract, witnessBenchPairData([2]common.Hash{slotOne, witnessBenchValue(7)}, [2]common.Hash{slotTwo, witnessBenchValue(9)})))
+		block.AddTx(witnessBenchSignedCall(t, block, key, contract, witnessBenchPairData([2]common.Hash{slotOne, witnessBenchValue(7)}, [2]common.Hash{slotTwo, witnessBenchValue(9)})))
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
@@ -343,7 +307,7 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 	block := rpc.BlockNumber(1)
 	code, err := api.GetCode(context.Background(), contract, bnhPtr(rpc.BlockNumberOrHashWithNumber(block)))
 	require.NoError(t, err)
-	require.Equal(t, witnessGoldenContractBytecode, []byte(code))
+	require.Equal(t, witnessBenchContractBytecode, []byte(code))
 	gotOne, err := api.GetStorageAt(context.Background(), contract, hexutil.Encode(slotOne[:]), bnhPtr(rpc.BlockNumberOrHashWithNumber(block)))
 	require.NoError(t, err)
 	require.Equal(t, witnessBenchValue(7), gotOne)
@@ -495,13 +459,13 @@ func TestCollapseWitnessKeepsSurvivorStorage(t *testing.T) {
 		statecfg.EnableHistoricalCommitment()
 		alloc := types.GenesisAlloc{
 			sender:   {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
-			victim:   {Balance: new(big.Int), Nonce: 1, Code: witnessGoldenContractBytecode},
+			victim:   {Balance: new(big.Int), Nonce: 1, Code: witnessBenchContractBytecode},
 			survivor: {Balance: new(big.Int), Nonce: 1, Code: []byte{0}, Storage: witnessBenchStorage([2]common.Hash{witnessBenchValue(1), witnessBenchValue(2)})},
 		}
 		spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
 		blocks, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, victim, nil))
+			block.AddTx(witnessBenchSignedCall(t, block, key, victim, nil))
 		})
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(blocks))

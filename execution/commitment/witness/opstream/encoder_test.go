@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -97,14 +99,10 @@ func TestEncodeMatchesTrieWitness(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			nodes, err := tc.tr.RLPEncode()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			want := trieWitnessBytes(t, nodes, tc.codeReads)
 			gotWitness, err := opstream.Encode(nodes, tc.codeReads)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			got := witnessBytes(t, gotWitness)
 			if !bytes.Equal(got, want) {
 				t.Fatalf("encoded witness differs: got %x, want %x", got, want)
@@ -120,9 +118,7 @@ func TestEncodeRejectsCodeHashMismatch(t *testing.T) {
 	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	tr := stateForAccount(key, account)
 	nodes, err := tr.RLPEncode()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	_, err = opstream.Encode(nodes, map[common.Hash]witness.CodeWithHash{
 		key: {Code: []byte{0x60, 0x02}},
 	})
@@ -133,9 +129,7 @@ func TestEncodeRejectsCodeHashMismatch(t *testing.T) {
 
 func TestEncodeRejectsNodeTrailingData(t *testing.T) {
 	nodes, err := stateForSingleLeaf().RLPEncode()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	nodes[0] = append(nodes[0], 0)
 	if _, err := opstream.Encode(nodes, nil); err == nil {
 		t.Fatal("expected trailing node data error")
@@ -148,13 +142,9 @@ func TestEncodeRejectsCodeReadForEmptyCodeHash(t *testing.T) {
 	account := accounts.NewAccount()
 	account.Nonce = 1
 	nodes, err := stateForAccount(key, account).RLPEncode()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	old, err := trie.RLPDecode(nodes)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	code := []byte{0x60, 0x01}
 	if acc, ok := old.GetAccount(key[:]); !ok || acc == nil {
 		t.Fatal("missing account in reference trie")
@@ -179,23 +169,15 @@ func TestEncodeRoundTrip(t *testing.T) {
 	tr.UpdateAccount([]byte("first"), &first)
 	tr.UpdateAccount([]byte("second"), &second)
 	nodes, err := tr.RLPEncode()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	witness, err := opstream.Encode(nodes, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	encoded := witnessBytes(t, witness)
 	decoded, err := opstream.NewWitnessFromReader(bytes.NewReader(encoded), false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	rebuilt, err := trie.BuildTrieFromWitness(decoded, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if got, want := rebuilt.Hash(), tr.Hash(); got != want {
 		t.Fatalf("round-trip root = %x, want %x", got, want)
 	}
@@ -219,9 +201,7 @@ func stateForAccount(key common.Hash, account accounts.Account) *trie.Trie {
 func trieWitnessBytes(t *testing.T, nodes [][]byte, codeReads map[common.Hash]witness.CodeWithHash) []byte {
 	t.Helper()
 	tr, err := trie.RLPDecode(nodes)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for key, read := range codeReads {
 		if len(read.Code) == 0 {
 			continue
@@ -231,9 +211,7 @@ func trieWitnessBytes(t *testing.T, nodes [][]byte, codeReads map[common.Hash]wi
 		}
 	}
 	witness, err := tr.ExtractWitness(false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	return witnessBytes(t, witness)
 }
 

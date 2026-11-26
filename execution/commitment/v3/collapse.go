@@ -31,12 +31,6 @@ import (
 
 func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
 	groups := make(map[string][][]byte)
-	deletedAccounts := make(map[string]struct{})
-	for _, item := range items {
-		if item.update != nil && item.update.Deleted() && len(item.plainKey) == length.Addr {
-			deletedAccounts[string(item.hashedKey)] = struct{}{}
-		}
-	}
 	for _, item := range items {
 		if item.update == nil || !item.update.Deleted() {
 			continue
@@ -46,12 +40,14 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 			if len(path) < 64 {
 				continue
 			}
-			if _, ok := deletedAccounts[string(path[:64])]; ok {
-				continue
-			}
 			owner, path = string(path[:64]), path[64:]
 		}
 		groups[owner] = append(groups[owner], slices.Clone(path))
+	}
+	for _, item := range items {
+		if item.update != nil && item.update.Deleted() && len(item.plainKey) == length.Addr {
+			delete(groups, string(item.hashedKey))
+		}
 	}
 	for owner, paths := range groups {
 		slices.SortFunc(paths, bytes.Compare)
@@ -153,18 +149,15 @@ func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib 
 	if err != nil || root == nil || root.childMask == 0 {
 		return path, err
 	}
-	var extension []byte
 	switch {
 	case root.isLeafRoot():
 		child := bits.TrailingZeros16(root.childMask)
-		suffix, _ := root.leafAt(child)
-		extension = append([]byte{byte(child)}, unpackPath(suffix, 63, nil)...)
+		return slices.Concat(path, deleteChildPath(root, child)), nil
 	case root.isExtension():
-		extension = slices.Clone(root.path)
+		return slices.Concat(path, root.path), nil
 	default:
 		return path, nil
 	}
-	return slices.Concat(path, extension), nil
 }
 
 func deleteChildPath(n *node, nib int) []byte {

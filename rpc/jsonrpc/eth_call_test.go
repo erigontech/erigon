@@ -1338,22 +1338,16 @@ func TestGetProofHistoricalCommitmentV3(t *testing.T) {
 	require.NoError(t, m.InsertChain(testChain))
 	requireCommitmentVariant(t, m, true)
 
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	const blockNum = 2
-	proof, err := api.GetProof(context.Background(), bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(blockNum)))
+	proof, err := api.GetProof(context.Background(), m.Address, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(blockNum)))
 	require.NoError(t, err)
 	require.NotNil(t, proof)
 	require.NotEmpty(t, proof.AccountProof)
 	require.NotZero(t, (*uint256.Int)(proof.Balance).Uint64())
 
-	require.NoError(t, m.DB.View(context.Background(), func(tx kv.Tx) error {
-		header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(blockNum), tx)
-		require.NoError(t, err)
-		require.Equal(t, testChain.Blocks[blockNum-1].Root(), header.Root)
-		return trie.VerifyAccountProof(header.Root, proof)
+	require.NoError(t, m.DB.View(context.Background(), func(_ kv.Tx) error {
+		return trie.VerifyAccountProof(testChain.Blocks[blockNum-1].Root(), proof)
 	}))
 }
 

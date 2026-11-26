@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"math/rand"
 	"testing"
 
@@ -191,12 +192,7 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 			if err := consume(2); err != nil {
 				return 0, err
 			}
-		case 1:
-			nodes++
-			if err := consume(1); err != nil {
-				return 0, err
-			}
-		case 2:
+		case 1, 2:
 			nodes++
 			if err := consume(1); err != nil {
 				return 0, err
@@ -220,17 +216,7 @@ func witnessBenchCountStreamNodes(data []byte) (int, error) {
 			if err != nil {
 				return 0, err
 			}
-			operands := 0
-			if flags&(1<<2) != 0 {
-				operands++
-			}
-			if flags&(1<<3) != 0 {
-				operands++
-			}
-			if flags&1 != 0 {
-				operands++
-			}
-			if err := consume(operands); err != nil {
+			if err := consume(bits.OnesCount8(flags & 0x0d)); err != nil {
 				return 0, err
 			}
 		case 6:

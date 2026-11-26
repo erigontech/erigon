@@ -1050,9 +1050,6 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 
 	t.Run("task2 chain collapse traces", func(t *testing.T) {
 		golden := newWitnessGoldenRun(t)
-		require.NoError(t, golden.m.DB.Update(context.Background(), func(tx kv.RwTx) error {
-			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-		}))
 		runHeadCaptureOverParentRecords(t, golden.m, golden.chain)
 	})
 }
