@@ -291,16 +291,18 @@ func TestGossipBlockQueuedForItsParentKeepsItsArrival(t *testing.T) {
 	require.False(t, line.seen.IsZero())
 }
 
-func TestBlockTimelineOfAGloasBlockHasNoFakeNumber(t *testing.T) {
-	logger, records := timelineLogger(log.LvlDebug)
-	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
-	go timelines.run(t.Context())
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-	block.Block.Slot = timelineSlot
+func TestBlockTimelineOfABlockWithoutExecutionPayloadHasNoFakeNumber(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion, clparams.GloasVersion} {
+		logger, _ := timelineLogger(log.LvlDebug)
+		timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+		block.Block.Slot = timelineSlot
 
-	importOnce(timelines, block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+		importOnce(timelines, block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
 
-	require.Equal(t, "-", recordFields(t, nextRecord(t, records))["number"], "a Gloas block carries no execution block number")
+		require.Len(t, timelines.lines, 1)
+		require.Equal(t, "-", (<-timelines.lines).number, "%s block", version)
+	}
 }
 
 func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
@@ -335,4 +337,85 @@ func TestBlockTimelineOfOverlappingImportsCountsBothAndLogsOnce(t *testing.T) {
 	require.Equal(t, at(1100*time.Millisecond), line.importStart)
 	require.Equal(t, at(1200*time.Millisecond), line.imported)
 	require.Equal(t, at(900*time.Millisecond), line.seen)
+}
+
+func TestBlockTimelineKeepsTheEarliestArrivalAndStart(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x12}
+
+	timelines.seen(block, at(1100*time.Millisecond))
+	timelines.seen(block, at(time.Second))
+	timelines.importStarted(block, at(1300*time.Millisecond))
+	timelines.importStarted(block, at(1200*time.Millisecond))
+	timelines.importEnded(block, root, at(1200*time.Millisecond), at(1400*time.Millisecond), nil)
+
+	require.Len(t, timelines.lines, 1)
+	line := <-timelines.lines
+	require.Equal(t, at(time.Second), line.seen)
+	require.Equal(t, at(1200*time.Millisecond), line.firstImport)
+	require.Equal(t, at(1200*time.Millisecond), line.importStart)
+}
+
+func TestBlockTimelineOfABlockImportedByAnotherPathHasNoImportTimes(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixture(t)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	logger, _ := timelineLogger(log.LvlDebug)
+	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	require.Empty(t, service.timelines.lines, "the block waits for its columns")
+	processing.headers.Store(common.Hash(root), block.SignedBeaconBlockHeader().Header)
+	accepted, err := service.processAndStoreBlock(t.Context(), block, false)
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	require.Len(t, service.timelines.lines, 1)
+	line := <-service.timelines.lines
+	require.Equal(t, common.Hash(root), line.root)
+	require.False(t, line.seen.IsZero())
+	require.Equal(t, 1, line.attempts)
+	require.True(t, line.waitedForColumns)
+	require.True(t, line.importStart.IsZero())
+	require.True(t, line.imported.IsZero())
+}
+
+func TestBlockTimelineOfAnUntrackedBlockImportedByAnotherPathIsNotLogged(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+
+	timelines.importedElsewhere(timelineBlock(timelineSlot, 0), common.Hash{0x13})
+
+	require.Empty(t, timelines.pending)
+	require.Empty(t, timelines.lines)
+}
+
+func TestBlockTimelineImportReplacesAnArrivalWhenFull(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	for i := range maxPendingBlockTimelines {
+		timelines.seen(timelineBlockByProposer(timelineSlot, uint64(i), 0), at(time.Second))
+	}
+	block := timelineBlockByProposer(timelineSlot, maxPendingBlockTimelines, 0)
+
+	importOnce(timelines, block, common.Hash{0x14}, at(time.Second), at(2*time.Second), nil)
+
+	require.Len(t, timelines.pending, maxPendingBlockTimelines)
+	require.Len(t, timelines.lines, 1)
+}
+
+func TestBlockTimelineImportKeepsEntriesWithAttemptsWhenFull(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	for i := range maxPendingBlockTimelines {
+		timelines.importStarted(timelineBlockByProposer(timelineSlot, uint64(i), 0), at(time.Second))
+	}
+	block := timelineBlockByProposer(timelineSlot, maxPendingBlockTimelines, 0)
+
+	importOnce(timelines, block, common.Hash{0x15}, at(time.Second), at(2*time.Second), nil)
+
+	require.Len(t, timelines.pending, maxPendingBlockTimelines)
+	require.NotContains(t, timelines.pending, block.Signature)
+	require.Empty(t, timelines.lines)
 }

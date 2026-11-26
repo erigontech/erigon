@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -38,9 +39,8 @@ const (
 )
 
 // blockTimelines logs one debug line per block of a recent slot that the block service imports, with the time since
-// the slot start at which the block arrived on gossip and went through its import attempts. Locally published blocks
-// are imported by the beacon API and have no line. A separate goroutine writes the lines and a full buffer drops them,
-// so a slow log file never delays an import.
+// the slot start at which the block arrived on gossip and went through its import attempts. A separate goroutine
+// writes the lines and a full buffer drops them, so a slow log file never delays an import.
 type blockTimelines struct {
 	clock  eth_clock.EthereumClock
 	logger log.Logger
@@ -110,51 +110,77 @@ func msSince(slotStart, t time.Time) any {
 // seen records when the block arrived on gossip. Callers record it only after the signature check, as another block
 // can carry a copy of the signature.
 func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
-	t.update(block, func(line *blockTimeline) {
-		if line.seen.IsZero() {
-			line.seen = now
-		}
+	t.update(block, newEntryIfRoom, func(line *blockTimeline) {
+		keepEarliest(&line.seen, now)
 	})
 }
 
 // importStarted records the start of one fork choice import of the block. Imports by different paths can overlap, so
 // an attempt counts when it starts, not when it ends.
 func (t *blockTimelines) importStarted(block *cltypes.SignedBeaconBlock, start time.Time) {
-	t.update(block, func(line *blockTimeline) {
+	t.update(block, newEntryEvictingArrival, func(line *blockTimeline) {
 		line.attempts++
-		if line.firstImport.IsZero() {
-			line.firstImport = start
-		}
+		keepEarliest(&line.firstImport, start)
 	})
 }
 
 // importEnded records the result of an import that started at start, and queues the line of the block once fork
 // choice holds it.
 func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
-	t.update(block, func(line *blockTimeline) {
+	t.update(block, existingEntry, func(line *blockTimeline) {
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			line.waitedForColumns = true
 		}
 		if err != nil {
 			return
 		}
-		line.root, line.importStart, line.imported = root, start, end
-		line.number = "-"
-		if payload := block.Block.Body.ExecutionPayload; payload != nil {
-			line.number = payload.BlockNumber
-		}
-		if commitments := block.GetBlobKzgCommitments(); commitments != nil {
-			line.blobs = commitments.Len()
-		}
-		line.logged = true
-		select {
-		case t.lines <- *line:
-		default:
-		}
+		line.importStart, line.imported = start, end
+		t.queue(line, block, root)
 	})
 }
 
-func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*blockTimeline)) {
+// importedElsewhere queues the line of a tracked block that another path put into fork choice, with no import times.
+func (t *blockTimelines) importedElsewhere(block *cltypes.SignedBeaconBlock, root common.Hash) {
+	t.update(block, existingEntry, func(line *blockTimeline) {
+		t.queue(line, block, root)
+	})
+}
+
+func (t *blockTimelines) queue(line *blockTimeline, block *cltypes.SignedBeaconBlock, root common.Hash) {
+	line.root = root
+	line.number = "-"
+	if payload := block.Block.Body.ExecutionPayload; payload != nil && block.Version() >= clparams.BellatrixVersion {
+		line.number = payload.BlockNumber
+	}
+	if commitments := block.GetBlobKzgCommitments(); commitments != nil {
+		line.blobs = commitments.Len()
+	}
+	line.logged = true
+	select {
+	case t.lines <- *line:
+	default:
+	}
+}
+
+func keepEarliest(current *time.Time, t time.Time) {
+	if current.IsZero() || t.Before(*current) {
+		*current = t
+	}
+}
+
+// entryCreation says whether update adds an entry for a block that has none.
+type entryCreation uint8
+
+const (
+	existingEntry entryCreation = iota
+	newEntryIfRoom
+	// newEntryEvictingArrival replaces an entry that has only an arrival when the map is full. Arrivals can be
+	// recorded before the proposer check and imports only after it, so blocks of other signers cannot keep the
+	// imported block out.
+	newEntryEvictingArrival
+)
+
+func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, create entryCreation, apply func(*blockTimeline)) {
 	if t == nil || !t.logger.Enabled(context.Background(), log.LvlDebug) {
 		return
 	}
@@ -167,12 +193,15 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 	key := block.Signature
 	line, ok := t.pending[key]
 	if !ok {
+		if create == existingEntry {
+			return
+		}
 		for pendingKey, pending := range t.pending {
 			if !timelineSlotTracked(pending.slot, currentSlot) {
 				delete(t.pending, pendingKey)
 			}
 		}
-		if len(t.pending) >= maxPendingBlockTimelines {
+		if len(t.pending) >= maxPendingBlockTimelines && (create != newEntryEvictingArrival || !t.evictArrivalLocked()) {
 			return
 		}
 		line = &blockTimeline{slot: block.Block.Slot}
@@ -181,6 +210,16 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 	if !line.logged {
 		apply(line)
 	}
+}
+
+func (t *blockTimelines) evictArrivalLocked() bool {
+	for key, line := range t.pending {
+		if line.attempts == 0 && !line.logged {
+			delete(t.pending, key)
+			return true
+		}
+	}
+	return false
 }
 
 func timelineSlotTracked(slot, currentSlot uint64) bool {

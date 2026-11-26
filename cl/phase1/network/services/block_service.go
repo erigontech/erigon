@@ -1214,7 +1214,9 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 
 	if !accepted {
-		_, accepted = b.forkchoiceStore.GetHeader(blockRoot)
+		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); accepted {
+			b.timelines.importedElsewhere(block, common.Hash(blockRoot))
+		}
 	}
 
 	// Fork choice may already contain a block whose database write failed.
