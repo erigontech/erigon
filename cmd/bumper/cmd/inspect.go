@@ -84,5 +84,5 @@ func getNames(s *statecfg.SchemaGen) (res map[string]string, domains []string) {
 
 var extCfgMap = map[string][]string{
 	domainType: {".kv", ".bt", ".kvi", ".kvei", ".vi", ".v", ".efi", ".ef"},
-	idxType:    {".efi", ".ef"},
+	idxType:    {".efi", ".ef"}, // for standalone inverted index
 }
