@@ -99,7 +99,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64) (kv.RwDB, *InvertedIn
 
 func TestInvertedIndexVisibleEnd(t *testing.T) {
 	db, ii := testDbAndInvertedIndex(t, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	iit := ii.beginForTests()
 	defer iit.Close()
@@ -637,7 +637,7 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 	ctx := t.Context()
 	db, ii := testDbAndInvertedIndex(t, aggStep)
 
-	rwTx := beginRw(t, db)
+	rwTx := mdbxtest.BeginRw(t, db)
 
 	// writeKeys adds keyCount entries to the index at the given txNum.
 	// forced=true in TableScanningPrune bypasses the CanPrune file check.
@@ -1251,7 +1251,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	require.NoError(err)
 
 	// Build files for steps 0 and 1 (covers txNums 0..31).
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	for step := kv.Step(0); step <= 1; step++ {
 		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
@@ -1307,7 +1307,7 @@ func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 	ii.Enabled = false
 	ctx := t.Context()
 
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	ic := ii.beginForTests()
 	defer ic.Close()
@@ -1511,7 +1511,7 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 					}
 					return nil
 				}))
-				tx := beginRw(t, db)
+				tx := mdbxtest.BeginRw(t, db)
 				expected := map[string]map[string]struct{}{ii.KeysTable: {}, ii.ValuesTable: {}}
 				for _, group := range [][]entry{seed.entries, entries} {
 					for _, e := range group {
@@ -1565,7 +1565,7 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 
 func TestInvertedIndexPrefetchError(t *testing.T) {
 	db, ii := testDbAndInvertedIndex(t, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	iit := ii.beginForTests()
 	defer iit.Close()
 	wantErr := errors.New("read failed")
@@ -1626,7 +1626,7 @@ func TestInvertedIndexPrefetchCancellation(t *testing.T) {
 	for _, batchSize := range []uint64{1, 1024} {
 		t.Run(fmt.Sprintf("batch=%d", batchSize), func(t *testing.T) {
 			db, ii := testDbAndInvertedIndex(t, 16)
-			tx := beginRw(t, db)
+			tx := mdbxtest.BeginRw(t, db)
 			iit := ii.beginForTests()
 			defer iit.Close()
 			ctx, cancel := context.WithCancel(t.Context())
@@ -1661,7 +1661,7 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
 				RoTxsLimiter(limiter).MustOpen()
 			t.Cleanup(db.Close)
-			tx := beginRw(t, db)
+			tx := mdbxtest.BeginRw(t, db)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			cursor := &prefetchIndexCursor{}
@@ -1699,7 +1699,7 @@ func TestInvIndexHasTxNumsInDB(t *testing.T) {
 	t.Parallel()
 	db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := t.Context()
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	ic := ii.beginForTests()
 	defer ic.Close()
 	writer := ic.NewWriter(db)
@@ -1900,7 +1900,7 @@ func TestInvertedIndexChunks(t *testing.T) {
 	})
 	t.Run("legacy_values", func(t *testing.T) {
 		db, ii := testDbAndInvertedIndex(t, 16)
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		m := iiChunkModel{}
 		for _, n := range []uint64{3, 9, 12} { // one 8-byte txNum per dup: the layout before chunking
 			require.NoError(t, tx.Put(ii.ValuesTable, []byte("k"), binary.BigEndian.AppendUint64(nil, n)))
@@ -1914,7 +1914,7 @@ func TestInvertedIndexChunks(t *testing.T) {
 
 	t.Run("random_flush_prune_unwind", func(t *testing.T) {
 		db, ii := testDbAndInvertedIndex(t, 16)
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		r := rand.New(rand.NewPCG(25304, 1))
 		keys := []string{"a", "ab", "b", "hot"}
 		m := iiChunkModel{}
@@ -1958,7 +1958,7 @@ func TestInvertedIndexChunks(t *testing.T) {
 
 func TestInvertedIndexPruneChunksResume(t *testing.T) {
 	db, ii := testDbAndInvertedIndex(t, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	m := iiChunkModel{}
 	for _, key := range []string{"a", "b", "c"} {
 		iiChunkAdd(t, tx, ii.ValuesTable, m, key, 1, 5, 9, 13)
@@ -1989,7 +1989,7 @@ func TestInvertedIndexPruneChunksResume(t *testing.T) {
 
 func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
 	db, ii := testDbAndInvertedIndex(t, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	iit := ii.beginForTests()
 	defer iit.Close()
 	cursor := &prefetchIndexCursor{t: t}

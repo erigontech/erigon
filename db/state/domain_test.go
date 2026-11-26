@@ -1043,7 +1043,7 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	// k2 is NOT modified in step 1
 
 	// Write both keys in step 0, then k1 again in step 1, all in one transaction.
-	tx := beginRw(t, db) //nolint:gocritic
+	tx := mdbxtest.BeginRw(t, db) //nolint:gocritic
 	dt := d.beginForTests()
 	w := dt.NewWriter(db)
 
@@ -1101,7 +1101,7 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	writer := domainTx.NewWriter(db)
 	key := []byte("key")
@@ -1130,7 +1130,7 @@ func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 func TestDomain_GetLatestMaxStepSelectsNewestDBValue(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	defer domainTx.Close()
 	writer := domainTx.NewWriter(db)
@@ -1150,7 +1150,7 @@ func TestDomain_GetLatestMaxStepSelectsNewestDBValue(t *testing.T) {
 func TestDomain_GetLatestMaxStepZeroWithUnitSteps(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 1)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	writer := domainTx.NewWriter(db)
 	key := []byte("key")
@@ -1173,7 +1173,7 @@ func TestDomain_GetLatestMaxStepZeroWithUnitSteps(t *testing.T) {
 func TestDomain_GetLatestMaxStepRejectsMergedFileSplit(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	writer := domainTx.NewWriter(db)
 	key := []byte("key")
@@ -2466,7 +2466,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize)
 	d.HistoryLargeValues = false
 
-	rwTx := beginRw(t, db)
+	rwTx := mdbxtest.BeginRw(t, db)
 
 	domRoTx := d.beginForTests()
 	defer domRoTx.Close()
@@ -3530,35 +3530,16 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 // (like CommitmentDomain) for testing buildHashMapAccessor code paths.
 func filledDomainWithHashMapAccessor(t *testing.T) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
-	logger := log.New()
-	dirs := datadir2.New(t.TempDir())
-
-	// Start with AccountsDomain config but switch to HashMap accessor
 	cfg := statecfg.Schema.AccountsDomain
-	cfg.Accessors = statecfg.AccessorHashMap // Use HashMap instead of BTree
-
-	// Set version to V1_0_standart to enable HashMap accessor building
+	cfg.Accessors = statecfg.AccessorHashMap
+	// V1_0_standart enables HashMap accessor building.
 	cfg.FileVersion = statecfg.DomainVersionTypes{
 		DataKV:       version.V1_0_standart,
 		AccessorBT:   version.V1_0_standart,
 		AccessorKVEI: version.V1_0_standart,
 		AccessorKVI:  version.V1_0_standart,
 	}
-	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{
-		DataEF:      version.V1_0_standart,
-		AccessorEFI: version.V1_0_standart,
-	}
-
-	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-	salt := uint32(1)
-
-	d, err := NewDomain(cfg, 16, config3.DefaultStepsInFrozenFile, dirs, logger)
-	require.NoError(t, err)
-	d.salt.Store(&salt)
-	d.DisableFsync()
-	t.Cleanup(d.Close)
-
+	db, d := testDbAndDomainOfStep(t, cfg, 16)
 	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
@@ -3607,7 +3588,7 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 
 	db, d, txs := filledDomainWithHashMapAccessor(t)
 
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	// Collate and merge with forced collision retry
 	collateAndMergeWithCollisionRetry(t, tx, d, txs)
@@ -3881,7 +3862,7 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, cfg, 16)
 	ctx := t.Context()
 
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	dc := d.beginForTests()
 	defer dc.Close()
@@ -3909,7 +3890,7 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		t.Parallel()
 		db, d := testDbAndDomain(t)
 		ctx := t.Context()
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		dc := d.beginForTests()
 		writer := dc.NewWriter(db)
 		require.NoError(t, writer.PutWithPrev([]byte("key"), []byte("value"), 5, nil))
@@ -3925,7 +3906,7 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 	t.Run("domain files without history files", func(t *testing.T) {
 		t.Parallel()
 		db, d, _ := filledDomainFixedSize(t, 4, 64, 16)
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		collateAndMerge(t, tx, d, 64)
 		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
 			require.NoError(t, tx.ClearTable(table))
@@ -3942,7 +3923,7 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		t.Parallel()
 		db, d, _ := filledDomainFixedSize(t, 4, 64, 16)
 		ctx := t.Context()
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		for step := range kv.Step(2) {
 			require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 		}
@@ -3958,7 +3939,7 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 	t.Run("history values files without index files", func(t *testing.T) {
 		t.Parallel()
 		db, d, _ := filledDomainFixedSize(t, 4, 64, 16)
-		tx := beginRw(t, db)
+		tx := mdbxtest.BeginRw(t, db)
 		collateAndMerge(t, tx, d, 64)
 		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
 			require.NoError(t, tx.ClearTable(table))
@@ -4339,7 +4320,7 @@ func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
 	domainExistenceForceInMem = []string{kv.AccountsDomain.String()}
 	t.Cleanup(func() { domainExistenceForceInMem = prev })
 	db, d := testDbAndDomain(t)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	writer := domainTx.NewWriter(db)
 	for i := range 1000 {
@@ -4382,7 +4363,7 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	domainExistenceForceRandom = []string{kv.AccountsDomain.String()}
 	t.Cleanup(func() { domainExistenceForceRandom = prev })
 	db, d := testDbAndDomain(t)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	domainTx := d.beginForTests()
 	writer := domainTx.NewWriter(db)
 	for i := range 100 {
@@ -4436,14 +4417,6 @@ func (d *Domain) beginForTests() *DomainRoTx {
 func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
-}
-
-func beginRw(t testing.TB, db kv.RwDB) kv.RwTx {
-	t.Helper()
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	return tx
 }
 
 func beginRo(t testing.TB, db kv.RoDB) kv.Tx {

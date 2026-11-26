@@ -1674,9 +1674,9 @@ func TestScanStaticFilesH(t *testing.T) {
 	hc.Close()
 }
 
-func writeSomeHistory(tb testing.TB, largeValues bool) (kv.RwDB, *History, [][]byte, uint64) {
+func writeSomeHistory(tb testing.TB) (kv.RwDB, *History, [][]byte, uint64) {
 	tb.Helper()
-	db, h := testDbAndHistory(tb, largeValues)
+	db, h := testDbAndHistory(tb, false)
 	ctx := tb.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
@@ -1750,47 +1750,34 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 	defer logEvery.Stop()
 	ctx := t.Context()
 
-	test := func(t *testing.T, h *History, db kv.RwDB, writtenKeys [][]byte, txs uint64) {
-		t.Helper()
-		require := require.New(t)
+	db, h, writtenKeys, txs := writeSomeHistory(t)
+	require := require.New(t)
 
-		collateAndMergeHistory(t, db, h, txs, true)
+	collateAndMergeHistory(t, db, h, txs, true)
 
-		tx, err := db.BeginRo(ctx)
+	tx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	ic := h.beginForTests()
+	defer ic.Close()
+
+	iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
+	require.NoError(err)
+	defer iter.Close()
+
+	keys := make([][]byte, 0)
+	for iter.HasNext() {
+		k, _, err := iter.Next()
 		require.NoError(err)
-		defer tx.Rollback()
-		ic := h.beginForTests()
-		defer ic.Close()
-
-		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
-		require.NoError(err)
-		defer iter.Close()
-
-		keys := make([][]byte, 0)
-		for iter.HasNext() {
-			k, _, err := iter.Next()
-			require.NoError(err)
-			keys = append(keys, k)
-			//vals = append(vals, fmt.Sprintf("%x", v))
-		}
-
-		slices.SortFunc(writtenKeys, bytes.Compare)
-
-		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
-		require.Len(keys, len(writtenKeys))
-		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
+		keys = append(keys, k)
+		//vals = append(vals, fmt.Sprintf("%x", v))
 	}
 
-	//LargeHistoryValues: don't support various keys len
-	//TODO: write hist test for non-various keys len
-	//t.Run("large_values", func(t *testing.T) {
-	//	db, h, keys, txs := writeSomeHistory(t, true)
-	//	test(t, h, db, keys, txs)
-	//})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, keys, txs := writeSomeHistory(t, false)
-		test(t, h, db, keys, txs)
-	})
+	slices.SortFunc(writtenKeys, bytes.Compare)
+
+	require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
+	require.Len(keys, len(writtenKeys))
+	require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 }
 
 func TestHistory_OpenFolder(t *testing.T) {
@@ -2481,7 +2468,7 @@ func TestIntegrityHistoryValueAccessor(t *testing.T) {
 func TestHistoryCanPruneUntilMalformedProgress(t *testing.T) {
 	t.Parallel()
 	db, h := testDbAndHistory(t, false)
-	rwTx := beginRw(t, db)
+	rwTx := mdbxtest.BeginRw(t, db)
 	require.NoError(t, rwTx.Put(kv.TblPruningValsProg, append([]byte(h.ValuesTable), "range"...), []byte{1}))
 
 	hc := h.beginForTests()
