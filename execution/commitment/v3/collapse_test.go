@@ -246,69 +246,6 @@ func TestDeletesOnlyCollapseProperty(t *testing.T) {
 	}
 }
 
-func TestDeletesOnlyCollapseComparison(t *testing.T) {
-	var equal, superset, differ int
-	var first string
-	for seed := range int64(20) {
-		rng := rand.New(rand.NewSource(seed + 100))
-		pre := witnessState(rng, witnessShape{
-			accounts:     8,
-			slots:        4,
-			slotPrefixes: [][]byte{{1}, {2}, {3}, {4}},
-		})
-		batch := make([]commitmenttest.Op, 0)
-		for i, op := range pre {
-			if i%2 == 0 || rng.Intn(3) == 0 {
-				batch = append(batch, commitmenttest.DeleteAt(op.Key))
-			}
-		}
-		b := newWitnessBed(t, pre)
-		b.v3Mem.Apply(batch)
-		tr := b.openV3(context.Background())
-		_, _, err := tr.RestoreState(b.v3State)
-		require.NoError(t, err)
-		items := collapseTestItems(batch)
-		var newEvents, oldEvents []collapseTestEvent
-		err = traceCollapsesDeletes(tr.ctx, items, func(sibling, prefix []byte) {
-			newEvents = append(newEvents, collapseTestEvent{bytes.Clone(sibling), bytes.Clone(prefix)})
-		})
-		require.NoError(t, err)
-		err = traceCollapses(tr.ctx, items, func(sibling, prefix []byte) {
-			oldEvents = append(oldEvents, collapseTestEvent{bytes.Clone(sibling), bytes.Clone(prefix)})
-		})
-		require.NoError(t, err)
-		newSet, oldSet := collapseEventSet(newEvents), collapseEventSet(oldEvents)
-		switch {
-		case equalEventSets(newSet, oldSet):
-			equal++
-		case isEventSuperset(newSet, oldSet):
-			superset++
-		default:
-			differ++
-			if first == "" {
-				first = fmt.Sprintf("seed=%d batch=%d new=%d old=%d", seed, len(batch), len(newSet), len(oldSet))
-			}
-		}
-	}
-	t.Logf("deletes-only comparison: equal=%d superset=%d differ=%d", equal, superset, differ)
-	if first != "" {
-		t.Logf("first differ otherwise: %s", first)
-	}
-}
-
-func equalEventSets(a, b map[string]struct{}) bool {
-	return isEventSuperset(a, b) && isEventSuperset(b, a)
-}
-
-func isEventSuperset(a, b map[string]struct{}) bool {
-	for event := range b {
-		if _, ok := a[event]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseTestEvent {
 	t.Helper()
 	b := newWitnessBed(t, pre)

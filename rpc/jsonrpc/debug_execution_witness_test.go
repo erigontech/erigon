@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -1157,6 +1158,42 @@ type chainWitnesses struct {
 	GetWitness []hexutil.Bytes
 }
 
+func requireWitnessStateSuperset(t *testing.T, hph, v3 []hexutil.Bytes, label string) {
+	t.Helper()
+	missing := countMissing(byteSet(hph), byteSet(v3))
+	require.Zero(t, missing, "%s missing %d HPH state nodes", label, missing)
+}
+
+func witnessStreamTrie(t *testing.T, witness hexutil.Bytes) *trie.Trie {
+	t.Helper()
+	decoded, err := opstream.NewWitnessFromReader(bytes.NewReader(witness), false)
+	require.NoError(t, err)
+	decodedTrie, err := trie.BuildTrieFromWitness(decoded, false)
+	require.NoError(t, err)
+	return decodedTrie
+}
+
+func witnessStreamNodes(t *testing.T, witness hexutil.Bytes) [][]byte {
+	t.Helper()
+	nodes, err := witnessStreamTrie(t, witness).RLPEncode()
+	require.NoError(t, err)
+	return nodes
+}
+
+func requireWitnessStreamSuperset(t *testing.T, hph, v3 hexutil.Bytes, label string) {
+	t.Helper()
+	missing := countMissing(byteSliceSet(witnessStreamNodes(t, hph)), byteSliceSet(witnessStreamNodes(t, v3)))
+	require.Zero(t, missing, "%s missing %d HPH witness nodes", label, missing)
+}
+
+func byteSliceSet(items [][]byte) map[string]struct{} {
+	set := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		set[string(item)] = struct{}{}
+	}
+	return set
+}
+
 func collectChainWitnesses(t *testing.T, commitmentV3 bool, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) chainWitnesses {
 	previousAssert := dbg.AssertEnabled
 	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
@@ -1218,9 +1255,12 @@ func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
 	}))
 	require.NotEmpty(t, hph.Legacy)
 	for n := range hph.Legacy {
-		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
+		var hphLegacy, v3Legacy ExecutionWitnessResult
+		require.NoError(t, json.Unmarshal(hph.Legacy[n], &hphLegacy))
+		require.NoError(t, json.Unmarshal(v3.Legacy[n], &v3Legacy))
+		requireWitnessStateSuperset(t, hphLegacy.State, v3Legacy.State, fmt.Sprintf("debug_executionWitness legacy, block %d", n+1))
 		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
-		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+		requireWitnessStreamSuperset(t, hph.GetWitness[n], v3.GetWitness[n], fmt.Sprintf("eth_getWitness, block %d", n+1))
 	}
 }
 

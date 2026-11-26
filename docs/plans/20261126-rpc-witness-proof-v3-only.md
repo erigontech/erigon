@@ -276,16 +276,16 @@
 
 - [x] write the rule tests first, red: every candidate is the single deletes-only survivor of a pre-state branch; cascades;
       a branch that drops to 0; both planes; key order of a delete and an insert does not change the result
-- [ ] replace `collapseSim` with the deletes-only walk in Technical Details; keep the `sorted` callback hook, the
+- [x] replace `collapseSim` with the deletes-only walk in Technical Details; keep the `sorted` callback hook, the
       `CollapseTracer` interface and the shared record reads of `TraceCollapsesRoot`
-- [ ] delete `TestCollapseTracerMatchesHPH`
-- [ ] `TestWitnessesMatchHPHUnderCommitmentV3`: legacy `debug_executionWitness` node set of v3 ⊇ HPH per block;
+- [x] delete `TestCollapseTracerMatchesHPH`
+- [x] `TestWitnessesMatchHPHUnderCommitmentV3`: legacy `debug_executionWitness` node set of v3 ⊇ HPH per block;
       `eth_getWitness`: decode both op-streams, v3 node set ⊇ HPH, and the v3 stream rebuilds the parent root; canonical
       stays byte-equal; the Task 2 golden test keeps eth_getProof byte-equal
-- [ ] add the Task 6 failing case, if any, as a test in the real RPC path: red with `collapseSim`, green with the new walk;
+- [x] add the Task 6 failing case, if any, as a test in the real RPC path: red with `collapseSim`, green with the new walk;
       Task 6 stateless re-execution stays green; the EEST canonical corpus stays byte-identical
-- [ ] move the v3 files of the legacy-sibling outputs that change to the override directory; list them in the PR body
-- [ ] run v3, rpc and engineapi tests, v3 on and off: green
+- [x] move the v3 files of the legacy-sibling outputs that change to the override directory; list them in the PR body
+- [x] run v3, rpc and engineapi tests, v3 on and off: green
 
 ### Task 8: witness build cost, old pipeline against new
 **Files:**

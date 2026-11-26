@@ -1057,9 +1057,12 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 		api := newDebugApiForTest(golden.m)
 		for _, shape := range golden.shapes {
 			candidates := witnessGoldenCollapseCandidates(t, api, golden.m, shape.blockNum, witnessModeLegacy)
-			if shape.name == "transient-before" {
+			switch shape.name {
+			case "transient-before":
+				require.NotEmpty(t, candidates, shape.name)
+			case "empty-storage":
 				require.Empty(t, candidates, shape.name)
-			} else {
+			default:
 				require.NotEmpty(t, candidates, shape.name)
 			}
 		}
