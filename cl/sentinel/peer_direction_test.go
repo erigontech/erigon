@@ -131,6 +131,52 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	require.Equal(t, network.Connected, local.Network().Connectedness(listening.ID()))
 }
 
+// closedOutboundNetwork lists the outbound connections to a peer as closed but not yet removed, as libp2p does
+// after the remote closes them.
+type closedOutboundNetwork struct {
+	network.Network
+	pid peer.ID
+}
+
+func (n closedOutboundNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
+	conns := n.Network.ConnsToPeer(pid)
+	for i, c := range conns {
+		if pid == n.pid && c.Stat().Direction == network.DirOutbound {
+			conns[i] = closedConn{c}
+		}
+	}
+	return conns
+}
+
+func TestInboundRedialAfterAClosedOutboundConnectionRejectedAtInboundCap(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	s.cfg.MaxPeerCount = 10
+
+	for range 8 {
+		connectInbound(t, local)
+	}
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	require.NoError(t, err)
+	listening, err := libp2p.New(libp2p.Identity(priv), libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, listening.Close()) })
+	require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: listening.ID(), Addrs: listening.Addrs()}))
+	dialing, err := libp2p.New(libp2p.Identity(priv), libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, dialing.Close()) })
+	require.NoError(t, dialing.Connect(t.Context(), peer.AddrInfo{ID: local.ID(), Addrs: local.Addrs()}))
+	require.Eventually(t, func() bool {
+		return len(local.Network().ConnsToPeer(listening.ID())) == 2
+	}, 5*time.Second, 5*time.Millisecond)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closedOutboundNetwork{Network: local.Network(), pid: listening.ID()}}}
+
+	require.False(t, s.handleNewConnection(listening.ID(), network.DirInbound, nil, func() (bool, error) {
+		t.Error("a peer rejected at the inbound cap must not be handshaked")
+		return false, nil
+	}))
+}
+
 func TestInboundPeerGoneBeforeAdmissionRejectedAtInboundCap(t *testing.T) {
 	local := newListeningHost(t)
 	s := testSentinel(t, local)
