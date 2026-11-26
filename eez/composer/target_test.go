@@ -53,6 +53,10 @@ var (
 	tcounter = common.HexToAddress("0xd0000000000000000000000000000000000000ce")
 	// originTarget returns the transaction's origin and gas price.
 	originTarget = common.HexToAddress("0xd0000000000000000000000000000000000000dd")
+	// originBalance returns the origin's balance.
+	originBalance = common.HexToAddress("0xd0000000000000000000000000000000000000de")
+	// gasTarget returns the gas it has left.
+	gasTarget = common.HexToAddress("0xd0000000000000000000000000000000000000df")
 	// probe calls tcounter, then l1Proxy with the count.
 	probe   = common.HexToAddress("0xd000000000000000000000000000000000000007")
 	l1Proxy = common.HexToAddress("0xd0000000000000000000000000000000000000ff")
@@ -95,6 +99,8 @@ func newTargetFixture(t *testing.T) *targetFixture {
 	m.deploy(payee, []byte{0x00})
 	m.deploy(tcounter, tcounterCode)
 	m.deploy(originTarget, originCode)
+	m.deploy(originBalance, []byte{0x32, 0x31, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3})
+	m.deploy(gasTarget, []byte{0x5a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3})
 	m.deploy(probe, slices.Concat([]byte{0x60, 0x20, 0x5f, 0x5f, 0x5f, 0x5f}, push20(tcounter), []byte{0x5a, 0xf1, 0x50},
 		[]byte{0x5f, 0x5f, 0x60, 0x20, 0x5f, 0x5f}, push20(l1Proxy), []byte{0x5a, 0xf1, 0x50, 0x00}))
 	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
@@ -323,8 +329,74 @@ func TestAtomicSharesThePosting(t *testing.T) {
 func TestExecuteRunsInThePosting(t *testing.T) {
 	f := newTargetFixture(t)
 	poster := common.Address{0xee, 0x01}
-	f.src.PostedBy(poster, uint256.NewInt(2))
+	f.src.PostedBy(poster, uint256.NewInt(2), 0)
 	out, err := f.execute(&Call{Target: originTarget, Source: l2Sender, SourceRollup: l2Rollup})
 	require.NoError(t, err)
 	require.Equal(t, slices.Concat(word(poster), num(3)), out)
+}
+
+// TestExecuteBuysThePostingsGas: the posting buys its gas limit at its price
+// from its sender as it opens, once; a sender that cannot pay stops it.
+func TestExecuteBuysThePostingsGas(t *testing.T) {
+	f := newTargetFixture(t)
+	poster := common.Address{0xee, 0x01}
+	f.m.fund(poster, 1e9)
+	// 1,000,000 gas at the base fee, 1, plus the tip, 2.
+	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
+	for range 2 {
+		out, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+		require.NoError(t, err)
+		require.Equal(t, num(1e9-3_000_000), out)
+	}
+
+	f = newTargetFixture(t)
+	f.m.fund(poster, 2_999_999)
+	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
+	_, err := f.execute(&Call{Target: originBalance, Source: l2Sender, SourceRollup: l2Rollup})
+	require.ErrorContains(t, err, "does not buy the posting's gas")
+	require.False(t, IsPoison(err))
+}
+
+// TestExecuteWithinThePostingsGas: a frame gets at most what the posting's
+// gas limit leaves after the entries before it, past the two calls that
+// reach the proxy; one failing on what they left waits, where it would run
+// in a posting of its own.
+func TestExecuteWithinThePostingsGas(t *testing.T) {
+	left := func(t *testing.T, f *targetFixture) uint64 {
+		t.Helper()
+		out, err := f.execute(&Call{Target: gasTarget, Source: l2Sender, SourceRollup: l2Rollup})
+		require.NoError(t, err)
+		return new(big.Int).SetBytes(out).Uint64()
+	}
+	require.Greater(t, left(t, newTargetFixture(t)), uint64(1_000_000), "no posting: the frame's own bound")
+	posted := func(t *testing.T, gasLimit uint64) *targetFixture {
+		f := newTargetFixture(t)
+		poster := common.Address{0xee, 0x01}
+		f.m.fund(poster, 1e9)
+		f.src.PostedBy(poster, new(uint256.Int), gasLimit)
+		return f
+	}
+
+	f := posted(t, 1_000_000)
+	reach := uint64(1_000_000 - 1_000_000/64)
+	reach -= reach / 64
+	first := left(t, f)
+	require.Less(t, first, reach)
+	require.Less(t, left(t, f), first, "less after an entry")
+
+	// The proxy's creation takes most of a 400,000 posting.
+	f = posted(t, 400_000)
+	_, err := f.execute(&Call{Target: callerTarget, Source: common.Address{0x01}, SourceRollup: 0})
+	require.NoError(t, err)
+	_, err = f.execute(&Call{Target: callerTarget, Source: common.Address{0x02}, SourceRollup: 0})
+	require.ErrorIs(t, err, errOverBudget)
+	require.False(t, IsPoison(err))
+	f = posted(t, 400_000)
+	_, err = f.execute(&Call{Target: callerTarget, Source: common.Address{0x02}, SourceRollup: 0})
+	require.NoError(t, err, "alone, it fits")
+	// Its own proxy's creation narrows nothing: alone, a failure is poison.
+	f = posted(t, 400_000)
+	_, err = f.execute(&Call{Target: revertTarget, Source: common.Address{0x02}, SourceRollup: 0})
+	require.ErrorIs(t, err, ErrCallFailed)
+	require.True(t, IsPoison(err), err)
 }

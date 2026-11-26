@@ -93,10 +93,12 @@ type Source struct {
 	rollup    uint64
 	rules     *chain.Rules
 	index     int
-	// origin and gasPrice are the posting's sender and price.
-	origin   accounts.Address
-	gasPrice uint256.Int
-	posting  postingPhase
+	// origin, gasPrice and gasLimit are the posting's sender, price and gas
+	// limit, zero for none; spent is the target gas of its entries so far.
+	origin          accounts.Address
+	gasPrice        uint256.Int
+	gasLimit, spent uint64
+	posting         postingPhase
 }
 
 // NewSource returns the simulation of the chain of config in the context of

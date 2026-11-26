@@ -175,6 +175,8 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	require.NoError(t, err)
 	poster := &testPoster{key: posterKey}
 	poster.tip.SetUint64(2)
+	// The posting buys its gas.
+	f.l1.m.fund(poster.From(), 1e18)
 	none := func() uint64 { return 0 }
 	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, poster, nil, none, none, nil, log.New())
 	t.Cleanup(f.c.Close)
@@ -1413,6 +1415,7 @@ func (f *crossFixture) poster(t *testing.T, sync *types.Block) (*Composer, *test
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	prover, poster := &testProver{}, &testPoster{key: key}
+	f.l1.m.fund(poster.From(), 1e18)
 	cfg := Config{Batcher: devnetBatcher(f.w.batch.ProofSystems[0]), K: 6, MaxBlocks: 300, MaxGas: MaxPostBatchGas, Proof: time.Second, Slack: 100 * time.Millisecond}
 	obs := &Observer{Node: quiet{}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
 	var witnesses Witnesses = syncWitness{f.w.witness}

@@ -68,12 +68,14 @@ const (
 	postingClosed
 )
 
-// PostedBy sets the posting's sender, from, and tip: outbound calls run
-// with from as their origin and the block's base fee plus tip as their gas
-// price.
-func (s *Source) PostedBy(from common.Address, tip *uint256.Int) {
+// PostedBy sets the posting's sender, from, its tip and its gas limit:
+// outbound calls run with from as their origin, the block's base fee plus
+// tip as their gas price, and within gasLimit, which the posting buys from
+// from's balance as it opens.
+func (s *Source) PostedBy(from common.Address, tip *uint256.Int, gasLimit uint64) {
 	s.origin = accounts.InternAddress(from)
 	s.gasPrice.Add(s.header.BaseFee, tip)
+	s.gasLimit = gasLimit
 }
 
 // Atomic runs f as the next entry of the posting, the one L1 transaction
@@ -87,9 +89,33 @@ func (s *Source) Atomic(f func() error) error {
 		return errPostingClosed
 	case postingIdle:
 		s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
+		if err := s.buyGas(); err != nil {
+			return err
+		}
 		s.posting = postingOpen
 	}
 	return s.entry(f)
+}
+
+// buyGas debits the posting's gas limit at its price from its sender, as L1
+// does before the posting runs. The refund of the gas it leaves is not
+// modelled: the posting's gas is known only once its batch is.
+func (s *Source) buyGas() error {
+	var fee uint256.Int
+	if fee.Mul(uint256.NewInt(s.gasLimit), &s.gasPrice); fee.IsZero() {
+		return nil
+	}
+	balance, err := s.ibs.GetBalance(s.origin)
+	if failed := s.reads.failed(); failed != nil {
+		return failed
+	}
+	if err != nil {
+		return err
+	}
+	if balance.Lt(&fee) {
+		return fmt.Errorf("the poster's balance %s does not buy the posting's gas, %s", &balance, &fee)
+	}
+	return s.ibs.SubBalance(s.origin, fee, tracing.BalanceDecreaseGasBuy)
 }
 
 // closePosting ends the posting, which precedes the triggers.
@@ -104,13 +130,14 @@ func (s *Source) closePosting() error {
 
 // entry runs f, undoing its writes when it fails.
 func (s *Source) entry(f func() error) error {
-	snapshot := s.ibs.PushSnapshot()
+	snapshot, spent := s.ibs.PushSnapshot(), s.spent
 	err := f()
 	if failed := s.reads.failed(); failed != nil {
 		err = failed
 	}
 	if err != nil {
 		s.ibs.RevertToSnapshot(snapshot, nil)
+		s.spent = spent
 		return err
 	}
 	s.ibs.PopSnapshot(snapshot)
@@ -150,12 +177,22 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A frame failing on what the entries before left the posting may run
+	// in a posting of its own: it waits.
+	before := s.spent
+	refuse := func(err error) error {
+		if s.frameGas(before) < s.frameGas(0) {
+			return fmt.Errorf("%w: %w", errOverBudget, err)
+		}
+		return Poison(err)
+	}
 	var created uint64
 	if !registered {
 		// The posting creates it, in the call's entry.
 		if _, created, err = s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil, nil); err != nil {
-			return nil, Poison(fmt.Errorf("create the proxy of %s on rollup %d: %w", c.Source, c.SourceRollup, err))
+			return nil, refuse(fmt.Errorf("create the proxy of %s on rollup %d: %w", c.Source, c.SourceRollup, err))
 		}
+		s.spent += created
 	}
 	data, err := protocol.EncodeExecuteOnBehalf(c.Target, 0, c.Data)
 	if err != nil {
@@ -190,10 +227,27 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	case reentered:
 		return nil, Poison(ErrReentry)
 	case err != nil:
-		return nil, Poison(fmt.Errorf("%w: %w %x", ErrCallFailed, err, ret))
+		return nil, refuse(fmt.Errorf("%w: %w %x", ErrCallFailed, err, ret))
 	}
+	s.spent += used
 	c.Gas = created + used
 	return ret, nil
+}
+
+// frameGas is the gas a frame gets once the posting's entries spent spent:
+// at most what the posting's gas limit leaves, less the 1/64 the posting's
+// self-call for the entry and the manager's call to the proxy each
+// withhold. The posting's calldata and the work before its entries are
+// priced only with its batch: it is an upper bound.
+func (s *Source) frameGas(spent uint64) uint64 {
+	gas := min(frameGas, s.header.GasLimit)
+	if s.gasLimit == 0 {
+		return gas
+	}
+	left := s.gasLimit - min(spent, s.gasLimit)
+	left -= left / 64
+	left -= left / 64
+	return min(gas, left)
 }
 
 // view runs a read-only frame of the manager.
@@ -210,7 +264,7 @@ func (s *Source) view(data []byte) ([]byte, error) {
 // frame calls `to` from `from` with value inside the posting, as a
 // contract would: no intrinsic gas, nonce or fee.
 func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, override vm.CallOverride, tracer *tracing.Hooks) ([]byte, uint64, error) {
-	gas := min(frameGas, s.header.GasLimit)
+	gas := s.frameGas(s.spent)
 	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override, Tracer: tracer})
 	evm.Reset(evmtypes.TxContext{Origin: s.origin, GasPrice: s.gasPrice}, s.ibs)
 	ret, left, _, err := evm.Call(accounts.InternAddress(from), accounts.InternAddress(to), data, mdgas.MdGas{Execution: gas}, value, false)
