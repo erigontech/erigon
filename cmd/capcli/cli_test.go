@@ -24,7 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -521,4 +523,77 @@ func writeRecSplitSegmentFixture(t *testing.T, segPath, idxPath, tmpDir string, 
 	idx.DisableFsync()
 	require.NoError(t, idx.AddKey([]byte{1}, 0))
 	require.NoError(t, idx.Build(t.Context()))
+}
+
+// TestCommandsBuildRequestURLsFromTheEndpointQuery pins the request URLs built on top of an --endpoint value that
+// carries a query: the request path joins onto the endpoint and the query stays on the final request.
+func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
+	var mu sync.Mutex
+	var requests []string
+	seen := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(requests)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/eth/v2/debug/beacon/heads"):
+			_, _ = w.Write([]byte(`{"data":[{"slot":"100"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/states/0/root"):
+			_, _ = w.Write([]byte(`{"data":{"root":"0x0000000000000000000000000000000000000000000000000000000000000001"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	endpoint := srv.URL + "/?apikey=K"
+
+	t.Run("getHead", func(t *testing.T) {
+		_, err := getHead(t.Context(), endpoint)
+		require.NoError(t, err)
+		require.Contains(t, seen(), "/eth/v2/debug/beacon/heads?apikey=K")
+	})
+
+	t.Run("getStateRootAtSlot", func(t *testing.T) {
+		_, err := getStateRootAtSlot(t.Context(), endpoint, 0)
+		require.NoError(t, err)
+		require.Contains(t, seen(), "/eth/v1/beacon/states/0/root?apikey=K")
+	})
+
+	t.Run("ArchiveSanitizer", func(t *testing.T) {
+		a := &ArchiveSanitizer{
+			chainCfg:     chainCfg{Chain: networkname.Mainnet},
+			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
+			BeaconApiURL: endpoint,
+			IntervalSlot: 50,
+		}
+		err := a.Run(t.Context())
+		require.Error(t, err, "the state request gets a 404; the URL is what this test pins")
+		require.Contains(t, seen(), "/eth/v2/debug/beacon/states/0?apikey=K")
+	})
+
+	t.Run("BenchmarkNode", func(t *testing.T) {
+		b := &BenchmarkNode{
+			chainCfg: chainCfg{Chain: networkname.Mainnet},
+			BaseURL:  endpoint,
+			Endpoint: "/eth/v1/beacon/states/{slot}/validators",
+			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
+		}
+		require.NoError(t, b.Run(t.Context()))
+		require.Contains(t, seen(), "/eth/v1/beacon/states/0/validators?apikey=K")
+	})
+
+	t.Run("ChainEndpoint", func(t *testing.T) {
+		c := &ChainEndpoint{
+			chainCfg:     chainCfg{Chain: networkname.Mainnet},
+			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
+			Endpoint:     endpoint,
+		}
+		err := c.Run(t.Context())
+		require.Error(t, err, "the head request gets a 404; the URL is what this test pins")
+		require.Contains(t, seen(), "/eth/v2/beacon/blocks/head?apikey=K")
+	})
 }
