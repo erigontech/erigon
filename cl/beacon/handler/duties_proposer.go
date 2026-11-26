@@ -93,7 +93,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if err != nil {
 			return nil, err
 		}
-		stateGetter, err := historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg.SlotsPerEpoch)
+		stateGetter, err := historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg)
 		if err != nil {
 			return nil, err
 		}
@@ -106,10 +106,8 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 				return nil, err
 			}
 			if balances.HasDiffs {
-				for _, diffSlot := range []uint64{balances.FirstDiffSlot, balances.LastDiffSlot} {
-					if err := readiness.check(diffSlot, diffSlot, kv.ValidatorEffectiveBalance); err != nil {
-						return nil, err
-					}
+				if err := readiness.checkRange(balances.FirstDiffSlot, balances.LastDiffSlot, kv.ValidatorEffectiveBalance); err != nil {
+					return nil, err
 				}
 			}
 		}

@@ -590,10 +590,12 @@ func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		canonicalSlot uint64
+		progress      uint64
 		status        int
 	}{
-		{"exact canonical root", 31, http.StatusOK},
-		{"earlier canonical root while indexing is pending", 30, http.StatusServiceUnavailable},
+		{"exact canonical root", 31, 0, http.StatusOK},
+		{"earlier canonical root while indexing is pending", 30, 0, http.StatusServiceUnavailable},
+		{"block root row written at the next slot", 30, 31, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := log.New()
@@ -605,7 +607,10 @@ func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
 				if err := beacon_indicies.MarkRootCanonical(tx, tc.canonicalSlot, root); err != nil {
 					return err
 				}
-				return state_accessors.SetStateProcessingProgress(tx, 0)
+				if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(31)); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
 			}))
 			dirs := datadir.New(t.TempDir())
 			getter := func(uint64) ([]byte, []byte, error) { return nil, nil, nil }
@@ -700,4 +705,29 @@ func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
 	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
 	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/4", "")
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalReadinessRangeFindsGapBeforeSnapshot(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	getter := func(uint64) ([]byte, []byte, error) { return nil, []byte{1}, nil }
+	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ValidatorEffectiveBalance: getter}}
+	dumped := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	defer dumped.Close()
+	require.NoError(t, dumped.DumpCaplinState(t.Context(), 100_000, 50_000, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, dumped.OpenFolder())
+	files := dumped.SegFileNames(50_000, 100_000)
+	require.Len(t, files, 1)
+	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenList([]string{filepath.Base(files[0])}, false))
+	view := snapshots.View()
+	defer view.Close()
+	readiness := historicalReadiness{progress: 49_983, reconstructed: true, view: view}
+
+	require.NoError(t, readiness.checkRange(49_153, 49_983, kv.ValidatorEffectiveBalance))
+	require.NoError(t, readiness.checkRange(50_000, 50_016, kv.ValidatorEffectiveBalance))
+	err := readiness.checkRange(49_153, 50_016, kv.ValidatorEffectiveBalance)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
 }

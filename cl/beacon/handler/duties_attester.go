@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -240,7 +241,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	stateGetter, err := historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg.SlotsPerEpoch)
+	stateGetter, err := historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +337,24 @@ func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) erro
 	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
 }
 
-func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, slotsPerEpoch uint64) (state_accessors.GetValFn, error) {
+func (r historicalReadiness) checkRange(first, last uint64, table string) error {
+	if r.reconstructed && first <= r.progress {
+		first = r.progress + 1
+	}
+	for first <= last {
+		if r.view == nil {
+			return r.check(first, first, table)
+		}
+		seg, ok := r.view.VisibleSegment(first, table)
+		if !ok {
+			return r.check(first, first, table)
+		}
+		first = seg.To()
+	}
+	return nil
+}
+
+func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
 	if err := readiness.check(slot, slot, table); err != nil && (table != kv.BlockRoot || beaconhttp.WrapEndpointError(err).Code != http.StatusServiceUnavailable) {
 		return nil, err
 	}
@@ -344,8 +362,13 @@ func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot u
 	return func(table string, key []byte) ([]byte, error) {
 		rowSlot := base_encoding.Decode64FromBytes4(key)
 		writeSlot := rowSlot
-		if table == kv.RandaoMixes {
-			writeSlot += slotsPerEpoch
+		switch table {
+		case kv.RandaoMixes:
+			writeSlot += cfg.SlotsPerEpoch
+		case kv.BlockRoot:
+			if rowSlot != cfg.GenesisSlot {
+				writeSlot++
+			}
 		}
 		if err := readiness.check(rowSlot, writeSlot, table); err != nil {
 			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
