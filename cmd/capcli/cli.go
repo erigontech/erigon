@@ -778,10 +778,20 @@ type ArchiveSanitizer struct {
 	FaultOut     string
 }
 
-type beaconHeadsResponse struct {
-	Data []struct {
-		Slot string `json:"slot"`
-	} `json:"data"`
+func getBeaconJSON(ctx context.Context, uri string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	if err != nil {
+		return 0, blobfetch.RedactURLError(err)
+	}
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return 0, blobfetch.RedactURLError(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, fmt.Errorf("bad status code %d", resp.StatusCode)
+	}
+	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
 }
 
 func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
@@ -789,21 +799,12 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	if err != nil {
 		return 0, blobfetch.RedactURLError(err)
 	}
-	var headResponse beaconHeadsResponse
-	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath("eth/v2/debug/beacon/heads").String(), nil)
-	if err != nil {
-		return 0, blobfetch.RedactURLError(err)
+	var headResponse struct {
+		Data []struct {
+			Slot string `json:"slot"`
+		} `json:"data"`
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, blobfetch.RedactURLError(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("get head failed, bad status code %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
+	if _, err := getBeaconJSON(ctx, base.JoinPath("eth/v2/debug/beacon/heads").String(), &headResponse); err != nil {
 		return 0, err
 	}
 	if len(headResponse.Data) == 0 {
@@ -816,35 +817,21 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-type beaconStateRootResponse struct {
-	Data struct {
-		Root common.Hash `json:"root"`
-	} `json:"data"`
-}
-
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
 	base, err := url.Parse(beaconApiURL)
 	if err != nil {
 		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
-	var response beaconStateRootResponse
-	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath(fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)).String(), nil)
-	if err != nil {
-		return common.Hash{}, blobfetch.RedactURLError(err)
+	var response struct {
+		Data struct {
+			Root common.Hash `json:"root"`
+		} `json:"data"`
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return common.Hash{}, blobfetch.RedactURLError(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	status, err := getBeaconJSON(ctx, base.JoinPath(fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)).String(), &response)
+	if status == http.StatusNotFound {
 		return common.Hash{}, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		return common.Hash{}, fmt.Errorf("get state root failed, bad status code %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err != nil {
 		return common.Hash{}, err
 	}
 	if response.Data.Root == (common.Hash{}) {

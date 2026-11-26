@@ -106,6 +106,13 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 }
 
 func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
+	statusErrors := map[string]string{
+		"block":      "checkpoint sync failed, bad status code 401",
+		"state":      "checkpoint sync failed, bad status code 401",
+		"head":       "bad status code 401",
+		"state root": "bad status code 401",
+		"benchmark":  "bad status code 401",
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -113,7 +120,7 @@ func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
 		case "/eth/v2/debug/beacon/heads":
 			_, _ = w.Write([]byte(`{"data":[{"slot":"1"}]}`))
 		case "/eth/v1/beacon/states/0/root":
-			_, _ = w.Write([]byte(`{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`))
+			_, _ = w.Write([]byte(`{"data":{"root":"0x` + strings.Repeat("0", 63) + `1"}}`))
 		default:
 			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
 		}
@@ -124,35 +131,41 @@ func TestBeaconAPIRequestsHandleErrorResponsesWithoutPanic(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var err error
 			require.NotPanics(t, func() { err = request(srv.URL + "?apikey=query-secret") })
-			require.Error(t, err)
+			require.ErrorContains(t, err, statusErrors[name])
 			require.NotContains(t, err.Error(), "query-secret")
 		})
 	}
 }
 
-func TestGetStateRootAtSlotRejectsMalformedRoot(t *testing.T) {
-	for name, root := range map[string]string{"invalid hex": "0xzz", "short": "0x1234"} {
+func TestMalformedResponsesErrorWithoutQuotingThePayload(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body    string
+		request func(base string) error
+	}{
+		"invalid hex root": {
+			body:    `{"data":{"root":"0x` + "zz" + strings.Repeat("0", 62) + `"}}`,
+			request: func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err },
+		},
+		"short root": {
+			body:    `{"data":{"root":"0x1234"}}`,
+			request: func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err },
+		},
+		"invalid slot": {
+			body:    `{"data":[{"slot":"https://x/?apikey=K"}]}`,
+			request: func(base string) error { _, err := getHead(t.Context(), base); return err },
+		},
+	} {
 		t.Run(name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = w.Write([]byte(`{"data":{"root":"` + root + `"}}`))
+				_, _ = w.Write([]byte(tc.body))
 			}))
 			t.Cleanup(srv.Close)
 
-			_, err := getStateRootAtSlot(t.Context(), srv.URL, 0)
+			err := tc.request(srv.URL)
 			require.Error(t, err)
+			require.NotContains(t, err.Error(), "apikey")
 		})
 	}
-}
-
-func TestGetHeadDoesNotQuoteAnInvalidSlot(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"slot":"https://x/?apikey=K"}]}`))
-	}))
-	t.Cleanup(srv.Close)
-
-	_, err := getHead(t.Context(), srv.URL)
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), "apikey")
 }
 
 type recordingTransport func(*http.Request) (*http.Response, error)
@@ -169,7 +182,7 @@ func (b *recordingBody) Close() error {
 	return b.ReadCloser.Close()
 }
 
-func TestGetStateRootAtSlotClosesTheBodyOnNotFound(t *testing.T) {
+func TestGetStateRootAtSlotReturnsZeroHashOnNotFound(t *testing.T) {
 	closed := false
 	original := http.DefaultTransport
 	http.DefaultTransport = recordingTransport(func(r *http.Request) (*http.Response, error) {
@@ -188,19 +201,6 @@ func TestGetStateRootAtSlotClosesTheBodyOnNotFound(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, root)
 	require.True(t, closed)
-}
-
-func TestGetStateRootAtSlotReturnsZeroHashOnNotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"code":404,"message":"not found"}`))
-	}))
-	t.Cleanup(srv.Close)
-
-	root, err := getStateRootAtSlot(t.Context(), srv.URL+"?apikey=query-secret", 0)
-	require.NoError(t, err)
-	require.Equal(t, common.Hash{}, root)
 }
 
 // A malformed redirect is quoted by net/http, and a server can repeat the request's path and query in it.
