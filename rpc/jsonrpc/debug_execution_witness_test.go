@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 
@@ -865,14 +864,7 @@ func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 			require.True(t, resolved, "mode %s account %x must resolve from eth_getWitness", mode, key)
 		}
 		require.NotZero(t, accountKeys, "mode %s account keys", mode)
-		replay := *result
-		replay.State = slices.Clone(result.State)
-		rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool {
-			return crypto.Keccak256Hash(node) == testChain.Blocks[1].Root()
-		})
-		require.NotEqual(t, -1, rootIndex, "mode %s state root node", mode)
-		replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
-		root, _, err := execBlockStatelessly(&replay, testChain.Blocks[2], m.ChainConfig, m.Engine)
+		root, err := ReplayExecutionWitness(result, testChain.Blocks[2], m.ChainConfig, m.Engine)
 		require.NoError(t, err, "mode %s stateless replay", mode)
 		require.Equal(t, testChain.Blocks[2].Root(), root, "mode %s post-state root", mode)
 	}
