@@ -398,6 +398,11 @@ func (b *CachingBeaconState) UpgradeToHeze() error {
 	bid.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
 	b.SetLatestExecutionPayloadBid(bid)
 
+	b.SetEth1Data(&cltypes.Eth1Data{})
+	b.ResetEth1DataVotes()
+	b.SetEth1DepositIndex(0)
+	b.SetDepositRequestsStartIndex(0)
+
 	b.SetVersion(clparams.HezeVersion)
 
 	log.Debug("Upgrade to Heze complete")

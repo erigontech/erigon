@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
@@ -160,6 +161,27 @@ func TestUpgradeToHezeStateRootMatchesDecodedState(t *testing.T) {
 	expected, err := fresh.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, expected, actual)
+}
+
+func TestUpgradeToHezeResetsRemovedEth1FieldsLikeDecodedState(t *testing.T) {
+	s := gloasStateForHezeUpgrade(t)
+	s.SetEth1Data(&cltypes.Eth1Data{DepositCount: 5, BlockHash: common.Hash{1}})
+	require.NoError(t, s.AddEth1DataVote(&cltypes.Eth1Data{DepositCount: 6}))
+	s.SetEth1DepositIndex(7)
+	s.SetDepositRequestsStartIndex(7)
+	_, err := s.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpgradeToHeze())
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	fresh := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, fresh.DecodeSSZ(encoded, int(clparams.HezeVersion)))
+
+	require.Equal(t, fresh.Eth1Data(), s.Eth1Data())
+	require.Equal(t, fresh.Eth1DataVotes().Len(), s.Eth1DataVotes().Len())
+	require.Equal(t, fresh.Eth1DepositIndex(), s.Eth1DepositIndex())
+	require.Equal(t, fresh.GetDepositRequestsStartIndex(), s.GetDepositRequestsStartIndex())
 }
 
 func TestUpgradeToHezeIgnoresConfiguredInclusionListCommitteeSize(t *testing.T) {

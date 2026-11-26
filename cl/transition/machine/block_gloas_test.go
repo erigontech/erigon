@@ -55,18 +55,24 @@ func (p *parentSlotProcessor) ProcessAttestations(_ abstract.BeaconState, _ *sol
 	return nil
 }
 
-func TestProcessBlockPassesParentHeaderSlotToAttestations(t *testing.T) {
+func stateAndBlockAfterParentSlot(t *testing.T, version clparams.StateVersion) (*corestate.CachingBeaconState, *cltypes.BeaconBlock) {
+	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	s := corestate.New(&cfg)
-	s.SetVersion(clparams.GloasVersion)
+	s.SetVersion(version)
 	require.NoError(t, s.SetSlot(65))
 	require.NoError(t, s.AddValidator(solid.NewValidator(), 0))
 	s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 63})
 	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{Slot: 0})
-	block := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+	block := cltypes.NewBeaconBlock(&cfg, version)
 	block.Slot = 65
 	block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	block.Body.SignedExecutionPayloadBid.Signature = common.Bytes96(bls.InfiniteSignature)
+	return s, block
+}
+
+func TestProcessBlockPassesParentHeaderSlotToAttestations(t *testing.T) {
+	s, block := stateAndBlockAfterParentSlot(t, clparams.GloasVersion)
 	p := &parentSlotProcessor{}
 
 	require.NoError(t, ProcessBlock(p, s, block))

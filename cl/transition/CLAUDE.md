@@ -14,6 +14,7 @@ Primary references:
 - Electra beacon chain: https://ethereum.github.io/consensus-specs/specs/electra/beacon-chain/
 - Fulu beacon chain: https://ethereum.github.io/consensus-specs/specs/fulu/beacon-chain/
 - Gloas beacon chain: https://ethereum.github.io/consensus-specs/specs/gloas/beacon-chain/
+- Heze beacon chain: https://ethereum.github.io/consensus-specs/specs/heze/beacon-chain/
 
 ## Transition Pipeline Map
 
@@ -23,8 +24,8 @@ Use this map when reviewing `cl/transition/machine/`.
 | --- | --- |
 | `machine/transition.go`: `TransitionState` | Phase0 `state_transition`: `process_slots`, block signature verification, `process_block`, final state-root assertion |
 | `machine/transition.go`: `TransitionStateFromPrecomputedEpochState` | Phase0 `state_transition` on a state already advanced by `process_slots`: skips `process_slots` when the state is at the block slot |
-| `machine/block.go`: `ProcessBlock` | Phase0 `process_block`; Bellatrix/Capella execution payload and withdrawals; Gloas modified `process_block` ordering with `process_parent_execution_payload`, `process_withdrawals`, and `process_execution_payload_bid`; batched signature verification (`verify_execution_payload_bid_signature`; signature part of `is_valid_indexed_payload_attestation`) |
-| `machine/block.go`: `ProcessOperations` | Phase0 `process_operations`; Capella `process_bls_to_execution_change`; Electra execution requests; Gloas payload attestations and payload-attestation signature-set collection |
+| `machine/block.go`: `ProcessBlock` | Phase0 `process_block`; Bellatrix/Capella execution payload and withdrawals; Gloas modified `process_block` ordering with `process_parent_execution_payload`, `process_withdrawals`, and `process_execution_payload_bid`; batched signature verification (`verify_execution_payload_bid_signature`; signature part of `is_valid_indexed_payload_attestation`); Heze modified `process_block` without `process_eth1_data` |
+| `machine/block.go`: `ProcessOperations` | Phase0 `process_operations`; Capella `process_bls_to_execution_change`; Electra execution requests; Gloas payload attestations and payload-attestation signature-set collection; Heze modified `process_operations` without the `deposits` count assertion |
 | `machine/block.go`: `processRandao` | Phase0 `process_randao`; batched signature collection for block-level validation |
 | `machine/block.go`: `processProposerSlashings` | Phase0 `process_proposer_slashing`; signature domain/signing-root validation |
 | `machine/block.go`: `processVoluntaryExits` | Phase0 `process_voluntary_exit`; Capella/Deneb voluntary-exit domain rule; Gloas builder-index exit signature source |
@@ -78,7 +79,7 @@ Use this map when reviewing `cl/transition/impl/eth2/statechange/`.
 
 | Go file/function | Spec section |
 | --- | --- |
-| `process_epoch.go`: `ProcessEpoch`, `GetUnslashedIndiciesSet` | Phase0/Altair `process_epoch`; `get_unslashed_participating_indices`; fork-version ordered epoch sub-transitions |
+| `process_epoch.go`: `ProcessEpoch`, `GetUnslashedIndiciesSet` | Phase0/Altair `process_epoch`; `get_unslashed_participating_indices`; fork-version ordered epoch sub-transitions; Heze modified `process_epoch` without `process_eth1_data_reset` |
 | `finalization_and_justification.go`: `ProcessJustificationBitsAndFinality`, `weighJustificationAndFinalization`, `computePreviousAndCurrentTargetBalancePostAltair` | Phase0/Altair `process_justification_and_finalization`; target balance thresholds and justification bits |
 | `process_rewards_and_penalties.go`: `ProcessRewardsAndPenalties`, `processRewardsAndPenaltiesPhase0`, `processRewardsAndPenaltiesPostAltair`, `getFlagsTotalBalances` | Phase0/Altair `process_rewards_and_penalties`; base rewards, participation flags, inactivity penalties |
 | `process_registry_updates.go`: `ProcessRegistryUpdates`, `computeActivationExitEpoch` | Phase0 `process_registry_updates`; `compute_activation_exit_epoch`; Electra churn-aware activation/exit rules |
@@ -89,7 +90,7 @@ Use this map when reviewing `cl/transition/impl/eth2/statechange/`.
 | `process_inactivity_scores.go`: `ProcessInactivityScores` | Altair `process_inactivity_updates` / `process_inactivity_scores` |
 | `process_sync_committee_update.go`: `ProcessSyncCommitteeUpdate` | Altair `process_sync_committee_updates` |
 | `resets.go`: `ProcessEth1DataReset`, `ProcessSlashingsReset`, `ProcessRandaoMixesReset`, `ProcessParticipationFlagUpdates` | Phase0/Altair epoch resets: eth1 data votes, slashings, randao mixes, participation flags |
-| `process_pending_deposits.go`: `ProcessPendingDeposits`, `applyPendingDeposit` | Electra `process_pending_deposits`; finalized deposit gating; churn consumption; postponed deposits; deposit signature/registry application |
+| `process_pending_deposits.go`: `ProcessPendingDeposits`, `applyPendingDeposit` | Electra `process_pending_deposits`; finalized deposit gating; churn consumption; postponed deposits; deposit signature/registry application; Heze (EIP-8365) modified `apply_pending_deposit` skipping new validators with BLS withdrawal credentials after churn accounting |
 | `process_pending_consolidations.go`: `ProcessPendingConsolidations` | Electra `process_pending_consolidations` |
 | `process_builder_pending_payments.go`: `ProcessBuilderPendingPayments` | Gloas builder pending-payment epoch rotation and payment finalization |
 | `process_proposer_lookahead.go`: `ProcessProposerLookahead` | Gloas proposer lookahead update |

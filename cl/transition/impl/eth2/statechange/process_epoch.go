@@ -70,7 +70,9 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		return err
 	}
 
-	ProcessEth1DataReset(s)
+	if s.Version() < clparams.HezeVersion {
+		ProcessEth1DataReset(s)
+	}
 	if s.Version() >= clparams.ElectraVersion {
 		if err := ProcessPendingDeposits(s); err != nil {
 			return err
