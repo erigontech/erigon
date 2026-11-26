@@ -107,11 +107,10 @@ func (t *Trie) runWitnessWalk(ctx context.Context, updates *commitment.Updates, 
 }
 
 func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
-	key := string(hash[:])
-	if _, ok := w.byHash[key]; ok {
+	if _, ok := w.byHash[string(hash[:])]; ok {
 		return
 	}
-	w.byHash[key] = rlp
+	w.byHash[string(hash[:])] = rlp
 	if !w.lean || len(rlp) < 32 && !bytes.Equal(hash[:], w.rootHash) {
 		return
 	}
