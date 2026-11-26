@@ -3924,13 +3924,13 @@ func TestRemoteBlobTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 
 			var pooled TxnSlots
 			for nonce := range uint64(17) {
-				txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
-				txn.IDHash[0] = byte(nonce + 1)
-				pooled.Append(txn, sender[:], false)
+				pooled.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
 			}
 			pool.AddRemoteTxns(ctx, pooled, nil, nil)
 			_, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
+			senderID, _ := pool.senders.getID(sender)
+			require.Equal(t, 17, pool.all.count(senderID))
 
 			// Nonces 0 to 16 are pooled, so the blob transaction takes the next nonce.
 			blob := makeBlobSlot(0x80, false)
@@ -3945,7 +3945,7 @@ func TestRemoteBlobTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
-			require.Equal(t, tc.kept, pool.all.count(pool.senders.senderIDs[sender]))
+			require.Equal(t, tc.kept, pool.all.count(senderID))
 		})
 	}
 }

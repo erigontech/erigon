@@ -1416,13 +1416,14 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 		return txpoolcfg.InsufficientFunds, nil
 	}
-	newSlot := p.all.get(txn.SenderID, txn.Nonce) == nil
-	if !senderCodeHash.IsEmpty() && newSlot {
-		if p.all.hasTxns(txn.SenderID) {
-			return txpoolcfg.DelegatedTxnLimit, nil
-		}
-		if txn.Nonce != senderNonce {
-			return txpoolcfg.DelegatedNonceGap, nil
+	if !senderCodeHash.IsEmpty() {
+		if existing := p.all.get(txn.SenderID, txn.Nonce); existing == nil {
+			if p.all.hasTxns(txn.SenderID) {
+				return txpoolcfg.DelegatedTxnLimit, nil
+			}
+			if txn.Nonce != senderNonce {
+				return txpoolcfg.DelegatedNonceGap, nil
+			}
 		}
 	}
 	if txn.HasBlobs() {
@@ -1439,10 +1440,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
 	// transactions and leave others queued behind the missing nonce.
-	if !unwinding && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
-		// Frames returned earlier, so txn uses an account nonce, and a new slot has no pooled
-		// transaction to replace.
-		if reason := p.checkInsertion(txn, false, nil); reason != txpoolcfg.NotSet {
+	if !unwinding && !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots && p.all.get(txn.SenderID, txn.Nonce) == nil {
+		if reason := p.checkInsertion(txn, nil); reason != txpoolcfg.NotSet {
 			return reason, nil
 		}
 		if txn.Traced {
@@ -2263,7 +2262,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
-	if reason := p.checkInsertion(mt.TxnSlot, mt.keyedNonce, found); reason != txpoolcfg.NotSet {
+	if reason := p.checkInsertion(mt.TxnSlot, found); reason != txpoolcfg.NotSet {
 		return reason
 	}
 
@@ -2315,9 +2314,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 
 // checkInsertion runs the checks that addLocked makes before it inserts txn, after the replacement
 // checks. found is the pooled transaction that txn would replace, or nil when txn takes a new slot.
-// keyedNonce is set for a frame on a keyed nonce sequence, which authorizations cannot reserve.
 // It returns NotSet if txn can be inserted. The caller must hold the pool lock.
-func (p *TxPool) checkInsertion(txn *TxnSlot, keyedNonce bool, found *metaTxn) txpoolcfg.DiscardReason {
+func (p *TxPool) checkInsertion(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
 	// Don't add blob txn to queued if it's less than current pending blob base fee
 	if txn.HasBlobs() && txn.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
@@ -2329,7 +2327,7 @@ func (p *TxPool) checkInsertion(txn *TxnSlot, keyedNonce bool, found *metaTxn) t
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if owner, ok := p.auths[AuthAndNonce{senderAddr, txn.Nonce}]; !keyedNonce && ok && owner != found {
+	if owner, ok := p.auths[AuthAndNonce{senderAddr, txn.Nonce}]; !txn.hasKeyedNonce() && ok && owner != found {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
