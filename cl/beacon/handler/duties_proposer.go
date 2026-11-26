@@ -289,6 +289,28 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
+	historicalState := raw.New(a.beaconChainCfg)
+	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
+	if err := historicalState.SetSlot(expectedSlot); err != nil {
+		return nil, err
+	}
+	historicalState.SetValidators(validatorSet)
+
+	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+	if historicalState.Version() >= clparams.FuluVersion {
+		epochData, err := state_accessors.ReadEpochData(stateGetter, expectedSlot, a.beaconChainCfg)
+		if err != nil {
+			return nil, err
+		}
+		if epochData == nil {
+			return nil, fmt.Errorf("epoch data not found for slot %d", expectedSlot)
+		}
+		if err := fillProposerDuties(duties, historicalState, expectedSlot, epochData.ProposerLookahead.Get); err != nil {
+			return nil, err
+		}
+		return duties, nil
+	}
+
 	activeIndices := make([]uint64, 0, validatorSet.Length())
 	validatorSet.Range(func(validatorIndex int, validator solid.Validator, _ int) bool {
 		if validator.Active(epoch) {
@@ -310,13 +332,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
 	}
 
-	historicalState := raw.New(a.beaconChainCfg)
-	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
-	if err := historicalState.SetSlot(expectedSlot); err != nil {
-		return nil, err
-	}
-	historicalState.SetValidators(validatorSet)
-
 	epochSeed := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
 	seedArray := [32]byte{}
 	copy(seedArray[:], epochSeed[:])
@@ -325,7 +340,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, err
 	}
 
-	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 	if err := fillProposerDuties(duties, historicalState, expectedSlot, func(i int) uint64 { return proposerIndices[i] }); err != nil {
 		return nil, err
 	}

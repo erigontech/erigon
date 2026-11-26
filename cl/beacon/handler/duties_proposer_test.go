@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
@@ -78,6 +79,45 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 
 	after := getProposerDutiesForEpoch(t, handler, epoch)
 	require.Equal(t, before, after)
+}
+
+func TestGetDutiesProposerHistoricalFuluUsesArchivedLookahead(t *testing.T) {
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	epoch := uint64(3)
+	slot := epoch * cfg.SlotsPerEpoch
+	fcu.FinalizedSlotVal = slot
+
+	var archivedState *state.CachingBeaconState
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		archivedState, err = handler.stateReader.ReadHistoricalState(t.Context(), tx, slot)
+		return err
+	}))
+	require.NotNil(t, archivedState)
+
+	cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = epoch, epoch, epoch, epoch
+	cfg.InitializeForkSchedule()
+	archivedState.SetVersion(clparams.FuluVersion)
+	recomputed, err := archivedState.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+	active := archivedState.GetActiveValidatorsIndices(epoch)
+	require.Greater(t, len(active), 1)
+	require.NoError(t, archivedState.SetEffectiveBalanceForValidatorAtIndex(int(active[0]), cfg.MaxEffectiveBalanceElectra))
+	require.NoError(t, archivedState.UpgradeToFulu())
+	expected := firstEpochProposers(archivedState)
+	require.NotEqual(t, recomputed, expected)
+
+	var encoded bytes.Buffer
+	require.NoError(t, state_accessors.EpochDataFromBeaconState(archivedState).Serialize(&encoded))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(slot), encoded.Bytes())
+	}))
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.True(t, response.Finalized)
+	require.Equal(t, clparams.FuluVersion.String(), response.Version)
+	requireProposerDuties(t, response.Data, archivedState, slot, expected)
 }
 
 func TestGetDutiesProposerMissingRandaoMixReturns500(t *testing.T) {
@@ -232,6 +272,28 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+func firstEpochProposers(s *state.CachingBeaconState) []uint64 {
+	proposers := make([]uint64, s.BeaconConfig().SlotsPerEpoch)
+	lookahead := s.GetProposerLookahead()
+	for i := range proposers {
+		proposers[i] = lookahead.Get(i)
+	}
+	return proposers
+}
+
+func requireProposerDuties(t *testing.T, duties []proposerDuties, s *state.CachingBeaconState, startSlot uint64, expected []uint64) {
+	t.Helper()
+	require.Len(t, duties, len(expected))
+	for i, duty := range duties {
+		slot := startSlot + uint64(i)
+		require.Equal(t, slot, duty.Slot)
+		require.Equal(t, expected[i], duty.ValidatorIndex, "slot %d", slot)
+		pubkey, err := s.ValidatorPublicKey(int(expected[i]))
+		require.NoError(t, err)
+		require.Equal(t, pubkey, duty.Pubkey, "slot %d", slot)
+	}
 }
 
 func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
