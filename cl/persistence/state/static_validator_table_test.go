@@ -103,7 +103,8 @@ func TestReadValidatorsTableGap(t *testing.T) {
 	}))
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		table := NewStaticValidatorTable()
-		require.Error(t, ReadValidatorsTable(tx, table))
+		require.NoError(t, ReadValidatorsTable(tx, table))
+		require.Len(t, table.validatorTable, 1)
 		return nil
 	}))
 }

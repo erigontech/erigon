@@ -159,8 +159,11 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 
 	var buf bytes.Buffer
 	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
-		if len(k) != 4 || base_encoding.Decode64FromBytes4(k) != uint64(len(out.validatorTable)) {
+		if len(k) != 4 {
 			return fmt.Errorf("%w at index %d", ErrValidatorTableTruncated, len(out.validatorTable))
+		}
+		if base_encoding.Decode64FromBytes4(k) != uint64(len(out.validatorTable)) {
+			break
 		}
 		staticValidator := &StaticValidator{}
 		buf.Reset()
