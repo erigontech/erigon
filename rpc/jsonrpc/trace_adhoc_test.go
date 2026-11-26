@@ -3533,8 +3533,7 @@ func TestTraceCallStateOverrideForms(t *testing.T) {
 	t.Cleanup(func() { client.Close(); server.Stop() })
 
 	const target = "0x00000000000000000000000000000000cafe0001"
-	// PUSH1 0x2a PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN
-	stateMap := map[string]any{target: map[string]any{"code": "0x602a60005260206000f3"}}
+	stateMap := map[string]any{target: map[string]any{"code": hexutil.Bytes(returningByte(42))}}
 	const wantOutput = "0x000000000000000000000000000000000000000000000000000000000000002a"
 	call := map[string]any{"from": bankAddr.Hex(), "to": target, "gas": "0x10000"}
 	traceTypes := []string{TraceTypeTrace}
@@ -3562,19 +3561,8 @@ func TestTraceCallStateOverrideForms(t *testing.T) {
 
 	t.Run("addresses mixed with configuration fields", func(t *testing.T) {
 		mixed := map[string]any{target: stateMap[target], "stateOverrides": stateMap}
-		for _, tc := range []struct {
-			method string
-			params []any
-		}{
-			{"trace_call", []any{call, traceTypes, "latest", mixed}},
-			{"trace_callMany", []any{[]any{[]any{call, traceTypes}}, "latest", mixed}},
-		} {
-			var result any
-			err := client.CallContext(t.Context(), &result, tc.method, tc.params...)
-			var rpcErr rpc.Error
-			require.ErrorAs(t, err, &rpcErr, tc.method)
-			require.Equal(t, -32602, rpcErr.ErrorCode(), tc.method)
-		}
+		requireErrorCode(t, client.CallContext(t.Context(), nil, "trace_call", call, traceTypes, "latest", mixed), -32602)
+		requireErrorCode(t, client.CallContext(t.Context(), nil, "trace_callMany", []any{[]any{call, traceTypes}}, "latest", mixed), -32602)
 	})
 }
 
@@ -3583,6 +3571,7 @@ func TestTraceCallConfigRejectsMalformedAddressKey(t *testing.T) {
 		`{"0xcafe":{"code":"0x00"}}`,
 		`{"0x00000000000000000000000000000000cafe000g":{"code":"0x00"}}`,
 		`{"0x00000000000000000000000000000000cafe000100":{"code":"0x00"}}`,
+		`{"00000000000000000000000000000000cafe0001":{"code":"0x00"}}`,
 	} {
 		var so ethapi.StateOverrides
 		require.Error(t, json.Unmarshal([]byte(in), &so), "eth_call rejects %s", in)
