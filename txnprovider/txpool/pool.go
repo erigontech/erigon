@@ -3427,8 +3427,8 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	// discardLocked has already queued the rows of admitted txns that addTxns then discarded.
-	// A rejected txn never entered the pool, so its row is queued here.
+	// A rejected txn never entered the pool, so its row is queued here. The row of an admitted
+	// txn that addTxns then discarded is already queued by discardLocked.
 	for i, reason := range reasons {
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.DuplicateHash {
 			txn := txns.Txns[i]
