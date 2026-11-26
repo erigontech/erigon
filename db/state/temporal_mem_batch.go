@@ -31,6 +31,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -67,8 +68,9 @@ type TemporalMemBatch struct {
 	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
 	inMemHistoryReads bool
 
-	latest  [kv.DomainLen][latestShards]latestShard
-	storage *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	latest [kv.DomainLen][latestShards]latestShard
+	// storage[i] is guarded by latest[kv.StorageDomain][i]; keys are sharded by address so a prefix scan of one account reads one tree.
+	storage [latestShards]btree2.Map[string, []dataWithTxNum]
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -108,7 +110,6 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
 	}
@@ -131,18 +132,22 @@ func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalM
 func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
 func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
-// shard returns the key's lock and map; the storage btree is guarded by shard 0 of its domain.
-func (sd *TemporalMemBatch) shard(domain kv.Domain, key string) *latestShard {
-	if domain == kv.StorageDomain {
-		return &sd.latest[domain][0]
+func shardIndex(domain kv.Domain, key string) uint64 {
+	if domain == kv.StorageDomain && len(key) > length.Addr {
+		key = key[:length.Addr]
 	}
-	return &sd.latest[domain][latestShardIndex(key)]
+	return latestShardIndex(key)
+}
+
+func (sd *TemporalMemBatch) shard(domain kv.Domain, key string) *latestShard {
+	return &sd.latest[domain][shardIndex(domain, key)]
+}
+
+func (sd *TemporalMemBatch) storageTree(key string) *btree2.Map[string, []dataWithTxNum] {
+	return &sd.storage[shardIndex(kv.StorageDomain, key)]
 }
 
 func (sd *TemporalMemBatch) shards(domain kv.Domain) []latestShard {
-	if domain == kv.StorageDomain {
-		return sd.latest[domain][:1]
-	}
 	return sd.latest[domain][:]
 }
 
@@ -380,12 +385,13 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	sh.Lock()
 	defer sh.Unlock()
 	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Get(key); ok {
+		storage := sd.storageTree(key)
+		if old, ok := storage.Get(key); ok {
 			updated, same, delta := replaceLatest(old, valWithStep, sd.inMemHistoryReads)
 			sameTxNumUpdate, putValueSize = same, delta
-			sd.storage.Set(key, updated)
+			storage.Set(key, updated)
 		} else {
-			sd.storage.Set(key, []dataWithTxNum{valWithStep})
+			storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
 			putValueSize += len(val)
 		}
@@ -487,7 +493,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	keyS := common.ToStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
-		dataWithTxNums, ok = sd.storage.Get(keyS)
+		dataWithTxNums, ok = sd.storageTree(keyS).Get(keyS)
 		if !ok {
 			return unwoundLatest(domain, keyS)
 		}
@@ -530,7 +536,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	defer sd.runlockDomain(domain)
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
-		ramIter = sd.storage.Iter()
+		ramIter = sd.storagePrefixTree(prefix).Iter()
 	}
 
 	// Wrap the callback to respect sd.unwindChangeset: when iterating the
@@ -564,13 +570,28 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, wrappedIt, roTx)
 }
 
+// storagePrefixTree requires the storage domain's read locks to be held.
+func (sd *TemporalMemBatch) storagePrefixTree(prefix []byte) *btree2.Map[string, []dataWithTxNum] {
+	if len(prefix) >= length.Addr {
+		return sd.storageTree(common.ToStringZeroCopy(prefix))
+	}
+	merged := &btree2.Map[string, []dataWithTxNum]{}
+	for i := range sd.storage {
+		sd.storage[i].Scan(func(k string, v []dataWithTxNum) bool {
+			merged.Set(k, v)
+			return true
+		})
+	}
+	return merged
+}
+
 // overlayLatest requires sh's lock to be held.
 func (sd *TemporalMemBatch) overlayLatest(sh *latestShard, domain kv.Domain, k []byte) (dataWithTxNum, bool) {
 	keyS := common.ToStringZeroCopy(k)
 	var vals []dataWithTxNum
 	var ok bool
 	if domain == kv.StorageDomain {
-		vals, ok = sd.storage.Get(keyS)
+		vals, ok = sd.storageTree(keyS).Get(keyS)
 	} else {
 		vals, ok = sh.m[keyS]
 	}
@@ -712,19 +733,22 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 		key  string
 		kept []dataWithTxNum
 	}
-	var edits []storageEdit
-	sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
-		kept := pruneSlice(entries)
-		if len(kept) != len(entries) {
-			edits = append(edits, storageEdit{k, kept})
-		}
-		return true
-	})
-	for _, e := range edits {
-		if len(e.kept) == 0 {
-			sd.storage.Delete(e.key)
-		} else {
-			sd.storage.Set(e.key, e.kept)
+	for i := range sd.storage {
+		storage := &sd.storage[i]
+		var edits []storageEdit
+		storage.Scan(func(k string, entries []dataWithTxNum) bool {
+			kept := pruneSlice(entries)
+			if len(kept) != len(entries) {
+				edits = append(edits, storageEdit{k, kept})
+			}
+			return true
+		})
+		for _, e := range edits {
+			if len(e.kept) == 0 {
+				storage.Delete(e.key)
+			} else {
+				storage.Set(e.key, e.kept)
+			}
 		}
 	}
 
@@ -835,10 +859,12 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		}
 	}
 
-	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
-		sd.storage.Set(key, value)
-		return true
-	})
+	for i := range other.storage {
+		other.storage[i].Scan(func(key string, value []dataWithTxNum) bool {
+			sd.storage[i].Set(key, value)
+			return true
+		})
+	}
 
 	unwound := func(b *TemporalMemBatch) bool {
 		return slices.ContainsFunc(b.preUnwindDomainWriters[:], func(ws []*DomainBufferedWriter) bool { return len(ws) > 0 })
@@ -978,14 +1004,16 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 		}
 		for domain, cb := range cfg.DomainCallbacks {
 			if domain == kv.StorageDomain {
-				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
-					if len(history) == 0 {
+				for i := range sd.storage {
+					sd.storage[i].Scan(func(keyStr string, history []dataWithTxNum) bool {
+						if len(history) == 0 {
+							return true
+						}
+						latest := history[len(history)-1]
+						cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 						return true
-					}
-					latest := history[len(history)-1]
-					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
-					return true
-				})
+					})
+				}
 				continue
 			}
 			for i := range sd.latest[domain] {

@@ -17,17 +17,17 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -58,7 +58,6 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
-		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 
@@ -108,7 +107,6 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	sd := &TemporalMemBatch{
 		stepSize: 16,
-		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
@@ -146,6 +144,38 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 	require.NoError(t, <-flushErr)
 }
 
+// Exec workers read storage while the apply loop writes it, so a write must not
+// wait for a reader of another account's slots.
+func TestStorageWriteDoesNotWaitForOtherAccountReader(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	key := func(addr byte) string {
+		return string(append(bytes.Repeat([]byte{addr}, length.Addr), make([]byte, length.Hash)...))
+	}
+	reading := key(1)
+	writing := key(2)
+	for b := byte(3); latestShardIndex(writing[:length.Addr]) == latestShardIndex(reading[:length.Addr]); b++ {
+		writing = key(b)
+	}
+	sh := sd.shard(kv.StorageDomain, reading)
+	sh.RLock()
+	defer sh.RUnlock()
+
+	written := make(chan struct{})
+	go func() {
+		sd.putLatest(kv.StorageDomain, writing, []byte{1}, 1)
+		close(written)
+	}()
+	select {
+	case <-written:
+	case <-time.After(5 * time.Second):
+		t.Fatal("storage write waited for a reader of another account")
+	}
+}
+
 // Commit borrows the batch's value buffers instead of copying, which is only
 // sound while a later write to the same key leaves the earlier bytes alone.
 func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
@@ -159,7 +189,6 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 
 			sd := &TemporalMemBatch{
 				stepSize:          16,
-				storage:           btree2.NewMap[string, []dataWithTxNum](128),
 				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 				inMemHistoryReads: inMemHistoryReads,
 			}
@@ -198,7 +227,6 @@ func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 	newBatch := func() *TemporalMemBatch {
 		return &TemporalMemBatch{
 			stepSize: 16,
-			storage:  btree2.NewMap[string, []dataWithTxNum](128),
 			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		}
 	}
