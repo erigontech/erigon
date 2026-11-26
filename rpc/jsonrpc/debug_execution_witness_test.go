@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1126,14 +1128,13 @@ type chainWitnesses struct {
 	GetWitness []hexutil.Bytes
 }
 
-func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
+func collectChainWitnesses(t *testing.T, commitmentV3 bool, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) chainWitnesses {
 	previousAssert := dbg.AssertEnabled
 	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
 	dbg.AssertEnabled = true
 	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
 	statecfg.EnableHistoricalCommitment()
 
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
@@ -1145,6 +1146,7 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 		return err
 	}))
 	require.Positive(t, latest)
+	require.Equal(t, uint64(testChain.Length()), latest)
 
 	debugAPI := newDebugApiForTest(m)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -1172,8 +1174,18 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 
 func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
 	var hph, v3 chainWitnesses
-	require.True(t, t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) }))
-	require.True(t, t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) }))
+	require.True(t, t.Run("hph", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		statecfg.EnableHistoricalCommitment()
+		m, testChain, _ := rpcdaemontest.CreateTestExecModule(t)
+		hph = collectChainWitnesses(t, false, m, testChain)
+	}))
+	require.True(t, t.Run("v3", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(true))
+		statecfg.EnableHistoricalCommitment()
+		m, testChain, _ := rpcdaemontest.CreateTestExecModule(t)
+		v3 = collectChainWitnesses(t, true, m, testChain)
+	}))
 	require.NotEmpty(t, hph.Legacy)
 	for n := range hph.Legacy {
 		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)

@@ -184,9 +184,9 @@
 - Create: `rpc/jsonrpc/testdata/witness_golden/`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go` (`collectChainWitnesses` takes the chain to run on)
 
-- [ ] build a dedicated chain in `witness_golden_test.go` with `GenerateChain` on `chain.TestChainBerlinConfig`; the shared
+- [x] build a dedicated chain in `witness_golden_test.go` with `GenerateChain` on `chain.TestChainBerlinConfig`; the shared
       `rpcdaemontest` chain stays unchanged
-- [ ] its blocks hold: a delete and an insert under one branch (transient collapse, with the insert both before and after
+- [x] its blocks hold: a delete and an insert under one branch (transient collapse, with the insert both before and after
       the delete in key order), a cascade, a storage-plane collapse, a storage trie that becomes empty, a self-destruct,
       an inline storage leaf as survivor; assert collapse candidates > 0 for each shape
 - [ ] per block write `debug_executionWitness` legacy and canonical, `eth_getWitness` bytes, and `eth_getProof` for a fixed
