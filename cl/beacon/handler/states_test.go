@@ -834,6 +834,53 @@ func TestGetCommitteesHeadSeedBounds(t *testing.T) {
 	}
 }
 
+func TestGetCommitteesHeadSeedRetention(t *testing.T) {
+	_, _, _, _, head, h, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	advanced, err := head.Copy()
+	require.NoError(t, err)
+	cfg := advanced.BeaconConfig()
+	vectorLength := cfg.EpochsPerHistoricalVector
+
+	for _, tc := range []struct {
+		stateEpoch uint64
+		epoch      uint64
+		code       int
+	}{
+		{vectorLength - 3, 0, http.StatusOK},
+		{vectorLength - 2, 0, http.StatusBadRequest},
+		{vectorLength - 2, 1, http.StatusOK},
+		{vectorLength - 1, 1, http.StatusBadRequest},
+		{vectorLength + 1, 4, http.StatusOK},
+		{vectorLength + 1, 3, http.StatusBadRequest},
+	} {
+		t.Run(fmt.Sprintf("state_%d_epoch_%d", tc.stateEpoch, tc.epoch), func(t *testing.T) {
+			require.NoError(t, advanced.SetSlot(tc.stateEpoch*cfg.SlotsPerEpoch))
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(advanced, syncedData.HeadRoot()))
+
+			path := fmt.Sprintf("/eth/v1/beacon/states/head/committees?epoch=%d", tc.epoch)
+			rec := httptest.NewRecorder()
+			h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+			require.Equal(t, tc.code, rec.Code, "GET %s", path)
+		})
+	}
+}
+
+func TestGetCommitteesHeadSeedBoundUsesViewedStateEpoch(t *testing.T) {
+	_, _, _, _, head, h, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	headEpoch := state.Epoch(head)
+	slotsPerEpoch := head.BeaconConfig().SlotsPerEpoch
+	advanced, err := head.Copy()
+	require.NoError(t, err)
+	require.NoError(t, advanced.SetSlot((headEpoch+1)*slotsPerEpoch))
+	h.syncedData = overwriteBeforeViewSyncedData{SyncedData: syncedData, t: t, next: advanced}
+	require.Equal(t, headEpoch, h.syncedData.HeadSlot()/slotsPerEpoch)
+
+	path := fmt.Sprintf("/eth/v1/beacon/states/head/committees?epoch=%d", headEpoch+3)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, rec.Code, "GET %s", path)
+}
+
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
