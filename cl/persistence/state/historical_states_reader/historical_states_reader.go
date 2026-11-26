@@ -556,28 +556,35 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_access
 	return nil
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
-	// Read the file
+type DiffedListRange struct {
+	DumpSlot      uint64
+	Forward       bool
+	FirstDiffSlot uint64
+	LastDiffSlot  uint64
+	HasDiffs      bool
+}
+
+func SelectDiffedListRange(slot, stateProgress uint64) DiffedListRange {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
+	if remainder <= clparams.SlotsPerDump/2 || stateProgress <= freshDumpSlot+clparams.SlotsPerDump {
+		return DiffedListRange{DumpSlot: freshDumpSlot, Forward: true, FirstDiffSlot: freshDumpSlot + 1, LastDiffSlot: slot, HasDiffs: remainder != 0}
+	}
+	dumpSlot := freshDumpSlot + clparams.SlotsPerDump
+	return DiffedListRange{DumpSlot: dumpSlot, FirstDiffSlot: slot + 1, LastDiffSlot: dumpSlot, HasDiffs: true}
+}
 
-	midpoint := uint64(clparams.SlotsPerDump / 2)
-	var compressed []byte
+func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
 	}
-	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
-	if forward {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
-		if err != nil {
-			return nil, err
-		}
+	diffRange := SelectDiffedListRange(slot, currentStageProgress)
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	forward := diffRange.Forward
+	compressed, err := kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(diffRange.DumpSlot))
+	if err != nil {
+		return nil, err
 	}
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)

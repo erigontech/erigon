@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -100,8 +101,16 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			if !a.stateReader.ValidatorTableCovers(expectedSlot) {
 				return nil, validatorReplayPending(expectedSlot)
 			}
-			if err := readiness.check(expectedSlot, expectedSlot, kv.ValidatorEffectiveBalance); err != nil {
+			balances := historical_states_reader.SelectDiffedListRange(expectedSlot, readiness.progress)
+			if err := readiness.check(balances.DumpSlot, balances.DumpSlot, kv.EffectiveBalancesDump); err != nil {
 				return nil, err
+			}
+			if balances.HasDiffs {
+				for _, diffSlot := range []uint64{balances.FirstDiffSlot, balances.LastDiffSlot} {
+					if err := readiness.check(diffSlot, diffSlot, kv.ValidatorEffectiveBalance); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 
