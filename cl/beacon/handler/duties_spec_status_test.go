@@ -654,3 +654,39 @@ func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {
 	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
 }
+
+func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	fcu.FinalizedSlotVal = 160
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		data, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+		if err != nil {
+			return err
+		}
+		if err := tx.Put(kv.SlotData, base_encoding.Encode64ToBytes4(128), data); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(127), make([]byte, 32)); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 64)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+	delete(types.KeyValueGetters, kv.RandaoMixes)
+	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.DumpCaplinState(t.Context(), 1000, 1000, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, snapshots.OpenFolder())
+	handler.caplinStateSnapshots = snapshots
+	validatorTable := state_accessors.NewStaticValidatorTable()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, validatorTable) }))
+	validatorTable.SetSlot(128)
+	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/4", "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}

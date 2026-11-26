@@ -265,16 +265,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	committeesPerSlot := max(min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize), 1)
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	randaoGetter := func(table string, key []byte) ([]byte, error) {
-		if table == kv.RandaoMixes {
-			rowSlot := base_encoding.Decode64FromBytes4(key)
-			if err := readiness.check(rowSlot, rowSlot+a.beaconChainCfg.SlotsPerEpoch, table); err != nil {
-				return nil, err
-			}
-		}
-		return stateGetter(table, key)
-	}
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(randaoGetter, slot, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, slot, mixPosition)
 	if err != nil {
 		return nil, fmt.Errorf("could not read randao mix: %w", err)
 	}
@@ -352,7 +343,11 @@ func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot u
 	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
 	return func(table string, key []byte) ([]byte, error) {
 		rowSlot := base_encoding.Decode64FromBytes4(key)
-		if err := readiness.check(rowSlot, rowSlot, table); err != nil {
+		writeSlot := rowSlot
+		if table == kv.RandaoMixes {
+			writeSlot += slotsPerEpoch
+		}
+		if err := readiness.check(rowSlot, writeSlot, table); err != nil {
 			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
 				for range maxEpochsLookaheadForDuties * 2 * slotsPerEpoch {
 					root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
