@@ -116,7 +116,7 @@ func TestVerifyTorrentFilesRecordsResolvedReadPath(t *testing.T) {
 	verified := make(map[string][20]byte)
 	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(path string, hash [20]byte) {
 		callbackPath = path
-		callbackErr = os.Remove(alias)
+		callbackErr = dir2.RemoveFile(alias)
 		if callbackErr == nil {
 			callbackErr = os.Symlink(targetTwo, alias)
 		}
