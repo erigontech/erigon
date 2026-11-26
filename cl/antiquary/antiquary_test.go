@@ -1025,10 +1025,11 @@ func TestCanonicalHeadCapIsReportedOncePerInterval(t *testing.T) {
 	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
 	a := &Antiquary{logger: logger}
 
-	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_000, 0))
-	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_060, 0))
-	require.Equal(t, 1, strings.Count(buf.String(), "canonicalHead="), "the log is rate limited")
+	start := time.Unix(1_000, 0)
+	a.reportCanonicalHeadCap(9_998, 10_000, start)
+	a.reportCanonicalHeadCap(9_998, 10_000, start.Add(10*time.Minute-time.Second))
+	require.Equal(t, 1, strings.Count(buf.String(), "canonicalHead="), "the log is rate limited to once per 10 minutes")
 
-	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_000, 0).Add(canonicalHeadCapLogInterval))
+	a.reportCanonicalHeadCap(9_998, 10_000, start.Add(10*time.Minute))
 	require.Equal(t, 2, strings.Count(buf.String(), "canonicalHead="))
 }

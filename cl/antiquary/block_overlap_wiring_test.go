@@ -282,7 +282,9 @@ func TestMergeBlocksKeepsTheSegmentsBelowTheMergedRange(t *testing.T) {
 
 func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
+	var logs bytes.Buffer
 	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	dirs := datadir.New(t.TempDir())
 	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
 	above := writeStateFixture(t, dirs.Snap, "beaconblocks", 2*limit, 3*limit, logger)
@@ -319,6 +321,7 @@ func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 	after, err := os.Stat(above)
 	require.NoError(t, err)
 	require.True(t, os.SameFile(before, after), "the indexed segment above the hole must not be dumped again")
+	require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the segment above, not the canonical head, holds the bound")
 }
 
 func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
@@ -383,6 +386,72 @@ func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	word, err := segment.Get(tail)
 	require.NoError(t, err)
 	require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
+}
+
+func TestAntiquateReportsTheCanonicalHeadOnlyWhenItHoldsBackASegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	t.Run("both bounds round to the same segment end", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		dirs := datadir.New(t.TempDir())
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var prevRoot common.Hash
+			var slots []uint64
+			for slot := uint64(0); slot < limit-500; slot += 500 {
+				slots = append(slots, slot)
+			}
+			for _, slot := range append(slots, limit-1) {
+				block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+				block.Block.Slot = slot
+				block.Block.ParentRoot = prevRoot
+				if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+					return err
+				}
+				root, err := block.Block.HashSSZ()
+				if err != nil {
+					return err
+				}
+				prevRoot = root
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin+1)
+		}))
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+		require.NoError(t, a.antiquate())
+		require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the cap did not hold back a segment")
+	})
+	t.Run("the margin holds the next segment", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		dirs := datadir.New(t.TempDir())
+		writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for slot := uint64(0); slot <= limit-1_000; slot += 500 {
+				var root common.Hash
+				binary.BigEndian.PutUint64(root[:], slot+1)
+				if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+					return err
+				}
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin+5_000)
+		}))
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+		require.NoError(t, a.antiquate())
+		require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the margin, not the canonical head, holds the next segment")
+	})
 }
 
 func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
