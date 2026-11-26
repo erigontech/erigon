@@ -141,7 +141,7 @@ var (
 func asOfProbeLog() {
 	for range time.Tick(30 * time.Second) {
 		for c, name := range [2]string{"exec", "committer"} {
-			for d := kv.Domain(0); d < kv.DomainLen; d++ {
+			for d := range kv.DomainLen {
 				m, h, t := asOfProbe[c][d][0].Load(), asOfProbe[c][d][1].Load(), asOfProbe[c][d][2].Load()
 				if m+h+t == 0 {
 					continue
