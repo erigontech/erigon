@@ -241,6 +241,7 @@ type blockService struct {
 	blockJobsLifecycleMu             sync.RWMutex
 	blockJobsStopped                 bool
 	publishedBlockScheduled          chan common.Hash
+	timelines                        *blockTimelines
 	// store the block in db
 	db kv.RwDB
 }
@@ -262,6 +263,7 @@ func NewBlockService(
 	b.dataColumns = dataColumns
 	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
+	go b.timelines.run(ctx)
 	return b
 }
 
@@ -305,6 +307,7 @@ func newBlockService(
 		db:               db,
 
 		publishedBlockScheduled: make(chan common.Hash, publishedBlockWakeBuffer),
+		timelines:               newBlockTimelines(ethClock, log.Root()),
 	}
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
@@ -333,12 +336,17 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
 		return errors.New("missing beacon block")
 	}
+	arrived := time.Now()
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg, nil, false, false) }, true); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() {
+		b.timelines.seen(msg, arrived)
+		b.scheduleBlockForLaterProcessing(msg, nil, false, false)
+	}, true); err != nil {
 		return err
 	}
+	b.timelines.seen(msg, arrived)
 	b.publishBlockGossipEvent(msg)
 	afterAdmission := startsELColumnsImportAfterAdmission(msg)
 	if !afterAdmission {
@@ -1206,7 +1214,9 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 
 	if !accepted {
-		_, accepted = b.forkchoiceStore.GetHeader(blockRoot)
+		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); accepted {
+			b.timelines.importedElsewhere(block, common.Hash(blockRoot))
+		}
 	}
 
 	// Fork choice may already contain a block whose database write failed.
@@ -1223,10 +1233,18 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return accepted, fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
 	}
 	if !accepted {
-		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+		start := time.Now()
+		b.timelines.importStarted(block, start)
+		err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true)
+		end := time.Now()
+		if err == nil {
+			_, accepted = b.forkchoiceStore.GetHeader(blockRoot)
+		}
+		b.timelines.importEnded(block, common.Hash(blockRoot), start, end, accepted, err)
+		if err != nil {
 			return false, err
 		}
-		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); !accepted {
+		if !accepted {
 			return false, nil
 		}
 		go b.importBlockOperations(block)

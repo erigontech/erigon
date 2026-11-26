@@ -280,10 +280,14 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsic mdgas.IntrinsicGasCal
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 
-			// eip-7702 allows tx origination from accounts having delegated designation code.
-			_, ok, err := st.state.GetDelegatedDesignation(from)
-			if err != nil {
-				return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			// eip-7702 allows tx origination from accounts having delegated designation code,
+			// starting at Prague.
+			ok := false
+			if rules.IsPrague {
+				_, ok, err = st.state.GetDelegatedDesignation(from)
+				if err != nil {
+					return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				}
 			}
 			if !ok {
 				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,

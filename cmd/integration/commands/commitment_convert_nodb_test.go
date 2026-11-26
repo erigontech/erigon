@@ -195,8 +195,9 @@ func TestCommitmentConvertWithoutChaindata(t *testing.T) {
 			agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
 			t.Cleanup(agg.Close)
 			require.NoError(t, agg.OpenFolder(nil))
-			c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+			checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
 			require.NoError(t, err)
+			c := checks[0]
 			require.Equal(t, lastTxNum, c.TxNum)
 			require.Equal(t, roots[lastTxNum], common.Hash(c.Root))
 		})
@@ -337,6 +338,30 @@ func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v2.")
 
 	requireConvertRefusedBeforeWriting(t, dirs, "legacy commitment history", "--v3", "--no-history")
+}
+
+func TestCommitmentConvertV3NoHistoryVerifiesV3History(t *testing.T) {
+	dirs := legacyDatadirWithCommitmentHistory(t)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		_, suffix, found := strings.Cut(filepath.Base(f), "-")
+		require.True(t, found)
+		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0-"+suffix)))
+	}
+
+	err = runCommitmentConvert(t, dirs, "--v3", "--no-history")
+	require.ErrorContains(t, err, "has no state entries")
+	require.ErrorContains(t, err, "integration commitment convert --restore")
+	requireCommitmentKVPrefix(t, dirs, "v2.")
+	entries, err := os.ReadDir(filepath.Join(dirs.Snap, "backup", "domains"))
+	if err != nil {
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	require.Empty(t, entries)
+	_, err = os.Stat(filepath.Join(dirs.Snap, "backup", ".exec_reset_pending"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {

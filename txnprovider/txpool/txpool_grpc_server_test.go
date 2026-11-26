@@ -104,6 +104,7 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 		{txpoolcfg.DelegatedNonceGap, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.DelegatedTxnLimit, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.NotReplaced, txpoolproto.ImportResult_FEE_TOO_LOW},
+		{txpoolcfg.ReplacedByHigherTip, txpoolproto.ImportResult_FEE_TOO_LOW},
 		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
 		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
