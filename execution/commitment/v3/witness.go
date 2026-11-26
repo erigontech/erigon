@@ -54,7 +54,6 @@ type witnessWalk struct {
 	rootHash  []byte
 	byHash    map[string][]byte
 	leanNodes [][]byte
-	leanSeen  map[string]struct{}
 	nodes     map[string]*witnessNode
 	roots     map[string]*witnessRoot
 	kbuf      []byte
@@ -93,7 +92,6 @@ func (t *Trie) runWitnessWalk(ctx context.Context, updates *commitment.Updates, 
 		lean:      lean,
 		rootHash:  want,
 		byHash:    make(map[string][]byte),
-		leanSeen:  make(map[string]struct{}),
 		nodes:     make(map[string]*witnessNode),
 		roots:     make(map[string]*witnessRoot),
 	}
@@ -109,17 +107,14 @@ func (t *Trie) runWitnessWalk(ctx context.Context, updates *commitment.Updates, 
 }
 
 func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
-	if _, ok := w.byHash[string(hash[:])]; !ok {
-		w.byHash[string(hash[:])] = rlp
+	key := string(hash[:])
+	if _, ok := w.byHash[key]; ok {
+		return
 	}
+	w.byHash[key] = rlp
 	if !w.lean || len(rlp) < 32 && !bytes.Equal(hash[:], w.rootHash) {
 		return
 	}
-	key := string(rlp)
-	if _, ok := w.leanSeen[key]; ok {
-		return
-	}
-	w.leanSeen[key] = struct{}{}
 	w.leanNodes = append(w.leanNodes, rlp)
 }
 

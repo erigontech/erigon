@@ -847,10 +847,7 @@ func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 	txWitness, err := ethAPI.GetTxWitness(ctx, at, 0)
 	require.NoError(t, err)
 	require.Equal(t, witness, txWitness)
-	decoded, err := opstream.NewWitnessFromReader(bytes.NewReader(witness), false)
-	require.NoError(t, err)
-	decodedTrie, err := trie.BuildTrieFromWitness(decoded, false)
-	require.NoError(t, err)
+	decodedTrie := witnessStreamTrie(t, witness)
 	require.Equal(t, testChain.Blocks[1].Root(), decodedTrie.Hash())
 
 	for _, mode := range []string{"legacy", "canonical"} {
@@ -1182,16 +1179,8 @@ func witnessStreamNodes(t *testing.T, witness hexutil.Bytes) [][]byte {
 
 func requireWitnessStreamSuperset(t *testing.T, hph, v3 hexutil.Bytes, label string) {
 	t.Helper()
-	missing := countMissing(byteSliceSet(witnessStreamNodes(t, hph)), byteSliceSet(witnessStreamNodes(t, v3)))
+	missing := countMissing(byteSet(witnessStreamNodes(t, hph)), byteSet(witnessStreamNodes(t, v3)))
 	require.Zero(t, missing, "%s missing %d HPH witness nodes", label, missing)
-}
-
-func byteSliceSet(items [][]byte) map[string]struct{} {
-	set := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		set[string(item)] = struct{}{}
-	}
-	return set
 }
 
 func collectChainWitnesses(t *testing.T, commitmentV3 bool, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) chainWitnesses {

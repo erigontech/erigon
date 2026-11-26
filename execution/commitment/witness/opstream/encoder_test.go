@@ -131,6 +131,17 @@ func TestEncodeRejectsCodeHashMismatch(t *testing.T) {
 	}
 }
 
+func TestEncodeRejectsNodeTrailingData(t *testing.T) {
+	nodes, err := stateForSingleLeaf().RLPEncode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes[0] = append(nodes[0], 0)
+	if _, err := opstream.Encode(nodes, nil); err == nil {
+		t.Fatal("expected trailing node data error")
+	}
+}
+
 func TestEncodeRejectsCodeReadForEmptyCodeHash(t *testing.T) {
 	addr := common.HexToAddress("0x1234")
 	key := crypto.Keccak256Hash(addr[:])

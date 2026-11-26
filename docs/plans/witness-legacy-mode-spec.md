@@ -52,12 +52,6 @@ The accessed-key set is first augmented by a collapse-detection pass (`detectCol
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
 transaction transiently collapsed; the witness is then assembled against the parent-state reader.
 
-Legacy collapse candidates are the survivors found by a deletes-only walk over the pre-state commitment records.
-Inserts do not affect this walk. An account survivor's path continues through a single-path pre-state storage trie,
-as HPH does. Canonical applies the existing `BranchChildCount` filter and drops candidates whose post-state branch
-keeps two or more children. `eth_getWitness` carries the legacy candidates and encodes the resulting lean node list
-with the format-only op-stream encoder.
-
 - **Node encoding** — standard Ethereum MPT node RLP (branch / extension / leaf); unresolved subtrees are
   represented by their 32-byte hash (a `HashNode`).
 - **Untouched storage roots** — for a witnessed account whose storage was not touched in this block, the

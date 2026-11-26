@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -94,142 +93,6 @@ type witnessGoldenCandidates struct {
 	canonical map[string][][]byte
 }
 
-type witnessGoldenHashedKey struct {
-	value common.Hash
-	hash  common.Hash
-}
-
-func witnessGoldenValue(value byte) common.Hash {
-	return common.Hash{31: value}
-}
-
-func witnessGoldenAddress(value uint64) common.Address {
-	var address common.Address
-	binary.BigEndian.PutUint64(address[12:], value)
-	return address
-}
-
-func witnessGoldenSlot(value uint64) witnessGoldenHashedKey {
-	slot := common.Hash{}
-	binary.BigEndian.PutUint64(slot[24:], value)
-	return witnessGoldenHashedKey{value: slot, hash: crypto.Keccak256Hash(slot[:])}
-}
-
-func witnessGoldenNibble(hash common.Hash, index int) byte {
-	if index%2 == 0 {
-		return hash[index/2] >> 4
-	}
-	return hash[index/2] & 0x0f
-}
-
-func witnessGoldenPrefixLength(left, right common.Hash) int {
-	for i := range len(left) * 2 {
-		if witnessGoldenNibble(left, i) != witnessGoldenNibble(right, i) {
-			return i
-		}
-	}
-	return len(left) * 2
-}
-
-func witnessGoldenSlots(count int) []witnessGoldenHashedKey {
-	slots := make([]witnessGoldenHashedKey, 0, count)
-	for value := uint64(1); len(slots) < count; value++ {
-		slots = append(slots, witnessGoldenSlot(value))
-	}
-	return slots
-}
-
-func witnessGoldenTransientSlots(t *testing.T, before bool) [3]common.Hash {
-	t.Helper()
-	slots := witnessGoldenSlots(4096)
-	for _, deleted := range slots {
-		for _, survivor := range slots {
-			if deleted.value == survivor.value || witnessGoldenPrefixLength(deleted.hash, survivor.hash) != 1 {
-				continue
-			}
-			deletedChild := witnessGoldenNibble(deleted.hash, 1)
-			survivorChild := witnessGoldenNibble(survivor.hash, 1)
-			for _, inserted := range slots {
-				if inserted.value == deleted.value || inserted.value == survivor.value || witnessGoldenPrefixLength(deleted.hash, inserted.hash) < 1 {
-					continue
-				}
-				insertedChild := witnessGoldenNibble(inserted.hash, 1)
-				if insertedChild == deletedChild || insertedChild == survivorChild {
-					continue
-				}
-				insertedBefore := bytes.Compare(inserted.hash[:], deleted.hash[:]) < 0
-				if insertedBefore == before {
-					return [3]common.Hash{deleted.value, survivor.value, inserted.value}
-				}
-			}
-		}
-	}
-	t.Fatalf("no transient storage keys found")
-	return [3]common.Hash{}
-}
-
-func witnessGoldenCascadeSlots(t *testing.T) [3]common.Hash {
-	t.Helper()
-	slots := witnessGoldenSlots(4096)
-	for _, first := range slots {
-		for _, second := range slots {
-			if first.value == second.value || witnessGoldenPrefixLength(first.hash, second.hash) != 2 {
-				continue
-			}
-			for _, survivor := range slots {
-				if witnessGoldenNibble(survivor.hash, 0) != witnessGoldenNibble(first.hash, 0) || witnessGoldenNibble(survivor.hash, 1) == witnessGoldenNibble(first.hash, 1) {
-					continue
-				}
-				return [3]common.Hash{first.value, second.value, survivor.value}
-			}
-		}
-	}
-	t.Fatalf("no cascade storage keys found")
-	return [3]common.Hash{}
-}
-
-func witnessGoldenPlainSlots(t *testing.T) [2]common.Hash {
-	t.Helper()
-	slots := witnessGoldenSlots(256)
-	for _, first := range slots {
-		for _, second := range slots {
-			if first.value != second.value && witnessGoldenNibble(first.hash, 0) != witnessGoldenNibble(second.hash, 0) {
-				return [2]common.Hash{first.value, second.value}
-			}
-		}
-	}
-	t.Fatalf("no plain storage keys found")
-	return [2]common.Hash{}
-}
-
-func witnessGoldenAddressWithPrefix(t *testing.T, sender common.Address) common.Address {
-	t.Helper()
-	senderHash := crypto.Keccak256Hash(sender[:])
-	for value := uint64(0x1000); ; value++ {
-		candidate := witnessGoldenAddress(value)
-		if candidate != sender && witnessGoldenNibble(crypto.Keccak256Hash(candidate[:]), 0) == witnessGoldenNibble(senderHash, 0) {
-			return candidate
-		}
-	}
-}
-
-func witnessGoldenStorage(pairs ...[2]common.Hash) map[common.Hash]common.Hash {
-	storage := make(map[common.Hash]common.Hash, len(pairs))
-	for _, pair := range pairs {
-		storage[pair[0]] = pair[1]
-	}
-	return storage
-}
-
-func witnessGoldenPairData(pairs ...[2]common.Hash) []byte {
-	data := make([]byte, 0, len(pairs)*64)
-	for _, pair := range pairs {
-		data = append(data, pair[0][:]...)
-		data = append(data, pair[1][:]...)
-	}
-	return data
-}
-
 func witnessGoldenSignedCall(t *testing.T, block *blockgen.BlockGen, sender common.Address, key *ecdsa.PrivateKey, to common.Address, data []byte) types.Transaction {
 	t.Helper()
 	tx := types.NewTransaction(block.TxNonce(sender), to, uint256.NewInt(1), 1_000_000, uint256.NewInt(1), data)
@@ -244,48 +107,48 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	transientBeforeSlots := witnessGoldenTransientSlots(t, true)
-	transientAfterSlots := witnessGoldenTransientSlots(t, false)
-	cascadeSlots := witnessGoldenCascadeSlots(t)
-	plainSlots := witnessGoldenPlainSlots(t)
-	emptySlots := witnessGoldenPlainSlots(t)
+	transientBeforeSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(338)}
+	transientAfterSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(14), witnessBenchSlot(42)}
+	cascadeSlots := [3]common.Hash{witnessBenchSlot(1), witnessBenchSlot(24), witnessBenchSlot(14)}
+	plainSlots := [2]common.Hash{witnessBenchSlot(1), witnessBenchSlot(2)}
+	emptySlots := plainSlots
 	inlineSlots := [2]common.Hash{
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000003c6b4"),
 		common.HexToHash("0x000000000000000000000000000000000000000000000000000000000007dc4f"),
 	}
 	inlineHashes := [2]common.Hash{crypto.Keccak256Hash(inlineSlots[0][:]), crypto.Keccak256Hash(inlineSlots[1][:])}
-	require.GreaterOrEqual(t, witnessGoldenPrefixLength(inlineHashes[0], inlineHashes[1]), 10)
+	require.GreaterOrEqual(t, witnessBenchPrefixLength(inlineHashes[0], inlineHashes[1]), 10)
 
-	transientBefore := witnessGoldenAddress(0x1001)
-	transientAfter := witnessGoldenAddress(0x1002)
-	cascade := witnessGoldenAddress(0x1003)
-	plain := witnessGoldenAddress(0x1004)
-	empty := witnessGoldenAddress(0x1005)
-	inline := witnessGoldenAddress(0x1006)
-	emptyStorage := witnessGoldenAddress(0x1007)
-	selfDestruct := witnessGoldenAddressWithPrefix(t, sender)
+	transientBefore := witnessBenchAddress(0x1001)
+	transientAfter := witnessBenchAddress(0x1002)
+	cascade := witnessBenchAddress(0x1003)
+	plain := witnessBenchAddress(0x1004)
+	empty := witnessBenchAddress(0x1005)
+	inline := witnessBenchAddress(0x1006)
+	emptyStorage := witnessBenchAddress(0x1007)
+	selfDestruct := witnessBenchAddressWithPrefix(sender)
 	alloc := types.GenesisAlloc{
 		sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
-		transientBefore: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{transientBeforeSlots[0], witnessGoldenValue(1)}, [2]common.Hash{transientBeforeSlots[1], witnessGoldenValue(2)},
+		transientBefore: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{transientBeforeSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientBeforeSlots[1], witnessBenchValue(2)},
 		)},
-		transientAfter: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{transientAfterSlots[0], witnessGoldenValue(1)}, [2]common.Hash{transientAfterSlots[1], witnessGoldenValue(2)},
+		transientAfter: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{transientAfterSlots[0], witnessBenchValue(1)}, [2]common.Hash{transientAfterSlots[1], witnessBenchValue(2)},
 		)},
-		cascade: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{cascadeSlots[0], witnessGoldenValue(1)}, [2]common.Hash{cascadeSlots[1], witnessGoldenValue(2)}, [2]common.Hash{cascadeSlots[2], witnessGoldenValue(3)},
+		cascade: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{cascadeSlots[0], witnessBenchValue(1)}, [2]common.Hash{cascadeSlots[1], witnessBenchValue(2)}, [2]common.Hash{cascadeSlots[2], witnessBenchValue(3)},
 		)},
-		plain: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{plainSlots[0], witnessGoldenValue(1)}, [2]common.Hash{plainSlots[1], witnessGoldenValue(2)},
+		plain: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
 		)},
-		empty: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{emptySlots[0], witnessGoldenValue(1)}, [2]common.Hash{emptySlots[1], witnessGoldenValue(2)},
+		empty: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{emptySlots[0], witnessBenchValue(1)}, [2]common.Hash{emptySlots[1], witnessBenchValue(2)},
 		)},
-		selfDestruct: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{plainSlots[0], witnessGoldenValue(1)}, [2]common.Hash{plainSlots[1], witnessGoldenValue(2)},
+		selfDestruct: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{plainSlots[0], witnessBenchValue(1)}, [2]common.Hash{plainSlots[1], witnessBenchValue(2)},
 		)},
-		inline: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessGoldenStorage(
-			[2]common.Hash{inlineSlots[0], witnessGoldenValue(1)}, [2]common.Hash{inlineSlots[1], witnessGoldenValue(2)},
+		inline: {Balance: new(big.Int), Nonce: 1, Code: append([]byte(nil), witnessGoldenContractBytecode...), Storage: witnessBenchStorage(
+			[2]common.Hash{inlineSlots[0], witnessBenchValue(1)}, [2]common.Hash{inlineSlots[1], witnessBenchValue(2)},
 		)},
 		emptyStorage: {Balance: new(big.Int), Nonce: 1, Code: []byte{0x00}},
 	}
@@ -303,30 +166,30 @@ func newWitnessGoldenRun(t *testing.T) witnessGoldenRun {
 	generated, err := m.GenerateChain(len(shapes), func(i int, block *blockgen.BlockGen) {
 		switch i {
 		case 0:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientBefore, witnessGoldenPairData([2]common.Hash{transientBeforeSlots[0], {}}, [2]common.Hash{transientBeforeSlots[2], witnessGoldenValue(3)})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientBefore, witnessBenchPairData([2]common.Hash{transientBeforeSlots[0], {}}, [2]common.Hash{transientBeforeSlots[2], witnessBenchValue(3)})))
 		case 1:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientAfter, witnessGoldenPairData([2]common.Hash{transientAfterSlots[0], {}}, [2]common.Hash{transientAfterSlots[2], witnessGoldenValue(3)})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, transientAfter, witnessBenchPairData([2]common.Hash{transientAfterSlots[0], {}}, [2]common.Hash{transientAfterSlots[2], witnessBenchValue(3)})))
 		case 2:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, cascade, witnessGoldenPairData([2]common.Hash{cascadeSlots[0], {}}, [2]common.Hash{cascadeSlots[1], {}})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, cascade, witnessBenchPairData([2]common.Hash{cascadeSlots[0], {}}, [2]common.Hash{cascadeSlots[1], {}})))
 		case 3:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, plain, witnessGoldenPairData([2]common.Hash{plainSlots[0], {}})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, plain, witnessBenchPairData([2]common.Hash{plainSlots[0], {}})))
 		case 4:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, empty, witnessGoldenPairData([2]common.Hash{emptySlots[0], {}}, [2]common.Hash{emptySlots[1], {}})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, empty, witnessBenchPairData([2]common.Hash{emptySlots[0], {}}, [2]common.Hash{emptySlots[1], {}})))
 		case 5:
 			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, selfDestruct, nil))
 		case 6:
-			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, inline, witnessGoldenPairData([2]common.Hash{inlineSlots[0], {}})))
+			block.AddTx(witnessGoldenSignedCall(t, block, sender, key, inline, witnessBenchPairData([2]common.Hash{inlineSlots[0], {}})))
 		}
 	})
 	require.NoError(t, err)
-	absentSlot := witnessGoldenValue(0x99)
+	absentSlot := witnessBenchValue(0x99)
 	return witnessGoldenRun{
 		m: m, chain: generated, shapes: shapes,
 		proofs: []witnessGoldenProof{
 			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(transientBeforeSlots[1][:])}},
 			{address: transientBefore, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
 			{address: sender},
-			{address: witnessGoldenAddress(0xdead)},
+			{address: witnessBenchAddress(0xdead)},
 			{address: emptyStorage, storageKeys: StorageKeys{hexutil.Bytes(absentSlot[:])}},
 			{address: selfDestruct},
 		},
@@ -537,9 +400,9 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	contract := witnessGoldenAddress(0x2001)
-	slotOne := witnessGoldenValue(1)
-	slotTwo := witnessGoldenValue(2)
+	contract := witnessBenchAddress(0x2001)
+	slotOne := witnessBenchSlot(1)
+	slotTwo := witnessBenchSlot(2)
 	spec := &types.Genesis{
 		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
@@ -550,7 +413,7 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))
 	generated, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
-		block.AddTx(witnessGoldenSignedCall(t, block, sender, key, contract, witnessGoldenPairData([2]common.Hash{slotOne, witnessGoldenValue(7)}, [2]common.Hash{slotTwo, witnessGoldenValue(9)})))
+		block.AddTx(witnessGoldenSignedCall(t, block, sender, key, contract, witnessBenchPairData([2]common.Hash{slotOne, witnessBenchValue(7)}, [2]common.Hash{slotTwo, witnessBenchValue(9)})))
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
@@ -561,10 +424,10 @@ func TestWitnessGoldenContractSStore(t *testing.T) {
 	require.Equal(t, witnessGoldenContractBytecode, []byte(code))
 	gotOne, err := api.GetStorageAt(context.Background(), contract, hexutil.Encode(slotOne[:]), bnhPtr(rpc.BlockNumberOrHashWithNumber(block)))
 	require.NoError(t, err)
-	require.Equal(t, witnessGoldenValue(7), gotOne)
+	require.Equal(t, witnessBenchValue(7), gotOne)
 	gotTwo, err := api.GetStorageAt(context.Background(), contract, hexutil.Encode(slotTwo[:]), bnhPtr(rpc.BlockNumberOrHashWithNumber(block)))
 	require.NoError(t, err)
-	require.Equal(t, witnessGoldenValue(9), gotTwo)
+	require.Equal(t, witnessBenchValue(9), gotTwo)
 }
 
 func TestWitnessGoldenChainMatchesHPH(t *testing.T) {
@@ -646,17 +509,17 @@ func requireGoldenChainStateless(t *testing.T, run witnessGoldenRun) {
 func TestGoldenTransientBranchChildren(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		before bool
-	}{{"before", true}, {"after", false}} {
+		values [3]uint64
+	}{{"before", [3]uint64{1, 14, 338}}, {"after", [3]uint64{1, 14, 42}}} {
 		t.Run(tc.name, func(t *testing.T) {
-			slots := witnessGoldenTransientSlots(t, tc.before)
+			slots := [3]common.Hash{witnessBenchSlot(tc.values[0]), witnessBenchSlot(tc.values[1]), witnessBenchSlot(tc.values[2])}
 			a := crypto.Keccak256Hash(slots[0][:])
 			b := crypto.Keccak256Hash(slots[1][:])
 			c := crypto.Keccak256Hash(slots[2][:])
-			depth := witnessGoldenPrefixLength(a, b)
-			insert := witnessGoldenNibble(c, depth)
-			if witnessGoldenPrefixLength(a, c) < depth || insert == witnessGoldenNibble(a, depth) || insert == witnessGoldenNibble(b, depth) {
-				t.Errorf("want c in a free branch child at depth %d, got a=%x b=%x c=%x", depth, witnessGoldenNibble(a, depth), witnessGoldenNibble(b, depth), insert)
+			depth := witnessBenchPrefixLength(a, b)
+			insert := witnessBenchNibble(c, depth)
+			if witnessBenchPrefixLength(a, c) < depth || insert == witnessBenchNibble(a, depth) || insert == witnessBenchNibble(b, depth) {
+				t.Errorf("want c in a free branch child at depth %d, got a=%x b=%x c=%x", depth, witnessBenchNibble(a, depth), witnessBenchNibble(b, depth), insert)
 			}
 		})
 	}
@@ -703,15 +566,15 @@ func TestCollapseWitnessKeepsSurvivorStorage(t *testing.T) {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	victim := witnessGoldenAddress(0x1010)
-	survivor := witnessGoldenAddressWithPrefix(t, victim)
+	victim := witnessBenchAddress(0x1010)
+	survivor := witnessBenchAddressWithPrefix(victim)
 	build := func(useV3 bool) chainWitnesses {
 		t.Cleanup(statecfg.SetCommitmentV3(useV3))
 		statecfg.EnableHistoricalCommitment()
 		alloc := types.GenesisAlloc{
 			sender:   {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
 			victim:   {Balance: new(big.Int), Nonce: 1, Code: witnessGoldenContractBytecode},
-			survivor: {Balance: new(big.Int), Nonce: 1, Code: []byte{0}, Storage: witnessGoldenStorage([2]common.Hash{witnessGoldenValue(1), witnessGoldenValue(2)})},
+			survivor: {Balance: new(big.Int), Nonce: 1, Code: []byte{0}, Storage: witnessBenchStorage([2]common.Hash{witnessBenchValue(1), witnessBenchValue(2)})},
 		}
 		spec := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: alloc, GasLimit: 10_000_000}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(spec), execmoduletester.WithKey(key))

@@ -19,7 +19,6 @@ package v3
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/bits"
 	"math/rand"
 	"slices"
@@ -100,18 +99,6 @@ func collapseTestItems(batch []commitmenttest.Op) []feedEntry {
 	return items
 }
 
-func collapseEventKey(event collapseTestEvent) string {
-	return fmt.Sprintf("%x/%x", event.sibling, event.prefix)
-}
-
-func collapseEventSet(events []collapseTestEvent) map[string]struct{} {
-	set := make(map[string]struct{}, len(events))
-	for _, event := range events {
-		set[collapseEventKey(event)] = struct{}{}
-	}
-	return set
-}
-
 func accountCollapseEvent(a, b []byte) collapseTestEvent {
 	aPath := accountNibbles(a)
 	bPath := accountNibbles(b)
@@ -146,7 +133,7 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 		want := accountCollapseEvent(pre[0].Key, pre[1].Key)
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.Equal(t, map[string]struct{}{collapseEventKey(want): {}}, collapseEventSet(got))
+		require.ElementsMatch(t, []collapseTestEvent{want}, got)
 	})
 
 	t.Run("three leaves delete two", func(t *testing.T) {
@@ -157,7 +144,7 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 		want := accountCollapseEvent(pre[0].Key, pre[2].Key)
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key), commitmenttest.DeleteAt(pre[1].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.Equal(t, map[string]struct{}{collapseEventKey(want): {}}, collapseEventSet(got))
+		require.ElementsMatch(t, []collapseTestEvent{want}, got)
 	})
 
 	t.Run("cascade", func(t *testing.T) {
@@ -168,7 +155,7 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 		want := accountCollapseEvent(pre[0].Key, pre[2].Key)
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key), commitmenttest.DeleteAt(pre[1].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.Equal(t, map[string]struct{}{collapseEventKey(want): {}}, collapseEventSet(got))
+		require.ElementsMatch(t, []collapseTestEvent{want}, got)
 	})
 
 	t.Run("branch keeps none", func(t *testing.T) {
@@ -197,7 +184,7 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 		want := storageCollapseEvent(addr, pre[1].Key[length.Addr:], pre[2].Key[length.Addr:])
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[1].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.Equal(t, map[string]struct{}{collapseEventKey(want): {}}, collapseEventSet(got))
+		require.ElementsMatch(t, []collapseTestEvent{want}, got)
 	})
 
 	t.Run("account delete with storage", func(t *testing.T) {
@@ -209,7 +196,7 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 		want := accountCollapseEvent(pre[0].Key, pre[1].Key)
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.Equal(t, map[string]struct{}{collapseEventKey(want): {}}, collapseEventSet(got))
+		require.ElementsMatch(t, []collapseTestEvent{want}, got)
 	})
 }
 
@@ -230,9 +217,9 @@ func testDeletesOnlyInsertOrder(t *testing.T, before bool) {
 			return &account
 		}()},
 	}
-	want := map[string]struct{}{collapseEventKey(accountCollapseEvent(a, survivor)): {}}
-	require.Equal(t, want, collapseEventSet(collapseRuleEvents(t, pre, batch, false)))
-	require.Equal(t, want, collapseEventSet(collapseRuleEvents(t, pre, batch, true)))
+	want := []collapseTestEvent{accountCollapseEvent(a, survivor)}
+	require.ElementsMatch(t, want, collapseRuleEvents(t, pre, batch, false))
+	require.ElementsMatch(t, want, collapseRuleEvents(t, pre, batch, true))
 }
 
 func relativeAccountKey(rng *rand.Rand, prefix, pivot []byte, before bool) []byte {
@@ -264,15 +251,11 @@ func TestDeletesOnlyCollapseProperty(t *testing.T) {
 				batch = append(batch, commitmenttest.DeleteAt(op.Key))
 			}
 		}
-		if len(batch) == 0 {
-			batch = append(batch, commitmenttest.DeleteAt(pre[0].Key))
-		}
 		got := collapseRuleEvents(t, pre, batch, false)
 		want := referenceCollapseEvents(t, pre, batch)
-		gotSet, wantSet := collapseEventSet(got), collapseEventSet(want)
-		require.Equal(t, wantSet, gotSet, "seed %d", seed)
-		require.Equal(t, gotSet, collapseEventSet(collapseRuleEvents(t, pre, batch, true)), "seed %d feed order", seed)
-		require.Len(t, gotSet, len(got), "seed %d duplicate events", seed)
+		require.ElementsMatch(t, want, got, "seed %d", seed)
+		require.ElementsMatch(t, got, collapseRuleEvents(t, pre, batch, true), "seed %d feed order", seed)
+		require.Len(t, got, len(want), "seed %d duplicate events", seed)
 	}
 }
 

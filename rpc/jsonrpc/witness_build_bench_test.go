@@ -62,7 +62,6 @@ type witnessBenchRun struct {
 
 func BenchmarkWitnessBuild(b *testing.B) {
 	b.StopTimer()
-	runs := make(map[string]*witnessBenchRun, 4)
 	for _, chainName := range []string{"collapse", "generated"} {
 		for _, variant := range []struct {
 			name string
@@ -73,30 +72,15 @@ func BenchmarkWitnessBuild(b *testing.B) {
 		} {
 			restore := statecfg.SetCommitmentV3(variant.on)
 			statecfg.EnableHistoricalCommitment()
+			var run *witnessBenchRun
 			if chainName == "collapse" {
-				runs[chainName+"/"+variant.name] = witnessBenchBuildCollapse(b)
+				run = witnessBenchBuildCollapse(b)
 			} else {
-				runs[chainName+"/"+variant.name] = witnessBenchBuildGenerated(b)
+				run = witnessBenchBuildGenerated(b)
 			}
-			restore()
-		}
-	}
-	b.StartTimer()
-
-	for _, chainName := range []string{"collapse", "generated"} {
-		for _, method := range []string{"legacy", "canonical", "getWitness", "getProof"} {
-			for _, variant := range []struct {
-				name string
-				on   bool
-			}{
-				{name: "hph"},
-				{name: "v3", on: true},
-			} {
-				name := chainName + "/" + method + "/" + variant.name
-				run := runs[chainName+"/"+variant.name]
-				b.Run(name, func(b *testing.B) {
-					restore := statecfg.SetCommitmentV3(variant.on)
-					b.Cleanup(restore)
+			b.StartTimer()
+			for _, method := range []string{"legacy", "canonical", "getWitness", "getProof"} {
+				b.Run(chainName+"/"+method+"/"+variant.name, func(b *testing.B) {
 					ctx := context.Background()
 					debugAPI := newDebugApiForTest(run.m)
 					ethAPI := newEthApiForTest(newBaseApiForTest(run.m), run.m.DB, nil, nil)
@@ -118,6 +102,8 @@ func BenchmarkWitnessBuild(b *testing.B) {
 					}
 				})
 			}
+			b.StopTimer()
+			restore()
 		}
 	}
 }
@@ -287,7 +273,7 @@ func witnessBenchBuildCollapse(b *testing.B) *witnessBenchRun {
 	cascade := witnessBenchAddress(0x1003)
 	plain := witnessBenchAddress(0x1004)
 	empty := witnessBenchAddress(0x1005)
-	selfDestruct := witnessBenchAddressWithPrefix(b, sender)
+	selfDestruct := witnessBenchAddressWithPrefix(sender)
 	inline := witnessBenchAddress(0x1006)
 	alloc := types.GenesisAlloc{
 		sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
@@ -462,16 +448,21 @@ func witnessBenchValue(value uint8) common.Hash {
 	return common.Hash{31: value}
 }
 
+func witnessBenchSlot(value uint64) common.Hash {
+	var slot common.Hash
+	binary.BigEndian.PutUint64(slot[24:], value)
+	return slot
+}
+
 func witnessBenchAddress(value uint64) common.Address {
 	var address common.Address
 	binary.BigEndian.PutUint64(address[12:], value)
 	return address
 }
 
-func witnessBenchAddressWithPrefix(b *testing.B, sender common.Address) common.Address {
-	b.Helper()
+func witnessBenchAddressWithPrefix(sender common.Address) common.Address {
 	senderHash := crypto.Keccak256Hash(sender[:])
-	for value := uint64(0x4000); ; value++ {
+	for value := uint64(0x1000); ; value++ {
 		candidate := witnessBenchAddress(value)
 		if candidate != sender && witnessBenchNibble(crypto.Keccak256Hash(candidate[:]), 0) == witnessBenchNibble(senderHash, 0) {
 			return candidate
@@ -482,8 +473,7 @@ func witnessBenchAddressWithPrefix(b *testing.B, sender common.Address) common.A
 func witnessBenchHashedSlots(count int) []witnessBenchHashedSlot {
 	slots := make([]witnessBenchHashedSlot, 0, count)
 	for value := uint64(1); len(slots) < count; value++ {
-		slot := common.Hash{}
-		binary.BigEndian.PutUint64(slot[24:], value)
+		slot := witnessBenchSlot(value)
 		slots = append(slots, witnessBenchHashedSlot{value: slot, hash: crypto.Keccak256Hash(slot[:])})
 	}
 	return slots

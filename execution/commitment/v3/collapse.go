@@ -18,6 +18,7 @@ package v3
 
 import (
 	"bytes"
+	"maps"
 	"math/bits"
 	"slices"
 	"sort"
@@ -31,10 +32,9 @@ import (
 
 func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
 	type deleteGroup struct {
-		plane  byte
-		owner  []byte
-		paths  [][]byte
-		unique map[string]struct{}
+		plane byte
+		owner []byte
+		paths [][]byte
 	}
 	groups := make(map[string]*deleteGroup)
 	deletedAccounts := make(map[string]struct{})
@@ -61,27 +61,17 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		groupKey := string(append([]byte{plane}, owner...))
 		group := groups[groupKey]
 		if group == nil {
-			group = &deleteGroup{plane: plane, owner: slices.Clone(owner), unique: make(map[string]struct{})}
+			group = &deleteGroup{plane: plane, owner: slices.Clone(owner)}
 			groups[groupKey] = group
 		}
-		if _, ok := group.unique[string(path)]; ok {
-			continue
-		}
-		group.unique[string(path)] = struct{}{}
 		group.paths = append(group.paths, slices.Clone(path))
 	}
-	ordered := make([]*deleteGroup, 0, len(groups))
 	for _, group := range groups {
 		slices.SortFunc(group.paths, bytes.Compare)
-		ordered = append(ordered, group)
+		group.paths = slices.CompactFunc(group.paths, bytes.Equal)
 	}
-	slices.SortFunc(ordered, func(a, b *deleteGroup) int {
-		if a.plane != b.plane {
-			return int(a.plane) - int(b.plane)
-		}
-		return bytes.Compare(a.owner, b.owner)
-	})
-	for _, group := range ordered {
+	for _, groupKey := range slices.Sorted(maps.Keys(groups)) {
+		group := groups[groupKey]
 		g := graph{plane: group.plane, addrHash: group.owner}
 		ownerPath := []byte(nil)
 		if group.plane == planeStorage {
@@ -95,13 +85,7 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		if root == nil {
 			continue
 		}
-		deletes := make([][]byte, 0, len(group.paths))
-		for _, path := range group.paths {
-			if !bytes.HasPrefix(path, root.path) {
-				continue
-			}
-			deletes = append(deletes, path)
-		}
+		deletes := deleteRange(group.paths, root.path, nil)
 		if len(deletes) == 0 {
 			continue
 		}
@@ -122,8 +106,7 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 		return false, nil
 	}
 	if n.isExtension() {
-		nib := bits.TrailingZeros16(n.childMask)
-		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
+		if child := rootExtensionChild(n); child != nil {
 			return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
 		}
 	}

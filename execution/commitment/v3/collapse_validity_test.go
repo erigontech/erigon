@@ -36,12 +36,7 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-type validityCollapse struct {
-	sibling []byte
-	prefix  []byte
-}
-
-func traceValidityCollapses(t *testing.T, b *witnessBed, batch []commitmenttest.Op) ([]validityCollapse, []byte) {
+func traceValidityCollapses(t *testing.T, b *witnessBed, batch []commitmenttest.Op) ([]collapseTestEvent, []byte) {
 	t.Helper()
 	ctx := context.Background()
 	b.v3Mem.Apply(batch)
@@ -49,9 +44,9 @@ func traceValidityCollapses(t *testing.T, b *witnessBed, batch []commitmenttest.
 	_, _, err := tr.RestoreState(b.v3State)
 	require.NoError(t, err)
 	updates := testUpdates(t, commitment.ModeCollect, batch)
-	candidates := make([]validityCollapse, 0)
+	candidates := make([]collapseTestEvent, 0)
 	root, err := tr.TraceCollapsesRoot(ctx, updates, func(sibling, prefix []byte) {
-		candidates = append(candidates, validityCollapse{
+		candidates = append(candidates, collapseTestEvent{
 			sibling: bytes.Clone(sibling),
 			prefix:  bytes.Clone(prefix),
 		})
@@ -60,7 +55,7 @@ func traceValidityCollapses(t *testing.T, b *witnessBed, batch []commitmenttest.
 	return candidates, root
 }
 
-func validityWitness(t *testing.T, b *witnessBed, batch []commitmenttest.Op, candidates []validityCollapse, drop int) [][]byte {
+func validityWitness(t *testing.T, b *witnessBed, batch []commitmenttest.Op, candidates []collapseTestEvent, drop int) [][]byte {
 	t.Helper()
 	tr := b.openV3(context.Background())
 	_, _, err := tr.RestoreState(b.v3State)
@@ -282,15 +277,11 @@ func validityRandomBatch(rng *rand.Rand, b *witnessBed, storage bool) []commitme
 		if i%3 != 2 || rng.Intn(2) == 0 {
 			batch = append(batch, commitmenttest.DeleteAt(key))
 		} else {
-			batch = append(batch, commitmenttest.Op{Key: key, Account: func() *commitmenttest.AccountValue {
-				return randomWitnessAccount(rng)
-			}()})
+			batch = append(batch, commitmenttest.Op{Key: key, Account: randomWitnessAccount(rng)})
 		}
 	}
 	for range 2 {
-		batch = append(batch, commitmenttest.Op{Key: craftKey(rng, length.Addr, nil, accountNibbles), Account: func() *commitmenttest.AccountValue {
-			return randomWitnessAccount(rng)
-		}()})
+		batch = append(batch, commitmenttest.Op{Key: craftKey(rng, length.Addr, nil, accountNibbles), Account: randomWitnessAccount(rng)})
 	}
 	return batch
 }

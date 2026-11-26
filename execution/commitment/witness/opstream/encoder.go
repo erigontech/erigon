@@ -19,6 +19,7 @@ package opstream
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -102,7 +103,7 @@ func (d *nodeEncoder) short(elements []byte, path []byte, storage bool) ([]Witne
 		if !storage {
 			account := new(accounts.Account)
 			if err := account.DecodeForHashing(value); err == nil {
-				return d.account(key, appendPath(path, key[:len(key)-1]...), account)
+				return d.account(key, slices.Concat(path, key[:len(key)-1]), account)
 			}
 		}
 		return []WitnessOperator{&OperatorLeafValue{Key: key, Value: decodeValue(value)}}, nil
@@ -115,7 +116,7 @@ func (d *nodeEncoder) short(elements []byte, path []byte, storage bool) ([]Witne
 	if len(trailing) != 0 {
 		return nil, fmt.Errorf("extension has trailing data")
 	}
-	childPath := appendPath(path, key...)
+	childPath := slices.Concat(path, key)
 	operators, err := d.reference(child, childPath, storage)
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ func (d *nodeEncoder) branch(elements []byte, path []byte, storage bool) ([]Witn
 			return nil, err
 		}
 		elements = rest
-		childPath := appendPath(path, byte(i))
+		childPath := slices.Concat(path, []byte{byte(i)})
 		childOperators, err := d.reference(item, childPath, storage)
 		if err != nil {
 			return nil, err
@@ -253,11 +254,4 @@ func decodeValue(encoded []byte) []byte {
 		return value
 	}
 	return encoded
-}
-
-func appendPath(path []byte, suffix ...byte) []byte {
-	result := make([]byte, len(path)+len(suffix))
-	copy(result, path)
-	copy(result[len(path):], suffix)
-	return result
 }

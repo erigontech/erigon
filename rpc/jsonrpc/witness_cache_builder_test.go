@@ -1053,19 +1053,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.NoError(t, golden.m.DB.Update(context.Background(), func(tx kv.RwTx) error {
 			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 		}))
-		require.NoError(t, golden.m.InsertChain(golden.chain))
-		api := newDebugApiForTest(golden.m)
-		for _, shape := range golden.shapes {
-			candidates := witnessGoldenCollapseCandidates(t, api, golden.m, shape.blockNum, witnessModeLegacy)
-			switch shape.name {
-			case "transient-before":
-				require.NotEmpty(t, candidates, shape.name)
-			case "empty-storage":
-				require.Empty(t, candidates, shape.name)
-			default:
-				require.NotEmpty(t, candidates, shape.name)
-			}
-		}
+		runHeadCaptureOverParentRecords(t, golden.m, golden.chain)
 	})
 }
 

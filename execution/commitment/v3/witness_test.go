@@ -204,7 +204,6 @@ type witnessShape struct {
 	accountPrefixes [][]byte
 	slotPrefixes    [][]byte
 	sharedSlots     bool
-	batch           func(*rand.Rand, *witnessBed) []commitmenttest.Op
 }
 
 func witnessState(rng *rand.Rand, shape witnessShape) []commitmenttest.Op {

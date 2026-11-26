@@ -8,9 +8,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -125,16 +122,11 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 		}
 	}
 	require.NotEqual(t, -1, rootIndex, "witness parent root")
-	nodes := make(map[string][]byte, len(state))
-	for _, node := range state {
-		nodes[string(crypto.Keccak256(node))] = node
-	}
 	state[0], state[rootIndex] = state[rootIndex], state[0]
 	decoded, err := trie.RLPDecode(state)
 	require.NoError(t, err)
 	require.Equal(t, parent.Root, decoded.Hash())
-	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	proof, account, err := witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	proof, account, err := payloadWitnessSenderProof(eat, parent, witness)
 	require.NoError(t, err)
 	require.NotEmpty(t, proof)
 	require.NotEmpty(t, account)
@@ -150,50 +142,40 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 	require.Equal(t, p.ExecutionPayload.StateRoot, root, "witness post-state root")
 }
 
-func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
-	const changed = "changed the sender leaf in the SSZ response"
-	if os.Getenv("ERIGON_TEST_MISSING_WITNESS_SENDER") != "1" {
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.v", "-test.run=^TestEngineWitnessChecksRejectMissingSender$")
-		cmd.Env = append(os.Environ(), "ERIGON_TEST_MISSING_WITNESS_SENDER=1")
-		out, err := cmd.CombinedOutput()
-		require.Contains(t, string(out), changed, "%s", out)
-		if err == nil {
-			t.Fatal("committed payload witness checks accepted a response missing the sender leaf")
-		}
-		return
+func payloadWitnessSenderProof(eat engineapitester.EngineApiTester, parent *types.Header, witness *jsonrpc.ExecutionWitnessResult) ([][]byte, []byte, error) {
+	nodes := make(map[string][]byte, len(witness.State))
+	for _, node := range witness.State {
+		nodes[string(crypto.Keccak256(node))] = node
 	}
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	return witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+}
 
+func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	ctx := t.Context()
 	payload := buildCommittedChangerPayload(ctx, t, eat)
 	code, body := postPayloadWitness(ctx, t, eat, payload)
-	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, http.StatusOK, code, string(body))
 	_, witness, err := engineapi.DecodePayloadStatusWithWitness(body)
 	require.NoError(t, err)
 	parent, err := eat.ExecutionModule.GetHeader(ctx, &payload.ExecutionPayload.ParentHash, nil)
 	require.NoError(t, err)
 	require.NotNil(t, parent)
-	nodes := make(map[string][]byte)
-	for _, node := range witness.State {
-		nodes[string(crypto.Keccak256(node))] = node
-	}
-	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	proof, account, err := witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	proof, account, err := payloadWitnessSenderProof(eat, parent, witness)
 	require.NoError(t, err)
 	require.NotEmpty(t, account)
 	require.Greater(t, len(proof), 1)
 	leaf := proof[len(proof)-1]
+	index := bytes.Index(body, leaf)
+	require.NotEqual(t, -1, index)
 	require.Equal(t, 1, bytes.Count(body, leaf))
-	body[bytes.Index(body, leaf)+len(leaf)-1] ^= 1
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(server.Close)
-	eat.EngineApiUrl = server.URL
-	t.Log(changed)
-	require.NotEmpty(t, requirePayloadWitness(ctx, t, eat, payload).State)
+	body[index+len(leaf)-1] ^= 1
+	_, changedWitness, err := engineapi.DecodePayloadStatusWithWitness(body)
+	require.NoError(t, err)
+	_, _, err = payloadWitnessSenderProof(eat, parent, changedWitness)
+	require.Error(t, err, "changed payload response must fail the sender proof check")
 }
 
 func requireEngineCommitmentVariant(t *testing.T, eat engineapitester.EngineApiTester, wantV3 bool) {

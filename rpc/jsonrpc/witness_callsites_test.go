@@ -21,8 +21,11 @@ import (
 	"go/parser"
 	"go/token"
 	"path"
+	"slices"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const witnessTrieImport = "github.com/erigontech/erigon/execution/commitment/trie"
@@ -33,16 +36,15 @@ type witnessTrieSelector struct {
 	symbol string
 }
 
-var witnessTrieSelectorAllowlist = []witnessTrieSelector{
-	{file: "eth_call.go", scope: "getWitness", symbol: "BuildTrieFromWitness"},
-	{file: "eth_call.go", scope: "assertProofVerifies", symbol: "VerifyAccountProof"},
-	{file: "eth_call.go", scope: "assertProofVerifies", symbol: "VerifyStorageProof"},
-	{file: "debug_execution_witness.go", scope: "witnessStateless", symbol: "Trie"},
-	{file: "debug_execution_witness.go", scope: "newWitnessStateless", symbol: "RLPDecode"},
-	{file: "commitment_context.go", scope: "WitnessNodes", symbol: "WitnessNodesForKeysByHash"},
-}
-
 func TestWitnessTrieCallsites(t *testing.T) {
+	expected := map[witnessTrieSelector]int{
+		{file: "eth_call.go", scope: "getWitness", symbol: "BuildTrieFromWitness"}:                  1,
+		{file: "eth_call.go", scope: "assertProofVerifies", symbol: "VerifyAccountProof"}:           1,
+		{file: "eth_call.go", scope: "assertProofVerifies", symbol: "VerifyStorageProof"}:           1,
+		{file: "debug_execution_witness.go", scope: "witnessStateless", symbol: "Trie"}:             1,
+		{file: "debug_execution_witness.go", scope: "newWitnessStateless", symbol: "RLPDecode"}:     1,
+		{file: "commitment_context.go", scope: "WitnessNodes", symbol: "WitnessNodesForKeysByHash"}: 1,
+	}
 	files := []string{
 		"eth_call.go",
 		"debug_execution_witness.go",
@@ -59,53 +61,40 @@ func TestWitnessTrieCallsites(t *testing.T) {
 		if !ok {
 			continue
 		}
-		collectWitnessTrieSelectors(parsed, path.Base(filename), importName, observed)
+		file := path.Base(filename)
+		ast.PreorderStack(parsed, nil, func(node ast.Node, stack []ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, ok := selector.X.(*ast.Ident)
+			if !ok || receiver.Name != importName {
+				return true
+			}
+			scope, ok := witnessTrieScope(file, stack)
+			if ok {
+				observed[witnessTrieSelector{file: file, scope: scope, symbol: selector.Sel.Name}]++
+			}
+			return true
+		})
 	}
-
-	allowed := make(map[witnessTrieSelector]struct{}, len(witnessTrieSelectorAllowlist))
-	for _, selector := range witnessTrieSelectorAllowlist {
-		allowed[selector] = struct{}{}
-	}
-	for selector, count := range observed {
-		if _, ok := allowed[selector]; !ok {
-			t.Errorf("unexpected trie selector %s.%s in %s.%s", witnessTrieImport, selector.symbol, selector.file, selector.scope)
-			continue
-		}
-		if count != 1 {
-			t.Errorf("trie selector %s.%s in %s.%s found %d times, want once", witnessTrieImport, selector.symbol, selector.file, selector.scope, count)
-		}
-	}
-	for _, selector := range witnessTrieSelectorAllowlist {
-		if observed[selector] != 1 {
-			t.Errorf("allowlisted trie selector %s.%s in %s.%s found %d times, want once", witnessTrieImport, selector.symbol, selector.file, selector.scope, observed[selector])
-		}
-	}
+	require.Equal(t, expected, observed)
 }
 
-func collectWitnessTrieSelectors(file *ast.File, filename, importName string, observed map[witnessTrieSelector]int) {
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch declaration := node.(type) {
-		case *ast.FuncDecl:
-			if witnessTrieFunction(filename, declaration) {
-				ast.Walk(&witnessTrieSelectorVisitor{
-					file:       filename,
-					importName: importName,
-					observed:   observed,
-				}, declaration)
-				return false
-			}
+func witnessTrieScope(filename string, stack []ast.Node) (string, bool) {
+	for _, declaration := range slices.Backward(stack) {
+		switch declaration := declaration.(type) {
 		case *ast.TypeSpec:
 			if filename == "debug_execution_witness.go" && declaration.Name.Name == "witnessStateless" {
-				ast.Walk(&witnessTrieSelectorVisitor{
-					file:       filename,
-					importName: importName,
-					observed:   observed,
-				}, declaration)
-				return false
+				return declaration.Name.Name, true
+			}
+		case *ast.FuncDecl:
+			if witnessTrieFunction(filename, declaration) {
+				return declaration.Name.Name, true
 			}
 		}
-		return true
-	})
+	}
+	return "", false
 }
 
 func witnessTrieFunction(filename string, declaration *ast.FuncDecl) bool {
@@ -116,7 +105,7 @@ func witnessTrieFunction(filename string, declaration *ast.FuncDecl) bool {
 		if declaration.Name.Name == "newWitnessStateless" {
 			return true
 		}
-		return declaration.Recv != nil && declaration.Recv.List != nil && len(declaration.Recv.List) == 1 && witnessStatelessType(declaration.Recv.List[0].Type)
+		return declaration.Recv != nil && len(declaration.Recv.List) == 1 && witnessStatelessType(declaration.Recv.List[0].Type)
 	case "witness_cache_builder.go":
 		return true
 	case "commitment_context.go":
@@ -146,38 +135,4 @@ func witnessTrieImportName(file *ast.File) (string, bool) {
 		return path.Base(importPath), true
 	}
 	return "", false
-}
-
-type witnessTrieSelectorVisitor struct {
-	file       string
-	importName string
-	scope      string
-	observed   map[witnessTrieSelector]int
-}
-
-func (v *witnessTrieSelectorVisitor) Visit(node ast.Node) ast.Visitor {
-	if node == nil {
-		return nil
-	}
-	scope := v.scope
-	switch n := node.(type) {
-	case *ast.FuncDecl:
-		scope = n.Name.Name
-	case *ast.FuncLit:
-		scope = "<func literal>"
-	case *ast.TypeSpec:
-		scope = n.Name.Name
-	}
-	if selector, ok := node.(*ast.SelectorExpr); ok {
-		if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Name == v.importName {
-			key := witnessTrieSelector{file: v.file, scope: scope, symbol: selector.Sel.Name}
-			v.observed[key]++
-		}
-	}
-	return &witnessTrieSelectorVisitor{
-		file:       v.file,
-		importName: v.importName,
-		scope:      scope,
-		observed:   v.observed,
-	}
 }
