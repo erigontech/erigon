@@ -231,9 +231,15 @@ func (m *Merger) Merge(
 		}
 
 		for _, t := range snapTypes {
+			output := t.FileInfo(snapDir, r.From(), r.To())
+			if snapshots.hasIndexedDirtyFile(t.Enum(), output.Path) {
+				// A stopped merge already wrote this output; writing over the open file would fail on Windows.
+				mergedFileNames = append(mergedFileNames, output.Path)
+				continue
+			}
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				t.FileInfo(snapDir, r.From(), r.To()),
+				output,
 				toMerge[t.Enum()],
 				snapDir,
 				doIndex,
