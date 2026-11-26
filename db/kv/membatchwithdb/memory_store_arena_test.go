@@ -145,3 +145,27 @@ func TestMemStore_DupSortRePutKeepsNilStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
+
+func TestMemStore_OverwriteKeepsKeyNilStatus(t *testing.T) {
+	for _, table := range []string{"test", kv.PlainState} {
+		for _, tc := range []struct{ first, second []byte }{{nil, []byte{}}, {[]byte{}, nil}} {
+			s := newMemStore()
+			require.NoError(t, s.Put(table, tc.first, []byte("v")))
+			require.NoError(t, s.Put(table, tc.second, []byte("v")))
+			c, err := s.Cursor(table)
+			require.NoError(t, err)
+			t.Cleanup(c.Close)
+			k, v, err := c.First()
+			require.NoError(t, err)
+			assert.Equal(t, tc.second == nil, k == nil, table)
+			assert.Equal(t, []byte("v"), v, table)
+		}
+	}
+}
+
+func TestMemStore_ClearTableReleasesArena(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put("test", []byte("key"), []byte("value")))
+	require.NoError(t, s.ClearTable("test"))
+	assert.Nil(t, s.tables["test"].arena.cur)
+}

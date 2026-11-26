@@ -241,10 +241,14 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	t := s.getOrCreateTable(table)
 	var hint btree2.PathHint
 	if old, ok := t.tree.GetHint(memEntry{k: k, v: v}, &hint); ok {
-		// a dupsort match has an equal value, but the comparator treats nil and empty as equal
-		if !t.dupSort || (old.v == nil) != (v == nil) {
-			t.tree.SetHint(memEntry{k: old.k, v: bytes.Clone(v)}, &hint)
+		// the comparator treats nil and empty as equal, so a match may differ in nil status
+		if len(k) == 0 {
+			old.k = bytes.Clone(k)
 		}
+		if !t.dupSort || len(v) == 0 {
+			old.v = bytes.Clone(v)
+		}
+		t.tree.SetHint(old, &hint)
 	} else {
 		t.tree.SetHint(memEntry{k: t.arena.put(k), v: t.arena.put(v)}, &hint)
 	}
@@ -367,6 +371,7 @@ func (s *memStore) ClearTable(table string) error {
 	defer s.mu.Unlock()
 	if t, ok := s.tables[table]; ok {
 		t.tree.Clear()
+		t.arena = arena{}
 	}
 	return nil
 }
