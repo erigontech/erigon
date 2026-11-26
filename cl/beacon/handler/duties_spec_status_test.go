@@ -537,12 +537,6 @@ func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
 			return err
 		}
 		active = append([]byte(nil), indices...)
-		if err := tx.Put(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(128), indices); err != nil {
-			return err
-		}
-		if err := tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(95), make([]byte, 32)); err != nil {
-			return err
-		}
 		if err := tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64)); err != nil {
 			return err
 		}
