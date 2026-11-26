@@ -249,7 +249,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
 	pool.frameRejections = nil
-	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns) })
+	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns, nil) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
 		pool.lock.Unlock()
@@ -1625,6 +1625,9 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	require.NoError(t, err)
 	var txns TxnSlots
 	txns.Append(&replay, sender[:], false)
+	batch := newAdmissionBatch(txns, nil)
+	pool.prepareFrames(ctx, batch.txns, make(blobCells))
+	require.Equal(t, txpoolcfg.Success, batch.txns[0].sidecarReason, "an exact copy must be checked before taking the admission lock")
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)

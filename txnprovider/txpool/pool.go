@@ -1539,6 +1539,38 @@ func (p *TxPool) validateBlobSidecar(txn *TxnSlot, cellsByHash blobCells) txpool
 	return txpoolcfg.Success
 }
 
+// A pooled sidecar has already passed KZG. Reuse that result only when every
+// blob, commitment and proof matches, including the proof format for this fork.
+func (p *TxPool) reusePooledSidecar(txn *TxnSlot, cells blobCells) bool {
+	hashes := txn.GetBlobHashes()
+	if len(hashes) == 0 || len(hashes) != len(txn.BlobBundles) {
+		return false
+	}
+	proofsPerBlob := 1
+	if p.isOsaka() {
+		proofsPerBlob = int(params.CellsPerExtBlob)
+	}
+	pooled := p.blobs.get(hashes)
+	for i, incoming := range txn.BlobBundles {
+		known := &pooled[i]
+		if known.Blob == nil || len(incoming.Proofs) != proofsPerBlob {
+			return false
+		}
+		if incoming.Commitment != known.Commitment || !slices.Equal(incoming.Proofs, known.Proofs) || !bytes.Equal(incoming.Blob, known.Blob) {
+			return false
+		}
+	}
+	if cells != nil && p.isAmsterdam() {
+		// Cells are optional. GetBlobsV4 can derive them if the bounded cache evicted them.
+		for i, hash := range hashes {
+			if pooled[i].Cells != nil {
+				cells.add(hash, pooled[i].Cells)
+			}
+		}
+	}
+	return true
+}
+
 var maxUint256 = new(uint256.Int).SetAllOne()
 
 // requiredBalance returns the sender funds needed for pool balance checks.
@@ -1890,6 +1922,8 @@ func (p *TxPool) prepareCandidates(txns []txnAdmission, cells blobCells) {
 				p.recoverAuthorizations(a.txn)
 			case !a.local && offenders.skip(a.source):
 				a.sidecarReason = txpoolcfg.SkippedAfterKZGFailure
+			case p.reusePooledSidecar(a.txn, cells):
+				a.sidecarReason = txpoolcfg.Success
 			default:
 				a.sidecarReason = p.validateBlobSidecar(a.txn, cells)
 			}
@@ -2146,7 +2180,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if stale {
 				return nil, errStateViewStale
 			}
-			frameGeneration = p.prepareFrames(simulationCtx, batch.txns)
+			frameGeneration = p.prepareFrames(simulationCtx, batch.txns, batch.preparedCells)
 			needFrameSimulation = false
 		}
 		var reasons []txpoolcfg.DiscardReason
