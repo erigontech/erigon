@@ -294,15 +294,7 @@ func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
 		if err := k.room(h, cost); err != nil {
 			return err
 		}
-		nonce, err := k.draft.Nonce(protocol.SystemAddress)
-		if err != nil {
-			return err
-		}
-		pairs, err := protocol.BuildSyncPairs([]protocol.OutboundSettlement{{Entry: e, UserTx: h.Raw}}, nil, x.Sync, nonce)
-		if err != nil {
-			return Poison(err)
-		}
-		load, err := types.DecodeTransaction(pairs[0].SystemTx)
+		load, err := k.draft.syncTx(x.Sync, []protocol.OutboundSettlement{{Entry: e, UserTx: h.Raw}}, nil)
 		if err != nil {
 			return err
 		}

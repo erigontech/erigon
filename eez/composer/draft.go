@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -159,6 +160,24 @@ func (d *Draft) Nonce(addr common.Address) (uint64, error) {
 		return 0, failed
 	}
 	return n, err
+}
+
+// syncTx builds the system transaction of the one Sync pair settling
+// outbound or delivering inbound, at the draft's next system nonce. An entry
+// that cannot lower is poison.
+func (d *Draft) syncTx(ctx protocol.SyncTxContext, outbound []protocol.OutboundSettlement, inbound []protocol.ExecutionEntry) (types.Transaction, error) {
+	nonce, err := d.Nonce(protocol.SystemAddress)
+	if err != nil {
+		return nil, err
+	}
+	pairs, err := protocol.BuildSyncPairs(outbound, inbound, ctx, nonce)
+	switch {
+	case err != nil:
+		return nil, Poison(err)
+	case len(pairs) != 1:
+		return nil, fmt.Errorf("lowered to %d Sync pairs, not one", len(pairs))
+	}
+	return types.DecodeTransaction(pairs[0].SystemTx)
 }
 
 // Txs returns the draft's transactions.

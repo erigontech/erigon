@@ -125,18 +125,7 @@ func (in *Deliveries) delivery(call *protocol.IncomingCall) (*Delivery, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce, err := in.fork.Nonce(protocol.SystemAddress)
-	if err != nil {
-		return nil, err
-	}
-	pairs, err := protocol.BuildSyncPairs(nil, []protocol.ExecutionEntry{*sidecar}, in.ctx, nonce)
-	if err != nil {
-		return nil, err
-	}
-	if len(pairs) != 1 {
-		return nil, fmt.Errorf("a call lowered to %d deliveries", len(pairs))
-	}
-	tx, err := types.DecodeTransaction(pairs[0].SystemTx)
+	tx, err := in.fork.syncTx(in.ctx, nil, []protocol.ExecutionEntry{*sidecar})
 	if err != nil {
 		return nil, err
 	}
