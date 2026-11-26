@@ -188,6 +188,42 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 	}
 }
 
+func TestCheckCompatibleZeroNonceStorageAccounts(t *testing.T) {
+	a, b := common.Address{1}, common.Address{2}
+	for _, tc := range []struct {
+		name         string
+		stored, next []common.Address
+		headTime     uint64
+		wantConflict bool
+	}{
+		{name: "before activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 99},
+		{name: "at activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 100, wantConflict: true},
+		{name: "after activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 150, wantConflict: true},
+		{name: "added after activation", next: []common.Address{a}, headTime: 150, wantConflict: true},
+		{name: "removed after activation", stored: []common.Address{a}, headTime: 150, wantConflict: true},
+		{name: "unchanged", stored: []common.Address{a}, next: []common.Address{a}, headTime: 150},
+		{name: "reordered", stored: []common.Address{a, b}, next: []common.Address{b, a}, headTime: 150},
+		{name: "nil and empty", next: []common.Address{}, headTime: 150},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := &chain.Config{BogotaTime: common.NewUint64(100), ZeroNonceStorageAccounts: tc.stored}
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = tc.next
+			err := stored.CheckCompatible(next, 1, tc.headTime)
+			if !tc.wantConflict {
+				require.Nil(t, err)
+				return
+			}
+			require.NotNil(t, err)
+			require.Equal(t, "EIP-8253 account list", err.WhatTime)
+			require.True(t, err.HasTimestampConflict())
+			require.False(t, err.HasBlockConflict())
+			require.Equal(t, uint64(99), err.RewindToTime)
+			require.EqualError(t, err, "mismatching EIP-8253 account list in database (activation timestamp 100, rewindto timestamp 99)")
+		})
+	}
+}
+
 func TestCheckCompatibleBpoAndBalancerTimestamps(t *testing.T) {
 	for _, tc := range []struct {
 		name           string

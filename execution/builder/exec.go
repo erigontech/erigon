@@ -137,7 +137,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
 	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.New(stateReader)
 	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
