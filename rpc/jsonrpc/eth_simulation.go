@@ -837,7 +837,7 @@ func (s *simulator) simulateBlock(
 		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
 			return fmt.Errorf("apply simulated writes: %w", err)
 		}
-		intraBlockState.ResetVersionedIO()
+		intraBlockState.ResetIO()
 		return nil
 	}
 
@@ -856,7 +856,10 @@ func (s *simulator) simulateBlock(
 	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
-	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	chainReader := &simulatedChainReader{
+		Reader: consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
+		parent: parent,
+	}
 	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
 	if err != nil {
 		return nil, nil, err
@@ -898,7 +901,7 @@ func (s *simulator) simulateBlock(
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
-	intraBlockState.ResetVersionedIO()
+	intraBlockState.ResetIO()
 	if balMode {
 		// Withdrawal recipients left absent still belong in the BAL as accessed.
 		intraBlockState.StartAccessRecording()
@@ -1172,6 +1175,20 @@ func (s *simulator) simulateCall(
 		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
+}
+
+// simulatedChainReader lets block initialization read the timestamp of a parent
+// built earlier in the same simulation, even when it exists only in memory.
+type simulatedChainReader struct {
+	*consensuschain.Reader
+	parent *types.Header
+}
+
+func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if parent := matchingParent(s.parent, hash, number); parent != nil {
+		return parent
+	}
+	return s.Reader.GetHeader(hash, number)
 }
 
 type simulatedCanonicalReader struct {

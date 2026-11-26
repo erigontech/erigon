@@ -1572,6 +1572,13 @@ func TestFramePoolSponsoredBlobFeeFalls(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, PendingSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
 	require.Equal(t, uint256.NewInt(10), &pool.byHash[string(slot.IDHash[:])].minFeeCap)
+	provided, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	require.Len(t, provided, 1)
+	require.IsType(t, &types.FrameTxWrapper{}, provided[0])
+	var network bytes.Buffer
+	require.NoError(t, provided[0].(*types.FrameTxWrapper).MarshalBinaryWrapped(&network))
+	require.Equal(t, slot.Rlp, network.Bytes())
 }
 
 func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
@@ -1937,6 +1944,7 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 	pool.chainID.SetUint64(1)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
 	frame := framePoolSlot(t, sender, 1, 2)
+	frameRlp := frame.Rlp
 
 	wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
 	require.NoError(t, err)
@@ -1975,6 +1983,10 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 		require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
 		require.Contains(t, restored.senderLastActivity, mt.TxnSlot.SenderID)
 	}
+	var selected TxnsRlp
+	_, err = restored.PeekBest(ctx, 2, &selected, 0)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{frameRlp, encoded.Bytes()}, selected.Txns)
 }
 
 func TestFramePoolReloadValidationBudgets(t *testing.T) {

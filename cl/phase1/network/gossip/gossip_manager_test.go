@@ -136,6 +136,7 @@ type newPubsubValidatorTestSuite struct {
 	ctrl      *gomock.Controller
 	mockP2P   *mock_services.MockP2PManager
 	mockClock *eth_clock.MockEthereumClock
+	useful    []peer.ID // peers the validator marked useful
 }
 
 // SetupTest is called before each test method
@@ -167,6 +168,8 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 	}).AnyTimes()
 	s.mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
 	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	s.useful = nil
+	s.mockP2P.EXPECT().MarkPeerUseful(gomock.Any()).Do(func(pid peer.ID) { s.useful = append(s.useful, pid) }).AnyTimes()
 
 	s.gm = NewGossipManager(
 		context.Background(),
@@ -333,6 +336,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationReject, result)
+	s.Empty(s.useful, "a rejected message does not make its forwarder useful")
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorPassesForwardingPeer() {
@@ -487,6 +491,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageErrIg
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationIgnore, result)
+	s.Empty(s.useful, "an ignored message does not make its forwarder useful")
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_WithSubnet() {
@@ -541,6 +546,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_Success() {
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationAccept, result)
+	s.Equal([]peer.ID{pid}, s.useful, "an accepted message is a first delivery by its forwarder")
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_DecodesWithTopicForkVersion() {

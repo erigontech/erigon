@@ -95,7 +95,6 @@ func TestNull(t *testing.T) {
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
 
@@ -105,9 +104,6 @@ func TestNull(t *testing.T) {
 	var value uint256.Int
 
 	require.NoError(t, state.SetState(address, accounts.ZeroKey, value))
-
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
 
 	writes, err := state.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)
@@ -130,15 +126,10 @@ func TestTouchDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
-	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
 
-	_, err = state.GetOrNewStateObject(accounts.ZeroAddress)
-	require.NoError(t, err)
-
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
+	require.NoError(t, state.TouchAccount(accounts.ZeroAddress))
 
 	writes, err := state.FinalizedWrites(&chain.Rules{})
 	require.NoError(t, err)

@@ -378,29 +378,23 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeq("GetCodeSize", scs, ccs)
-		// Check storage.
-		obj, err := state.getStateObject(addr, true)
-		if err != nil {
-			return err
-		}
-		if obj != nil {
-			for key, value := range obj.dirtyStorage {
-				out, _ := checkstate.GetState(addr, key)
-				if !checkeq("GetState("+key.String()+")", out, value) {
-					return err
-				}
+		// Check storage. SetState actions use keys in [0, 100) (see the SetState
+		// action generator), so comparing every candidate slot covers the same
+		// ground the stateObject's dirtyStorage walk used to.
+		for i := range 100 {
+			var keyBytes common.Hash
+			binary.BigEndian.PutUint16(keyBytes[:], uint16(i))
+			key := accounts.InternKey(keyBytes)
+			sv, serr := state.GetState(addr, key)
+			if serr != nil {
+				return serr
 			}
-		}
-		obj, err = checkstate.getStateObject(addr, true)
-		if err != nil {
-			return err
-		}
-		if obj != nil {
-			for key, value := range obj.dirtyStorage {
-				out, _ := state.GetState(addr, key)
-				if !checkeq("GetState("+key.String()+")", out, value) {
-					return err
-				}
+			cv, cerr := checkstate.GetState(addr, key)
+			if cerr != nil {
+				return cerr
+			}
+			if !checkeq("GetState("+key.String()+")", sv, cv) {
+				return err
 			}
 		}
 	}
@@ -514,19 +508,19 @@ func TestCloseResetsRevisions(t *testing.T) {
 	require.Zero(t, state.revisions.nextId)
 }
 
-func TestCloseReleasesVersionedWrites(t *testing.T) {
+func TestCloseReleasesWrites(t *testing.T) {
 	t.Parallel()
 	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(state.Close)
 	state.SetTxContext(1, 0)
 
 	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
-	require.NotZero(t, state.versionedWrites.Count())
+	require.NotZero(t, state.writes.Count())
 
-	handedOut := state.VersionedWrites()
+	handedOut := state.Writes()
 	state.Close()
 
-	require.Zero(t, state.versionedWrites.Count())
+	require.Zero(t, state.writes.Count())
 	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
 }
 
@@ -558,7 +552,7 @@ func TestValStatus_OscillationNetVsOrigin(t *testing.T) {
 	require.NoError(t, s.SetState(addr, back, a))
 	require.NoError(t, s.SetState(addr, back, b))
 	require.NoError(t, s.SetState(addr, back, uint256.Int{}))
-	vw, ok := s.VersionedWrites().GetStorage(addr, back)
+	vw, ok := s.Writes().GetStorage(addr, back)
 	require.True(t, ok)
 	require.Equal(t, ValueUnchanged, vw.valStatus, "net 0->0 is Unchanged despite A,B in between")
 
@@ -567,7 +561,7 @@ func TestValStatus_OscillationNetVsOrigin(t *testing.T) {
 	require.NoError(t, s.SetState(addr, keep, a))
 	require.NoError(t, s.SetState(addr, keep, b))
 	require.NoError(t, s.SetState(addr, keep, a))
-	vw2, ok := s.VersionedWrites().GetStorage(addr, keep)
+	vw2, ok := s.Writes().GetStorage(addr, keep)
 	require.True(t, ok)
 	require.Equal(t, ValueCreated, vw2.valStatus, "net 0->A is Created")
 }
@@ -589,14 +583,14 @@ func TestValStatus_RevertRestamps(t *testing.T) {
 	require.NoError(t, s.SetState(addr, key, a)) // origin 0 -> A: Created
 	snap := s.PushSnapshot()
 	require.NoError(t, s.SetState(addr, key, uint256.Int{})) // A -> 0 (== origin): Unchanged
-	vw, ok := s.VersionedWrites().GetStorage(addr, key)
+	vw, ok := s.Writes().GetStorage(addr, key)
 	require.True(t, ok)
 	require.Equal(t, ValueUnchanged, vw.valStatus)
 
 	s.RevertToSnapshot(snap, nil)
 	// The value is A again; valStatus must be re-stamped to Created, not left at the
 	// stale Unchanged from the reverted write (which would wrongly skip the write).
-	vw, ok = s.VersionedWrites().GetStorage(addr, key)
+	vw, ok = s.Writes().GetStorage(addr, key)
 	require.True(t, ok)
 	require.Equal(t, a, vw.Val)
 	require.Equal(t, ValueCreated, vw.valStatus)
@@ -622,14 +616,14 @@ func TestValStatus_AccountPathsNeverUnchanged(t *testing.T) {
 	// Balance 0→100→0 nets to the committed origin — the storage analog is ValueUnchanged.
 	require.NoError(t, s.SetBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified))
 	require.NoError(t, s.SetBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
-	bw, ok := s.VersionedWrites().GetBalance(addr)
+	bw, ok := s.Writes().GetBalance(addr)
 	require.True(t, ok)
 	require.NotEqual(t, ValueUnchanged, bw.valStatus, "a net-zero balance write is never ValueUnchanged")
 
 	// Nonce 0→1→0 likewise nets to the origin and is never ValueUnchanged.
 	require.NoError(t, s.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, s.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
-	nw, ok := s.VersionedWrites().GetNonce(addr)
+	nw, ok := s.Writes().GetNonce(addr)
 	require.True(t, ok)
 	require.NotEqual(t, ValueUnchanged, nw.valStatus, "a net-zero nonce write is never ValueUnchanged")
 }
@@ -666,11 +660,9 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 write
-	_, err = states[1].GetOrNewStateObject(addr)
-	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx1 read
 	v, err = states[1].GetState(addr, key)
@@ -702,7 +694,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	// Publishing the finalized write-set to the versionMap carries the wipe, so
 	// later txs read the destroyed account as empty.
-	states[3].versionMap.FlushVersionedWrites(finalizedWrites(t, states[3], &chain.Rules{}), true)
+	states[3].versionMap.FlushWrites(finalizedWrites(t, states[3], &chain.Rules{}), true)
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
@@ -739,11 +731,9 @@ func TestVersionMapRevert(t *testing.T) {
 	balance := u256.U64(100)
 
 	// Tx0 write
-	_, err := states[0].GetOrNewStateObject(addr)
-	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val))
 	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
@@ -768,8 +758,8 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
-	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
+	states[1].EndTransaction()
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
@@ -813,15 +803,13 @@ func TestEstimateDependencyCaughtAtCommit(t *testing.T) {
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 speculative write: flushed incomplete, so its cells are born ESTIMATE
 	// (the branch never downgrades a completed Done cell back to Estimate).
-	_, err = states[1].GetOrNewStateObject(addr)
-	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), false)
+	states[1].versionMap.FlushWrites(states[1].Writes(), false)
 
 	// Tx2 read: an estimate cell still carries its value, so the read returns it
 	// and records the dependency.
@@ -844,7 +832,7 @@ func TestEstimateDependencyCaughtAtCommit(t *testing.T) {
 	assert.NoError(t, err)
 
 	var io2 VersionedIO
-	states[2].MergeTxIOInto(&io2, states[2].VersionedWrites())
+	states[2].MergeTxIOInto(&io2, states[2].Writes())
 	valid := mvhm.ValidateVersion(2, &io2, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid
@@ -886,11 +874,9 @@ func TestVersionMapOverwrite(t *testing.T) {
 	balance2 := u256.U64(200)
 
 	// Tx0 write
-	_, err := states[0].GetOrNewStateObject(addr)
-	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val1))
 	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr, key, val2))
@@ -899,7 +885,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -913,13 +899,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	for h := range states[1].versionedWrites.AllHeaders() {
+	for h := range states[1].writes.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].writes = WriteSet{}
 
 	// Tx2 read should get Tx0's value
-	states[2].versionedReads = ReadSet{}
+	states[2].reads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -936,13 +922,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	for h := range states[0].versionedWrites.AllHeaders() {
+	for h := range states[0].writes.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
 	}
-	states[0].versionedWrites = WriteSet{}
+	states[0].writes = WriteSet{}
 
 	// Tx2 read again should get default vals
-	states[2].versionedReads = ReadSet{}
+	states[2].reads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -978,19 +964,18 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	val2 := u256.U64(2)
 
 	// Tx0 write
-	_, err := states[0].GetOrNewStateObject(addr)
-	require.NoError(t, err)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
+	require.NoError(t, states[0].CreateAccount(addr, false))
+	states[0].versionMap.FlushWrites(states[0].Writes(), true)
 
 	// Tx2 write
 	require.NoError(t, states[2].SetState(addr, key2, val2))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true)
+	states[2].versionMap.FlushWrites(states[2].Writes(), true)
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	require.NoError(t, states[1].SetState(addr, key1, val1))
 	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 
 	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
@@ -1005,12 +990,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx2 read
-	// Clear cached reads and state objects from Tx2's SetState call above —
-	// those reads were recorded when Tx1 hadn't flushed yet (Tx0's version).
-	// Now that Tx1 has flushed, re-reading without stale cache simulates a
-	// re-execution that the scheduler would trigger on dependency.
-	states[2].stateObjects = map[accounts.Address]*stateObject{}
-	states[2].versionedReads = ReadSet{}
+	// Clear cached reads from Tx2's SetState call above — those reads were
+	// recorded when Tx1 hadn't flushed yet (Tx0's version). Now that Tx1 has
+	// flushed, re-reading without stale cache simulates a re-execution that the
+	// scheduler would trigger on dependency.
+	states[2].reads = ReadSet{}
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -1034,13 +1018,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	for h := range states[2].versionedWrites.AllHeaders() {
+	for h := range states[2].writes.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
 	}
-	states[2].versionedWrites = WriteSet{}
+	states[2].writes = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = ReadSet{}
+	states[3].reads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -1055,17 +1039,16 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
+	states[1].versionMap.FlushWrites(states[1].Writes(), true)
 	// map deletes necessary here as they happen in scheduler not ibs
 	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
 	states[1].versionMap.Delete(addr, BalancePath, accounts.NilKey, 1, true)
 
 	// Tx3 read
-	// we need to flush the local state objects as we're not
+	// we need to flush the cached reads as we're not
 	// resetting the state - which is artificial for the test
-	states[3].stateObjects = map[accounts.Address]*stateObject{}
-	states[3].versionedReads = ReadSet{}
+	states[3].reads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -1077,13 +1060,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
-	for h := range states[1].versionedWrites.AllHeaders() {
+	for h := range states[1].writes.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].writes = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = ReadSet{}
+	states[3].reads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -1098,10 +1081,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 func TestNewAndResetBuildAVersionedState(t *testing.T) {
 	ibs := New(NewNoopReader())
 	defer ibs.Close()
-	require.True(t, ibs.IsVersioned())
+	require.NotNil(t, ibs.VersionMap())
 	before := ibs.VersionMap()
 	ibs.Reset()
-	require.True(t, ibs.IsVersioned())
+	require.NotNil(t, ibs.VersionMap())
 	require.NotSame(t, before, ibs.VersionMap(), "Reset drops the previous tx's writes with its map")
 }
 
@@ -1204,10 +1187,10 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
 	ibs.AddLog(&types.Log{Address: addr.Value()})
 	ibs.AddAddressToAccessList(addr)
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), true) // an address with no cell is not memoized
+	vm.FlushWrites(ibs.Writes(), true) // an address with no cell is not memoized
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address)
+	require.NotNil(t, ibs.reads.address)
 	ibs.SetTxContext(5, 2)
 	ibs.SetVersion(3)
 
@@ -1216,8 +1199,8 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.version)
 	require.Empty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
-	require.Empty(t, ibs.versionedReads.address)
+	require.NotNil(t, ibs.reads.address, "the read set keeps its maps")
+	require.Empty(t, ibs.reads.address)
 
 	ibs.stateReader = NewNoopReader()
 	balance, err := ibs.GetBalance(addr)
@@ -1256,7 +1239,7 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 
 	reads := New(NewNoopReader())
 	for i := range maxPooledEntries + 1 {
-		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+		reads.reads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
 	}
 	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
 
@@ -1323,7 +1306,7 @@ func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
 	// sync.Pool may drop the entry at any GC, so assert the release handed the
 	// state on rather than that the next Get returns this one: Close would have
 	// dropped the maps.
-	require.NotNil(t, ibs.stateObjects, "a poolable state must be handed on, not closed")
+	require.NotNil(t, ibs.journal, "a poolable state must be handed on, not closed")
 	require.Nil(t, ibs.stateReader, "and must not keep the last call's reader")
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.txIndex)
@@ -1400,7 +1383,7 @@ func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
 	ibs := New(NewNoopReader())
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	for i := range maxPooledEntries + 1 {
-		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+		ibs.reads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
 	}
 	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
 }
@@ -1418,9 +1401,9 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
-	ibs.ResetVersionedIO()
+	ibs.EndTransaction()
+	vm.FlushWrites(finalizedWrites(t, ibs, rules), true)
+	ibs.ResetIO()
 
 	ibs.SetTxContext(1, 1)
 	bal, err := ibs.GetBalance(addr)
@@ -1548,6 +1531,22 @@ func (w *finalStateWriter) WriteAccountStorage(address accounts.Address, _ uint6
 
 func (w *finalStateWriter) CreateContract(accounts.Address) error { return nil }
 
+func TestSetVersionMapRejectsNil(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.Panics(t, func() { ibs.SetVersionMap(nil) }, "a nil version map is an invariant violation")
+}
+
+// Close hands back everything a call collected, origin cells included, so the
+// next state takes them from the pools instead of the heap.
+func TestCloseReleasesOriginCells(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.recordStorageOrigin(accounts.InternAddress([20]byte{0xc0, 0xde}), accounts.InternKey([32]byte{1}), uint256.Int{})
+	ibs.Close()
+	if !ibs.origins.IsEmpty() {
+		t.Fatal("Close kept the origin cells")
+	}
+}
+
 // A versioned state hands a finished tx to a StateWriter: the touched empty account is removed.
 func TestWriteFlushedToRemovesTouchedEmptyAccount(t *testing.T) {
 	t.Parallel()
@@ -1608,7 +1607,7 @@ func TestWriteFlushedToAcrossTxs(t *testing.T) {
 		versioned.FlushWritesToVersionMap(writes)
 		require.NoError(t, versioned.WriteFlushedTo(writes, w))
 		versioned.EndTransaction()
-		versioned.ResetVersionedIO()
+		versioned.ResetIO()
 	}
 	versioned.SetTxContext(1, 0)
 	require.NoError(t, versioned.SubBalance(a, *uint256.NewInt(10), tracing.BalanceChangeTransfer))

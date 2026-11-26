@@ -44,6 +44,7 @@ type gloasBlockProductionOptions struct {
 	selfBuildPayload     *selfBuildPayload
 	payloadFeeRecipient  *common.Address
 	deferPayloadCache    bool
+	bidRequest           bool
 }
 
 type gloasBlockProductionOptionsKey struct{}
