@@ -420,16 +420,88 @@ func TestGetDutiesProposerFutureEpochBounds(t *testing.T) {
 	}
 }
 
+type replaceHeadAfterDutyView struct {
+	synced_data.SyncedData
+	afterView func() error
+}
+
+func (s *replaceHeadAfterDutyView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	return s.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+		return fn(head)
+	})
+}
+
+func (s *replaceHeadAfterDutyView) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	if err := s.SyncedData.ViewHeadStateWithIdentity(fn); err != nil {
+		return err
+	}
+	if afterView := s.afterView; afterView != nil {
+		s.afterView = nil
+		return afterView()
+	}
+	return nil
+}
+
+func TestDutiesUseSameHeadAsDependentRoot(t *testing.T) {
+	_, _, _, _, head, h, _, manager, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	epoch := state.Epoch(head) + 2
+	setDutiesClockEpoch(h, epoch-1)
+	newHead, err := head.Copy()
+	require.NoError(t, err)
+	cfg := head.BeaconConfig()
+	mixIndex := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
+	require.NoError(t, newHead.SetRandaoMixAt(int(mixIndex), common.Hash{1}))
+	oldRoot, newRoot := common.Hash{2}, common.Hash{3}
+
+	for _, tc := range []struct{ name, method, body string }{
+		{"attester", http.MethodPost, `["0","1","2"]`},
+		{"proposer", http.MethodGet, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			type response struct {
+				Data          json.RawMessage `json:"data"`
+				DependentRoot common.Hash     `json:"dependent_root"`
+			}
+			getDuties := func() response {
+				path := "/eth/v1/validator/duties/" + tc.name + "/" + strconv.FormatUint(epoch, 10)
+				req := httptest.NewRequestWithContext(t.Context(), tc.method, path, strings.NewReader(tc.body))
+				recorder := httptest.NewRecorder()
+				h.mux.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				var body response
+				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
+				return body
+			}
+
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, oldRoot))
+			before := getDuties()
+			require.Equal(t, oldRoot, before.DependentRoot)
+			h.syncedData = &replaceHeadAfterDutyView{SyncedData: manager, afterView: func() error {
+				return manager.OnHeadStateWithBlockRoot(newHead, newRoot)
+			}}
+			during := getDuties()
+			h.syncedData = manager
+			after := getDuties()
+			require.Equal(t, newRoot, after.DependentRoot)
+			require.NotEqual(t, before.Data, after.Data)
+			require.Equal(t, oldRoot, during.DependentRoot)
+			require.Equal(t, string(before.Data), string(during.Data), "duties must match the head that supplied dependent_root")
+		})
+	}
+}
+
 // Processing the empty slots after the head would carry the head root into their block roots.
 func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
-	for _, attester := range []bool{false, true} {
-		root, err := handler.getDependentRoot(headEpoch+2, attester)
-		require.NoError(t, err)
-		require.Equal(t, syncedData.HeadRoot(), root)
-	}
+	require.NoError(t, syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		for _, attester := range []bool{false, true} {
+			root, err := handler.getDependentRoot(head, headRoot, headSlot, state.Epoch(head)+2, attester)
+			require.NoError(t, err)
+			require.Equal(t, headRoot, root)
+		}
+		return nil
+	}))
 }
 
 type proposerDutiesResponse struct {

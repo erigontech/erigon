@@ -71,50 +71,31 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
-	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
-	}
-	isAvailableInHeadState := epoch >= headEpoch || (!isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot())
+	isAvailableInForkChoice := !isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot()
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	var (
+		dependentRoot common.Hash
+		duties        []proposerDuties
+	)
 
-	if !isAvailableInHeadState {
-		tx, err := a.indiciesDB.BeginRo(r.Context())
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-		var view *snapshotsync.CaplinStateView
-		if a.caplinStateSnapshots != nil {
-			view = a.caplinStateSnapshots.View()
-			defer view.Close()
-		}
-		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
-
-		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
-		if err != nil {
-			return nil, err
-		}
-		duties, err := a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
-		if err != nil {
-			return nil, err
-		}
-		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
-	}
-
-	dependentRoot, err := a.getProposerDependentRoot(epoch, v2)
-	if err != nil {
-		return nil, err
-	}
-
-	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-
-	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		stateEpoch := state.Epoch(s)
+		if epoch > stateEpoch+maxEpochsLookaheadForDuties {
+			return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
+		}
+		if epoch < stateEpoch && !isAvailableInForkChoice {
+			return nil
+		}
 		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
+		root, err := a.getDependentRoot(s, headRoot, headSlot, epoch, v2 && targetVersion >= clparams.FuluVersion)
+		if err != nil {
+			return err
+		}
+		dependentRoot = root
+		duties = make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
-		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if targetVersion.After(s.Version()) {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
@@ -122,7 +103,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			}
 			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
 				log.Warn("getDutiesProposer: failed to advance state to target fork",
-					"epoch", epoch, "headEpoch", headEpoch, "err", processErr)
+					"epoch", epoch, "headEpoch", stateEpoch, "err", processErr)
 				return processErr
 			}
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
@@ -164,7 +145,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			}
 			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
 				log.Warn("getDutiesProposer: failed to advance state for epoch beyond lookahead",
-					"epoch", epoch, "headEpoch", headEpoch, "err", processErr)
+					"epoch", epoch, "headEpoch", stateEpoch, "err", processErr)
 				return processErr
 			}
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
@@ -189,10 +170,34 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		return nil, err
 	}
 
+	if duties == nil {
+		tx, err := a.indiciesDB.BeginRo(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		var view *snapshotsync.CaplinStateView
+		if a.caplinStateSnapshots != nil {
+			view = a.caplinStateSnapshots.View()
+			defer view.Close()
+		}
+		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+
+		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
+		if err != nil {
+			return nil, err
+		}
+		duties, err := a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
+		if err != nil {
+			return nil, err
+		}
+		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(targetVersion).With("dependent_root", dependentRoot), nil
+	}
+
 	return newBeaconResponse(duties).
 		WithFinalized(isFinalized).
 		WithOptimistic(!isFinalized && a.forkchoiceStore.IsHeadOptimistic()).
-		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+		WithVersion(targetVersion).
 		With("dependent_root", dependentRoot), nil
 }
 
@@ -228,14 +233,6 @@ func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, 
 		}
 	}
 	return nil
-}
-
-func (a *ApiHandler) getProposerDependentRoot(epoch uint64, v2 bool) (common.Hash, error) {
-	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
-	if v2 && targetVersion >= clparams.FuluVersion {
-		return a.getDependentRoot(epoch, true)
-	}
-	return a.getDependentRoot(epoch, false)
 }
 
 func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter state_accessors.GetValFn, epoch uint64, v2 bool) (common.Hash, error) {
