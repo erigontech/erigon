@@ -560,13 +560,13 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 	case c.L2RPC != "" && c.L2Front == "":
 		return nil, fmt.Errorf("%w: --%s serves --%s", ErrConfig, ComposerL2RPCFlag.Name, ComposerL2FrontFlag.Name)
 	case c.L2RPC != "":
-		if u, err := url.Parse(c.L2RPC); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if !isHTTP(c.L2RPC) {
 			return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL", ErrConfig, ComposerL2RPCFlag.Name, l1.RedactURL(c.L2RPC))
 		}
 	}
 	if c.L1Front != "" {
 		// The front forwards over HTTP.
-		if u, err := url.Parse(node); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if !isHTTP(node) {
 			return nil, fmt.Errorf("%w: --%s forwards to --%s over http(s), not %s", ErrConfig, ComposerL1FrontFlag.Name, L1RPCFlag.Name, l1.RedactURL(node))
 		}
 	}
@@ -574,7 +574,7 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		c.Builder = node
 	}
 	// eth_sendBundle goes over HTTP.
-	if u, err := url.Parse(c.Builder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if !isHTTP(c.Builder) {
 		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, l1.RedactURL(c.Builder), L1RPCFlag.Name)
 	}
 	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
@@ -784,4 +784,10 @@ func (f *L2Flags) Check(cfg *chain.Config) error {
 		return fmt.Errorf("%w: %s differ from the chain's l2 section, which init writes", ErrConfig, strings.Join(differ, ", "))
 	}
 	return nil
+}
+
+// isHTTP reports whether raw is an http(s) URL with a host.
+func isHTTP(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
