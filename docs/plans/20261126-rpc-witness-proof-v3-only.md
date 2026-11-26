@@ -62,7 +62,7 @@
 ## Decisions
 - Scope and bar:
   - HPH nodes keep today's code behind the existing dispatch, with no new HPH work. The HPH branches are deleted in
-    Task 9, together with the HPH tree, after v3 is the default.
+    Task 10, together with the HPH tree, after v3 is the default.
   - Parity bar: prune, proof and op-stream steps are byte-identical to today's output (golden fixtures). The collapse
     step is gated by validity: reth stateless, `erigon_only=0` against reth, the EEST canonical corpus, the spec.
   - eth_getWitness keeps its API. A node-list encoder builds the op-stream; `*trie.Trie` leaves the serving path.
@@ -74,7 +74,7 @@
   - Legacy collapse uses a deletes-only rule; its witness node set is a superset of today's legacy node set. Canonical
     is that candidate set through the existing `BranchChildCount` filter. Rejected: the net rule for legacy, which makes
     legacy smaller.
-- Order: Tasks 1-8 are built on main now; whichever of this branch and #26810 lands second rebases. Task 9 waits for
+- Order: Tasks 1-9 are built on main now; whichever of this branch and #26810 lands second rebases. Task 10 waits for
   its gate.
 
 ## Development Approach
@@ -83,7 +83,7 @@
 - Pure moves (Tasks 4 and 5's format move) have no behaviour change: the existing tests and the golden fixtures are
   the safety net, and the PR body says so (AGENTS.md "When pragmatism applies").
 - One PR per task group, cut from fresh main: PR 1 = Tasks 1-2, PR 2 = Task 3, PR 3 = Task 4, PR 4 = Task 5,
-  PR 5 = Tasks 6-8, PR 6 = Tasks 9-11 (gated).
+  PR 5 = Tasks 6-9, PR 6 = Tasks 10-12 (gated).
 - Every task that changes code runs its package tests with v3 on and off (`statecfg.SetCommitmentV3` in the test, and
   the CI `ERIGON_COMMITMENT_V3` leg). The HPH branch stays green against its fixtures.
 - Each task ends with its tests green before the next task starts. A failing case found in Task 6 is recorded, not
@@ -267,7 +267,6 @@
 ### Task 7: v3-native collapse siblings
 **Files:**
 - Modify: `execution/commitment/v3/collapse.go`, `execution/commitment/v3/trie.go`, `execution/commitment/v3/witness_test.go`
-- Create: `execution/commitment/v3/collapse_bench_test.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 - Modify: `rpc/jsonrpc/testdata/witness_golden/`
 
@@ -282,11 +281,26 @@
 - [ ] add the Task 6 failing case, if any, as a test in the real RPC path: red with `collapseSim`, green with the new walk;
       Task 6 stateless re-execution stays green; the EEST canonical corpus stays byte-identical
 - [ ] move the v3 files of the legacy-sibling outputs that change to the override directory; list them in the PR body
-- [ ] benchmark per-block collapse cost against the `collapseSim` arm on the Task 2 chain in `collapse_bench_test.go`;
-      bar: `ab-verdict` gives v3-native not worse
 - [ ] run v3, rpc and engineapi tests, v3 on and off: green
 
-### Task 8: PR 5 acceptance and spec
+### Task 8: witness build cost, old pipeline against new
+**Files:**
+- Create: `rpc/jsonrpc/witness_build_bench_test.go`
+
+- [ ] `BenchmarkWitnessBuild/<method>/<variant>`: `debug_executionWitness` legacy and canonical, `eth_getWitness`, and
+      `eth_getProof` on a fixed key set; variants `hph` and `v3`; each iteration builds every block of the chain once;
+      report ns/op, B/op, allocs/op, and the output's nodes and bytes per block (`b.ReportMetric`)
+- [ ] two chains, built once per variant outside the timer: the Task 2 collapse chain, and a generated chain of 64 blocks
+      with transfers, storage writes and deletes, and self-destructs
+- [ ] the file builds its own chains and uses only code present on main `2841804a8eb`, so `ab-bench.sh -f` runs the same
+      file in every arm
+- [ ] the supervisor runs `ab-bench.sh -f rpc/jsonrpc/witness_build_bench_test.go -n 12` on a quiet Linux box: base
+      `2841804a8eb` (old pipeline: HPH with the erigon2 prune and trie, and v3 with the superset, the erigon2 prune and
+      `collapseSim`) against the branch head, with `-x` checkpoints after Task 3, Task 5 and Task 7
+- [ ] verdicts per method from `ab-verdict`: new v3 against old v3 (bar: not worse) and new v3 against old HPH; a chart
+      page with ns/op and allocs/op per method and arm; the numbers go in the PR body with the box and the run count
+
+### Task 9: PR 5 acceptance and spec
 **Files:**
 - Create: `rpc/jsonrpc/witness_callsites_test.go`
 - Modify: `docs/plans/witness-legacy-mode-spec.md`
@@ -299,7 +313,7 @@
 - [ ] if `docs/site` changes, regenerate both `llms-full.txt` files
 - [ ] `make lint` on the touched packages; golden fixtures, Task 6 and Task 7 tests green, v3 on and off
 
-### Task 9: delete the HPH branches (⚠️ gated: v3 is the default and the HPH tree is being deleted)
+### Task 10: delete the HPH branches (⚠️ gated: v3 is the default and the HPH tree is being deleted)
 **Files:**
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `rpc/jsonrpc/eth_call.go`, `debug_execution_witness.go`, `witness_cache_builder.go`
@@ -311,15 +325,15 @@
 - [ ] drop the `witnessTrie` assertion, the `BranchData` child-count fallback, the `AcceptsFeed` touch split and the variant
       branches in the cache builder
 - [ ] `trie.WitnessNodesForKeysByHash` loses its serving caller; keep it only where a test uses it as an oracle
-- [ ] remove the HPH entry from the Task 8 allowlist
+- [ ] remove the HPH entry from the Task 9 allowlist
 - [ ] run `go test ./rpc/... ./execution/commitment/... ./execution/engineapi/...`: green
 
-### Task 10: verify acceptance criteria
-- [ ] the Task 8 call-site test allows only the two ASSERT entries
+### Task 11: verify acceptance criteria
+- [ ] the Task 9 call-site test allows only the two ASSERT entries
 - [ ] golden fixtures green; EEST canonical corpus byte-identical; stateless re-execution green for every fixture block
 - [ ] `make lint` and the rpc, commitment and engineapi packages green
 
-### Task 11: [Final] update documentation
+### Task 12: [Final] update documentation
 - [ ] `docs/plans/witness-legacy-mode-spec.md`: code map without HPH
 - [ ] move this plan to `docs/plans/completed/`
 
@@ -329,7 +343,9 @@
   reth stateless re-executes every block, `erigon_only=0`, codes and keys identical. Host-side diff by raw node
   bytes. Before the run, check that the script records these three numbers per block and that the window holds
   enough blocks with deletes to reach a verdict.
-- Build time per block under v3 against main on the same window.
+- Build cost on the same window: per-block `witnessCacheBuildDuration` (head-capture) on main with HPH, main with v3 and
+  this branch with v3, over the same blocks; on-demand `debug_executionWitness` latency for a fixed block set; verdicts
+  from `ab-verdict`.
 
 **External**
 - Tell the prover team that legacy `debug_executionWitness` and `eth_getWitness` may add collapse siblings after
@@ -346,4 +362,4 @@
   the HPH simulation from v3 at the cost of a legacy output change.
 - Byte equality of the op-stream depends on matching `WitnessBuilder`'s traversal and trie state, including account-leaf
   detection and inline nodes; the golden fixtures are the gate.
-- Task 9 depends on the v3 default gate (tip latency below HPH) and on #26810.
+- Task 10 depends on the v3 default gate (tip latency below HPH) and on #26810.
