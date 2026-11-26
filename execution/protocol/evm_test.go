@@ -51,6 +51,40 @@ func TestGetHashFnAnswersZeroForALaterBlock(t *testing.T) {
 	}
 }
 
+// A walk back over several ancestors answers their hashes and remembers them, so repeated
+// lookups cost no more header reads.
+func TestGetHashFnWalksBackOverAncestors(t *testing.T) {
+	const chainLength = 10
+	hashes := make(map[uint64]common.Hash, chainLength)
+	for n := range chainLength {
+		hashes[uint64(n)] = common.BytesToHash([]byte{byte(n)})
+	}
+	readHeaders := 0
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		readHeaders++
+		if hashes[number] != hash {
+			return nil, nil
+		}
+		return &types.Header{Number: *uint256.NewInt(number), ParentHash: hashes[number-1]}, nil
+	}
+	ref := &types.Header{Number: *uint256.NewInt(chainLength), ParentHash: hashes[chainLength-1]}
+	getHash := GetHashFn(ref, getHeader)
+
+	for n := uint64(5); n < chainLength; n++ {
+		hash, err := getHash(n)
+		require.NoError(t, err)
+		require.Equal(t, hashes[n], hash)
+	}
+	require.Equal(t, chainLength-6, readHeaders, "one header read per newly walked block")
+
+	for n := uint64(5); n < chainLength; n++ {
+		hash, err := getHash(n)
+		require.NoError(t, err)
+		require.Equal(t, hashes[n], hash)
+	}
+	require.Equal(t, chainLength-6, readHeaders, "repeated lookups hit the cache")
+}
+
 // A lookup that finds no ancestor header has failed; any hash it answered would be made up.
 func TestGetHashFnFailsOnAMissingHeader(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(10)}

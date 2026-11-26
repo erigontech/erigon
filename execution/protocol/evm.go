@@ -21,9 +21,7 @@ package protocol
 
 import (
 	"fmt"
-	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -118,17 +116,12 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
 
-	// lru.New only returns err on -ve size
-	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
-	hashLookupCacheLock := sync.Mutex{}
-	hashLookupCache.Add(refNumber, refHash)
+	hashLookupCache := map[uint64]common.Hash{refNumber: refHash}
 
 	return func(n uint64) (common.Hash, error) {
 		if n >= blockNumber {
 			return common.Hash{}, nil
 		}
-		hashLookupCacheLock.Lock()
-		defer hashLookupCacheLock.Unlock()
 
 		if n == lastKnownNumber {
 			//fmt.Println("GH-LN", n, refHash)
@@ -140,7 +133,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			return refHash, nil
 		}
 
-		if hash, ok := hashLookupCache.Get(n); ok {
+		if hash, ok := hashLookupCache[n]; ok {
 			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
 		}
@@ -152,7 +145,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 		for {
 			for {
-				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
+				hash, ok := hashLookupCache[lastKnownNumber-1]
 
 				if !ok {
 					break
@@ -167,11 +160,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			}
 
 			hash, num := lastKnownHash, lastKnownNumber
-			header, err := func() (*types.Header, error) {
-				hashLookupCacheLock.Unlock()
-				defer hashLookupCacheLock.Lock()
-				return getHeader(hash, num)
-			}()
+			header, err := getHeader(hash, num)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -183,7 +172,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
-			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
+			hashLookupCache[lastKnownNumber] = lastKnownHash
 
 			if n == lastKnownNumber {
 				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
