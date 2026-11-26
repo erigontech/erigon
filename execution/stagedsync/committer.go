@@ -656,6 +656,13 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
 	base := newMemoAccountReader(cc.asOfReader.dr.StateReaderAt(req.firstTxNum))
+	base.prefill(req.bal, prefillWorkers, func() (state.StateReader, func(), error) {
+		tx, err := cc.db.BeginTemporalRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
+		if err != nil {
+			return nil, nil, err
+		}
+		return cc.asOfReader.dr.CloneWithTx(tx).StateReaderAt(req.firstTxNum), tx.Rollback, nil
+	})
 	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
 		return

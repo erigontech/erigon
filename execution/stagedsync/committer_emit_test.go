@@ -18,11 +18,13 @@ package stagedsync
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -411,4 +413,68 @@ func TestMemoAccountReader_DoesNotCacheAFailedRead(t *testing.T) {
 	got, err := r.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Equal(t, acc, got)
+}
+
+func prefillBAL(n int) (types.BlockAccessList, *mapStateReader) {
+	bal := make(types.BlockAccessList, n)
+	src := newMapStateReader()
+	for i := range bal {
+		bal[i].Address = common.Address{byte(i >> 8), byte(i)}
+		if i%3 != 0 {
+			src.accounts[accounts.InternAddress(bal[i].Address)] = &accounts.Account{Nonce: uint64(i)}
+		}
+	}
+	return bal, src
+}
+
+func TestMemoAccountReader_PrefillReadsOnWorkers(t *testing.T) {
+	t.Parallel()
+
+	bal, src := prefillBAL(1000)
+	serial := &countingAccountReader{mapStateReader: src}
+	r := newMemoAccountReader(serial)
+	var opened atomic.Int32
+	r.prefill(bal, 4, func() (state.StateReader, func(), error) {
+		opened.Add(1)
+		return src, func() {}, nil
+	})
+	require.Equal(t, int32(4), opened.Load())
+	for i := range bal {
+		got, err := r.ReadAccountData(accounts.InternAddress(bal[i].Address))
+		require.NoError(t, err)
+		if i%3 == 0 {
+			require.Nil(t, got)
+		} else {
+			require.Equal(t, uint64(i), got.Nonce)
+		}
+	}
+	require.Zero(t, serial.reads)
+}
+
+func TestMemoAccountReader_PrefillFailureLeavesTheSerialRead(t *testing.T) {
+	t.Parallel()
+
+	bal, src := prefillBAL(1000)
+	serial := &countingAccountReader{mapStateReader: src}
+	r := newMemoAccountReader(serial)
+	var opened atomic.Int32
+	r.prefill(bal, 4, func() (state.StateReader, func(), error) {
+		switch opened.Add(1) {
+		case 1:
+			return nil, nil, errors.New("no tx")
+		case 2:
+			return &failingAccountReader{mapStateReader: src, err: errors.New("read failed")}, func() {}, nil
+		}
+		return src, func() {}, nil
+	})
+	for i := range bal {
+		got, err := r.ReadAccountData(accounts.InternAddress(bal[i].Address))
+		require.NoError(t, err)
+		if i%3 == 0 {
+			require.Nil(t, got)
+		} else {
+			require.Equal(t, uint64(i), got.Nonce)
+		}
+	}
+	require.Equal(t, 500, serial.reads)
 }

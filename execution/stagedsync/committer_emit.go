@@ -18,12 +18,14 @@ package stagedsync
 
 import (
 	"slices"
+	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -229,4 +231,52 @@ func (r *memoAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Ac
 		r.accounts[addr] = acc
 	}
 	return acc, err
+}
+
+const (
+	prefillWorkers           = 4
+	prefillAccountsPerWorker = 256
+)
+
+// prefill reads every BAL account on up to workers goroutines, each through its own reader from open.
+// A chunk whose open or read fails stays unread, for the serial fallback to read and report.
+func (r *memoAccountReader) prefill(bal types.BlockAccessList, workers int, open func() (state.StateReader, func(), error)) {
+	workers = min(workers, (len(bal)+prefillAccountsPerWorker-1)/prefillAccountsPerWorker)
+	if workers < 2 {
+		return
+	}
+	type entry struct {
+		addr accounts.Address
+		acc  *accounts.Account
+	}
+	read := make([][]entry, workers)
+	chunk := (len(bal) + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := range workers {
+		part := bal[min(w*chunk, len(bal)):min((w+1)*chunk, len(bal))]
+		wg.Go(func() {
+			reader, closeReader, err := open()
+			if err != nil {
+				return
+			}
+			defer closeReader()
+			out := make([]entry, len(part))
+			for i := range part {
+				out[i].addr = accounts.InternAddress(part[i].Address)
+				if out[i].acc, err = reader.ReadAccountData(out[i].addr); err != nil {
+					return
+				}
+			}
+			read[w] = out
+		})
+	}
+	wg.Wait()
+	if len(r.accounts) == 0 {
+		r.accounts = make(map[accounts.Address]*accounts.Account, len(bal))
+	}
+	for _, out := range read {
+		for _, e := range out {
+			r.accounts[e.addr] = e.acc
+		}
+	}
 }
