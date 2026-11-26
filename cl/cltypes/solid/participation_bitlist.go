@@ -140,15 +140,15 @@ func (u *ParticipationBitList) Cap() int {
 	return u.c
 }
 
-func (u *ParticipationBitList) checkLimit() error {
-	if u.l > u.c {
-		return fmt.Errorf("participation list length exceeds limit: %d > %d", u.l, u.c)
+func (u *ParticipationBitList) checkLimit(length int) error {
+	if length > u.c {
+		return fmt.Errorf("participation list length exceeds limit: %d > %d", length, u.c)
 	}
 	return nil
 }
 
 func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
-	if err := u.checkLimit(); err != nil {
+	if err := u.checkLimit(u.l); err != nil {
 		return [32]byte{}, err
 	}
 	depth := GetDepth((uint64(u.c) + 31) / 32)
@@ -214,7 +214,7 @@ func merkleizeLayers(layer, out []byte, fromDepth, toDepth uint8) error {
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
 // It returns the resulting byte slice.
 func (u *ParticipationBitList) EncodeSSZ(dst []byte) ([]byte, error) {
-	if err := u.checkLimit(); err != nil {
+	if err := u.checkLimit(u.l); err != nil {
 		return nil, err
 	}
 	return append(dst, u.u[:u.l]...), nil
@@ -223,8 +223,8 @@ func (u *ParticipationBitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *ParticipationBitList) DecodeSSZ(dst []byte, _ int) error {
-	if len(dst) > u.c {
-		return fmt.Errorf("participation list length exceeds limit: %d > %d", len(dst), u.c)
+	if err := u.checkLimit(len(dst)); err != nil {
+		return err
 	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)

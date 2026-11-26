@@ -294,6 +294,23 @@ func TestParticipationBitListRejectsOverLimit(t *testing.T) {
 	}
 }
 
+func TestParticipationBitListAcceptsLimit(t *testing.T) {
+	rng := rand.New(rand.NewSource(4))
+	for _, limit := range []int{1, 32, 64} {
+		for _, length := range []int{0, limit} {
+			t.Run(fmt.Sprintf("%d/%d", limit, length), func(t *testing.T) {
+				values := randomParticipation(rng, length)
+				bitList := appendAll(solid.NewParticipationBitList(0, limit), values)
+				encoded, err := bitList.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.True(t, bytes.Equal(values, encoded), "limit %d length %d: encoded %d bytes", limit, length, len(encoded))
+				_, err = bitList.HashSSZ()
+				require.NoError(t, err)
+			})
+		}
+	}
+}
+
 func TestParticipationBitListUnmarshalJSONRejectsOverLimit(t *testing.T) {
 	list := solid.NewParticipationBitList(1, 2)
 	list.Set(0, 7)
