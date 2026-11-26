@@ -2,6 +2,7 @@ package witness
 
 import (
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -10,7 +11,4 @@ type AccountWithAddress struct {
 	Account *accounts.Account
 }
 
-type CodeWithHash struct {
-	Code     []byte
-	CodeHash accounts.CodeHash
-}
+type CodeWithHash = opstream.CodeWithHash

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -474,6 +475,48 @@ func TestWitnessMatchesHPH(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWitnessEncoderMatchesTask3Shapes(t *testing.T) {
+	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
+		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
+	})
+	seeds := int64(25)
+	if testing.Short() {
+		seeds = 3
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			for seed := range seeds {
+				rng := rand.New(rand.NewSource(seed))
+				b := newWitnessBed(t, witnessState(rng, shape))
+				keys := witnessKeySet(rng, b)
+				for _, exclusion := range []bool{false, true} {
+					for _, nodes := range [][][]byte{b.hphWitness(t, keys, exclusion), b.v3NativeWitness(t, keys, exclusion)} {
+						want := witnessBytesFromNodes(t, nodes)
+						gotWitness, err := opstream.Encode(nodes, nil)
+						require.NoError(t, err)
+						var got bytes.Buffer
+						_, err = gotWitness.WriteInto(&got)
+						require.NoError(t, err)
+						require.Equal(t, want, got.Bytes(), "seed=%d exclusion=%t", seed, exclusion)
+					}
+				}
+			}
+		})
+	}
+}
+
+func witnessBytesFromNodes(t testing.TB, nodes [][]byte) []byte {
+	t.Helper()
+	tr, err := trie.RLPDecode(nodes)
+	require.NoError(t, err)
+	witness, err := tr.ExtractWitness(false, nil)
+	require.NoError(t, err)
+	var output bytes.Buffer
+	_, err = witness.WriteInto(&output)
+	require.NoError(t, err)
+	return output.Bytes()
 }
 
 func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {

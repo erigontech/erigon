@@ -238,15 +238,15 @@
 
 - [x] move the format-only code and its tests to `opstream` in one commit; `trie` keeps `WitnessBuilder` and
       `BuildTrieFromWitness` and imports `opstream` (check with `go list -deps`)
-- [ ] write the encoder byte test first, red: encoder bytes equal `RLPDecode` + `UpdateAccountCode` + `ExtractWitness` +
+- [x] write the encoder byte test first, red: encoder bytes equal `RLPDecode` + `UpdateAccountCode` + `ExtractWitness` +
       `WriteInto` on the Task 3 shapes and on: two accounts with one storage root and one touched slot, a code-bearing
       account without a code read, an account with code and empty storage, an EIP-7702 account, the empty set, a single
       leaf, a root extension
-- [ ] write the round-trip test: `opstream.NewWitnessFromReader` + `trie.BuildTrieFromWitness` rebuilds the parent root
-- [ ] add the encoder from the root-first lean node list and the code reads, with the state list in Technical Details;
+- [x] write the round-trip test: `opstream.NewWitnessFromReader` + `trie.BuildTrieFromWitness` rebuilds the parent root
+- [x] add the encoder from the root-first lean node list and the code reads, with the state list in Technical Details;
       `emptyWitnessBytes` uses `opstream`
-- [ ] `getWitness` uses the encoder for both variants; `WitnessLean` and its `*trie.Trie` return go
-- [ ] run trie, opstream, Task 1 and Task 2 tests, v3 on and off: green
+- [x] `getWitness` uses the encoder for both variants; `WitnessLean` and its `*trie.Trie` return go
+- [x] run trie, opstream, Task 1 and Task 2 tests, v3 on and off: green
 
 ### Task 6: collapse validity harness
 **Files:**
