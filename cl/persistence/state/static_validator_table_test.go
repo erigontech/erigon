@@ -39,20 +39,41 @@ func (tx validatorCursorTx) Cursor(string) (kv.Cursor, error) { return tx.cursor
 
 type validatorErrorCursor struct {
 	kv.Cursor
-	err error
+	row      []byte
+	firstErr error
+	nextErr  error
 }
 
-func (c validatorErrorCursor) First() ([]byte, []byte, error) { return nil, nil, c.err }
-func (c validatorErrorCursor) Close()                         {}
+func (c validatorErrorCursor) First() ([]byte, []byte, error) {
+	if c.firstErr != nil {
+		return []byte{}, nil, c.firstErr
+	}
+	return []byte{0, 0, 0, 0}, c.row, nil
+}
+
+func (c validatorErrorCursor) Next() ([]byte, []byte, error) { return []byte{}, nil, c.nextErr }
+func (c validatorErrorCursor) Close()                        {}
 
 func TestReadValidatorsTableReturnsCursorError(t *testing.T) {
+	var row bytes.Buffer
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&row))
+
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	wantErr := errors.New("cursor first failed")
-	err := db.View(t.Context(), func(tx kv.Tx) error {
-		tx = validatorCursorTx{Tx: tx, cursor: validatorErrorCursor{err: wantErr}}
-		return ReadValidatorsTable(tx, NewStaticValidatorTable())
-	})
-	require.ErrorIs(t, err, wantErr)
+	wantErr := errors.New("cursor failed")
+	for _, test := range []struct {
+		name   string
+		cursor validatorErrorCursor
+	}{
+		{name: "First", cursor: validatorErrorCursor{firstErr: wantErr}},
+		{name: "Next after a row", cursor: validatorErrorCursor{row: row.Bytes(), nextErr: wantErr}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := db.View(t.Context(), func(tx kv.Tx) error {
+				return ReadValidatorsTable(validatorCursorTx{Tx: tx, cursor: test.cursor}, NewStaticValidatorTable())
+			})
+			require.ErrorIs(t, err, wantErr)
+		})
+	}
 }
 
 func TestStaticValidatorTable(t *testing.T) {

@@ -45,13 +45,18 @@ type errorCursor struct {
 
 func (c errorCursor) Seek(key []byte) ([]byte, []byte, error) {
 	if c.seekErr != nil {
-		return nil, nil, c.seekErr
+		return []byte{}, nil, c.seekErr
 	}
 	return c.Cursor.Seek(key)
 }
 
-func (c errorCursor) Next() ([]byte, []byte, error) { return nil, nil, c.nextErr }
-func (c errorCursor) Close()                        {}
+func (c errorCursor) Next() ([]byte, []byte, error) {
+	if c.nextErr != nil {
+		return []byte{}, nil, c.nextErr
+	}
+	return nil, nil, nil
+}
+func (c errorCursor) Close() {}
 
 type cursorTx struct {
 	kv.Tx
@@ -80,10 +85,13 @@ func TestRangeBlockRootsReturnsCursorError(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		cursor    errorCursor
+		stop      bool
 		wantSlots []uint64
+		wantErr   error
 	}{
-		{name: "Seek", cursor: errorCursor{seekErr: wantErr}},
-		{name: "Next", cursor: errorCursor{nextErr: wantErr}, wantSlots: []uint64{slot}},
+		{name: "Seek", cursor: errorCursor{seekErr: wantErr}, wantErr: wantErr},
+		{name: "Next", cursor: errorCursor{nextErr: wantErr}, wantSlots: []uint64{slot}, wantErr: wantErr},
+		{name: "Next after the callback stops", cursor: errorCursor{nextErr: wantErr}, stop: true, wantSlots: []uint64{slot}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
@@ -94,10 +102,14 @@ func TestRangeBlockRootsReturnsCursorError(t *testing.T) {
 			err = RangeBlockRoots(cursorTx{Tx: tx, cursor: test.cursor}, slot, slot+1, func(gotSlot uint64, gotRoot common.Hash) bool {
 				require.Equal(t, root, gotRoot)
 				slots = append(slots, gotSlot)
-				return true
+				return !test.stop
 			})
 			require.Equal(t, test.wantSlots, slots)
-			require.ErrorIs(t, err, wantErr)
+			if test.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, test.wantErr)
 		})
 	}
 }
