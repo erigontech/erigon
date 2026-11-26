@@ -854,10 +854,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, errors.New("rules engine reader does not support full rules.Engine")
 	}
 	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, callHeader *types.Header, constCall bool) ([]byte, error) {
-		callCtx := blockCtx
-		if callHeader != header {
-			callCtx = protocol.NewEVMBlockContext(callHeader, blockCtx.GetHash, engine, accounts.NilAddress, s.chainConfig)
-		}
+		callCtx := protocol.NewEVMBlockContext(callHeader, blockCtx.GetHash, engine, accounts.NilAddress, s.chainConfig)
 		return protocol.SysCallContractWithBlockContext(contract, data, s.chainConfig, ibs, callCtx, constCall, vmConfig)
 	}
 	chainReader := &simulatedChainReader{
