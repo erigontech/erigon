@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
-	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1209,7 +1208,7 @@ type accessedState struct {
 	Storage     map[common.Address]map[common.Hash]struct{}
 	CodeAddrs   map[common.Address]struct{}
 	SortedCodes []hexutil.Bytes
-	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+	CodeReads   map[common.Hash][]byte
 	Deleted     map[common.Address]struct{}
 }
 
@@ -1280,7 +1279,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		CodeAddrs:   make(map[common.Address]struct{}),
 		SortedCodes: []hexutil.Bytes{},
 		WitnessKeys: []hexutil.Bytes{},
-		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+		CodeReads:   make(map[common.Hash][]byte),
 		Deleted:     make(map[common.Address]struct{}),
 	}
 	for addr := range rs.DeletedAccounts {
@@ -1411,12 +1410,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
-			codeHash := rs.codeHash(code)
-			addrHash := crypto.Keccak256Hash(addr[:])
-			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
-				Code:     code,
-				CodeHash: accounts.InternCodeHash(codeHash),
-			}
+			out.CodeReads[crypto.Keccak256Hash(addr[:])] = code
 		}
 	}
 

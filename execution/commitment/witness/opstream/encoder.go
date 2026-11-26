@@ -29,12 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type CodeWithHash struct {
-	Code     []byte
-	CodeHash accounts.CodeHash
-}
-
-func Encode(nodes [][]byte, codeReads map[common.Hash]CodeWithHash) (*Witness, error) {
+func Encode(nodes [][]byte, codeReads map[common.Hash][]byte) (*Witness, error) {
 	if len(nodes) == 0 {
 		return NewWitness(nil), nil
 	}
@@ -60,7 +55,7 @@ func Encode(nodes [][]byte, codeReads map[common.Hash]CodeWithHash) (*Witness, e
 
 type nodeEncoder struct {
 	byHash    map[common.Hash][]byte
-	codeReads map[common.Hash]CodeWithHash
+	codeReads map[common.Hash][]byte
 }
 
 func (d *nodeEncoder) node(encoded []byte, path []byte, storage bool) ([]WitnessOperator, error) {
@@ -195,18 +190,18 @@ func (d *nodeEncoder) account(key, path []byte, account *accounts.Account) ([]Wi
 	codeSize := uint64(0)
 	accountHashBytes := nibbles.HexToKeybytes(path)
 	accountHash := common.BytesToHash(accountHashBytes)
-	codeRead, hasCodeRead := d.codeReads[accountHash]
-	if hasCodeRead && len(codeRead.Code) > 0 && crypto.Keccak256Hash(codeRead.Code) != account.CodeHash.Value() {
-		return nil, fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", account.CodeHash.Value(), crypto.Keccak256Hash(codeRead.Code))
+	code := d.codeReads[accountHash]
+	if len(code) > 0 && crypto.Keccak256Hash(code) != account.CodeHash.Value() {
+		return nil, fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", account.CodeHash.Value(), crypto.Keccak256Hash(code))
 	}
 	if emptyAccount && emptyCode {
 		return []WitnessOperator{accountLeaf(key, account, codeSize)}, nil
 	}
 
 	if !emptyCode {
-		if hasCodeRead && len(codeRead.Code) > 0 {
-			operators = append(operators, &OperatorCode{Code: append([]byte(nil), codeRead.Code...)})
-			codeSize = uint64(len(codeRead.Code))
+		if len(code) > 0 {
+			operators = append(operators, &OperatorCode{Code: append([]byte(nil), code...)})
+			codeSize = uint64(len(code))
 		} else {
 			operators = append(operators, &OperatorHash{Hash: account.CodeHash.Value()})
 			codeSize = math.MaxUint64

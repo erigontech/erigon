@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -79,7 +78,7 @@ func TestEncodeMatchesTrieWitness(t *testing.T) {
 	cases := []struct {
 		name      string
 		tr        *trie.Trie
-		codeReads map[common.Hash]witness.CodeWithHash
+		codeReads map[common.Hash][]byte
 	}{
 		{name: "empty", tr: trie.New(common.Hash{})},
 		{name: "single leaf", tr: stateForSingleLeaf()},
@@ -87,10 +86,10 @@ func TestEncodeMatchesTrieWitness(t *testing.T) {
 		{
 			name: "accounts storage and code",
 			tr:   state,
-			codeReads: map[common.Hash]witness.CodeWithHash{
-				storageHash:      {Code: code},
-				emptyStorageHash: {Code: code},
-				designatorHash:   {Code: designator},
+			codeReads: map[common.Hash][]byte{
+				storageHash:      code,
+				emptyStorageHash: code,
+				designatorHash:   designator,
 			},
 		},
 		{name: "code-bearing account without code read", tr: stateForAccount(missingCodeHash, missingCodeAccount)},
@@ -119,8 +118,8 @@ func TestEncodeRejectsCodeHashMismatch(t *testing.T) {
 	tr := stateForAccount(key, account)
 	nodes, err := tr.RLPEncode()
 	require.NoError(t, err)
-	_, err = opstream.Encode(nodes, map[common.Hash]witness.CodeWithHash{
-		key: {Code: []byte{0x60, 0x02}},
+	_, err = opstream.Encode(nodes, map[common.Hash][]byte{
+		key: {0x60, 0x02},
 	})
 	if err == nil {
 		t.Fatal("expected code hash mismatch")
@@ -152,8 +151,8 @@ func TestEncodeRejectsCodeReadForEmptyCodeHash(t *testing.T) {
 	if err := old.UpdateAccountCode(key[:], trie.CodeNode(code)); err == nil || !strings.Contains(err.Error(), "inserted code mismatch") {
 		t.Fatalf("reference code mismatch error = %v", err)
 	}
-	_, err = opstream.Encode(nodes, map[common.Hash]opstream.CodeWithHash{
-		key: {Code: code, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))},
+	_, err = opstream.Encode(nodes, map[common.Hash][]byte{
+		key: code,
 	})
 	if err == nil || !strings.Contains(err.Error(), "inserted code mismatch") {
 		t.Fatalf("Encode error = %v, want code hash mismatch", err)
@@ -198,15 +197,15 @@ func stateForAccount(key common.Hash, account accounts.Account) *trie.Trie {
 	return tr
 }
 
-func trieWitnessBytes(t *testing.T, nodes [][]byte, codeReads map[common.Hash]witness.CodeWithHash) []byte {
+func trieWitnessBytes(t *testing.T, nodes [][]byte, codeReads map[common.Hash][]byte) []byte {
 	t.Helper()
 	tr, err := trie.RLPDecode(nodes)
 	require.NoError(t, err)
-	for key, read := range codeReads {
-		if len(read.Code) == 0 {
+	for key, code := range codeReads {
+		if len(code) == 0 {
 			continue
 		}
-		if err := tr.UpdateAccountCode(key[:], trie.CodeNode(read.Code)); err != nil {
+		if err := tr.UpdateAccountCode(key[:], trie.CodeNode(code)); err != nil {
 			t.Fatal(err)
 		}
 	}
