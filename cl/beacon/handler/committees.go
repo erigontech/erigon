@@ -63,8 +63,9 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 
 	buildResponse := func(s *state.CachingBeaconState, epoch uint64) ([]*committeeResponse, error) {
-		if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync committees duties: epoch %d is too far in the future", epoch))
+		stateEpoch := state.Epoch(s)
+		if epoch > stateEpoch+s.BeaconConfig().MinSeedLookahead+1 {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("committees for epoch %d require a later state than epoch %d", epoch, stateEpoch))
 		}
 		resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 		committeeCount := s.CommitteeCount(epoch)

@@ -808,6 +808,32 @@ func TestGetRandaoHistoricalEpochBoundary(t *testing.T) {
 	}
 }
 
+func TestGetCommitteesHeadSeedBounds(t *testing.T) {
+	_, blocks, _, _, head, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	headEpoch := state.Epoch(head)
+	recentSlot := blocks[0].Block.Slot
+	fcu.LowestAvailableSlotVal = &recentSlot
+	require.Less(t, recentSlot/h.beaconChainCfg.SlotsPerEpoch, headEpoch)
+	require.NotEqual(t, head.GetRandaoMixes(headEpoch), head.GetRandaoMixes(headEpoch+1))
+
+	for _, stateID := range []string{"head", strconv.FormatUint(recentSlot, 10)} {
+		t.Run(stateID, func(t *testing.T) {
+			for _, tc := range []struct {
+				epoch uint64
+				code  int
+			}{
+				{headEpoch + 2, http.StatusOK},
+				{headEpoch + 3, http.StatusBadRequest},
+			} {
+				path := fmt.Sprintf("/eth/v1/beacon/states/%s/committees?epoch=%d", stateID, tc.epoch)
+				rec := httptest.NewRecorder()
+				h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+				require.Equal(t, tc.code, rec.Code, "GET %s", path)
+			}
+		})
+	}
+}
+
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
