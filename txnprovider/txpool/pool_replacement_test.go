@@ -218,3 +218,52 @@ func TestReplacementIgnoresUnfundedTxns(t *testing.T) {
 		})
 	}
 }
+
+// A batch protects what the balance covers when it starts. A rejected replacement changes nothing, and
+// neither a transaction that the batch adds nor one that a cheaper replacement funds is protected.
+func TestReplacementBatchProtectsFundsAtItsStart(t *testing.T) {
+	const unit = common.Ether / 100
+	slot := func(nonce, feeCap, cost uint64, id byte) *TxnSlot {
+		txn := newTestTxnSlot(nonce, 0, 0, feeCap, fundedTxnGas)
+		txn.Txn.GetValue().SetUint64(cost - fundedTxnGas*feeCap)
+		txn.IDHash[0] = id
+		return txn
+	}
+	for _, tc := range []struct {
+		name   string
+		pooled []uint64 // costs in units of the balance's hundredth
+		batch  []*TxnSlot
+		want   []txpoolcfg.DiscardReason
+	}{
+		{
+			// Nonce 2 is unfunded; the cheaper replacement of nonce 1 funds it until nonce 0 is replaced.
+			name: "cheaper replacement first", pooled: []uint64{20, 70, 20},
+			batch: []*TxnSlot{slot(1, bumpedFeeCap, 40*unit, 5), slot(0, bumpedFeeCap, 50*unit, 6)},
+			want:  []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success},
+		},
+		{
+			name: "rejected replacement first", pooled: []uint64{20, 70, 20},
+			batch: []*TxnSlot{slot(0, bumpedFeeCap, 81*unit, 4), slot(1, bumpedFeeCap, 40*unit, 5), slot(0, bumpedFeeCap, 50*unit, 6)},
+			want:  []txpoolcfg.DiscardReason{txpoolcfg.InsufficientFunds, txpoolcfg.Success, txpoolcfg.Success},
+		},
+		{
+			name: "added transaction first", pooled: []uint64{20, 20},
+			batch: []*TxnSlot{slot(2, fundedTxnFeeCap, 50*unit, 5), slot(0, bumpedFeeCap, 40*unit, 6)},
+			want:  []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			var pooled []*TxnSlot
+			for nonce, cost := range tc.pooled {
+				pooled = append(pooled, slot(uint64(nonce), fundedTxnFeeCap, cost*unit, byte(nonce+1)))
+			}
+			require.Equal(t, slices.Repeat([]txpoolcfg.DiscardReason{txpoolcfg.Success}, len(pooled)), addTestTxns(t, pool, sender, true, pooled...))
+
+			require.Equal(t, tc.want, addTestTxns(t, pool, sender, true, tc.batch...))
+			// The last transaction ends up unfunded.
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, []int{2, 0, 1}, []int{pending, baseFee, queued})
+		})
+	}
+}

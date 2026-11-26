@@ -2287,15 +2287,16 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 		}
 	}
 
+	// Record the sender's funded prefix before the batch changes any of its transactions.
+	prefix, err := p.batchFundedPrefix(cacheView, prefixes, mt.TxnSlot.SenderID)
+	if err != nil {
+		p.logger.Warn("[txpool] addLocked: sender info", "err", err)
+		return txpoolcfg.ErrGetSenderInfo
+	}
 	if found != nil {
-		// Checked last: an accepted replacement is already counted in the batch's funded prefix, so no
-		// later check may reject it.
-		funded, err := p.keepsSenderFunded(cacheView, prefixes, mt.TxnSlot, found)
-		if err != nil {
-			p.logger.Warn("[txpool] addLocked: sender info", "err", err)
-			return txpoolcfg.ErrGetSenderInfo
-		}
-		if !funded {
+		// Checked last: an accepted replacement is already counted in the prefix, so no later check
+		// may reject it.
+		if !p.keepsSenderFunded(prefix, mt.TxnSlot, found) {
 			return txpoolcfg.InsufficientFunds
 		}
 		p.removeFromSubPool(found, "add")

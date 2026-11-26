@@ -84,10 +84,11 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 
 // fundedPrefix is the run of a sender's transactions that its balance covers after frame reservations:
 // account nonces from start, the sender's state nonce, up to end, exclusive, with no gap. spent is what
-// the run costs.
+// the run costs, and balance is the sender's balance in the batch's state view.
 type fundedPrefix struct {
 	start, end uint64
 	spent      uint256.Int
+	balance    uint256.Int
 }
 
 // covers reports whether mt is one of the transactions in the prefix.
@@ -95,49 +96,52 @@ func (f *fundedPrefix) covers(mt *metaTxn) bool {
 	return !mt.keyedNonce && mt.TxnSlot.Nonce >= f.start && mt.TxnSlot.Nonce < f.end
 }
 
-// keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
-// takes the place of previous. A replacement that does not raise the cost, or that replaces a transaction
-// outside the prefix, is always accepted. A batch of additions records the prefix in prefixes at its first
-// costlier replacement of one of the sender's transactions, and updates it with each accepted replacement
-// inside it, so the batch walks the sender's transactions only once. The prefix does not grow afterwards:
-// a transaction that the batch adds, or funds with a cheaper replacement, is not covered. Neither can be
-// pending before the batch ends. When it returns true, the caller must make the replacement, because the
-// prefix already counts it.
-func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, replacement *TxnSlot, previous *metaTxn) (bool, error) {
-	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
-	costlier := newCost.Gt(oldCost)
-	prefix := prefixes[replacement.SenderID]
-	if prefix == nil && !costlier {
-		return true, nil
+// batchFundedPrefix returns the sender's funded prefix for a batch of additions and records it in prefixes
+// at the first call. addLocked calls it before the batch changes any of the sender's transactions, so the
+// prefix is what the balance covers when the batch starts, whichever candidates the batch rejects. A
+// transaction that the batch adds, or funds with a cheaper replacement, is not covered; neither can be
+// pending before the batch ends.
+func (p *TxPool) batchFundedPrefix(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, senderID uint64) (*fundedPrefix, error) {
+	if prefix := prefixes[senderID]; prefix != nil {
+		return prefix, nil
 	}
-	senderNonce, balance, _, err := p.senders.info(cacheView, replacement.SenderID)
+	senderNonce, balance, _, err := p.senders.info(cacheView, senderID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	// As in onSenderStateChange, frame reservations come out of the balance first.
-	sender := p.senders.senderID2Addr[replacement.SenderID]
-	reserved := p.frameReservations[sender].cost
-	if prefix == nil {
-		prefix = p.newFundedPrefix(replacement.SenderID, senderNonce, unreservedFunds(balance, reserved))
-		prefixes[replacement.SenderID] = prefix
-	}
+	reserved := p.frameReservations[p.senders.senderID2Addr[senderID]].cost
+	prefix := p.newFundedPrefix(senderID, senderNonce, unreservedFunds(balance, reserved))
+	prefix.balance = balance
+	prefixes[senderID] = prefix
+	return prefix, nil
+}
+
+// keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
+// takes the place of previous. If so, it counts the replacement in the prefix, and the caller must make
+// the replacement. A replacement that does not raise the cost, or that replaces a transaction outside the
+// prefix, is always accepted. Updating the prefix lets a batch walk the sender's transactions only once.
+func (p *TxPool) keepsSenderFunded(prefix *fundedPrefix, replacement *TxnSlot, previous *metaTxn) bool {
 	if !prefix.covers(previous) {
-		return true, nil
+		return true
 	}
+	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
 	var spent uint256.Int
 	spent.Sub(&prefix.spent, oldCost)
 	_, overflow := spent.AddOverflow(&spent, newCost)
-	if costlier {
+	if newCost.Gt(oldCost) {
+		sender := p.senders.senderID2Addr[replacement.SenderID]
+		reserved := p.frameReservations[sender].cost
 		// A replaced frame that the sender pays for releases its reservation, which can fund the replacement.
 		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
 			reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
 		}
-		if funds := unreservedFunds(balance, reserved); overflow || spent.Gt(&funds) {
-			return false, nil
+		if funds := unreservedFunds(prefix.balance, reserved); overflow || spent.Gt(&funds) {
+			return false
 		}
 	}
 	prefix.spent = spent
-	return true, nil
+	return true
 }
 
 // newFundedPrefix walks the sender's account-nonce transactions from senderNonce for as long as they have
