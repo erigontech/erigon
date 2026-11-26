@@ -291,11 +291,11 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	if err != nil {
 		return err
 	}
-	gas, err := PostBatchGas(batch)
+	gas, err := postingGas(batch, e.fx.targetGas)
 	if err != nil {
 		return err
 	}
-	if gas += e.fx.targetGas; gas > c.cfg.MaxGas {
+	if gas > c.cfg.MaxGas {
 		return fmt.Errorf("%w: %d over %d", errOverBudget, gas, c.cfg.MaxGas)
 	}
 	anchor, err := c.anchor(ctx, blocks[0])

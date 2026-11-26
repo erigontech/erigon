@@ -49,12 +49,16 @@ var proofPlaceholder = bytes.Repeat([]byte{0xff}, 128)
 // PostBatchGas projects the gas of posting b with a proof of
 // proofPlaceholder: the larger of its execution and calldata at the standard
 // rate and its EIP-7623 floor.
-func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) {
+func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) { return postingGas(b, 0) }
+
+// postingGas projects the gas of posting b as PostBatchGas does, its L1
+// calls taking target: execution, which the floor does not add to.
+func postingGas(b *protocol.ProofSystemBatch, target uint64) (uint64, error) {
 	standard, tokens, err := postBatchGas(b)
 	if err != nil {
 		return 0, err
 	}
-	return max(standard, txGas+10*tokens), nil
+	return max(standard+target, txGas+10*tokens), nil
 }
 
 // postBatchGas projects the gas of posting b with a proof of

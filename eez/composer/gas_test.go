@@ -92,6 +92,25 @@ func TestPostBatchGas(t *testing.T) {
 	require.GreaterOrEqual(t, FloorGas(proofPlaceholder), FloorGas(bytes.Repeat([]byte{0x11}, 65)))
 }
 
+// TestPostingGasAddsTargetBeforeTheFloor: the gas of the L1 calls a posting
+// makes is execution, which the EIP-7623 floor does not add to.
+func TestPostingGasAddsTargetBeforeTheFloor(t *testing.T) {
+	_, mined, _ := window(t, "captured-devnet-window-84")
+	fat := *mined
+	fat.CallData = bytes.Repeat([]byte{0xff}, 30_000)
+	for target, want := range map[uint64]uint64{
+		0: 1_245_840,
+		// The standard price with the target, 1,140,936, stays under the
+		// floor; 1,340,936 passes it.
+		100_000: 1_245_840,
+		300_000: 1_340_936,
+	} {
+		got, err := postingGas(&fat, target)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "target %d", target)
+	}
+}
+
 // TestSyncIntervalWithinCeiling: a Sync interval whose blocks the sequencer
 // filled to its DA budget for a ceiling posts within that ceiling, so a
 // backlog always has a chunk to post.
