@@ -383,17 +383,10 @@ func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
 		require.Greater(t, balanceAfter, balanceBefore)
 		recomputed, err := advancedState.GetBeaconProposerIndices(targetEpoch)
 		require.NoError(t, err)
-		lookahead := advancedState.GetProposerLookahead()
-		expected := make([]uint64, cfg.SlotsPerEpoch)
-		for i := range expected {
-			expected[i] = lookahead.Get(i)
-		}
+		expected := firstEpochProposers(advancedState)
 		require.NotEqual(t, expected, recomputed)
 		response := getProposerDutiesForEpoch(t, handler, targetEpoch)
-		require.Len(t, response.Data, len(expected))
-		for i, duty := range response.Data {
-			require.Equal(t, expected[i], duty.ValidatorIndex, "slot %d", targetSlot+uint64(i))
-		}
+		requireProposerDuties(t, response.Data, advancedState, targetSlot, expected)
 	})
 }
 
