@@ -1466,6 +1466,10 @@ func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, p
 	if err != nil {
 		return err
 	}
+	if domain == kv.AccountsDomain {
+		// The code and storage are removed above. SharedDomains would remove the storage again from the head state.
+		return p.view.sd.DomainDelNoCascade(domain, p.view.roTx, k, txNum, prevVal)
+	}
 	return p.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 

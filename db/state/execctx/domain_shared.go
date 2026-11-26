@@ -1932,6 +1932,15 @@ func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, k 
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+	return sd.domainDel(domain, tx, k, txNum, prevVal, true)
+}
+
+// DomainDelNoCascade is DomainDel without removing a deleted account's storage and code: the caller removes them.
+func (sd *SharedDomains) DomainDelNoCascade(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+	return sd.domainDel(domain, tx, k, txNum, prevVal, false)
+}
+
+func (sd *SharedDomains) domainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, cascade bool) error {
 	ks := string(k)
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, nil)
@@ -1948,7 +1957,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// Deleting an account cascades to its storage and code — run before the
 	// absent-key skip so leftover storage/code is still wiped even if the
 	// account itself is already gone.
-	if domain == kv.AccountsDomain {
+	if cascade && domain == kv.AccountsDomain {
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
 			return err
 		}

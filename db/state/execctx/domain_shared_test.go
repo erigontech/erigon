@@ -2709,3 +2709,47 @@ func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
 	mergeAndCheck(deepTarget, shallowTarget)
 	mergeAndCheck(shallowTarget, deepTarget)
 }
+
+// DomainDel of an account removes its storage and code; DomainDelNoCascade removes only the account.
+func TestSharedDomain_DomainDelNoCascadeKeepsStorageAndCode(t *testing.T) {
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	slot := common.Hash{31: 1}
+	storageKey := composite(addr[:], slot[:])
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
+	for _, tc := range []struct {
+		name string
+		del  func(sd *execctx.SharedDomains, tx kv.TemporalTx) error
+		kept bool
+	}{
+		{"DomainDel", func(sd *execctx.SharedDomains, tx kv.TemporalTx) error {
+			return sd.DomainDel(kv.AccountsDomain, tx, addr[:], 2, nil)
+		}, false},
+		{"DomainDelNoCascade", func(sd *execctx.SharedDomains, tx kv.TemporalTx) error {
+			return sd.DomainDelNoCascade(kv.AccountsDomain, tx, addr[:], 2, nil)
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDb(t, 100)
+			rwTx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKey, []byte{1}, 1, nil))
+			require.NoError(t, domains.DomainPut(kv.CodeDomain, rwTx, addr[:], []byte{0x60, 0x00}, 1, nil))
+			require.NoError(t, tc.del(domains, rwTx))
+
+			for _, d := range []struct {
+				domain kv.Domain
+				key    []byte
+			}{{kv.AccountsDomain, addr[:]}, {kv.StorageDomain, storageKey}, {kv.CodeDomain, addr[:]}} {
+				v, _, err := domains.GetLatest(d.domain, rwTx, d.key)
+				require.NoError(t, err)
+				require.Equal(t, tc.kept && d.domain != kv.AccountsDomain, len(v) > 0, "%s", d.domain)
+			}
+		})
+	}
+}

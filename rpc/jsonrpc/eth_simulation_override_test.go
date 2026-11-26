@@ -235,8 +235,9 @@ func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
 }
 
 // On a historical base, deploying at the real address of a contract that is created after the base block, and holds
-// more slots than the bound at the head, removes nothing: it is not refused, the later slots read as empty, and the
-// state roots are the ones of the same simulation on a chain that ends at the base block.
+// more slots than the bound at the head, removes nothing, and so does deleting it again in its constructor: it is
+// not refused, the later slots read as empty, and the state roots are the ones of the same simulation on a chain that
+// ends at the base block.
 func TestSimulateV1HistoricalDeployIgnoresLaterStorage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long-running test")
@@ -274,23 +275,36 @@ func TestSimulateV1HistoricalDeployIgnoresLaterStorage(t *testing.T) {
 	// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN, deployed by its init code.
 	readSlot1 := []byte{byte(vm.PUSH1), 1, byte(vm.SLOAD), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
 	deploy := hexutil.Bytes(append(append([]byte{byte(vm.PUSH11)}, readSlot1...), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 11, byte(vm.PUSH1), 21, byte(vm.RETURN)))
+	// PUSH0 SELFDESTRUCT: created and destroyed in one transaction, so the account is deleted (EIP-6780).
+	selfDestruct := hexutil.Bytes{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)}
 	gas := hexutil.Uint64(1_000_000)
-	req := SimulationRequest{BlockStateCalls: []SimulatedBlock{
-		{Calls: []ethapi.CallArgs{{From: &testAddr, Gas: &gas, Input: &deploy}}},
-		{Calls: []ethapi.CallArgs{{From: &testAddr, To: &contract, Gas: &gas}}},
-	}}
-	got, err := newEthApiForTest(newBaseApiForTest(later), later.DB, nil, nil).SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(0))
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(got[0].Calls[0].Status), "%v", got[0].Calls[0].Error)
-	require.Equal(t, hexutil.Encode(make([]byte, 32)), got[1].Calls[0].ReturnData, "slot 1 of the later contract")
-
+	laterApi := newEthApiForTest(newBaseApiForTest(later), later.DB, nil, nil)
 	base := newChain()
-	want, err := newEthApiForTest(newBaseApiForTest(base), base.DB, nil, nil).SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-	require.NoError(t, err)
-	for i := range want {
-		require.NotEqual(t, common.Hash{}, want[i].StateRoot, "block %d", i)
-		require.Equal(t, want[i].StateRoot, got[i].StateRoot, "block %d", i)
-		require.Equal(t, want[i].Calls[0].ReturnData, got[i].Calls[0].ReturnData, "block %d", i)
+	baseApi := newEthApiForTest(newBaseApiForTest(base), base.DB, nil, nil)
+	for _, tc := range []struct {
+		name     string
+		initCode *hexutil.Bytes
+	}{
+		{"deploy", &deploy},
+		{"deploy and self-destruct", &selfDestruct},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := SimulationRequest{BlockStateCalls: []SimulatedBlock{
+				{Calls: []ethapi.CallArgs{{From: &testAddr, Gas: &gas, Input: tc.initCode}}},
+				{Calls: []ethapi.CallArgs{{From: &testAddr, To: &contract, Gas: &gas}}},
+			}}
+			got, err := laterApi.SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(0))
+			require.NoError(t, err)
+			require.Len(t, got, 2)
+			require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(got[0].Calls[0].Status), "%v", got[0].Calls[0].Error)
+
+			want, err := baseApi.SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			for i := range want {
+				require.NotEqual(t, common.Hash{}, want[i].StateRoot, "block %d", i)
+				require.Equal(t, want[i].StateRoot, got[i].StateRoot, "block %d", i)
+				require.Equal(t, want[i].Calls[0].ReturnData, got[i].Calls[0].ReturnData, "block %d", i)
+			}
+		})
 	}
 }

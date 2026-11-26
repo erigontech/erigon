@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -144,6 +145,41 @@ func TestCountStorageSlotsIgnoresHeadOnlySlotsOnAHistoricalBase(t *testing.T) {
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
 
 	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 1), "the slots were written after the base block")
+}
+
+// On a historical base, removing an account's storage writes no tombstone for a slot only the head holds.
+func TestHistoricalRemovalSkipsHeadOnlySlots(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		remove func(w *state.Writer, a accounts.Address) error
+	}{
+		{"delete account", func(w *state.Writer, a accounts.Address) error { return w.DeleteAccount(a, nil) }},
+		{"create contract", func(w *state.Writer, a accounts.Address) error { return w.CreateContract(a) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+			addr := common.HexToAddress("0xaa")
+			putDel := sd.AsPutDel(rwTx)
+			for slot := byte(1); slot <= 2; slot++ {
+				require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 5, nil))
+			}
+			require.NoError(t, sd.Flush(t.Context(), rwTx))
+			sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd.Close)
+
+			sim := &simulator{touchedKeys: keysByAccount{}, sweptStorage: map[accounts.Address]struct{}{}}
+			hist := &historicalPutDel{TemporalPutDel: sd.AsPutDel(rwTx), view: newSimulationIntraBlockStateReader(rwTx, sd, 2), touched: sim.touchedKeys, sweptStorage: sim.sweptStorage}
+			bound := &storageBoundPutDel{TemporalPutDel: hist, count: func(a []byte) error {
+				return sim.countStorageSlots(t.Context(), a, sd, rwTx, false, 2, 1)
+			}}
+			require.NoError(t, tc.remove(state.NewWriter(bound, nil, 10), accounts.InternAddress(addr)))
+			for slot := byte(1); slot <= 2; slot++ {
+				_, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}))
+				require.False(t, ok, "slot %d exists only at head", slot)
+			}
+		})
+	}
 }
 
 // Slots that an earlier write already removed are not counted again.
