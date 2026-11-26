@@ -976,6 +976,13 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			m.ExecModule.WaitIdle(t.Context())
 			waitForBatchWithHead(canonical.TopBlock.Hash())
 
+			logs, unsubscribeLogs := m.Notifications.Events.AddLogsSubscription()
+			t.Cleanup(unsubscribeLogs)
+			m.Notifications.Events.EmptyLogSubscription(false)
+			receipts, unsubscribeReceipts := m.Notifications.Events.AddReceiptsSubscription()
+			t.Cleanup(unsubscribeReceipts)
+			m.Notifications.Events.EmptyReceiptSubscription(false)
+
 			header := types.CopyHeader(side.TopBlock.HeaderNoCopy())
 			header.Root[0] ^= 1
 			badTip := types.NewBlockFromNetwork(header, side.TopBlock.Body(), side.TopBlock.BlockAccessListSidecar())
@@ -1034,8 +1041,10 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			for _, block := range side.Blocks[1:newHead.NumberU64()] {
 				wantHeaders = append(wantHeaders, block.Hash())
 			}
-			got := collectReorgSubscriptions(headers, nil, nil)
+			got := collectReorgSubscriptions(headers, logs, receipts)
 			require.Equal(t, wantHeaders, got.headerHashes(t), "headers from committed catch-up cycles must also be delivered")
+			require.Equal(t, 1, got.logCount(newHead.Hash(), false))
+			require.Equal(t, 1, got.receiptCount(newHead.Hash(), newHead.Transactions()[0].Hash()))
 
 			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
 			require.NoError(t, err)
@@ -1043,6 +1052,16 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			m.ExecModule.WaitIdle(t.Context())
 			require.Empty(t, m.Notifications.Accumulator.Changes())
 			require.Empty(t, collectReorgSubscriptions(headers, nil, nil).headers, "repeated forkchoice must not repeat delivered headers")
+
+			// An empty child at a reused height exposes receipts left by the discarded block.
+			child, err := m.GenerateChainFrom(newHead, 1, nil)
+			require.NoError(t, err)
+			require.Empty(t, child.TopBlock.Transactions())
+			insertAndSwitchTo(t, m, child.Blocks)
+			waitForBatchWithHead(child.TopBlock.Hash())
+			got = collectReorgSubscriptions(nil, logs, receipts)
+			require.Empty(t, got.receipts, "an empty block must not announce receipts")
+			require.Empty(t, got.logs, "an empty block must not announce logs")
 		})
 	}
 }

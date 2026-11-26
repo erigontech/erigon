@@ -371,14 +371,24 @@ func TestSendersUnwindsToTheBlockBeforeABadSignature(t *testing.T) {
 	}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, 5))
 
-	u := &recordingUnwinder{}
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
-	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 5, m.Ctx, log.New()))
+	for _, catchup := range []bool{false, true} {
+		s := &stagedsync.StageState{ID: stages.Senders}
+		s.CurrentSyncCycle.IsInitialCycle = catchup
+		u := &recordingUnwinder{}
+		require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, s, u, tx, 5, m.Ctx, log.New()))
 
-	require.Equal(t, 1, u.calls)
-	require.Equal(t, uint64(3), u.point)
-	require.NotNil(t, u.reason.Block)
-	require.Equal(t, hashes[3], *u.reason.Block)
+		require.Equal(t, 1, u.calls)
+		require.Equal(t, uint64(3), u.point)
+		require.NotNil(t, u.reason.Block)
+		require.Equal(t, hashes[3], *u.reason.Block)
+		if catchup {
+			var rejected *stagedsync.RejectedBlockError
+			require.ErrorAs(t, u.reason.ErrBadBlock, &rejected)
+			require.Equal(t, uint64(4), rejected.Number)
+			require.Equal(t, hashes[3], rejected.Hash)
+		}
+	}
 }
 
 func TestSendersBatchUsesEachBlocksSigner(t *testing.T) {

@@ -505,16 +505,6 @@ func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
 }
 
-// RejectedBlockError identifies a block that failed execution during startup or catch-up.
-type RejectedBlockError struct {
-	Number uint64
-	Hash   common.Hash
-	Err    error
-}
-
-func (e *RejectedBlockError) Error() string { return e.Err.Error() }
-func (e *RejectedBlockError) Unwrap() error { return e.Err }
-
 // renderExecOutcome converts the parallel executor's typed outcome back to the
 // stage's error contracts. Precedence is fixed by the order of the checks: an
 // operational failure (execErr) outranks a verdict, which outranks a resumable
@@ -528,7 +518,7 @@ func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 	}
 
 	if v := out.verdict; v != nil {
-		// Startup can discard an unaccepted catch-up suffix only when execution
+		// Catch-up can discard an unaccepted suffix only when execution
 		// identifies the rejected block. An internal failure has no such identity.
 		if s.CurrentSyncCycle.IsInitialCycle {
 			if v.blockHash != (common.Hash{}) {

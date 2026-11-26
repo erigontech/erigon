@@ -815,7 +815,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			checkpointStateChanges()
 			catchupCommitted = true
-			restoreRecentReceipts = nil
+			// Keep the committed receipts if a later cycle fails.
+			if hasMore && e.accum != nil && e.accum.RecentReceipts != nil {
+				restoreRecentReceipts = e.accum.RecentReceipts.Snapshot()
+			} else {
+				restoreRecentReceipts = nil
+			}
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -848,7 +853,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		if errors.Is(err, rules.ErrInvalidBlock) {
+		// Tip execution reports invalid blocks directly. During catch-up, ErrInvalidBlock
+		// can also mean the executor missed a result, so rejection needs a block identity.
+		_, rejected := errors.AsType[*stagedsync.RejectedBlockError](err)
+		if rejected || (!initialCycle && errors.Is(err, rules.ErrInvalidBlock)) {
 			var latestValidHash common.Hash
 			if catchupCommitted {
 				teardownOverlay()
