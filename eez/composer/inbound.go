@@ -18,7 +18,6 @@ package composer
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 
@@ -76,7 +75,7 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	}
 	// refuse marks err final unless a state read failed or the run was cut.
 	refuse := func(err error) error {
-		if errors.Is(err, ErrStateRead) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if transient(err) {
 			return err
 		}
 		return Poison(err)

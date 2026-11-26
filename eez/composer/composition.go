@@ -174,6 +174,9 @@ func (k *composition) add(h *Held) error {
 		k.deferred = append(k.deferred, h)
 		k.unroomed++
 		return nil
+	case transient(err), k.ctx.Err() != nil:
+		// The node failed, not h: poison or not, it waits.
+		return err
 	case IsPoison(err):
 		k.evict(h, err)
 		return nil
@@ -316,8 +319,6 @@ func (k *composition) outbound(h *Held, tx types.Transaction) error {
 			switch {
 			case errors.Is(err, core.ErrGasLimitReached):
 				return ErrFull
-			case errors.Is(err, ErrStateRead), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-				return err
 			case err != nil:
 				return Poison(fmt.Errorf("with its L1 call loaded: %w", err))
 			case r.Status != types.ReceiptStatusSuccessful:

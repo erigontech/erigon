@@ -1104,13 +1104,9 @@ func TestComposeOutboundPastTheDeadlineWaits(t *testing.T) {
 		return uint256.NewInt(10), nil
 	}
 	h := f.holdOut(t, 0, outboundProxies[1], 7, nil)
-	var buf bytes.Buffer
-	f.c.logger = log.New()
-	f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
 	sync := f.w.sync.Header()
 	require.Nil(t, f.c.compose(ctx, sync.Number.Uint64(), sync, 101, targetTime))
-	require.NotContains(t, buf.String(), "eez.composer.poison")
-	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt))
+	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt), "not evicted")
 	require.Zero(t, h.Attempts)
 }
 

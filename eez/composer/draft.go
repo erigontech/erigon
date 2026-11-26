@@ -39,6 +39,12 @@ import (
 // transaction's, so the transaction waits.
 var ErrStateRead = errors.New("state read failed")
 
+// transient reports a failure of the node, not of the transaction: a failed
+// state read or a run its context cut.
+func transient(err error) bool {
+	return errors.Is(err, ErrStateRead) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // PreState is what a block executes on: its parent's state, the header
 // chain the engine reads, and the hashes BLOCKHASH serves.
 type PreState struct {
