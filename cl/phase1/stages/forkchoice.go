@@ -38,6 +38,8 @@ import (
 
 var errBlockIndicesPending = errors.New("block indices are not yet available")
 
+var errHeadSuperseded = errors.New("the selected head is no longer the fork choice head")
+
 func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot uint64, err error) {
 	// Advance the forkchoice store's internal clock so that epoch-boundary
 	// checkpoint promotions (unrealized → realized) happen on time.
@@ -63,39 +65,20 @@ func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot ui
 func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head forkchoice.ForkChoiceNode, headSlot uint64) error {
 	headRoot := head.Root
 	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
-	executionHead, ready := cfg.forkChoice.GetExecutionHead(head)
-	if !ready {
-		executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
+	executionHead, fcuErr, err := sendHeadForkChoiceUpdate(ctx, logger, cfg, head, headVersion)
+	if err != nil {
+		return err
 	}
-	recordExecutionHead := true
-
-	// Perform fork choice update if the engine is available
-	if engine := cfg.forkChoice.Engine(); engine != nil {
-		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
-		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
-		logger.Debug("Caplin is sending forkchoice")
-
-		if _, err := engine.ForkChoiceUpdate(
-			ctx,
-			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			executionHead, nil, headVersion,
-		); err != nil {
-			switch {
-			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
-				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
-				// to lose by carrying on: the next head will send another one.
-				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
-			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
-				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
-				recordExecutionHead = false
-			default:
-				return fmt.Errorf("failed to run forkchoice: %w", err)
-			}
-		}
-	}
-	if recordExecutionHead {
-		cfg.executionHead = executionHead
+	switch {
+	case fcuErr == nil:
+	case errors.Is(fcuErr, execution_client.ErrForkChoiceUpdateTimeout):
+		// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+		// to lose by carrying on: the next head will send another one.
+		logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+	case errors.Is(fcuErr, execution_client.ErrForkChoiceUpdateBusy):
+		logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
+	default:
+		return fmt.Errorf("failed to run forkchoice: %w", fcuErr)
 	}
 	// The stage's payload decision may differ from the poll that woke it.
 	// Keep the wake's throttle key current without changing its timestamp.
@@ -112,9 +95,43 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 	return nil
 }
 
+// sendHeadForkChoiceUpdate resolves the head's execution hash and sends its FCU, under the execution head lock from Gloas.
+func sendHeadForkChoiceUpdate(ctx context.Context, logger log.Logger, cfg *Cfg, head forkchoice.ForkChoiceNode, headVersion clparams.StateVersion) (executionHead common.Hash, fcuErr, err error) {
+	if headVersion >= clparams.GloasVersion {
+		unlock, err := cfg.forkChoice.LockExecutionHead(ctx)
+		if err != nil {
+			return common.Hash{}, nil, fmt.Errorf("failed to lock the execution head: %w", err)
+		}
+		defer unlock()
+		current, _, err := cfg.forkChoice.GetHeadNode()
+		if err != nil {
+			return common.Hash{}, nil, err
+		}
+		if current.Root != head.Root {
+			return common.Hash{}, nil, errHeadSuperseded
+		}
+		head = current
+	}
+	executionHead = cfg.forkChoice.GetHeadExecutionHash(head)
+	if engine := cfg.forkChoice.Engine(); engine != nil {
+		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
+		logger.Debug("Caplin is sending forkchoice")
+
+		_, fcuErr = engine.ForkChoiceUpdate(
+			ctx,
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
+			executionHead, nil, headVersion,
+		)
+	}
+	cfg.forkChoice.RecordExecutionHead(executionHead, fcuErr)
+	return executionHead, fcuErr, nil
+}
+
 // updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
 // block or the trusted anchor as canonical, once the required block indices are available.
-func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) (forkSlot uint64, reorged bool, err error) {
+func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) (forkSlot uint64, reorged bool, reorgEvent *beaconevents.ChainReorgData, err error) {
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
@@ -128,22 +145,22 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	// leave any canonical ancestors from the old fork unchanged.
 	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to read block slot by block root: %w", err)
+		return 0, false, nil, fmt.Errorf("failed to read block slot by block root: %w", err)
 	}
 	if storedSlot == nil && headRoot != anchorRoot {
-		return 0, false, fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
+		return 0, false, nil, fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
 	}
 
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to read canonical block root: %w", err)
+		return 0, false, nil, fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
 	// Capture the actual old canonical tip before any mutations.
 	oldHeadSlot, oldHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to read canonical head: %w", err)
+		return 0, false, nil, fmt.Errorf("failed to read canonical head: %w", err)
 	}
 
 	// List of new canonical chain entries
@@ -155,20 +172,20 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 
 		// Read the parent block root
 		if currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot); err != nil {
-			return 0, false, fmt.Errorf("failed to read parent block root: %w", err)
+			return 0, false, nil, fmt.Errorf("failed to read parent block root: %w", err)
 		}
 
 		// Read the slot for the current block root
 		if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
-			return 0, false, fmt.Errorf("failed to read block slot by block root: %w", err)
+			return 0, false, nil, fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
 			if currentRoot != anchorRoot {
-				return 0, false, fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
+				return 0, false, nil, fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
 			}
 			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
 			if !ok {
-				return 0, false, fmt.Errorf("anchor header is not available for %s", anchorRoot)
+				return 0, false, nil, fmt.Errorf("anchor header is not available for %s", anchorRoot)
 			}
 			newFoundSlot = &header.Slot
 		}
@@ -178,7 +195,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		// Read the canonical block root for the new slot
 		currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 		if err != nil {
-			return 0, false, fmt.Errorf("failed to read canonical block root: %w", err)
+			return 0, false, nil, fmt.Errorf("failed to read canonical block root: %w", err)
 		}
 
 		// Append the current slot and root to the list of reconnection roots
@@ -187,19 +204,19 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 
 	// Truncate the canonical chain at the current slot
 	if err := beacon_indicies.TruncateCanonicalChain(tx, currentSlot); err != nil {
-		return 0, false, fmt.Errorf("failed to truncate canonical chain: %w", err)
+		return 0, false, nil, fmt.Errorf("failed to truncate canonical chain: %w", err)
 	}
 
 	// Mark the new canonical chain segments in reverse order
 	for _, reconnectionRoot := range slices.Backward(reconnectionRoots) {
 		if err := beacon_indicies.MarkRootCanonical(tx, reconnectionRoot.slot, reconnectionRoot.root); err != nil {
-			return 0, false, fmt.Errorf("failed to mark root canonical: %w", err)
+			return 0, false, nil, fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
 
 	// Mark the head slot and root as canonical
 	if err := beacon_indicies.MarkRootCanonical(tx, headSlot, headRoot); err != nil {
-		return 0, false, fmt.Errorf("failed to mark root canonical: %w", err)
+		return 0, false, nil, fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
 	// A reorg occurred if the fork point (currentSlot) is strictly below the
@@ -210,12 +227,12 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(tx, oldHeadRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldHeadRoot)
-			return currentSlot, true, nil
+			return currentSlot, true, nil, nil
 		}
 		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(tx, headRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
-			return currentSlot, true, nil
+			return currentSlot, true, nil, nil
 		}
 		reorgDepth := uint64(0)
 		if oldHeadSlot > currentSlot {
@@ -225,7 +242,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		if cfg.forkChoice != nil {
 			executionOptimistic = cfg.forkChoice.IsRootOptimistic(headRoot)
 		}
-		reorgEvent := &beaconevents.ChainReorgData{
+		reorgEvent = &beaconevents.ChainReorgData{
 			Slot:                headSlot,
 			Depth:               reorgDepth,
 			OldHeadBlock:        oldHeadRoot,
@@ -235,10 +252,9 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
 			ExecutionOptimistic: executionOptimistic,
 		}
-		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
 
-	return currentSlot, reorged, nil
+	return currentSlot, reorged, reorgEvent, nil
 }
 
 func currentHeadSnapshot(store forkchoice.ForkChoiceStorageReader, isGloas bool) func() (common.Hash, uint64, string, bool, error) {
@@ -494,7 +510,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
-func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
+func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot)
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -548,7 +564,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	if headState != nil {
 		// Update the head state with the new head state
-		if err := cfg.syncedData.OnOwnedHeadStateWithBlockRoot(headState, headRoot); err != nil {
+		if err := installHeadState(ctx, cfg, headState, headSlot, headRoot); err != nil {
 			return fmt.Errorf("failed to set head state: %w", err)
 		}
 	}
@@ -574,6 +590,27 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	return nil
 }
 
+// installHeadState publishes the head state. From Gloas it installs under the execution head lock and returns
+// errHeadSuperseded when the fork choice head is no longer headRoot.
+func installHeadState(ctx context.Context, cfg *Cfg, headState *state.CachingBeaconState, headSlot uint64, headRoot common.Hash) error {
+	if cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
+		return cfg.syncedData.OnOwnedHeadStateWithBlockRoot(headState, headRoot)
+	}
+	unlock, err := cfg.forkChoice.LockExecutionHead(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	current, _, err := cfg.forkChoice.GetHeadNode()
+	if err != nil {
+		return err
+	}
+	if current.Root != headRoot {
+		return errHeadSuperseded
+	}
+	return cfg.syncedData.OnOwnedHeadStateWithBlockRoot(headState, headRoot)
+}
+
 // gloasHeadStatePublished reports whether the synced head state is already the state of this Gloas head. A payload
 // envelope does not change the beacon state, so that state stays valid when the head's payload status changes.
 func gloasHeadStatePublished(cfg *Cfg, headSlot uint64, headRoot common.Hash) bool {
@@ -587,6 +624,7 @@ func gloasHeadStatePublished(cfg *Cfg, headSlot uint64, headRoot common.Hash) bo
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
 func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	cfg.forkChoiceWaitingForIndices = false
+	cfg.forkChoiceSuperseded = false
 	head, headSlot, err := selectForkChoiceHead(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
@@ -599,6 +637,10 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		waitNotified = sync.OnceValue(func() error { return <-done })
 		defer func() { _ = waitNotified() }()
 	} else if err := notifyServicesOfHead(ctx, logger, cfg, head, headSlot); err != nil {
+		if errors.Is(err, errHeadSuperseded) {
+			cfg.forkChoiceSuperseded = true
+			return nil
+		}
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
@@ -608,7 +650,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	forkSlot, reorged, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	forkSlot, reorged, reorgEvent, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	if err != nil {
 		if errors.Is(err, errBlockIndicesPending) {
 			cfg.forkChoiceWaitingForIndices = true
@@ -620,8 +662,17 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		}
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
+	// A Gloas pass can be superseded and rolled back, so its reorg is announced only once committed.
+	gloasHead := cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
+	if reorgEvent != nil && !gloasHead {
+		cfg.emitter.State().SendChainReorg(reorgEvent)
+	}
 
-	if err := postForkchoiceOperations(tx, logger, cfg, headSlot, headRoot); err != nil {
+	if err := postForkchoiceOperations(ctx, tx, logger, cfg, headSlot, headRoot); err != nil {
+		if errors.Is(err, errHeadSuperseded) {
+			cfg.forkChoiceSuperseded = true
+			return nil
+		}
 		return fmt.Errorf("failed to post forkchoice operations: %w", err)
 	}
 
@@ -634,6 +685,10 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	notifyErr := waitNotified()
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	cfg.committedRoot = headRoot
+	if reorgEvent != nil && gloasHead {
+		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
 	// The das worker walks the canonical chain, so it must be asked after the commit.
 	if reorged {

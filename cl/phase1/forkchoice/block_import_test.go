@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -305,4 +306,74 @@ func TestEpochTickDuringAdmissionRunsThePromotionFirst(t *testing.T) {
 	f.onTickPerSlot(tickMs(f))
 
 	requireSameCheckpoints(t, serial, f)
+}
+
+func TestGloasBlockImportSeedsExecutionHashFromOwnBid(t *testing.T) {
+	store, _, _ := newForkNodesTestStore(t)
+	store.beaconCfg.GloasForkEpoch = 0
+	store.beaconCfg.InitializeForkSchedule()
+	parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+	parentPayloadHash, emptyParentHash := common.Hash{0xa1}, common.Hash{0xa2}
+	store.eth2Roots.Add(parentRoot, parentPayloadHash)
+
+	child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	child.Block.ParentRoot = parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = emptyParentHash
+
+	store.mu.Lock()
+	store.applyExecutionHashLocked(child.Block, childRoot, clparams.GloasVersion)
+	store.mu.Unlock()
+
+	require.Equal(t, emptyParentHash, store.GetEth1Hash(childRoot))
+}
+
+func TestGloasEmptyBlockInvalidationFollowsOwnBidParentHash(t *testing.T) {
+	store, _, _ := newForkNodesTestStore(t)
+	store.beaconCfg.GloasForkEpoch = 0
+	store.beaconCfg.InitializeForkSchedule()
+	parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+	parentPayloadHash, emptyParentHash := common.Hash{0xa1}, common.Hash{0xa2}
+	store.eth2Roots.Add(parentRoot, parentPayloadHash)
+	child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	child.Block.ParentRoot = parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = emptyParentHash
+	store.mu.Lock()
+	store.applyExecutionHashLocked(child.Block, childRoot, clparams.GloasVersion)
+	store.mu.Unlock()
+	store.invalidatedExecutionPayloads = &sync.Map{}
+
+	store.invalidatedExecutionPayloads.Store(parentPayloadHash, struct{}{})
+	require.False(t, store.payloadExecutionHashInvalidated(childRoot))
+
+	store.invalidatedExecutionPayloads.Store(emptyParentHash, struct{}{})
+	status, ok := store.GetRecentExecutionPayloadStatusByRoot(childRoot)
+	require.True(t, ok)
+	require.True(t, status == execution_client.PayloadStatusInvalidated)
+}
+
+func TestGloasBlockWithoutBidKeepsParentExecutionHash(t *testing.T) {
+	bids := map[string]*cltypes.SignedExecutionPayloadBid{
+		"nil bid":         nil,
+		"bid without msg": {},
+	}
+	for name, bid := range bids {
+		t.Run(name, func(t *testing.T) {
+			store, _, _ := newForkNodesTestStore(t)
+			store.beaconCfg.GloasForkEpoch = 0
+			store.beaconCfg.InitializeForkSchedule()
+			parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+			parentPayloadHash := common.Hash{0xa1}
+			store.eth2Roots.Add(parentRoot, parentPayloadHash)
+
+			child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+			child.Block.ParentRoot = parentRoot
+			child.Block.Body.SignedExecutionPayloadBid = bid
+
+			store.mu.Lock()
+			store.applyExecutionHashLocked(child.Block, childRoot, clparams.GloasVersion)
+			store.mu.Unlock()
+
+			require.Equal(t, parentPayloadHash, store.GetEth1Hash(childRoot))
+		})
+	}
 }

@@ -59,6 +59,7 @@ type ForkChoiceStorageMock struct {
 	HeadVal                               common.Hash
 	HeadSlotVal                           uint64
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
+	lastExecutionHead                     atomic.Value
 	BlockProcessingVal                    bool
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
 	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
@@ -869,6 +870,29 @@ func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64
 		return f.GetHeadNodeFn()
 	}
 	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, f.HeadSlotVal, nil
+}
+
+func (f *ForkChoiceStorageMock) GetHeadExecutionHash(head forkchoice.ForkChoiceNode) common.Hash {
+	return f.GetEth1Hash(head.Root)
+}
+
+func (f *ForkChoiceStorageMock) LockExecutionHead(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *ForkChoiceStorageMock) TryLockExecutionHead() (func(), bool) {
+	return func() {}, true
+}
+
+func (f *ForkChoiceStorageMock) RecordExecutionHead(hash common.Hash, fcuErr error) {
+	if forkchoice.ForkChoiceUpdateApplied(fcuErr) {
+		f.lastExecutionHead.Store(hash)
+	}
+}
+
+func (f *ForkChoiceStorageMock) LastExecutionHead() common.Hash {
+	hash, _ := f.lastExecutionHead.Load().(common.Hash)
+	return hash
 }
 
 func (f *ForkChoiceStorageMock) TryGetHeadNode() (forkchoice.ForkChoiceNode, bool) {

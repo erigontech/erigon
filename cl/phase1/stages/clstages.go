@@ -90,14 +90,13 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
-	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
-	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
-	executionHead               common.Hash
-	forkChoiceRerunAt           time.Time
-	forkChoiceWaitingForIndices bool
-	forkChoiceIndicesChanged    <-chan struct{}
-	chainTipRejections          *chainTipRejections
-	ancestorLookupFailedSlot    uint64
+	forkChoiceRerunAt            time.Time
+	committedRoot                common.Hash
+	forkChoiceWaitingForIndices  bool
+	forkChoiceSuperseded         bool
+	forkChoiceIndicesChanged     <-chan struct{}
+	chainTipRejections           *chainTipRejections
+	ancestorLookupFailedSlot     uint64
 	// chainTipResumeSlot is the slot after a capped window, so a run of skipped slots longer than one request is crossed.
 	chainTipResumeSlot atomic.Uint64
 	pendingBlockWrite  *pendingBlockWrite
@@ -487,6 +486,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if cfg.forkChoiceWaitingForIndices {
 						return CleanupAndPruning
 					}
+					if cfg.forkChoiceSuperseded {
+						return ForkChoice
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
@@ -559,7 +561,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
-						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.committedRoot,
 					)
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {

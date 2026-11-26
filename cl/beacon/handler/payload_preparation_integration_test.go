@@ -37,6 +37,7 @@ import (
 	syncmock "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -68,7 +69,10 @@ import (
 
 type preparationExecutionClient struct {
 	*execution_client.ExecutionClientDirect
-	forkChoiceCalls       int
+	forkChoiceHeads       []common.Hash
+	forkChoiceFinalized   []common.Hash
+	forkChoiceSafe        []common.Hash
+	forkChoiceErr         error
 	productionID          []byte
 	collectedID           []byte
 	startPayloadBuildHook func()
@@ -83,7 +87,12 @@ func (c *preparationExecutionClient) NewPayload(ctx context.Context, payload *cl
 }
 
 func (c *preparationExecutionClient) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attrs *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
-	c.forkChoiceCalls++
+	c.forkChoiceHeads = append(c.forkChoiceHeads, head)
+	c.forkChoiceFinalized = append(c.forkChoiceFinalized, finalized)
+	c.forkChoiceSafe = append(c.forkChoiceSafe, safe)
+	if c.forkChoiceErr != nil {
+		return nil, c.forkChoiceErr
+	}
 	id, err := c.ExecutionClientDirect.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, version)
 	if attrs != nil {
 		c.productionID = bytes.Clone(id)
@@ -128,7 +137,7 @@ func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
 		proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
 		require.NoError(t, err)
 		fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
-		callsBeforePreparation := fixture.engine.forkChoiceCalls
+		callsBeforePreparation := len(fixture.engine.forkChoiceHeads)
 		preparationCtx, cancel := context.WithCancel(ctx)
 		done := fixture.handler.StartPayloadPreparation(preparationCtx)
 		t.Cleanup(func() { cancel(); <-done })
@@ -141,7 +150,7 @@ func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
 		}, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot)), 10*time.Millisecond)
 		cancel()
 		<-done
-		require.Equal(t, callsBeforePreparation, fixture.engine.forkChoiceCalls)
+		require.Len(t, fixture.engine.forkChoiceHeads, callsBeforePreparation)
 		require.NotEmpty(t, prepared.id)
 		require.True(t, prepared.primedAt.Before(fixture.handler.ethClock.GetSlotTime(targetSlot)))
 		require.NoError(t, common.Sleep(ctx, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot))))
@@ -181,6 +190,11 @@ type gloasPreparationIntegrationFixture struct {
 
 func newGloasPreparationIntegrationFixture(t *testing.T) *gloasPreparationIntegrationFixture {
 	t.Helper()
+	return newGloasPreparationIntegrationFixtureWithParentEnvelope(t, true)
+}
+
+func newGloasPreparationIntegrationFixtureWithParentEnvelope(t *testing.T, applyParentEnvelope bool) *gloasPreparationIntegrationFixture {
+	t.Helper()
 	module := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	seed, err := module.GenerateChain(1, nil)
 	require.NoError(t, err)
@@ -213,7 +227,10 @@ func newGloasPreparationIntegrationFixture(t *testing.T) *gloasPreparationIntegr
 
 	parentState, parentBlock, parentEnvelope, parentPayload, parentRoot, parentSlot := produceGloasIntegrationChild(t, handler, anchor, store.AnchorRoot(), anchor.LatestBlockHeader().Slot)
 	store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + parentSlot*handler.beaconChainCfg.SecondsPerSlot))
-	applyGossipIntegrationEnvelope(t, handler.indiciesDB, store, parentBlock, parentEnvelope)
+	importIntegrationBlock(t, handler.indiciesDB, store, parentBlock)
+	if applyParentEnvelope {
+		acceptGossipIntegrationEnvelope(t, store, parentBlock, parentEnvelope)
+	}
 
 	return &gloasPreparationIntegrationFixture{
 		module: module, reader: reader, engine: engine, handler: handler, store: store, synced: synced,
@@ -225,11 +242,8 @@ func newGloasPreparationIntegrationFixture(t *testing.T) *gloasPreparationIntegr
 func (f *gloasPreparationIntegrationFixture) runForkChoice(t *testing.T) (forkchoice.ForkChoiceNode, common.Hash) {
 	t.Helper()
 	head, executionHead := runGloasIntegrationForkChoice(t, f.store, f.engine, f.handler, f.synced)
-	f.module.ExecModule.WaitIdle(t.Context())
 	require.Equal(t, f.parentRoot, f.synced.HeadRoot(), "the ForkChoice stage must materialize its head")
-	actualHead, _, _, err := f.reader.GetForkChoice(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, executionHead, actualHead)
+	requireCommittedExecutionHead(t, f, executionHead)
 	return head, executionHead
 }
 
@@ -245,13 +259,13 @@ func (*preparationSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoR
 	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
-func runGloasIntegrationForkChoice(
+func newGloasIntegrationStageCfg(
 	t *testing.T,
 	store *forkchoice.ForkChoiceStore,
 	engine execution_client.ExecutionEngine,
 	handler *ApiHandler,
 	synced *synced_data.SyncedDataManager,
-) (forkchoice.ForkChoiceNode, common.Hash) {
+) *stages.Cfg {
 	t.Helper()
 	anchor, err := store.GetStateAtBlockRoot(store.AnchorRoot())
 	require.NoError(t, err)
@@ -265,6 +279,18 @@ func runGloasIntegrationForkChoice(
 	// ForkChoice does not use the history collector. Its large mmap can overlap the race
 	// detector's heap region, so release it before the stage starts allocating state data.
 	require.NoError(t, cfg.Close())
+	return cfg
+}
+
+func runGloasIntegrationForkChoice(
+	t *testing.T,
+	store *forkchoice.ForkChoiceStore,
+	engine execution_client.ExecutionEngine,
+	handler *ApiHandler,
+	synced *synced_data.SyncedDataManager,
+) (forkchoice.ForkChoiceNode, common.Hash) {
+	t.Helper()
+	cfg := newGloasIntegrationStageCfg(t, store, engine, handler, synced)
 	require.NoError(t, stages.ConsensusClStages().Stages[stages.ForkChoice].ActionFunc(t.Context(), log.Root(), cfg, stages.Args{}))
 
 	head, _, err := store.GetHeadNode()
@@ -312,10 +338,25 @@ func applyGossipIntegrationEnvelope(
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
 ) {
 	t.Helper()
+	importIntegrationBlock(t, db, store, block)
+	acceptGossipIntegrationEnvelope(t, store, block, envelope)
+}
+
+func importIntegrationBlock(t *testing.T, db kv.RwDB, store *forkchoice.ForkChoiceStore, block *cltypes.SignedBeaconBlock) {
+	t.Helper()
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}))
 	require.NoError(t, store.OnBlock(t.Context(), block, true, false, false))
+}
+
+func acceptGossipIntegrationEnvelope(
+	t *testing.T,
+	store *forkchoice.ForkChoiceStore,
+	block *cltypes.SignedBeaconBlock,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+) {
+	t.Helper()
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	blockState, err := store.GetStateAtBlockRoot(root)
@@ -366,10 +407,7 @@ func prepareGossipIntegrationEnvelope(
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
 ) (services.ExecutionPayloadService, common.Hash) {
 	t.Helper()
-	require.NoError(t, fixture.handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
-	}))
-	require.NoError(t, fixture.store.OnBlock(t.Context(), block, true, false, false))
+	importIntegrationBlock(t, fixture.handler.indiciesDB, fixture.store, block)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	blockState, err := fixture.store.GetStateAtBlockRoot(root)
@@ -867,4 +905,446 @@ func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
 			})
 		}
 	}
+}
+
+// afterHeadSelectionStore runs hook once, when publication asks for the execution head lock after selecting the head.
+type afterHeadSelectionStore struct {
+	forkchoice.ForkChoiceStorage
+	hook func()
+}
+
+func (s *afterHeadSelectionStore) TryLockExecutionHead() (func(), bool) {
+	if hook := s.hook; hook != nil {
+		s.hook = nil
+		hook()
+	}
+	return s.ForkChoiceStorage.TryLockExecutionHead()
+}
+
+// publishGloasIntegrationBlock publishes an already imported block, because the fixture's blocks carry no valid signatures.
+func publishGloasIntegrationBlock(t *testing.T, fixture *gloasPreparationIntegrationFixture, block *cltypes.SignedBeaconBlock, slot uint64) error {
+	t.Helper()
+	return publishGloasIntegrationBlockWithContext(t, t.Context(), fixture, block, slot)
+}
+
+func publishGloasIntegrationBlockWithContext(t *testing.T, ctx context.Context, fixture *gloasPreparationIntegrationFixture, block *cltypes.SignedBeaconBlock, slot uint64) error {
+	t.Helper()
+	if fixture.handler.attestationProducer == nil {
+		fixture.handler.attestationProducer = attestation_producer.New(fixture.handler.beaconChainCfg)
+	}
+	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + slot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+	importIntegrationBlock(t, fixture.handler.indiciesDB, fixture.store, block)
+	return fixture.handler.storeBlockAndBlobs(ctx, block, nil, nil, BlockPublishingValidationConsensus, func() {})
+}
+
+func TestStoreBlockAndBlobsSkipsHeadWhileTheExecutionHeadLockIsHeld(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, _, _, _, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		unlock, err := fixture.store.LockExecutionHead(t.Context())
+		require.NoError(t, err)
+		defer unlock()
+		syncedHead := fixture.synced.HeadRoot()
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+
+		require.NoError(t, publishGloasIntegrationBlockWithContext(t, ctx, fixture, block, slot))
+
+		require.Empty(t, fixture.engine.forkChoiceHeads[callsBefore:])
+		require.Equal(t, syncedHead, fixture.synced.HeadRoot())
+	})
+}
+
+func TestStoreBlockAndBlobsSendsFullHeadWhenEnvelopeAppliesAfterHeadSelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, envelope, payload, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		require.NotEqual(t, bid.ParentBlockHash, bid.BlockHash)
+		fixture.handler.forkchoiceStore = &afterHeadSelectionStore{
+			ForkChoiceStorage: fixture.store,
+			hook: func() {
+				head, _, err := fixture.store.GetHeadNode()
+				require.NoError(t, err)
+				require.Equal(t, forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+				acceptGossipIntegrationEnvelope(t, fixture.store, block, envelope)
+			},
+		}
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Equal(t, []common.Hash{payload.Payload.BlockHash}, fixture.engine.forkChoiceHeads[callsBefore:])
+	})
+}
+
+func TestStoreBlockAndBlobsSendsBidBlockHashForUnverifiedFullHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, stageHash := fixture.runForkChoice(t)
+		_, block, _, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		fixture.engine.forkChoiceErr = execution_client.ErrForkChoiceUpdateBusy
+		fixture.handler.forkchoiceStore = &headNodeStore{ForkChoiceStorage: fixture.store, status: cltypes.PayloadStatusFull}
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.False(t, fixture.store.IsPayloadVerified(root))
+		require.Equal(t, bid.ParentBlockHash, fixture.store.GetEth1Hash(root), "no envelope arrived, so the cached hash is the bid's parent hash")
+		require.Equal(t, []common.Hash{bid.BlockHash}, fixture.engine.forkChoiceHeads[callsBefore:])
+		require.Equal(t, stageHash, fixture.store.LastExecutionHead(), "a busy FCU is not recorded")
+	})
+}
+
+// checkpointAfterLockStore reports old checkpoints until its execution head lock is taken, then new ones.
+// Its execution hashes are the checkpoint roots, and they are only valid while the lock is held.
+type checkpointAfterLockStore struct {
+	forkchoice.ForkChoiceStorage
+	finalized, justified solid.Checkpoint
+	locked               bool
+}
+
+func (s *checkpointAfterLockStore) TryLockExecutionHead() (func(), bool) {
+	unlock, ok := s.ForkChoiceStorage.TryLockExecutionHead()
+	if !ok {
+		return nil, false
+	}
+	s.locked = true
+	s.finalized = solid.Checkpoint{Epoch: 2, Root: common.Hash{0xf2}}
+	s.justified = solid.Checkpoint{Epoch: 3, Root: common.Hash{0xa2}}
+	return func() { s.locked = false; unlock() }, true
+}
+
+func (s *checkpointAfterLockStore) FinalizedCheckpoint() solid.Checkpoint { return s.finalized }
+
+func (s *checkpointAfterLockStore) JustifiedCheckpoint() solid.Checkpoint { return s.justified }
+
+func (s *checkpointAfterLockStore) GetFinalizedExecutionHash(root common.Hash) common.Hash {
+	if !s.locked {
+		return common.Hash{}
+	}
+	return root
+}
+
+func TestStoreBlockAndBlobsSendsCheckpointHashesReadUnderTheExecutionHeadLock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, _, _, _, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.engine.forkChoiceErr = execution_client.ErrForkChoiceUpdateBusy
+		fixture.handler.forkchoiceStore = &checkpointAfterLockStore{
+			ForkChoiceStorage: fixture.store,
+			finalized:         solid.Checkpoint{Epoch: 1, Root: common.Hash{0xf1}},
+			justified:         solid.Checkpoint{Epoch: 2, Root: common.Hash{0xa1}},
+		}
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Equal(t, []common.Hash{{0xf2}}, fixture.engine.forkChoiceFinalized[callsBefore:])
+		require.Equal(t, []common.Hash{{0xa2}}, fixture.engine.forkChoiceSafe[callsBefore:])
+	})
+}
+
+func TestPublicationRecordsExecutionHeadForWakeCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, stageHash := fixture.runForkChoice(t)
+		require.Equal(t, stageHash, fixture.store.LastExecutionHead())
+		_, block, envelope, payload, _, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + slot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, fixture.store, block, envelope)
+		require.NotEqual(t, stageHash, payload.Payload.BlockHash)
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Equal(t, payload.Payload.BlockHash, fixture.store.LastExecutionHead())
+	})
+}
+
+func TestPublicationAndCanonicalStageKeepEmptyParentExecutionHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixtureWithParentEnvelope(t, false)
+		_, block, _, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		parentPayloadHash := fixture.parentPayload.Payload.BlockHash
+		require.NotEqual(t, parentPayloadHash, bid.ParentBlockHash, "the child must build on the EMPTY parent")
+		acceptGossipIntegrationEnvelope(t, fixture.store, fixture.parentBlock, fixture.parentEnvelope)
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + slot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		importIntegrationBlock(t, fixture.handler.indiciesDB, fixture.store, block)
+		require.Equal(t, bid.ParentBlockHash, fixture.store.GetEth1Hash(root))
+
+		head, canonicalHash := runGloasIntegrationForkChoice(t, fixture.store, fixture.engine, fixture.handler, fixture.synced)
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Equal(t, forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+		require.Equal(t, bid.ParentBlockHash, canonicalHash)
+		require.Equal(t, []common.Hash{bid.ParentBlockHash, bid.ParentBlockHash}, fixture.engine.forkChoiceHeads[callsBefore:], "the canonical stage and publication each send the EMPTY parent hash")
+	})
+}
+
+// headNodeStore reports a fixed payload status for the head root, as if fork choice selected it.
+type headNodeStore struct {
+	forkchoice.ForkChoiceStorage
+	status cltypes.PayloadStatus
+}
+
+func (s *headNodeStore) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	head, slot, err := s.ForkChoiceStorage.GetHeadNode()
+	head.PayloadStatus = s.status
+	return head, slot, err
+}
+
+func TestStoreBlockAndBlobsSendsBidParentHashForEmptyHeadWithAppliedEnvelope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, envelope, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		require.NotEqual(t, bid.ParentBlockHash, bid.BlockHash)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + slot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, fixture.store, block, envelope)
+		require.Equal(t, bid.BlockHash, fixture.store.GetEth1Hash(root), "the applied envelope must cache the block's own payload hash")
+		fixture.handler.forkchoiceStore = &headNodeStore{ForkChoiceStorage: fixture.store, status: cltypes.PayloadStatusEmpty}
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+		fixture.store.RecordExecutionHead(common.Hash{0xee}, nil)
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Equal(t, []common.Hash{bid.ParentBlockHash}, fixture.engine.forkChoiceHeads[callsBefore:])
+		require.Equal(t, bid.ParentBlockHash, fixture.store.LastExecutionHead())
+	})
+}
+
+// beforeExecutionHashStore runs beforeExecutionHash once, before publication resolves the head's execution hash.
+type beforeExecutionHashStore struct {
+	forkchoice.ForkChoiceStorage
+	beforeExecutionHash func(head forkchoice.ForkChoiceNode)
+}
+
+func (s *beforeExecutionHashStore) GetHeadExecutionHash(head forkchoice.ForkChoiceNode) common.Hash {
+	if hook := s.beforeExecutionHash; hook != nil {
+		s.beforeExecutionHash = nil
+		hook(head)
+	}
+	return s.ForkChoiceStorage.GetHeadExecutionHash(head)
+}
+
+func requireCommittedExecutionHead(t *testing.T, fixture *gloasPreparationIntegrationFixture, want common.Hash) {
+	t.Helper()
+	fixture.module.ExecModule.WaitIdle(t.Context())
+	actual, _, _, err := fixture.reader.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, want, actual)
+}
+
+// producedRootsRecorder records the roots attestation data was produced for.
+type producedRootsRecorder struct {
+	attestation_producer.AttestationDataProducer
+	roots []common.Hash
+}
+
+func (p *producedRootsRecorder) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, root common.Hash, slot uint64) (solid.AttestationData, error) {
+	p.roots = append(p.roots, root)
+	return p.AttestationDataProducer.ProduceAndCacheAttestationData(baseState, root, slot)
+}
+
+func TestStoreBlockAndBlobsSkipsStaleHeadAfterChildImport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, envelope, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		var callsAfterStage int
+		var childRoot common.Hash
+		produced := &producedRootsRecorder{AttestationDataProducer: attestation_producer.New(fixture.handler.beaconChainCfg)}
+		fixture.handler.attestationProducer = produced
+		fixture.handler.forkchoiceStore = &afterHeadSelectionStore{
+			ForkChoiceStorage: fixture.store,
+			hook: func() {
+				head, _, err := fixture.store.GetHeadNode()
+				require.NoError(t, err)
+				require.Equal(t, forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+				acceptGossipIntegrationEnvelope(t, fixture.store, block, envelope)
+				fullState, err := fixture.store.GetStateAtBlockRoot(root)
+				require.NoError(t, err)
+				var child *cltypes.SignedBeaconBlock
+				var childSlot uint64
+				_, child, _, _, childRoot, childSlot = produceGloasIntegrationChild(t, fixture.handler, fullState, root, slot)
+				require.Equal(t, bid.BlockHash, child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash)
+				fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+				importIntegrationBlock(t, fixture.handler.indiciesDB, fixture.store, child)
+				stageHead, _ := runGloasIntegrationForkChoice(t, fixture.store, fixture.engine, fixture.handler, fixture.synced)
+				require.Equal(t, forkchoice.ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, stageHead)
+				callsAfterStage = len(fixture.engine.forkChoiceHeads)
+			},
+		}
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+
+		require.Empty(t, fixture.engine.forkChoiceHeads[callsAfterStage:], "publication must not send an FCU once the head moved")
+		require.Equal(t, childRoot, fixture.synced.HeadRoot(), "publication must leave the head state the stage installed")
+		require.Empty(t, produced.roots, "publication must not cache attestation data for the stale head")
+		requireCommittedExecutionHead(t, fixture, bid.BlockHash)
+	})
+}
+
+type afterProduceStore struct {
+	attestation_producer.AttestationDataProducer
+	afterProduce func()
+}
+
+func (p *afterProduceStore) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, root common.Hash, slot uint64) (solid.AttestationData, error) {
+	data, err := p.AttestationDataProducer.ProduceAndCacheAttestationData(baseState, root, slot)
+	if hook := p.afterProduce; hook != nil {
+		p.afterProduce = nil
+		hook()
+	}
+	return data, err
+}
+
+func TestStoreBlockAndBlobsKeepsStageHeadStateWhenHeadMovesBeforeInstall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, envelope, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + slot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, fixture.store, block, envelope)
+		var childRoot common.Hash
+		var childHash common.Hash
+		stageDone := make(chan error, 1)
+		stageCfg := newGloasIntegrationStageCfg(t, fixture.store, fixture.engine, fixture.handler, fixture.synced)
+		fixture.handler.attestationProducer = &afterProduceStore{
+			AttestationDataProducer: attestation_producer.New(fixture.handler.beaconChainCfg),
+			afterProduce: func() {
+				fullState, err := fixture.store.GetStateAtBlockRoot(root)
+				require.NoError(t, err)
+				_, child, childEnvelope, childPayload, childRoot2, childSlot := produceGloasIntegrationChild(t, fixture.handler, fullState, root, slot)
+				childRoot, childHash = childRoot2, childPayload.Payload.BlockHash
+				fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+				applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, fixture.store, child, childEnvelope)
+				go func() {
+					stageDone <- stages.ConsensusClStages().Stages[stages.ForkChoice].ActionFunc(t.Context(), log.Root(), stageCfg, stages.Args{})
+				}()
+				// The stage either finishes or waits durably for the publication.
+				synctest.Wait()
+			},
+		}
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+		require.NoError(t, <-stageDone)
+
+		require.Equal(t, childRoot, fixture.synced.HeadRoot(), "the stage's head state must not be replaced by the stale publication head")
+		requireCommittedExecutionHead(t, fixture, childHash)
+	})
+}
+
+// headNodeErrStore fails the head lookup publication makes under the execution head lock.
+type headNodeErrStore struct {
+	forkchoice.ForkChoiceStorage
+	err error
+}
+
+func (s *headNodeErrStore) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	return forkchoice.ForkChoiceNode{}, 0, s.err
+}
+
+func TestStoreBlockAndBlobsReturnsHeadNodeError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, _, _, _, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		wantErr := errors.New("head lookup failed")
+		fixture.handler.forkchoiceStore = &headNodeErrStore{ForkChoiceStorage: fixture.store, err: wantErr}
+		callsBefore := len(fixture.engine.forkChoiceHeads)
+
+		require.ErrorIs(t, publishGloasIntegrationBlock(t, fixture, block, slot), wantErr)
+
+		require.Empty(t, fixture.engine.forkChoiceHeads[callsBefore:])
+	})
+}
+
+func TestStoreBlockAndBlobsDoesNotRollBackSameRootFullHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, block, envelope, _, root, slot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		stageDone := make(chan error, 1)
+		stageCfg := newGloasIntegrationStageCfg(t, fixture.store, fixture.engine, fixture.handler, fixture.synced)
+		fixture.handler.forkchoiceStore = &beforeExecutionHashStore{
+			ForkChoiceStorage: fixture.store,
+			beforeExecutionHash: func(head forkchoice.ForkChoiceNode) {
+				require.Equal(t, forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+				acceptGossipIntegrationEnvelope(t, fixture.store, block, envelope)
+				go func() {
+					stageDone <- stages.ConsensusClStages().Stages[stages.ForkChoice].ActionFunc(t.Context(), log.Root(), stageCfg, stages.Args{})
+				}()
+				// The stage either finishes or waits durably for the publication.
+				synctest.Wait()
+			},
+		}
+
+		require.NoError(t, publishGloasIntegrationBlock(t, fixture, block, slot))
+		require.NoError(t, <-stageDone)
+
+		requireCommittedExecutionHead(t, fixture, bid.BlockHash)
+	})
 }

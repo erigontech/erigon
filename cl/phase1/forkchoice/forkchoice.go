@@ -109,6 +109,8 @@ type ForkChoiceStore struct {
 	blocksProcessing       atomic.Int64
 	blockImportPrepareHook func()
 	blockImportsInFlight   map[common.Hash]chan struct{}
+	executionHeadLock      chan struct{}
+	lastExecutionHead      atomic.Value // common.Hash
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -479,6 +481,7 @@ func NewForkChoiceStore(
 	headSet := make(map[common.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
+		executionHeadLock:              make(chan struct{}, 1),
 		forkGraph:                      forkGraph,
 		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		latestMessages:                 newLatestMessagesStore(anchorState.ValidatorLength()),
@@ -815,7 +818,7 @@ func (f *ForkChoiceStore) Engine() execution_client.ExecutionEngine {
 	return f.engine
 }
 
-// FinalizedCheckpoint returns justified checkpoint
+// GetEth1Hash returns the cached execution hash of a beacon root, zero on a miss.
 func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

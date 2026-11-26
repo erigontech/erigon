@@ -100,6 +100,20 @@ func preparePostState(postState *state.CachingBeaconState, block *cltypes.Beacon
 	return prepared
 }
 
+// applyExecutionHashLocked records the execution head for a block from its payload or, in Gloas, its bid.
+func (f *ForkChoiceStore) applyExecutionHashLocked(block *cltypes.BeaconBlock, blockRoot common.Hash, blockVersion clparams.StateVersion) {
+	if block.Body.ExecutionPayload != nil {
+		f.eth2Roots.Add(blockRoot, block.Body.ExecutionPayload.BlockHash)
+	} else if blockVersion >= clparams.GloasVersion {
+		// Until the envelope arrives the head is the bid's parent hash.
+		if bid := block.Body.SignedExecutionPayloadBid; bid != nil && bid.Message != nil {
+			f.eth2Roots.Add(blockRoot, bid.Message.ParentBlockHash)
+		} else if parentHash, ok := f.eth2Roots.Get(block.ParentRoot); ok {
+			f.eth2Roots.Add(blockRoot, parentHash)
+		}
+	}
+}
+
 // applyBlockImportLocked applies the store writes of a block import under f.mu, in the order on_block applies them.
 func (f *ForkChoiceStore) applyBlockImportLocked(
 	block *cltypes.BeaconBlock,
@@ -112,17 +126,7 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	blockEpoch := f.computeEpochAtSlot(block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	f.updateChildren(block.Slot-1, block.ParentRoot, blockRoot) // parent slot can be innacurate
-	if block.Body.ExecutionPayload != nil {
-		f.eth2Roots.Add(blockRoot, block.Body.ExecutionPayload.BlockHash)
-	} else if blockVersion >= clparams.GloasVersion {
-		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block (GLOAS separates them).
-		// Inherit parent's execution head as a placeholder so FCU sends a valid (non-zero) hash.
-		// OnExecutionPayload will overwrite this with the real payload hash if the envelope arrives (FULL path).
-		// If the envelope never arrives (EMPTY path), the parent hash is the correct EL head anyway.
-		if parentHash, ok := f.eth2Roots.Get(block.ParentRoot); ok {
-			f.eth2Roots.Add(blockRoot, parentHash)
-		}
-	}
+	f.applyExecutionHashLocked(block, blockRoot, blockVersion)
 	// Remove the parent from the head set
 	delete(f.headSet, block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
