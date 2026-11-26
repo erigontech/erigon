@@ -225,8 +225,8 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 		senderID, _ := p.senders.getID(a.sender)
 		pooled := p.all.senderIDFrameTxn[senderID]
 		if first, ok := firstRemoval[pooled]; ok && first < i {
-			// The blocker may be gone at insertion. Simulate against the head now
-			// so the batch can still be installed under one lock.
+			// An earlier input may remove this blocker. Simulate against the head
+			// now so the frame is ready if its sender slot opens at insertion.
 			pooled = nil
 		}
 		// A surviving pooled hash decides the local result, but an earlier frame
@@ -246,9 +246,9 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 	return p.stateGeneration, p.stateBlockHash
 }
 
-// possibleFrameRemovals records the first ordinary input that could replace each
-// pooled frame at its account nonce. A sender penalty can remove a remote frame
-// before insertion starts, so its index is -1. The caller holds the pool lock.
+// possibleFrameRemovals records the first ordinary input that could replace a
+// pooled frame at its account nonce or evict a remote frame through a sender
+// penalty. Only later inputs can use the freed slot. The caller holds the pool lock.
 func (p *TxPool) possibleFrameRemovals(txns []txnAdmission) map[*metaTxn]int {
 	if len(txns) < 2 || len(p.all.senderIDFrameTxn) == 0 {
 		return nil
@@ -264,12 +264,13 @@ func (p *TxPool) possibleFrameRemovals(txns []txnAdmission) map[*metaTxn]int {
 		if blocker == nil {
 			continue
 		}
-		if !a.local && blocker.subPool&IsLocal == 0 {
-			firstRemoval[blocker] = -1
-		} else if !blocker.keyedNonce && blocker.TxnSlot.Nonce == a.txn.Nonce {
-			if _, ok := firstRemoval[blocker]; !ok {
-				firstRemoval[blocker] = i
-			}
+		if _, seen := firstRemoval[blocker]; seen {
+			continue
+		}
+		mayEvict := !a.local && blocker.subPool&IsLocal == 0
+		mayReplace := !blocker.keyedNonce && blocker.TxnSlot.Nonce == a.txn.Nonce
+		if mayEvict || mayReplace {
+			firstRemoval[blocker] = i
 		}
 	}
 	return firstRemoval

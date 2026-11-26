@@ -3840,8 +3840,8 @@ func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
 				first, _ = newTestSetCodeWithAuthorization(t, pool.chainID, 3)
 			}
 
-			// The first input's penalty frees a slot for the second. If the second is
-			// SetCode, admission retries after recovering its authorizations.
+			// The first input's penalty frees a slot for the second. If the second
+			// is SetCode, its authorizations must be ready when that slot opens.
 			reasons := submitRemoteTxns(t, pool, sender, first, second)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
 			require.Equal(t, 3, pool.all.count(first.SenderID), "one penalty leaves two seeded transactions plus the admitted input")
@@ -3874,8 +3874,35 @@ func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
 
 	setCode := newTestSetCodeTxnSlot(3, 0, 1, 2, 100_000)
 	setCode.IDHash[0] = 4
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, submitRemoteTxns(t, pool, sender, setCode))
+	// In the reverse order the copy is a duplicate. The later penalty must leave it evicted.
+	reasons = submitRemoteTxns(t, pool, sender, pooled, setCode)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash, txpoolcfg.Spammer}, reasons)
+	require.Nil(t, setCode.AuthAndNonces, "a pooled duplicate cannot free a slot for authorization recovery")
+	require.NotContains(t, pool.byHash, string(pooled.IDHash[:]))
+	require.NotContains(t, pool.auths, auth)
 	require.Len(t, pool.byHash, 2, "the submitting transaction keeps its rejection after its penalty frees a slot")
+}
+
+func TestSenderPenaltyKeepsBatchTogetherForPromotion(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	other := common.Address{2}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender, other), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.cfg.AccountSlots, pool.cfg.MaxNonceGap = 2, 1
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0),
+		newTestSenderTxnSlot(t, sender, 1), newTestSenderTxnSlot(t, sender, 2))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	// The penalty makes SetCode eligible for admission. The other sender's
+	// nonce 2 survives only if promotion also sees its nonce 0 later in the batch.
+	setCode, _ := newTestSetCodeWithAuthorization(t, pool.chainID, 2)
+	var txns TxnSlots
+	txns.Append(encodeRemoteTxn(t, newTestTxnSlot(2, 0, 2, 3, 100_000)), other[:], true)
+	txns.Append(newTestSenderTxnSlot(t, sender, 3), sender[:], false)
+	txns.Append(setCode, sender[:], false)
+	txns.Append(encodeRemoteTxn(t, newTestTxnSlot(0, 0, 2, 3, 100_000)), other[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Spammer, txpoolcfg.Success, txpoolcfg.Success}, reasons)
 }
 
 func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {

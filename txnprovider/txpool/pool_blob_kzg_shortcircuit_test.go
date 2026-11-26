@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -325,14 +326,21 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			tc.limit(&pool.cfg)
 
 			bad := makeBlobSlot(0x80, true)
+			second := makeBlobSlot(0x81, true)
 			a0 := [20]byte{1}
 			var slots TxnSlots
 			slots.Append(&bad, a0[:], false)
+			slots.Append(&second, a0[:], false)
+			batch, err := pool.prepareTxns(ctx, slots, nil)
+			require.NoError(t, err)
+			require.NoError(t, pool.withLockedState(ctx, &slots, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+				return pool.planPreparation(&batch, view)
+			}), "both inputs can be rejected before proof verification")
 			pool.AddRemoteTxns(ctx, slots, nil, nil)
 
 			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason, tc.reason}, reasons)
 		})
 	}
 }
@@ -376,14 +384,28 @@ func TestRemoteBlobSidecarBeforeAndAfterLocalAdmission(t *testing.T) {
 	withoutSidecar := blob
 	withoutSidecar.BlobBundles = nil
 
+	// A possible duplicate still gets the price rejection if the earlier copy
+	// fails insertion. Its sidecar must not cause later inputs to be skipped.
+	pool.pendingBlobFee.Store(blob.GetBlobFeeCap().Uint64() + 1)
+	badCopy := makeBlobSlot(0x52, true)
+	other := common.Address{2}
+	var rejected TxnSlots
+	rejected.Append(&blob, sender[:], true)
+	rejected.Append(&badCopy, sender[:], false)
+	rejected.Append(newTestTxnSlot(0, 0, 300_000, 300_000, 100_000), other[:], false)
+	reasons, err := pool.addNewTxns(ctx, rejected, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow, txpoolcfg.UnderPriced, txpoolcfg.Success}, reasons)
+
 	// The same remote input is underpriced on both sides of the local input.
 	// Only the later copy can be a duplicate and needs its sidecar checked.
+	pool.pendingBlobFee.Store(blob.GetBlobFeeCap().Uint64())
 	var txns TxnSlots
 	txns.Append(&withoutSidecar, sender[:], false)
 	txns.Append(&blob, sender[:], true)
 	txns.Append(&withoutSidecar, sender[:], false)
 	txns.Append(&blob, sender[:], false)
-	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
 		txpoolcfg.UnderPriced, txpoolcfg.Success, txpoolcfg.UnequalBlobTxExt, txpoolcfg.DuplicateHash,
@@ -412,7 +434,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
 		batch := newAdmissionBatch(slots, nil)
-		require.ErrorIs(t, pool.validateTxns(&batch, cacheView), errPreparationRequired)
+		require.ErrorIs(t, pool.planPreparation(&batch, cacheView), errPreparationRequired)
 		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 

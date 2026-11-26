@@ -1409,27 +1409,40 @@ func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
 }
 
-func TestFramePoolAdmissionAfterSenderPenalty(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	pool.cfg.AccountSlots = 1
-	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
-	var initial TxnSlots
-	initial.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
-	initial.Append(blocker, sender[:], false)
-	reasons, err := pool.addNewTxns(ctx, initial, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+func TestFramePoolAdmissionAroundSenderPenalty(t *testing.T) {
+	for _, order := range []string{"frame first", "penalty first"} {
+		t.Run(order, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.cfg.AccountSlots = 1
+			blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var initial TxnSlots
+			initial.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
+			initial.Append(blocker, sender[:], false)
+			reasons, err := pool.addNewTxns(ctx, initial, nil)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 
-	// The remote sender penalty runs during validation, before either input is inserted.
-	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
-	var txns TxnSlots
-	txns.Append(candidate, sender[:], true)
-	txns.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], false)
-	reasons, err = pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Spammer}, reasons)
-	require.NotContains(t, pool.byHash, string(blocker.IDHash[:]))
-	require.Contains(t, pool.byHash, string(candidate.IDHash[:]))
+			// The candidate conflicts with the pooled frame until the penalty evicts it.
+			candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+			overLimit := newTestSenderTxnSlot(t, sender, 1)
+			var txns TxnSlots
+			want := []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame, txpoolcfg.Spammer}
+			if order == "penalty first" {
+				txns.Append(overLimit, sender[:], false)
+				txns.Append(candidate, sender[:], true)
+				want = []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}
+			} else {
+				txns.Append(candidate, sender[:], true)
+				txns.Append(overLimit, sender[:], false)
+			}
+			reasons, err = pool.addNewTxns(ctx, txns, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, reasons)
+			require.NotContains(t, pool.byHash, string(blocker.IDHash[:]))
+			_, pooled := pool.byHash[string(candidate.IDHash[:])]
+			require.Equal(t, order == "penalty first", pooled)
+		})
+	}
 }
 
 func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
