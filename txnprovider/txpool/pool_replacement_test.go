@@ -184,9 +184,15 @@ func TestReplacementIgnoresUnfundedTxns(t *testing.T) {
 		replaceValue uint64
 		wantPending  int
 	}{
-		// Nonce 2 spends the funds that nonce 3 needs.
-		{"unfunded nonce", []uint64{0, 1, 2, 3}, []uint64{0, 0, spareFunds + fundedTxnCost, 0}, 3, 0, 3},
-		{"after nonce gap", []uint64{0, 1, 3}, []uint64{0, 0, common.Ether / 2}, 0, common.Ether / 2, 2},
+		{
+			// Nonce 2 spends the funds that nonce 3 needs.
+			name: "unfunded nonce", nonces: []uint64{0, 1, 2, 3}, values: []uint64{0, 0, spareFunds + fundedTxnCost, 0},
+			replaced: 3, wantPending: 3,
+		},
+		{
+			name: "after nonce gap", nonces: []uint64{0, 1, 3}, values: []uint64{0, 0, common.Ether / 2},
+			replaced: 0, replaceValue: common.Ether / 2, wantPending: 2,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)

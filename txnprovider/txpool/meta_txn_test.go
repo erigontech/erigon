@@ -130,8 +130,14 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 		localNext                   bool // a local txn ranks above remote ones, so it outlasts its predecessor
 		evictedSubPool, nextSubPool SubPoolType
 	}{
-		{"pending overflow", 300, 50, 1, 2, false, PendingSubPool, BaseFeeSubPool},
-		{"base fee overflow", 5, 8, 10, 2, true, BaseFeeSubPool, BaseFeeSubPool},
+		{
+			name: "pending overflow", firstFeeCap: 300, otherFeeCap: 50, pendingLimit: 1, baseFeeLimit: 2,
+			evictedSubPool: PendingSubPool, nextSubPool: BaseFeeSubPool,
+		},
+		{
+			name: "base fee overflow", firstFeeCap: 5, otherFeeCap: 8, pendingLimit: 10, baseFeeLimit: 2,
+			localNext: true, evictedSubPool: BaseFeeSubPool, nextSubPool: BaseFeeSubPool,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, _, _ := newTestPool(t)

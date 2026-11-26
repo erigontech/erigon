@@ -83,11 +83,16 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 }
 
 // fundedPrefix is the run of a sender's transactions that its balance covers after frame reservations:
-// account nonces from the sender's state nonce up to end, exclusive, with no gap. spent is what the run
-// costs.
+// account nonces from start, the sender's state nonce, up to end, exclusive, with no gap. spent is what
+// the run costs.
 type fundedPrefix struct {
-	end   uint64
-	spent uint256.Int
+	start, end uint64
+	spent      uint256.Int
+}
+
+// covers reports whether mt is one of the transactions in the prefix.
+func (f *fundedPrefix) covers(mt *metaTxn) bool {
+	return !mt.keyedNonce && mt.TxnSlot.Nonce >= f.start && mt.TxnSlot.Nonce < f.end
 }
 
 // keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
@@ -113,26 +118,10 @@ func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uin
 	sender := p.senders.senderID2Addr[replacement.SenderID]
 	reserved := p.frameReservations[sender].cost
 	if prefix == nil {
-		prefix = &fundedPrefix{end: senderNonce}
-		funds := unreservedFunds(balance, reserved)
-		p.all.ascend(replacement.SenderID, func(mt *metaTxn) bool {
-			if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
-				return true
-			}
-			if mt.TxnSlot.Nonce != prefix.end {
-				return false
-			}
-			var spent uint256.Int
-			if _, overflow := spent.AddOverflow(&prefix.spent, requiredBalance(mt.TxnSlot)); overflow || spent.Gt(&funds) {
-				return false
-			}
-			prefix.spent = spent
-			prefix.end++
-			return true
-		})
+		prefix = p.newFundedPrefix(replacement.SenderID, senderNonce, unreservedFunds(balance, reserved))
 		prefixes[replacement.SenderID] = prefix
 	}
-	if previous.keyedNonce || previous.TxnSlot.Nonce < senderNonce || previous.TxnSlot.Nonce >= prefix.end {
+	if !prefix.covers(previous) {
 		return true, nil
 	}
 	var spent uint256.Int
@@ -149,6 +138,28 @@ func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uin
 	}
 	prefix.spent = spent
 	return true, nil
+}
+
+// newFundedPrefix walks the sender's account-nonce transactions from senderNonce for as long as they have
+// no gap and funds cover their total cost.
+func (p *TxPool) newFundedPrefix(senderID, senderNonce uint64, funds uint256.Int) *fundedPrefix {
+	prefix := &fundedPrefix{start: senderNonce, end: senderNonce}
+	p.all.ascend(senderID, func(mt *metaTxn) bool {
+		if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
+			return true
+		}
+		if mt.TxnSlot.Nonce != prefix.end {
+			return false
+		}
+		var spent uint256.Int
+		if _, overflow := spent.AddOverflow(&prefix.spent, requiredBalance(mt.TxnSlot)); overflow || spent.Gt(&funds) {
+			return false
+		}
+		prefix.spent = spent
+		prefix.end++
+		return true
+	})
+	return prefix
 }
 
 // unreservedFunds returns what balance leaves after reserved, or zero if reserved exceeds balance.
