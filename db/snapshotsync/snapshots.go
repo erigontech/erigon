@@ -1090,6 +1090,7 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 	// concurrent OpenIdxIfNeed on it, which race on its index slice.
 	seen := make(map[string]struct{}, len(fileNames))
 	pendingUnlink := s.pendingUnlinkNames()
+	var unsupported *DirtySegment
 
 	for _, fName := range fileNames {
 		if _, dup := seen[fName]; dup {
@@ -1135,6 +1136,14 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			}
 		}
 
+		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Type().Versions().Supports(sn.Version()) {
+			if unsupported == nil {
+				unsupported = sn
+			}
+			sn.closeSeg()
+			continue
+		}
+
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
@@ -1154,6 +1163,9 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 
 	if err := wg.Wait(); err != nil {
 		return err
+	}
+	if unsupported != nil {
+		unsupported.Type().Versions().MustSupport(unsupported.Version(), unsupported.FileName())
 	}
 
 	return nil
