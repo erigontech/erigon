@@ -85,8 +85,9 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 	db, agg = reopenAggregator(t, db, agg, 10)
 	require.NoError(t, agg.OpenFolder(db))
 	for _, txNum := range []uint64{latestTxNum, earlierTxNum} {
-		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
+		check := checks[0]
 		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 }
