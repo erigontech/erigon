@@ -270,9 +270,6 @@ func TestWitnessGoldenCollapseShapes(t *testing.T) {
 		case "transient-before":
 			require.Empty(t, hph.legacy[name], name)
 			require.NotEmpty(t, v3.legacy[name], name)
-		case "empty-storage":
-			require.NotEmpty(t, hph.legacy[name], name)
-			require.Empty(t, v3.legacy[name], name)
 		default:
 			require.NotEmpty(t, hph.legacy[name], name)
 			require.NotEmpty(t, v3.legacy[name], name)

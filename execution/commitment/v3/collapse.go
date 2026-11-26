@@ -89,12 +89,10 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 		nib := bits.TrailingZeros16(n.childMask)
 		return len(deleteRange(deletes, deleteChildPath(n, nib), nil)) == 0, nil
 	}
-	survivorCount := 0
-	var survivor []byte
+	survivorCount, survivor := 0, 15-bits.LeadingZeros16(n.childMask)
 	for mask := n.childMask; mask != 0; mask &= mask - 1 {
 		nib := bits.TrailingZeros16(mask)
-		childPath := deleteChildPath(n, nib)
-		childDeletes := deleteRange(deletes, childPath, nil)
+		childDeletes := deleteRange(deletes, deleteChildPath(n, nib), nil)
 		live := true
 		if n.leafMask&(uint16(1)<<nib) != 0 {
 			live = len(childDeletes) == 0
@@ -107,18 +105,15 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 		}
 		if live {
 			survivorCount++
-			survivor = childPath
-			if n.leafMask&(uint16(1)<<nib) != 0 {
-				var err error
-				survivor, err = collapseSurvivorPath(ctx, g, n, nib, survivor)
-				if err != nil {
-					return false, err
-				}
-			}
+			survivor = nib
 		}
 	}
-	if bits.OnesCount16(n.childMask) >= 2 && survivorCount == 1 {
-		tracer(slices.Concat(ownerPath, survivor), slices.Concat(ownerPath, n.path))
+	if bits.OnesCount16(n.childMask) >= 2 && survivorCount <= 1 {
+		path, err := collapseSurvivorPath(ctx, g, n, survivor, deleteChildPath(n, survivor))
+		if err != nil {
+			return false, err
+		}
+		tracer(slices.Concat(ownerPath, path), slices.Concat(ownerPath, n.path))
 	}
 	return survivorCount != 0, nil
 }

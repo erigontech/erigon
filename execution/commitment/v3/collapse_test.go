@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -151,10 +152,10 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 			accounts:        3,
 			accountPrefixes: [][]byte{{1, 2, 3}, {1, 2, 4}, {1, 8}},
 		})
-		want := accountCollapseEvent(pre[0].Key, pre[2].Key)
+		want := []collapseTestEvent{accountCollapseEvent(pre[0].Key, pre[1].Key), accountCollapseEvent(pre[0].Key, pre[2].Key)}
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key), commitmenttest.DeleteAt(pre[1].Key)}
 		got := collapseRuleEvents(t, pre, batch, false)
-		require.ElementsMatch(t, []collapseTestEvent{want}, got)
+		require.ElementsMatch(t, want, got)
 	})
 
 	t.Run("branch keeps none", func(t *testing.T) {
@@ -162,8 +163,10 @@ func TestDeletesOnlyCollapseShapes(t *testing.T) {
 			accounts:        2,
 			accountPrefixes: [][]byte{{1, 2}, {1, 3}},
 		})
+		want := accountCollapseEvent(pre[0].Key, pre[1].Key)
 		batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key), commitmenttest.DeleteAt(pre[1].Key)}
-		require.Empty(t, collapseRuleEvents(t, pre, batch, false))
+		require.ElementsMatch(t, []collapseTestEvent{want}, collapseRuleEvents(t, pre, batch, false))
+		require.ElementsMatch(t, []collapseTestEvent{want}, collapseRuleEvents(t, pre, batch, true))
 	})
 
 	t.Run("delete and insert before", func(t *testing.T) {
@@ -285,6 +288,7 @@ func TestCollapseRandomBlocksKeepWitnessNodes(t *testing.T) {
 				dead[string(op.Key)] = true
 			}
 		}
+		debugPlain := slices.Clone(keys.plain)
 		for _, slot := range bed.slots {
 			if dead[string(slot[:length.Addr])] && !touched[string(slot)] {
 				valid = append(valid, commitmenttest.DeleteAt(slot))
@@ -294,7 +298,7 @@ func TestCollapseRandomBlocksKeepWitnessNodes(t *testing.T) {
 		batch = valid
 
 		v3Events := collapseRuleEvents(t, pre, batch, false)
-		hphEvents := collapseHphEvents(t, pre, batch)
+		hphEvents, hphChildCount := collapseHphEvents(t, pre, batch)
 		post := newWitnessBed(t, pre)
 		_, root := post.v3Collapses(t, batch, true)
 		_, root2 := post.v3Collapses(t, batch, false)
@@ -304,41 +308,74 @@ func TestCollapseRandomBlocksKeepWitnessNodes(t *testing.T) {
 			data, _, err := post.v3Mem.Branch(key)
 			return data, err
 		}
-		makeKeys := func(events []collapseTestEvent, canonical bool) witnessKeys {
-			result := witnessKeys{plain: slices.Clone(keys.plain)}
+		v3ChildCount := func(prefix []byte) int {
+			childCount, err := tr.BranchChildCount(read, prefix)
+			require.NoError(t, err)
+			return childCount
+		}
+		makeKeys := func(plain [][]byte, events []collapseTestEvent, childCount func([]byte) int) witnessKeys {
+			result := witnessKeys{plain: slices.Clone(plain)}
 			for _, event := range events {
-				if canonical {
-					childCount, err := tr.BranchChildCount(read, event.prefix)
-					require.NoError(t, err)
-					if childCount >= 2 {
-						continue
-					}
+				if childCount != nil && childCount(event.prefix) >= 2 {
+					continue
 				}
 				result.hashed = append(result.hashed, event.sibling)
 			}
 			return result
 		}
 
-		hphLegacy := bed.hphWitness(t, makeKeys(hphEvents, false), true)
-		v3Legacy := bed.v3NativeWitness(t, makeKeys(v3Events, false), true)
-		if missing := countWitnessNodes(hphLegacy, v3Legacy); missing != 0 {
-			legacyMisses++
-			if legacyMisses <= 2 {
-				t.Logf("legacy seed %d HPH %d v3 %d missing %d", seed, len(hphLegacy), len(v3Legacy), missing)
+		for shape, plain := range map[string][][]byte{"eth_getWitness": keys.plain, "debug_executionWitness": debugPlain} {
+			hphLegacy := bed.hphWitness(t, makeKeys(plain, hphEvents, nil), true)
+			v3Legacy := bed.v3NativeWitness(t, makeKeys(plain, v3Events, nil), true)
+			if missing := countWitnessNodes(hphLegacy, v3Legacy); missing != 0 {
+				legacyMisses++
+				if legacyMisses <= 2 {
+					t.Logf("legacy %s seed %d HPH %d v3 %d missing %d", shape, seed, len(hphLegacy), len(v3Legacy), missing)
+				}
 			}
-		}
-		hphCanonical := bed.hphWitness(t, makeKeys(hphEvents, true), false)
-		v3Canonical := bed.v3NativeWitness(t, makeKeys(v3Events, true), false)
-		if !slices.EqualFunc(hphCanonical, v3Canonical, bytes.Equal) {
-			canonicalDiffs++
-			if canonicalDiffs <= 2 {
-				t.Logf("canonical seed %d HPH %d v3 %d", seed, len(hphCanonical), len(v3Canonical))
+			hphCanonical := bed.hphWitness(t, makeKeys(plain, hphEvents, hphChildCount), false)
+			v3Canonical := bed.v3NativeWitness(t, makeKeys(plain, v3Events, v3ChildCount), false)
+			if !slices.EqualFunc(hphCanonical, v3Canonical, bytes.Equal) {
+				canonicalDiffs++
+				if canonicalDiffs <= 2 {
+					t.Logf("canonical %s seed %d HPH %d v3 %d", shape, seed, len(hphCanonical), len(v3Canonical))
+				}
 			}
 		}
 	}
 	t.Logf("%d seeds legacy misses=%d canonical HPH diffs=%d", seedCount, legacyMisses, canonicalDiffs)
 	require.Zero(t, legacyMisses)
 	require.Zero(t, canonicalDiffs)
+}
+
+func TestCollapseDeletedSiblingsKeepHphStorageNodes(t *testing.T) {
+	pre := witnessState(rand.New(rand.NewSource(8)), witnessShape{
+		accounts:        3,
+		slots:           1,
+		accountPrefixes: [][]byte{{1, 2}, {1, 3}, {8}},
+		slotPrefixes:    [][]byte{{1}},
+	})
+	a, b := pre[0].Key, pre[1].Key
+	batch := []commitmenttest.Op{commitmenttest.DeleteAt(a), commitmenttest.DeleteAt(b)}
+	for _, op := range pre[3:] {
+		if bytes.HasPrefix(op.Key, a) || bytes.HasPrefix(op.Key, b) {
+			batch = append(batch, commitmenttest.DeleteAt(op.Key))
+		}
+	}
+	require.Len(t, batch, 4)
+	keys := func(events []collapseTestEvent) witnessKeys {
+		result := witnessKeys{plain: [][]byte{a, b}}
+		for _, event := range events {
+			result.hashed = append(result.hashed, event.sibling)
+		}
+		return result
+	}
+	hphEvents, _ := collapseHphEvents(t, pre, batch)
+	v3Events := collapseRuleEvents(t, pre, batch, false)
+	bed := newWitnessBed(t, pre)
+	hphLegacy := bed.hphWitness(t, keys(hphEvents), true)
+	v3Legacy := bed.v3NativeWitness(t, keys(v3Events), true)
+	require.Zero(t, countWitnessNodes(hphLegacy, v3Legacy), "hph events %x, v3 events %x", hphEvents, v3Events)
 }
 
 func TestCollapseDeleteRangeCost(t *testing.T) {
@@ -360,7 +397,7 @@ func TestCollapseDeleteRangeCost(t *testing.T) {
 	require.LessOrEqual(t, comparisons, 32*len(deletes))
 }
 
-func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseTestEvent {
+func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) ([]collapseTestEvent, func([]byte) int) {
 	t.Helper()
 	bed := newWitnessBed(t, pre)
 	bed.hphMem.Apply(batch)
@@ -373,7 +410,12 @@ func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseT
 	})
 	_, err := hph.Process(t.Context(), testUpdates(t, commitment.ModeUpdate, batch), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
-	return events
+	childCount := func(prefix []byte) int {
+		data, _, err := bed.hphMem.Branch(nibbles.HexToCompact(prefix))
+		require.NoError(t, err)
+		return commitment.BranchData(data).ChildCount()
+	}
+	return events, childCount
 }
 
 func countWitnessNodes(want, got [][]byte) int {
@@ -434,6 +476,9 @@ func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []col
 	}
 	for key := range deletes[planeStorage] {
 		path := []byte(key)
+		if _, deleted := deletes[planeAccount][string(path[:64])]; deleted {
+			continue
+		}
 		groups[string(path[:64])] = append(groups[string(path[:64])], path[64:])
 	}
 	var result []collapseTestEvent
@@ -501,15 +546,20 @@ func referenceCollapseNodes(n *node, live map[string]struct{}, deletes [][]byte,
 		return result
 	}
 	survivors := make([][]byte, 0, bits.OnesCount16(n.childMask))
+	var last []byte
 	for mask := n.childMask; mask != 0; mask &= mask - 1 {
 		nib := bits.TrailingZeros16(mask)
 		childPath := collapseNodeChildPath(n, nib)
+		last = childPath
 		for key := range live {
 			if bytes.HasPrefix([]byte(key), childPath) {
 				survivors = append(survivors, childPath)
 				break
 			}
 		}
+	}
+	if len(survivors) == 0 {
+		survivors = append(survivors, last)
 	}
 	if len(survivors) == 1 {
 		result = append(result, collapseTestEvent{sibling: slices.Concat(ownerPath, survivors[0]), prefix: slices.Concat(ownerPath, n.path)})
