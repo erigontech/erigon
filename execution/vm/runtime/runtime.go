@@ -260,7 +260,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 // ownState gives a run without a caller state a versioned state over an empty base, and remembers it as the
 // runtime's own. The caller keeps the states it was returned.
 func ownState(cfg *Config) {
-	cfg.State = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	cfg.State = state.New(state.NewNoopReader())
 	cfg.State.SetNoConflictDetection()
 	cfg.ownState = cfg.State
 }
