@@ -316,6 +316,20 @@ func TestProposerSlashingServiceRejectsMalformedAfterAccepted(t *testing.T) {
 	require.False(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(malformed)))
 }
 
+func TestProposerSlashingServiceRejectsInvalidSignatureAfterAccepted(t *testing.T) {
+	service, operationsPool, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
+	valid := signedSlashing(proposerIndex, common.Hash{1}, common.Hash{2})
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, valid))
+
+	invalidSignature := signedSlashing(proposerIndex, common.Hash{3}, common.Hash{4})
+	invalidSignature.Header2.Signature = invalidSignature.Header1.Signature
+	err := service.ProcessMessage(t.Context(), nil, invalidSignature)
+	require.ErrorContains(t, err, "invalid signature")
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Len(t, operationsPool.ProposerSlashingsPool.Raw(), 1)
+	require.False(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(invalidSignature)))
+}
+
 func TestProposerSlashingServiceIgnoresSeenProposerOnGossip(t *testing.T) {
 	service, _, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
 	ctx := serviceinterface.WithGossipPeer(t.Context(), "forwarder")
