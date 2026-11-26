@@ -222,7 +222,7 @@ func (w *witnessWalk) walkPlane(plane byte, addrHash, fullKey, k []byte, want []
 		}
 		return nil
 	}
-	if !w.exclusion && bytes.Equal(k, r.n.path) {
+	if w.lean && !w.exclusion && bytes.Equal(k, r.n.path) {
 		return nil
 	}
 	w.emit(r.branch.rlp, r.branch.hash)
@@ -261,7 +261,7 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, k [
 				w.emit(behind.rlp, behind.hash)
 				return nil
 			}
-			if !w.exclusion && len(k) == len(ext) {
+			if w.lean && !w.exclusion && len(k) == len(ext) {
 				return nil
 			}
 			k = k[len(ext):]

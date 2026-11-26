@@ -377,6 +377,54 @@ func TestWitnessRejectsCorruptRecords(t *testing.T) {
 	}
 }
 
+func TestWitnessSupersetAtExtensionEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		inner, storage bool
+	}{
+		{name: "account-root"},
+		{name: "account-inner", inner: true},
+		{name: "storage-root", storage: true},
+		{name: "storage-inner", inner: true, storage: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefixes := [][]byte{{1, 2, 3}, {1, 2, 4}}
+			if tc.inner {
+				prefixes = append(prefixes, []byte{8})
+			}
+			shape := witnessShape{accounts: len(prefixes), accountPrefixes: prefixes}
+			if tc.storage {
+				shape = witnessShape{accounts: 1, slots: len(prefixes), slotPrefixes: prefixes}
+			}
+			b := newWitnessBed(t, witnessState(rand.New(rand.NewSource(0)), shape))
+			end := []byte{1, 2}
+			if tc.storage {
+				end = slices.Concat(accountNibbles(b.accounts[0]), end)
+			}
+			tr := b.openV3(t.Context())
+			_, _, err := tr.RestoreState(b.v3State)
+			require.NoError(t, err)
+			fetch := func(key []byte) map[string][]byte {
+				t.Helper()
+				u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+				defer u.Close()
+				u.TouchHashedKey(key)
+				nodes, _, _, err := tr.WitnessesByHash(t.Context(), u, false)
+				require.NoError(t, err)
+				return nodes
+			}
+			atEnd := fetch(end)
+			pastEnd := fetch(slices.Concat(end, []byte{15}))
+			for hash := range pastEnd {
+				if _, ok := atEnd[hash]; !ok {
+					t.Fatalf("extension-end superset size = %d, want %d, missing branch %x", len(atEnd), len(pastEnd), hash)
+				}
+			}
+			require.Equal(t, pastEnd, atEnd)
+		})
+	}
+}
+
 func TestWitnessNodesRequiresContext(t *testing.T) {
 	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 	defer u.Close()
