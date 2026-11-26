@@ -205,9 +205,11 @@ func (e *initialSyncPublicationError) Unwrap() error {
 	return e.err
 }
 
-// ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
-// It downloads block files, then executes them in a hasMore loop until
-// all frozen blocks are processed.
+// ProcessFrozenBlocks downloads block snapshots at startup. Unless onlySnapDownload
+// is set, it also executes pending canonical blocks, including those recorded by
+// an interrupted forkchoice. After a rejection, startup can keep the last committed
+// execution checkpoint if discarding the unexecuted suffix preserves frozen blocks
+// and the last accepted chain.
 func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)

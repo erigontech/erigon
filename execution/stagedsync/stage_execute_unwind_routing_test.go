@@ -121,10 +121,8 @@ func TestRenderExecOutcome(t *testing.T) {
 	})
 
 	t.Run("plain invalid verdict propagates without setting an unwind point", func(t *testing.T) {
-		// A plain invalid block propagates the error and lets the caller own the
-		// unwind: setting a stage unwind point here would leave a stale bad-block
-		// verdict that blocks a fresh canonical block at the same height from
-		// re-executing on the next fork-choice.
+		// A pending unwind would carry this rejection into the next forkchoice,
+		// which may select a valid block at the same height.
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, err: plainInvalid}}
@@ -173,15 +171,14 @@ func TestRenderExecOutcome(t *testing.T) {
 
 	t.Run("wrong root on non-initial cycle takes the binary-search path from the implicated block", func(t *testing.T) {
 		u := &recordingUnwinder{}
-		// blockNum (5) <= s.BlockNumber (10) makes handleIncorrectRootHashError
-		// return nil at its guard, before touching applyTx. If the routing wrongly
-		// fell through to the plain branch it would UnwindTo(lastHeader-1)=19.
+		// The wrong-root handler checks the block height before reading the
+		// database, so this case needs no apply transaction.
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = false
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xdead"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
-		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
+		require.Empty(t, u.calls, "the stage has already reached the block with the wrong root")
 	})
 
 	t.Run("initial cycle reports the rejected block without scheduling an unwind", func(t *testing.T) {

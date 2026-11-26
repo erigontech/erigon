@@ -144,6 +144,8 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		node, err := engineapitester.InitialiseEngineApiTester(ctx, restartArgs)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, node.Close()) })
+		// The first commit proves startup has acquired the execution semaphore.
+		// Drain can then wait for startup to finish before we inspect the checkpoint.
 		select {
 		case <-started:
 		case <-ctx.Done():

@@ -27,12 +27,9 @@ import (
 // MaxNotifiedBlocks is the longest block span one notification dispatch covers.
 const MaxNotifiedBlocks = 1024
 
-// RecentReceipts caches recent block receipts for notification dispatch.
-//
-// Requirements:
-// - Erigon3 doesn't store logs in db (yet)
-// - need support unwind of receipts
-// - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
+// RecentReceipts caches block receipts and keeps removed logs for the next
+// notification after an unwind. Dispatchers send notifications once RPC can read
+// the announced state from the published forkchoice overlay or the committed database.
 type RecentReceipts struct {
 	receipts    map[uint64]types.Receipts
 	txs         map[uint64][]types.Transaction

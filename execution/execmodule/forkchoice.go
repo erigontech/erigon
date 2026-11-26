@@ -846,7 +846,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !rejected || bad.Hash == (common.Hash{}) {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		// A previous forkchoice may have committed this block's canonical entry.
+		// A catch-up batch from this forkchoice or an earlier one may have
+		// marked the rejected block canonical on disk.
 		// Check the committed view before taking the writer lock for cleanup.
 		canonical, cleanupErr := rawdb.ReadCanonicalHash(roTx, bad.Number)
 		if cleanupErr != nil {

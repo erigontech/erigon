@@ -505,13 +505,11 @@ func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
 }
 
-// renderExecOutcome converts the parallel executor's typed outcome back to the
-// stage's error contracts. Precedence is fixed by the order of the checks: an
-// operational failure (execErr) outranks a verdict, which outranks a resumable
-// boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
-// unwind from the implicated block; any other verdict propagates for the caller to
-// unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
-// it propagates the verdict without scheduling an unwind.
+// renderExecOutcome gives operational errors priority over block verdicts and
+// block verdicts priority over a resumable batch boundary. Only a wrong trie
+// root outside the initial cycle and fork validation can schedule a binary-search
+// unwind to locate the bad block. Other verdicts return to the caller with the
+// rejected block's hash when known.
 func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if execErr != nil {
 		return execErr
