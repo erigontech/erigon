@@ -735,16 +735,6 @@ func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
 	}
 }
 
-type countingAsOfTx struct {
-	kv.TemporalTx
-	reads int
-}
-
-func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-	tx.reads++
-	return tx.TemporalTx.GetAsOf(domain, key, ts)
-}
-
 // The as-of read serves a value committed before ts from the state cache, and reads the tx for one written at ts.
 func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	db, stateCache := committedCacheState(t)
@@ -756,7 +746,7 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	defer sd.Close()
 	sd.BindStateCache(stateCache)
 
-	tx := &countingAsOfTx{TemporalTx: roTx}
+	tx := &countingTxReads{TemporalTx: roTx}
 	asOf := sd.AsOfGetter(tx)
 	committed := make([]byte, 20)
 	committed[0] = 0xcc
