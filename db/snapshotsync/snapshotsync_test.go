@@ -1083,6 +1083,7 @@ func TestSnapshotDownloadFiltersRegisteredTypes(t *testing.T) {
 	for i := range got {
 		gotNames[i] = got[i].Name
 	}
+	require.Contains(t, gotNames, "v1.1-000000-000100-blobsidecars-extra.seg")
 	for _, name := range []string{"v1.1-000000000-000000100-blobsidecars.seg", "v1.1-000000000-000000100-blocksidecars.idx"} {
 		require.NotContains(t, gotNames, name)
 	}
@@ -1128,6 +1129,11 @@ func TestDownloadTypedCaplinPaths(t *testing.T) {
 			name := "caplin/" + basename + suffix
 			raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
 			typed := raw.Typed(snaptype2.BlockSnapshotTypes)
+			if strings.HasPrefix(basename, "v1.1-") {
+				require.Equal(t, raw.Items, typed.Items, name)
+			} else {
+				require.Empty(t, typed.Items, name)
+			}
 			for _, useTyped := range []bool{false, true} {
 				items := raw
 				if useTyped {

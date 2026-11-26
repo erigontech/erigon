@@ -416,10 +416,42 @@ func TestCaplinStateRemoveOverlapsReportsDownloaderKeys(t *testing.T) {
 }
 
 func TestDownloaderKeysUseSnapshotRoot(t *testing.T) {
-	root := t.TempDir()
-	caplinDir := filepath.Join(root, "consensus-files")
-	name := filepath.Join(caplinDir, "v1.1-000000-000050-PendingDepositsDump.seg")
-	require.Equal(t, []string{"consensus-files/v1.1-000000-000050-PendingDepositsDump.seg"}, downloaderKeys(root, caplinDir, []string{filepath.Base(name)}))
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	dirs.SnapCaplin = filepath.Join(dirs.Snap, "archive", datadir.SnapCaplinDir)
+	require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+	want := filepath.ToSlash(filepath.Join("archive", datadir.SnapCaplinDir, filepath.Base(subSeg)))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+	require.Contains(t, reported, want)
+}
+
+func TestCaplinStateRemoveOverlapsReturnsDownloaderKeyError(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.Open(t.TempDir())
+	dirs.Snap = "relative-snap"
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	called := false
+	err := s.RemoveOverlaps(func([]string) error {
+		called = true
+		return nil
+	})
+	require.Error(t, err)
+	require.False(t, called)
 }
 
 func TestCaplinStateRemoveOverlapsSkipsTheCallbackWithNothingToRemove(t *testing.T) {

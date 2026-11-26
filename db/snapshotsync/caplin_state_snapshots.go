@@ -265,22 +265,26 @@ func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) e
 	if onDelete != nil {
 		notify := onDelete
 		onDelete = func(l []string) error {
-			return notify(downloaderKeys(s.downloaderRoot, s.Dir(), l))
+			keys, err := downloaderKeys(s.downloaderRoot, s.Dir(), l)
+			if err != nil {
+				return err
+			}
+			return notify(keys)
 		}
 	}
 	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
 }
 
-func downloaderKeys(root, dir string, names []string) []string {
+func downloaderKeys(root, dir string, names []string) ([]string, error) {
 	keys := make([]string, len(names))
 	for i, name := range names {
 		rel, err := filepath.Rel(root, filepath.Join(dir, name))
 		if err != nil {
-			rel = name
+			return nil, err
 		}
 		keys[i] = filepath.ToSlash(rel)
 	}
-	return keys
+	return keys, nil
 }
 
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {

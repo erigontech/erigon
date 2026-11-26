@@ -1497,6 +1497,18 @@ func TestSeedableFilesPreserveSnapshotKeys(t *testing.T) {
 	require.ElementsMatch(t, append(rootNames, filepath.ToSlash(filepath.Join("caplin", stateName))), got)
 }
 
+func TestSeedableFilesUseSnapshotRootForCaplinArchive(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	dirs.SnapCaplin = filepath.Join(dirs.Snap, "archive", datadir.SnapCaplinDir)
+	require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
+	name := snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, name), nil, 0o644))
+
+	got, err := SeedableFiles(dirs, "", true)
+	require.NoError(t, err)
+	require.Contains(t, got, filepath.ToSlash(filepath.Join("archive", datadir.SnapCaplinDir, name)))
+}
+
 func TestAddNewSeedableFileKeepsUnknownFileBehavior(t *testing.T) {
 	for _, name := range []string{
 		filepath.Join("caplin", snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)),
@@ -1506,7 +1518,9 @@ func TestAddNewSeedableFileKeepsUnknownFileBehavior(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			test := newDownloaderTest(t)
 			require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), []byte("data"), 0o644))
-			require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), name))
+			key := filepath.ToSlash(name)
+			require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), key))
+			require.Contains(t, test.downloader.torrentsByName, key)
 		})
 	}
 }
