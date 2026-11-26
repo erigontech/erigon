@@ -39,7 +39,7 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 		}
 		return nil
 	}))
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	c, err := tx.RwCursorDupSort(kv.TblTracesToIdx)
 	require.NoError(t, err)
 	defer c.Close()

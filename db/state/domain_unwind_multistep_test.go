@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -54,7 +55,7 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, stepSize)
 	ctx := t.Context()
 
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 
 	dt := d.beginForTests()
 	w := dt.NewWriter(db)
@@ -157,7 +158,7 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 		for _, firstCut := range []uint64{20, 32, 34} {
 			t.Run(fmt.Sprintf("%s/cut_%d", cfg.Name, firstCut), func(t *testing.T) {
 				db, d := testDbAndDomainOfStep(t, cfg, 16)
-				tx := beginRw(t, db)
+				tx := mdbxtest.BeginRw(t, db)
 				view := d.beginForTests()
 				defer view.Close()
 				writer := view.NewWriter(db)
@@ -187,7 +188,7 @@ func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
 	for _, oldBranch := range [][]byte{{0, 1, 0, 0}, {0, 1, 0, 1, 0}} {
 		t.Run(fmt.Sprintf("old_%x", oldBranch), func(t *testing.T) {
 			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16)
-			tx := beginRw(t, db)
+			tx := mdbxtest.BeginRw(t, db)
 			view := d.beginForTests()
 			defer view.Close()
 			writer := view.NewWriter(db)
@@ -217,7 +218,7 @@ func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
 
 func TestDomain_UnwindRestoresExistingBranch(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	view := d.beginForTests()
 	defer view.Close()
 	writer := view.NewWriter(db)
@@ -240,7 +241,7 @@ func TestDomain_UnwindRestoresDeletionOverBranchShapedValue(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		t.Run(cfg.Name.String(), func(t *testing.T) {
 			db, d := testDbAndDomainOfStep(t, cfg, 16)
-			tx := beginRw(t, db)
+			tx := mdbxtest.BeginRw(t, db)
 			view := d.beginForTests()
 			defer view.Close()
 			writer := view.NewWriter(db)
@@ -312,7 +313,7 @@ func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
 		for _, restored := range [][]byte{nil, {7}} {
 			t.Run(fmt.Sprintf("%s/restore_%x", cfg.Name, restored), func(t *testing.T) {
 				db, d := testDbAndDomainOfStep(t, cfg, 16)
-				tx := beginRw(t, db)
+				tx := mdbxtest.BeginRw(t, db)
 				view := d.beginForTests()
 				defer view.Close()
 				key, ancestor := []byte("key"), []byte{1}
@@ -350,7 +351,7 @@ func TestDomain_UnwindRestoresDeletedCommitmentV3Record(t *testing.T) {
 	cfg := statecfg.Schema.CommitmentDomain
 	statecfg.EnableCommitmentV3Records(&cfg)
 	db, d := testDbAndDomainOfStep(t, cfg, 16)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	view := d.beginForTests()
 	defer view.Close()
 	writer := view.NewWriter(db)

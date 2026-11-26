@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -499,7 +500,7 @@ func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
 func TestHistoryConvertTxNumLookups(t *testing.T) {
 	const txs, stepSize, keys = 160, 16, 31
 	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys)
-	tx := beginRw(t, db)
+	tx := mdbxtest.BeginRw(t, db)
 	for step := range kv.Step(txs/stepSize - 1) {
 		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
 	}
