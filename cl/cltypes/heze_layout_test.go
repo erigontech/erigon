@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func newHezeBid(t *testing.T) *ExecutionPayloadBid {
@@ -228,6 +229,19 @@ func TestBeaconBodyDecodeIgnoresThePreviousBodySize(t *testing.T) {
 				require.NoError(t, decode(receiver, bigEncoded))
 				require.NoError(t, decode(receiver, small))
 			}
+		})
+	}
+}
+
+func TestBeaconBodyShortBufferKeepsTheReceiver(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion, clparams.HezeVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBeaconBody(cfg, version)
+			body.VoluntaryExits.Append(&SignedVoluntaryExit{VoluntaryExit: &VoluntaryExit{Epoch: 7}})
+			require.ErrorIs(t, body.DecodeSSZ(nil, int(version)), ssz.ErrLowBufferSize)
+			require.Equal(t, 1, body.VoluntaryExits.Len())
+			require.Equal(t, uint64(7), body.VoluntaryExits.Get(0).VoluntaryExit.Epoch)
 		})
 	}
 }
