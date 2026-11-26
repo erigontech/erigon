@@ -872,10 +872,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 func addDeletedAccountStorage(tx kv.TemporalTx, firstTxNum uint64, accessed *accessedState) error {
 	for delAddr := range accessed.Deleted {
-		to, ok := kv.NextSubtree(delAddr[:])
-		if !ok {
-			to = nil
-		}
+		to, _ := kv.NextSubtree(delAddr[:])
 		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNum, order.Asc, kv.Unlim)
 		if err != nil {
 			return err

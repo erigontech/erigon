@@ -418,10 +418,7 @@ func TestWitnessSupersetAtExtensionEnd(t *testing.T) {
 }
 
 func TestWitnessNodesRequiresContext(t *testing.T) {
-	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer u.Close()
-	u.TouchHashedKey([]byte{1, 4})
-	nodes, root, err := (&Trie{}).WitnessNodes(t.Context(), u, false)
+	nodes, root, err := (&Trie{}).WitnessNodes(t.Context(), nil, false)
 	require.ErrorIs(t, err, errTrieContext)
 	require.Nil(t, nodes)
 	require.Nil(t, root)

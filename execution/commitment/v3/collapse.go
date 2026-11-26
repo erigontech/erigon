@@ -44,25 +44,16 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		}
 		groups[owner] = append(groups[owner], slices.Clone(path))
 	}
-	for _, item := range items {
-		if item.update != nil && item.update.Deleted() && len(item.plainKey) == length.Addr {
-			delete(groups, string(item.hashedKey))
-		}
+	for _, path := range groups[""] {
+		delete(groups, string(path))
 	}
 	for owner, paths := range groups {
 		slices.SortFunc(paths, bytes.Compare)
 		groups[owner] = slices.CompactFunc(paths, bytes.Equal)
 	}
 	for _, groupKey := range slices.Sorted(maps.Keys(groups)) {
-		plane := planeAccount
-		addrHash := []byte(nil)
-		ownerPath := []byte(nil)
-		if groupKey != "" {
-			plane = planeStorage
-			ownerPath = []byte(groupKey)
-			packed := hashAddressPath(ownerPath)
-			addrHash = packed[:]
-		}
+		ownerPath := []byte(groupKey)
+		plane, addrHash, _ := splitPrefix(ownerPath)
 		g := graph{plane: plane, addrHash: addrHash}
 		root, err := g.loadRoot(ctx)
 		if err != nil {
@@ -91,10 +82,8 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 	if n == nil || n.childMask == 0 {
 		return false, nil
 	}
-	if n.isExtension() {
-		if child := rootExtensionChild(n); child != nil {
-			return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
-		}
+	if child := rootExtensionChild(n); child != nil {
+		return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
 	}
 	if n.childMask == n.leafMask && bits.OnesCount16(n.childMask) == 1 {
 		nib := bits.TrailingZeros16(n.childMask)

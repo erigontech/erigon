@@ -1346,9 +1346,7 @@ func TestGetProofHistoricalCommitmentV3(t *testing.T) {
 	require.NotEmpty(t, proof.AccountProof)
 	require.NotZero(t, (*uint256.Int)(proof.Balance).Uint64())
 
-	require.NoError(t, m.DB.View(context.Background(), func(_ kv.Tx) error {
-		return trie.VerifyAccountProof(testChain.Blocks[blockNum-1].Root(), proof)
-	}))
+	require.NoError(t, trie.VerifyAccountProof(testChain.Blocks[blockNum-1].Root(), proof))
 }
 
 type missingHeaderBlockReader struct {
