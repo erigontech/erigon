@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -1926,4 +1928,27 @@ func TestIntegrityCacheReadErrorStopsRun(t *testing.T) {
 	if strings.Contains(err.Error(), "--sample") {
 		t.Fatalf("continued to sample validation after cache read error: %v", err)
 	}
+}
+
+func TestIntegrityCacheReportsTorrentAndSampleErrors(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o755))
+	dataPath := filepath.Join(dirs.Snap, "failed.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	info := metainfo.Info{PieceLength: 16 * 1024}
+	require.NoError(t, info.BuildFromFilePath(dataPath))
+	infoBytes, err := bencode.Marshal(info)
+	require.NoError(t, err)
+	f, err := os.Create(dataPath + ".torrent")
+	require.NoError(t, err)
+	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
+	require.NoError(t, f.Close())
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xbb}, 1024), 0o644))
+
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	require.NoError(t, os.WriteFile(cachePath, nil, 0o644))
+	command := cli.Command{Name: "integrity", Flags: snapshotCommand.Command("integrity").Flags, Action: doIntegrity}
+	err = command.Run(t.Context(), []string{"integrity", "--datadir", dirs.DataDir, "--file-integrity-cache", cachePath, "--failFast=false", "--sample", "2"})
+	require.ErrorContains(t, err, "hash mismatch at piece 0")
+	require.ErrorContains(t, err, "--sample must be in (0, 1], got 2")
 }

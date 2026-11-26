@@ -83,6 +83,54 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestVerifyTorrentFilesRejectsMissingPieceHashes(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	info := metainfo.Info{Name: filepath.Base(dataPath), Length: 1024, PieceLength: 16 * 1024}
+	infoBytes, err := bencode.Marshal(info)
+	require.NoError(t, err)
+	f, err := os.Create(dataPath + ".torrent")
+	require.NoError(t, err)
+	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
+	require.NoError(t, f.Close())
+
+	var verified bool
+	err = verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	require.Error(t, err)
+	require.False(t, verified)
+}
+
+func TestVerifyTorrentFilesRecordsResolvedReadPath(t *testing.T) {
+	dir := t.TempDir()
+	targetOne := filepath.Join(dir, "one.data")
+	targetTwo := filepath.Join(dir, "two.data")
+	alias := filepath.Join(dir, "alias.seg")
+	require.NoError(t, os.WriteFile(targetOne, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	require.NoError(t, os.WriteFile(targetTwo, bytes.Repeat([]byte{0xbb}, 1024), 0o644))
+	require.NoError(t, os.Symlink(targetOne, alias))
+	writeTorrentFile(t, alias)
+
+	var callbackPath string
+	var callbackErr error
+	verified := make(map[string][20]byte)
+	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(path string, hash [20]byte) {
+		callbackPath = path
+		callbackErr = os.Remove(alias)
+		if callbackErr == nil {
+			callbackErr = os.Symlink(targetTwo, alias)
+		}
+		if callbackErr == nil {
+			verified[cachePath(path)] = hash
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, callbackErr)
+	require.Equal(t, cachePath(targetOne), callbackPath)
+	_, ok := verified[cachePath(targetOne)]
+	require.True(t, ok)
+}
+
 func TestVerifyTorrentFilesRejectsTrailingBytes(t *testing.T) {
 	dir := t.TempDir()
 	writeTorrentPair(t, dir, "test.seg", false)

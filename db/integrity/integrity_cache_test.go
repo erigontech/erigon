@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	dir2 "github.com/erigontech/erigon/common/dir"
@@ -144,4 +145,57 @@ func TestIntegrityCacheFileAliases(t *testing.T) {
 	if _, present := saved.entries[cacheKey("new", failed)]; present {
 		t.Errorf("new failed alias entry on disk = %t, want false", present)
 	}
+}
+
+func TestIntegrityCacheRejectsLegacyFormat(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "valid.seg")
+	writeTorrentPair(t, dir, "valid.seg", false)
+	fps, err := fingerprintsOf(dataPath)
+	require.NoError(t, err)
+
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	legacy := formatEntry(cacheKey("test", fps), encodeHashes(fps)) + "\n"
+	require.NoError(t, os.WriteFile(cachePath, []byte(legacy), 0o644))
+
+	cache, err := LoadIntegrityCache(cachePath)
+	require.NoError(t, err)
+	cache.markVerified(fps[0].path, fps[0].hash)
+	require.False(t, cache.has("test", fps))
+
+	require.NoError(t, cache.Save())
+	saved, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(string(saved), "integrity-cache-v1\n"))
+}
+
+func TestIntegrityCacheKeepsAllVerifiedHashesForResolvedPath(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "data.seg")
+	aliasOne := filepath.Join(dir, "one.seg")
+	aliasTwo := filepath.Join(dir, "two.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	require.NoError(t, os.Symlink(dataPath, aliasOne))
+	require.NoError(t, os.Symlink(dataPath, aliasTwo))
+	writeTorrentFile(t, aliasOne)
+	writeTorrentFile(t, aliasTwo)
+
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	seedIntegrityCache(t, cachePath, "seed", aliasOne, aliasTwo)
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, true, log.New())
+	require.NoError(t, err)
+	fpsOne, err := fingerprintsOf(aliasOne)
+	require.NoError(t, err)
+	fpsTwo, err := fingerprintsOf(aliasTwo)
+	require.NoError(t, err)
+	require.True(t, cache.has("seed", fpsOne))
+	require.True(t, cache.has("seed", fpsTwo))
+
+	cache.add("new", fpsOne)
+	cache.add("new", fpsTwo)
+	require.NoError(t, cache.Save())
+	saved, err := LoadIntegrityCache(cachePath)
+	require.NoError(t, err)
+	require.Contains(t, saved.entries, cacheKey("new", fpsOne))
+	require.Contains(t, saved.entries, cacheKey("new", fpsTwo))
 }
