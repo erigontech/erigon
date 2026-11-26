@@ -82,14 +82,14 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 			dependentRoot, err = s.GetBlockRootAtSlot(dependentRootSlot)
 			if err != nil {
 				if dependentRootSlot == 0 {
-					return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+					return beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 				}
 				dependentRootSlot--
 				continue
 			}
 			return nil
 		}
-		return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+		return beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 	})
 }
 
@@ -107,7 +107,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -135,7 +135,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

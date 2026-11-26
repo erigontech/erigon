@@ -253,7 +253,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -285,7 +285,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
 func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, stateGetter state_accessors.GetValFn, epoch, expectedSlot uint64) ([]proposerDuties, error) {
@@ -306,7 +306,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 			return nil, err
 		}
 		if genesisState == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found for slot %d", expectedSlot))
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("state not found for slot %d", expectedSlot))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		if err := fillProposerDutiesFromState(duties, genesisState, epoch, expectedSlot); err != nil {
@@ -320,7 +320,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
 	activeIndices := make([]uint64, 0, validatorSet.Length())
 	validatorSet.Range(func(validatorIndex int, validator solid.Validator, _ int) bool {
@@ -330,7 +330,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return true
 	})
 	if len(activeIndices) == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active validators not found for slot %d", expectedSlot))
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("active validators not found for slot %d", expectedSlot))
 	}
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
@@ -339,10 +339,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
 	}
-	if mix == (common.Hash{}) {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
-	}
-
 	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
 	if err := historicalState.SetSlot(expectedSlot); err != nil {
