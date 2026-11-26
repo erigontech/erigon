@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -858,7 +859,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		// reconstructs the parent state root. Any lossy/malformed serialization yields a
 		// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
 		// pre-serialization witness-root check above cannot.
-		decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
+		decodedWitness, err := opstream.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
 		if err != nil {
 			return nil, fmt.Errorf("decode produced witness: %w", err)
 		}
@@ -900,7 +901,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
 // empty-touch blocks.
 func emptyWitnessBytes() (hexutil.Bytes, error) {
-	w := trie.NewWitness(make([]trie.WitnessOperator, 0))
+	w := opstream.NewWitness(make([]opstream.WitnessOperator, 0))
 	var buf bytes.Buffer
 	if _, err := w.WriteInto(&buf); err != nil {
 		return nil, err

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -845,7 +846,7 @@ func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
 	txWitness, err := ethAPI.GetTxWitness(ctx, at, 0)
 	require.NoError(t, err)
 	require.Equal(t, witness, txWitness)
-	decoded, err := trie.NewWitnessFromReader(bytes.NewReader(witness), false)
+	decoded, err := opstream.NewWitnessFromReader(bytes.NewReader(witness), false)
 	require.NoError(t, err)
 	decodedTrie, err := trie.BuildTrieFromWitness(decoded, false)
 	require.NoError(t, err)

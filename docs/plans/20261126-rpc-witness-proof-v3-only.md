@@ -236,7 +236,7 @@
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `rpc/jsonrpc/eth_call.go`
 
-- [ ] move the format-only code and its tests to `opstream` in one commit; `trie` keeps `WitnessBuilder` and
+- [x] move the format-only code and its tests to `opstream` in one commit; `trie` keeps `WitnessBuilder` and
       `BuildTrieFromWitness` and imports `opstream` (check with `go list -deps`)
 - [ ] write the encoder byte test first, red: encoder bytes equal `RLPDecode` + `UpdateAccountCode` + `ExtractWitness` +
       `WriteInto` on the Task 3 shapes and on: two accounts with one storage root and one touched slot, a code-bearing
