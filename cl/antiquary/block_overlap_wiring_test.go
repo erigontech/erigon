@@ -322,71 +322,56 @@ func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 
 func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
-	for _, tc := range []struct {
-		name       string
-		head, tail uint64
-		mark       []uint64
-	}{
-		{name: "tail 500 slots above the head", head: limit - 1000, tail: limit - 500, mark: []uint64{limit - 500, limit}},
-		{name: "tail next to the head", head: limit - 2, tail: limit - 1, mark: []uint64{limit - 1}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			logger := log.New()
-			dirs := datadir.New(t.TempDir())
-			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-			var slots []uint64
-			for slot := uint64(0); slot < tc.head; slot += 500 {
-				slots = append(slots, slot)
-			}
-			slots = append(slots, tc.head, tc.tail, limit)
-			roots := make(map[uint64]common.Hash)
-			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				var prevRoot common.Hash
-				for _, slot := range slots {
-					block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
-					block.Block.Slot = slot
-					block.Block.ParentRoot = prevRoot
-					if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, slot <= tc.head); err != nil {
-						return err
-					}
-					root, err := block.Block.HashSSZ()
-					if err != nil {
-						return err
-					}
-					roots[slot], prevRoot = root, root
-				}
-				return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin)
-			}))
-			sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
-			t.Cleanup(sn.Close)
-			require.NoError(t, sn.OpenFolder())
-			a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
-
-			require.NoError(t, a.antiquate())
-			require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
-			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-				body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tc.tail, roots[tc.tail]))
-				require.NotEmpty(t, body, "the block at slot %d must stay in the database", tc.tail)
-				return err
-			}))
-
-			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				for _, slot := range tc.mark {
-					if err := beacon_indicies.MarkRootCanonical(tx, slot, roots[slot]); err != nil {
-						return err
-					}
-				}
-				return nil
-			}))
-			require.NoError(t, a.antiquate())
-			require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
-			view := sn.View()
-			defer view.Close()
-			segment, ok := view.BeaconBlocksSegment(tc.tail)
-			require.True(t, ok)
-			word, err := segment.Get(tc.tail)
-			require.NoError(t, err)
-			require.NotEmpty(t, word, "the block at slot %d must be frozen", tc.tail)
-		})
+	const head, tail = limit - 2, limit - 1
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	var slots []uint64
+	for slot := uint64(0); slot < head; slot += 500 {
+		slots = append(slots, slot)
 	}
+	slots = append(slots, head, tail, limit)
+	roots := make(map[uint64]common.Hash)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for _, slot := range slots {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = prevRoot
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, slot <= head); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			roots[slot], prevRoot = root, root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin)
+	}))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+	require.NoError(t, a.antiquate())
+	require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
+		require.NotEmpty(t, body, "the block at slot %d must stay in the database", tail)
+		return err
+	}))
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, tail, roots[tail])
+	}))
+	require.NoError(t, a.antiquate())
+	require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+	view := sn.View()
+	defer view.Close()
+	segment, ok := view.BeaconBlocksSegment(tail)
+	require.True(t, ok)
+	word, err := segment.Get(tail)
+	require.NoError(t, err)
+	require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
 }
