@@ -44,7 +44,7 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Version: Version{TxIndex: j}, Path: SelfDestructPath},
 		Val:         true,
 	})
-	vm.FlushVersionedWrites(sd, false)
+	vm.FlushWrites(sd, false)
 
 	rs := ReadSet{}
 	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
@@ -78,7 +78,7 @@ func TestQuietBelow_SeedPutBackByADroppedWriteBlocks(t *testing.T) {
 	vm.InitStamps(8)
 	earlier := &WriteSet{}
 	earlier.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(8)})
-	vm.FlushVersionedWrites(earlier, false)
+	vm.FlushWrites(earlier, false)
 	stamp := vm.WriteSeq()
 
 	vm.DropWrite(addr, BalancePath, accounts.NilKey, Version{TxIndex: 1, Incarnation: 1})
@@ -180,7 +180,7 @@ func flushPath(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) 
 	default:
 		ws = newWriteSet(&VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(1)})
 	}
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	return ws
 }
 
@@ -224,7 +224,7 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 				WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
 				Val:         *uint256.NewInt(1),
 			})
-			vm.FlushVersionedWrites(ws, false)
+			vm.FlushWrites(ws, false)
 			stamp := vm.WriteSeq()
 			promote(vm, ws)
 			require.False(t, vm.QuietBelow(5, stamp), "%s, %s cell: a storage-only promotion on an entry with lifecycle cells must bump", name, cell)
@@ -280,8 +280,7 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x05"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
 	}
 	for name, op := range ops {
 		for _, tc := range []struct {
@@ -301,8 +300,7 @@ func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x06"))
 	ops := map[string]func(vm *VersionMap, j int){
-		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
-		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+		"Delete": func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
 	}
 	for name, op := range ops {
 		vm := newStampedMap(32)
@@ -354,7 +352,7 @@ func TestQuietBelow_NoOpBALCodeFlushDoesNotBump(t *testing.T) {
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: version}, Val: code})
 	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: code.Hash})
 	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: version}, Val: code.Len()})
-	vm.FlushVersionedWrites(ws, false)
+	vm.FlushWrites(ws, false)
 	require.True(t, vm.QuietBelow(5, stamp), "an equal code flush must not stamp")
 }
 
@@ -429,8 +427,8 @@ func TestValSkip_OriginPublishedAfterReadOfCreatedContract(t *testing.T) {
 
 	creator := newNoMaterializeTx(vm, 0)
 	require.NoError(t, creator.CreateAccount(c, true))
-	created := creator.VersionedWrites()
-	vm.FlushVersionedWrites(created, false)
+	created := creator.Writes()
+	vm.FlushWrites(created, false)
 
 	late := newNoMaterializeTx(vm, 2)
 	_, err := late.GetState(c, slot)

@@ -1948,3 +1948,7 @@ func TestRunDownloadSchedulesRecoveryOfAPublishedRoot(t *testing.T) {
 		})
 	}
 }
+
+func (*maliciousColumnSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

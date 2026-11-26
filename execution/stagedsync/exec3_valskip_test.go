@@ -102,7 +102,7 @@ func writeBalanceBelowReader(vm *state.VersionMap) {
 		WriteHeader: state.WriteHeader{Address: arrivalAddr, Version: state.Version{TxIndex: arrivalReader - 1}, Path: state.BalancePath},
 		Val:         *uint256.NewInt(2),
 	})
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 }
 
 func TestArrivalValidSkipsOnlyWhenNoLowerWrite(t *testing.T) {

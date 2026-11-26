@@ -948,3 +948,11 @@ func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, *clparams.
 	)
 	return client, cfg, requestedRoot, block
 }
+
+func (*envelopeResponseSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*bogusThenValidEnvelopeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

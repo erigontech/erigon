@@ -1978,6 +1978,39 @@ func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *te
 	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 }
 
+func TestPostEthV2BeaconBlocksRejectsIncompleteSlashings(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	block := cltypes.NewDenebSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	block.SignedBlock.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	zeroRoot := `"0x` + strings.Repeat("0", 64) + `"`
+	signature := `"signature":"0x` + strings.Repeat("0", 192) + `"`
+	header := `{"message":{"slot":"1","proposer_index":"0","parent_root":` + zeroRoot +
+		`,"state_root":` + zeroRoot + `,"body_root":` + zeroRoot + `},` + signature + `}`
+	for _, tc := range []struct {
+		name, field, value string
+	}{
+		{name: "null attestation data", field: "attester_slashings", value: `[{"attestation_1":{"data":null},"attestation_2":{}}]`},
+		{name: "null signed header", field: "proposer_slashings", value: `[{"signed_header_1":null,"signed_header_2":` + header + `}]`},
+		{name: "null header message", field: "proposer_slashings", value: `[{"signed_header_1":{"message":null,` + signature + `},"signed_header_2":` + header + `}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			empty := `"` + tc.field + `":[]`
+			require.Contains(t, string(body), empty)
+			malformed := strings.Replace(string(body), empty, `"`+tc.field+`":`+tc.value, 1)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", strings.NewReader(malformed))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
+
+			_, err := handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+			var endpointErr *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointErr)
+			require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+		})
+	}
+}
+
 func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *testing.T) {
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
@@ -6295,7 +6328,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 		clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
 		handler.ethClock = clock
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		produceCalls := 0
 		handler.attestationProducer = cachedAttestationDataProducer{
 			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
@@ -6360,7 +6393,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			handler, fcu, slot, produceCalls := setup(t)
-			handler.attestationDataImportWait = defaultAttestationDataImportWait
+			handler.importWait = defaultImportWait
 			var attempts atomic.Int64
 			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
 				return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
@@ -6374,8 +6407,8 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 			elapsed := time.Since(start)
 			require.Equal(t, http.StatusOK, status)
 			require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-			require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-			require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+			require.GreaterOrEqual(t, elapsed, 2*importPollInterval)
+			require.Less(t, elapsed, defaultImportWait/2)
 			require.Zero(t, *produceCalls)
 		})
 	})
@@ -6535,7 +6568,7 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
 			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 			handler.aggregatePool = nil
-			handler.attestationDataImportWait = 0
+			handler.importWait = 0
 			slot := headState.Slot()
 			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
 			targetSlot := handler.beaconChainCfg.RoundSlotToEpoch(slot)
@@ -6627,7 +6660,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
 			const importWait = time.Second
-			handler.attestationDataImportWait = importWait
+			handler.importWait = importWait
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -6719,7 +6752,7 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot + 1).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6757,7 +6790,7 @@ func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) 
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6837,7 +6870,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-			handler.attestationDataImportWait = 20 * time.Millisecond
+			handler.importWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
 			cfg.InitializeForkSchedule()
@@ -6954,7 +6987,7 @@ func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T)
 	setup := func(t *testing.T) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, func(), *atomic.Int32) {
 		t.Helper()
 		_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		handler.aggregatePool = nil
 		cfg := handler.beaconChainCfg
 		cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0

@@ -49,8 +49,8 @@ func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logg
 }
 
 const (
-	// This is the target size for the packs of transactions or announcements. A
-	// pack can get larger than this if a single transactions exceeds this size.
+	// p2pTxPacketLimit is the target size for outbound transaction and announcement
+	// packets. Adding the last transaction can push a batch over the target.
 	p2pTxPacketLimit = 100 * 1024
 )
 

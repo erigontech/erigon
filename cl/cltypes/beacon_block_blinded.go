@@ -303,14 +303,8 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 		return err
 	}
 	return solid.RangeErr(b.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
-		if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil {
-			return fmt.Errorf("attester slashing %d: attestation_1 and attestation_2 are required", i)
-		}
-		slashing.SetVersionWithConfig(b.Version, b.beaconCfg)
-		for j, att := range []*IndexedAttestation{slashing.Attestation_1, slashing.Attestation_2} {
-			if att.AttestingIndices.Length() > att.AttestingIndices.Cap() {
-				return fmt.Errorf("attester slashing %d attestation_%d: attesting indices exceed limit: %d > %d", i, j+1, att.AttestingIndices.Length(), att.AttestingIndices.Cap())
-			}
+		if err := slashing.setVersionAndValidate(b.Version, b.beaconCfg); err != nil {
+			return fmt.Errorf("attester slashing %d: %w", i, err)
 		}
 		return nil
 	})
@@ -530,6 +524,17 @@ func (b *BlindedBeaconBody) Clone() clonable.Clonable {
 
 func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
+}
+
+func (b *BlindedBeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
+	if b.BlobKzgCommitments == nil || index >= b.BlobKzgCommitments.Len() {
+		return nil, errors.New("index out of range")
+	}
+	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+	if err != nil {
+		return nil, err
+	}
+	return append(b.BlobKzgCommitments.ElementProof(index), kzgCommitmentsProof...), nil
 }
 
 func (b *BlindedBeaconBody) GetPayloadHeader() (*Eth1Header, error) {

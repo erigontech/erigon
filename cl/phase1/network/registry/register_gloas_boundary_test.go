@@ -110,6 +110,7 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			// A nil host makes local publishes run the validator like a peer's message.
 			p2pManager.EXPECT().Host().Return(nil).AnyTimes()
 			p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
+			p2pManager.EXPECT().MarkPeerUseful(gomock.Any()).AnyTimes()
 			networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 			gm := gossip.NewGossipManager(
 				t.Context(), p2pManager, &cfg, &networkConfig, clock, false, 0,
