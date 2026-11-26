@@ -710,9 +710,10 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		op       vm.OpCode
-		stepErr  error // error of the opcode hook: a halt found before the opcode runs
-		fault    error // error of the fault hook: a halt found while the opcode runs
-		written  bool  // the step is already written when the fault arrives
+		stepErr  error  // error of the opcode hook: a halt found before the opcode runs
+		fault    error  // error of the fault hook: a halt found while the opcode runs
+		written  bool   // the step is already written when the fault arrives
+		differs  string // which of the fault's "pc", "op" or "depth" differs from the step
 		limit    int
 		halted   bool
 		wantLogs int
@@ -721,6 +722,9 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 		{name: "halt before the opcode runs", op: vm.SSTORE, stepErr: vm.ErrOutOfGas, halted: true, wantLogs: 2},
 		{name: "completed REVERT", op: vm.REVERT, fault: vm.ErrExecutionReverted, wantLogs: 2},
 		{name: "fault after the step was written", op: vm.CALL, fault: vm.ErrOutOfGas, written: true, wantLogs: 2},
+		{name: "fault at another pc", op: vm.JUMP, fault: vm.ErrInvalidJump, differs: "pc", wantLogs: 2},
+		{name: "fault of another opcode", op: vm.JUMP, fault: vm.ErrInvalidJump, differs: "op", wantLogs: 2},
+		{name: "fault at another depth", op: vm.JUMP, fault: vm.ErrInvalidJump, differs: "depth", wantLogs: 2},
 		{name: "fault of a step past the limit", op: vm.JUMP, fault: vm.ErrInvalidJump, limit: 1, wantLogs: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -743,7 +747,16 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 				l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false) // a child frame of the step ends
 			}
 			if tc.fault != nil {
-				l.OnFaultV2(1, byte(tc.op), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, 1, vm.VMErrorFromErr(tc.fault))
+				pc, op, depth := uint64(1), tc.op, 1
+				switch tc.differs {
+				case "pc":
+					pc = 7
+				case "op":
+					op = vm.JUMPI
+				case "depth":
+					depth = 2
+				}
+				l.OnFaultV2(pc, byte(op), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, depth, vm.VMErrorFromErr(tc.fault))
 			}
 			closeStreamLikeCaller(l, stream)
 			require.NoError(t, stream.Flush())
@@ -794,7 +807,7 @@ func TestNoFaultAfterChildFrameExits(t *testing.T) {
 	store := func(b []byte) []byte {
 		return append(push(b), byte(vm.PUSH0), byte(vm.MSTORE))
 	}
-	returning := func(code []byte) []byte {
+	initCodeFor := func(code []byte) []byte {
 		return append(store(code), byte(vm.PUSH1), byte(len(code)), byte(vm.PUSH1), byte(32-len(code)), byte(vm.RETURN))
 	}
 	children := map[string][]byte{
@@ -803,7 +816,7 @@ func TestNoFaultAfterChildFrameExits(t *testing.T) {
 		"halts while run":  {byte(vm.PUSH1), 5, byte(vm.JUMP)},
 		"halts before run": {byte(vm.INVALID)},
 	}
-	create := func(init []byte, op vm.OpCode) []byte {
+	createCode := func(init []byte, op vm.OpCode) []byte {
 		code := store(init)
 		if op == vm.CREATE2 {
 			code = append(code, byte(vm.PUSH0))
@@ -816,10 +829,10 @@ func TestNoFaultAfterChildFrameExits(t *testing.T) {
 			t.Run(name+"/"+op.String(), func(t *testing.T) {
 				var code []byte
 				if op == vm.CREATE || op == vm.CREATE2 {
-					code = create(child, op)
+					code = createCode(child, op)
 				} else {
 					// Deploy the child, then call it with no arguments.
-					code = append(create(returning(child), vm.CREATE), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0))
+					code = append(createCode(initCodeFor(child), vm.CREATE), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0))
 					addr := byte(vm.DUP5)
 					if op == vm.CALL || op == vm.CALLCODE {
 						code, addr = append(code, byte(vm.PUSH0)), byte(vm.DUP6)

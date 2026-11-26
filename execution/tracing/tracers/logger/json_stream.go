@@ -167,12 +167,11 @@ func (l *JsonStreamLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGa
 	l.writePrologueOnce()
 }
 
-// OnFaultV2 marks the pending step with the exceptional halt of its opcode. The interpreter
-// reports a fault only for a step it captured, and no opcode fails after its child frame has
-// exited, so a pending step is always the faulted one. A REVERT that completes also ends with
-// an error here, but it is not a halt.
+// OnFaultV2 marks the pending step with the exceptional halt of its opcode. A REVERT that
+// completes also ends with an error here, but it is not a halt.
 func (l *JsonStreamLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
-	if l.pending.ok && !errors.Is(err, vm.ErrExecutionReverted) {
+	if l.pending.ok && l.pending.pc == pc && l.pending.op == vm.OpCode(op) && l.pending.depth == depth &&
+		!errors.Is(err, vm.ErrExecutionReverted) {
 		l.pending.err = err
 	}
 }
