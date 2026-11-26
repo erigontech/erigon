@@ -404,8 +404,7 @@ func TestSimulateV1SystemCallBlockHash(t *testing.T) {
 		byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN),
 	}
 	beaconRoots := params.BeaconRootsAddress.Value()
-	gas := hexutil.Uint64(100_000)
-	readSlot := ethapi.CallArgs{From: &bankAddr, To: &beaconRoots, Gas: &gas}
+	readSlot := ethapi.CallArgs{From: &bankAddr, To: &beaconRoots}
 	result, err := api.SimulateV1(t.Context(), SimulationRequest{
 		BlockStateCalls: []SimulatedBlock{
 			{

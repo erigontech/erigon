@@ -70,14 +70,10 @@ func TestSysCallContractBlockHashWithoutHeaderReader(t *testing.T) {
 	code := []byte{byte(vm.NUMBER), byte(vm.PUSH1), 2, byte(vm.SWAP1), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.STOP)}
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
-	require.NoError(t, ibs.CreateAccount(contract, false))
 	require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
 	header := &types.Header{Number: *uint256.NewInt(3)}
 
-	var err error
-	require.NotPanics(t, func() {
-		_, err = SysCallContract(contract, nil, chain.TestChainBerlinConfig, ibs, header, ethash.NewFaker(), false, vm.Config{})
-	})
+	_, err := SysCallContract(contract, nil, chain.TestChainBerlinConfig, ibs, header, ethash.NewFaker(), false, vm.Config{})
 	require.ErrorContains(t, err, "header reader unavailable for block 1")
 }
 
