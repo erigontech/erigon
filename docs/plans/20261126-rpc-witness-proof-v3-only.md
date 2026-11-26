@@ -309,13 +309,13 @@
 - Create: `rpc/jsonrpc/witness_callsites_test.go`
 - Modify: `docs/plans/witness-legacy-mode-spec.md`
 
-- [ ] a test lists every `trie.` call site in `rpc/jsonrpc/eth_call.go`, `debug_execution_witness.go`, `witness_cache_builder.go`
+- [x] a test lists every `trie.` call site in `rpc/jsonrpc/eth_call.go`, `debug_execution_witness.go`, `witness_cache_builder.go`
       and `commitmentdb/commitment_context.go`, and allows only: the ASSERT verifier, the ASSERT round trip
       (`opstream.NewWitnessFromReader` + `trie.BuildTrieFromWitness`), and the frozen HPH branch (`trie.WitnessNodesForKeysByHash`);
       `execution/types/hashing.go` and `execution/state/dump.go` are out of scope
-- [ ] spec: the collapse-sibling rule for legacy and canonical, the eth_getWitness note, and the code map
-- [ ] if `docs/site` changes, regenerate both `llms-full.txt` files
-- [ ] `make lint` on the touched packages; golden fixtures, Task 6 and Task 7 tests green, v3 on and off
+- [x] spec: the collapse-sibling rule for legacy and canonical, the eth_getWitness note, and the code map
+- [x] if `docs/site` changes, regenerate both `llms-full.txt` files
+- [x] `make lint` on the touched packages; golden fixtures, Task 6 and Task 7 tests green, v3 on and off
 
 ### Task 10: delete the HPH branches (⚠️ gated: v3 is the default and the HPH tree is being deleted)
 **Files:**

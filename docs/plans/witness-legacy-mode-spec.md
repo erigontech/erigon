@@ -44,12 +44,19 @@ when empty.
 
 The set of RLP-encoded trie nodes proving every account and storage slot the block reads or writes, drawn from
 the account trie and from the storage tries of touched accounts. It is produced by an on-the-fly fold over the
-accessed hashed keys (`HexPatriciaHashed.WitnessesByHash` captures the node set indexed by hash, read-only, so
-off-path cells keep their stored hashes; `WitnessNodes` prunes it to the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
+accessed hashed keys. `v3.Trie.WitnessNodes` walks the v3 records and returns the lean node set; the frozen HPH
+path captures the node set indexed by hash and prunes it with `trie.WitnessNodesForKeysByHash`. Each key contributes
+the nodes on its root→leaf path together with the branch sibling hashes
 required to recompute every node hash up to the root.
 The accessed-key set is first augmented by a collapse-detection pass (`detectCollapseSiblings`, run against a
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
 transaction transiently collapsed; the witness is then assembled against the parent-state reader.
+
+Legacy collapse candidates are the survivors found by a deletes-only walk over the pre-state commitment records.
+Inserts do not affect this walk. An account survivor's path continues through a single-path pre-state storage trie,
+as HPH does. Canonical applies the existing `BranchChildCount` filter and drops candidates whose post-state branch
+keeps two or more children. `eth_getWitness` carries the legacy candidates and encodes the resulting lean node list
+with the format-only op-stream encoder.
 
 - **Node encoding** — standard Ethereum MPT node RLP (branch / extension / leaf); unresolved subtrees are
   represented by their 32-byte hash (a `HashNode`).
@@ -100,9 +107,11 @@ reached by a `BLOCKHASH` opcode during execution. Used to answer `BLOCKHASH` und
    practice an account leaf's empty storage-root field. It is appended *after* stateless verification: the bare
    node is unreachable from the root, so re-execution would reject it.
 2. **Collapse siblings retained.** During replay a branch can transiently collapse toward a single child;
-   `detectCollapseSiblings` traces the affected siblings. Canonical drops a traced sibling when its post-state
-   branch still has ≥2 children (the collapse was transient, so the sibling is not structurally required);
-   legacy keeps every traced collapse-sibling — legacy is thus the superset.
+   `detectCollapseSiblings` reports the survivor for every pre-state branch that has at least two children and keeps
+   exactly one child after the block's deletes. The walk ignores inserts. For an account survivor, the reported path
+   continues through a single-path pre-state storage trie, as HPH does. Canonical drops candidates whose post-state
+   branch keeps two or more children; legacy keeps the full deletes-only survivor set and is thus the superset.
+   `eth_getWitness` carries these legacy siblings and encodes them from the lean node list.
 
 The account and storage proofs are otherwise built identically in the two modes; these two points are the only
 structural differences.
@@ -168,8 +177,13 @@ Serving semantics in head-capture mode:
   `collectAccessedState` (codes/keys), `collectAccessedHeaders`, `detectCollapseSiblings`, `buildWitnessTrie`,
   `verifyWitnessStateless`, the `{0x80}` append.
 - **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
-  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` (read-only fold, untouched storage root emitted
-  as a bare `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysByHash`.
+  `execution/commitment/v3.Trie.WitnessNodes` on v3; the frozen HPH fallback uses
+  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` and
+  `trie.WitnessNodesForKeysByHash`.
+- **Collapse** — `execution/commitment/v3/collapse.go` walks pre-state records and reports deletes-only survivors;
+  account survivor paths continue through a single-path storage trie.
+- **Op-stream** — `execution/commitment/witness/opstream.Encode` encodes the lean node list and code reads.
+- **Proof** — `execution/commitment/witness.ProofFromNodes` extracts account and storage proofs from RLP nodes.
 - **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
   `rpc/jsonrpc/witness_cache_builder.go` (`WitnessCacheMode`, rolling-pin lifecycle, `buildAndCacheHeadCapture`),
   `rpc/jsonrpc/debug_execution_witness.go` (`headCaptureSource`, `buildWitnessResultHeadCapture`,
