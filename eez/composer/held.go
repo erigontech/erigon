@@ -327,8 +327,7 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
-		if p.byHash[tx.Hash] {
-			p.resubmitted(tx)
+		if p.resubmitted(tx) {
 			continue
 		}
 		p.byHash[tx.Hash] = true
@@ -337,15 +336,21 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 	p.txs = append(front, p.txs...)
 }
 
-// resubmitted gives the queued transaction of tx's hash, sent again while
-// tx was out of the pool, the Sync block tx last composed in.
-func (p *HeldPool) resubmitted(tx *Held) {
+// resubmitted reports whether tx's hash is queued, sent again while tx was
+// out of the pool, and gives that transaction the Sync block tx last
+// composed in and the attempts and waits tx counted.
+func (p *HeldPool) resubmitted(tx *Held) bool {
+	if !p.byHash[tx.Hash] {
+		return false
+	}
 	for _, q := range p.txs {
 		if q.Hash == tx.Hash {
 			q.sync = max(q.sync, tx.sync)
-			return
+			q.Attempts, q.Deferred = max(q.Attempts, tx.Attempts), max(q.Deferred, tx.Deferred)
+			break
 		}
 	}
+	return true
 }
 
 // replaced returns, for each chain of txs a replacement queued or in flight
@@ -387,8 +392,7 @@ func (p *HeldPool) Reserve(txs []*Held) {
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
-		if p.byHash[tx.Hash] {
-			p.resubmitted(tx)
+		if p.resubmitted(tx) {
 			continue
 		}
 		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync}

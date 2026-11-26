@@ -549,8 +549,11 @@ func TestHeldPoolKeepsDiscardedComposed(t *testing.T) {
 			p.Evict(sender, Outbound, 0)
 		}},
 		"resubmitted, recovered, evicted": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
-			push(t, p, held(sender, 0, Outbound, 1), 0)
+			again := held(sender, 0, Outbound, 1)
+			push(t, p, again, 0)
+			drained[0].Attempts = 2
 			p.PushFront(drained)
+			require.Equal(t, uint32(2), again.Attempts, "its charges carried")
 			p.Evict(sender, Outbound, 0)
 		}},
 	} {
