@@ -769,6 +769,10 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 	return out.DecodeSSZ(currentList, 0)
 }
 
+func (r *HistoricalStatesReader) ValidatorTableCovers(slot uint64) bool {
+	return slot <= r.validatorTable.Slot()
+}
+
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
 	sd, err := state_accessors.ReadSlotData(kvGetter, slot)

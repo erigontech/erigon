@@ -232,12 +232,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 	defer tx.Rollback()
 
-	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
-	if err != nil {
+	if err := a.requireHistoricalDutiesState(tx, epoch*a.beaconChainCfg.SlotsPerEpoch); err != nil {
 		return nil, err
-	}
-	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
 	snRoTx := a.caplinStateSnapshots.View()
@@ -301,4 +297,19 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		}
 	}
 	return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
+}
+
+func (a *ApiHandler) requireHistoricalDutiesState(tx kv.Tx, slot uint64) error {
+	minProgressSlot := max(slot, 1)
+	reconstructed, err := a.isStateReconstructed(tx, minProgressSlot)
+	if err == nil && !reconstructed && slot == 0 {
+		reconstructed, err = tx.Has(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+	}
+	if err != nil {
+		return err
+	}
+	if !reconstructed {
+		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", slot))
+	}
+	return nil
 }

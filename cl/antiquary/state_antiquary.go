@@ -128,21 +128,20 @@ func FillStaticValidatorsTableIfNeeded(logger log.Logger, stateSn *snapshotsync.
 	if err := stateSn.OpenFolder(); err != nil {
 		return false, err
 	}
-	if stateSn.BlocksAvailable() == 0 {
+	throughSlot := stateSn.BlocksAvailable()
+	if throughSlot == 0 {
 		return false, nil
 	}
-	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-	log.Info("[Caplin-Archive] filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
+	log.Info("[Caplin-Archive] filling validators table", "from", 0, "to", throughSlot)
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	start := time.Now()
-	var lastSlot uint64
-	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
+	for slot := uint64(0); slot <= throughSlot; slot++ {
 		select {
 		case <-logTicker.C:
-			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
+			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, throughSlot))
 		default:
 		}
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
@@ -183,10 +182,9 @@ func FillStaticValidatorsTableIfNeeded(logger log.Logger, stateSn *snapshotsync.
 		); err != nil {
 			return false, fmt.Errorf("replay validator events at slot %d: %w", slot, err)
 		}
-		lastSlot = slot
 	}
-	validatorsTable.SetSlot(lastSlot)
-	logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
+	validatorsTable.SetSlot(throughSlot)
+	logger.Info("[Antiquary] Filled static validators table", "slots", throughSlot, "elapsed", time.Since(start))
 	return true, nil
 }
 

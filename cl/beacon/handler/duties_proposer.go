@@ -83,6 +83,9 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return nil, err
 		}
 		defer tx.Rollback()
+		if err := a.requireHistoricalDutiesState(tx, expectedSlot); err != nil {
+			return nil, err
+		}
 		var view *snapshotsync.CaplinStateView
 		if a.caplinStateSnapshots != nil {
 			view = a.caplinStateSnapshots.View()
@@ -289,17 +292,6 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 }
 
 func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, stateGetter state_accessors.GetValFn, epoch, expectedSlot uint64) ([]proposerDuties, error) {
-	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
-	if err != nil {
-		return nil, err
-	}
-	if a.caplinStateSnapshots != nil {
-		stageStateProgress = max(stageStateProgress, a.caplinStateSnapshots.BlocksAvailable())
-	}
-	if expectedSlot > stageStateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
-	}
-
 	if expectedSlot == a.beaconChainCfg.GenesisSlot {
 		genesisState, err := a.stateReader.ReadHistoricalState(ctx, tx, expectedSlot)
 		if err != nil {
@@ -315,6 +307,9 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return duties, nil
 	}
 
+	if !a.stateReader.ValidatorTableCovers(expectedSlot) {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("static validator table does not yet cover slot %d", expectedSlot))
+	}
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
 	if err != nil {
 		return nil, err

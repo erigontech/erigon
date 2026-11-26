@@ -23,7 +23,7 @@ tests:
     compare:
       expr: "actual_code == 400"
 
-  - name: proposer duties early epoch dependent root missing
+  - name: proposer duties early epoch head dependent root missing
     actual:
       handler: i
       path: /eth/v1/validator/duties/proposer/1
