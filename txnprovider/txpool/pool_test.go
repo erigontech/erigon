@@ -3851,7 +3851,7 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	}
 }
 
-// Any peer can relay a transaction that its sender signed before, so the sender is
+// Any peer can relay a transaction that its sender signed earlier, so the sender is
 // punished only for a transaction that would take a new slot.
 func TestRemoteTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
 	for _, tc := range []struct {

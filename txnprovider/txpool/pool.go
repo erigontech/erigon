@@ -1431,10 +1431,10 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 
-	// A Spammer result makes validateTxns call punishSpammer, which evicts half of the sender's
-	// remote transactions. Any peer can relay any transaction that the sender ever signed,
-	// including ones that the pool would reject anyway. So a transaction counts as spam only if it
-	// would take a new slot and passes the checks above and the insertion checks.
+	// A Spammer result makes validateTxns call punishSpammer, which evicts up to half of the
+	// sender's pooled transactions. Any peer can relay any transaction that the sender ever
+	// signed, including ones that the pool would reject anyway. So a transaction counts as spam
+	// only if it would take a new slot and passes the checks above and the insertion checks.
 	//
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
