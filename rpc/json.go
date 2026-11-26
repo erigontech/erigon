@@ -644,7 +644,7 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 			return false
 		}
 		argval := reflect.New(types[i])
-		if err := decodeArgument(elem, argval.Interface()); err != nil {
+		if err := decodeArgument(elem, argval); err != nil {
 			scanErr = fmt.Errorf("invalid argument %d: %w", i, err)
 			return false
 		}
@@ -654,14 +654,24 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 	return args, scanErr
 }
 
-// decodeArgument decodes one already syntax-checked argument value.
-func decodeArgument(elem []byte, arg any) error {
+// decodeArgument decodes one already syntax-checked argument value into arg,
+// a pointer to the argument.
+func decodeArgument(elem []byte, arg reflect.Value) error {
+	if isJSONNull(elem) {
+		return json.Unmarshal(elem, arg.Interface())
+	}
+	// An optional argument is a pointer: allocate its value here, so that a
+	// value type which unmarshals itself also takes the direct call below.
+	if ptr := arg.Elem(); ptr.Kind() == reflect.Pointer {
+		ptr.Set(reflect.New(ptr.Type().Elem()))
+		arg = ptr
+	}
 	// A type that unmarshals itself is called directly, which skips the
 	// validation pass json.Unmarshal runs first.
-	if u, ok := arg.(json.Unmarshaler); ok && !isJSONNull(elem) {
+	if u, ok := reflect.TypeAssert[json.Unmarshaler](arg); ok {
 		return u.UnmarshalJSON(elem)
 	}
-	return json.Unmarshal(elem, arg)
+	return json.Unmarshal(elem, arg.Interface())
 }
 
 func isJSONNull(raw json.RawMessage) bool {

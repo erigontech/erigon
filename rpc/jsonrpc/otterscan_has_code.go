@@ -33,17 +33,12 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return false, err
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
-	if err != nil {
-		return false, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return false, err
 	}

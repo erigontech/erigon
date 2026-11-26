@@ -30,6 +30,21 @@ type ProposerSlashing struct {
 	Header2 *SignedBeaconBlockHeader `json:"signed_header_2"`
 }
 
+func (p *ProposerSlashing) UnmarshalJSON(buf []byte) error {
+	type proposerSlashingJSON ProposerSlashing
+	var tmp proposerSlashingJSON
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	for i, header := range []*SignedBeaconBlockHeader{tmp.Header1, tmp.Header2} {
+		if header == nil || header.Header == nil {
+			return fmt.Errorf("proposer slashing signed_header_%d is missing or has no message", i+1)
+		}
+	}
+	*p = ProposerSlashing(tmp)
+	return nil
+}
+
 func (p *ProposerSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, p.Header1, p.Header2)
 }
@@ -69,6 +84,18 @@ func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
 func (a *AttesterSlashing) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
 	a.Attestation_1.SetVersionWithConfig(v, cfg)
 	a.Attestation_2.SetVersionWithConfig(v, cfg)
+}
+
+// setVersionAndValidate applies the fork and preset limits to both indexed
+// attestations, which JSON decoding cannot know, and rejects lists over them.
+func (a *AttesterSlashing) setVersionAndValidate(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) error {
+	a.SetVersionWithConfig(v, cfg)
+	for i, att := range []*IndexedAttestation{a.Attestation_1, a.Attestation_2} {
+		if n, limit := att.AttestingIndices.Length(), att.AttestingIndices.Cap(); n > limit {
+			return fmt.Errorf("attestation_%d: attesting indices exceed limit: %d > %d", i+1, n, limit)
+		}
+	}
+	return nil
 }
 
 func (a *AttesterSlashing) UnmarshalJSON(buf []byte) error {

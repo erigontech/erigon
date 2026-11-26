@@ -2466,3 +2466,7 @@ func TestChainTipPollBatchCarriesThePeerThatServedIt(t *testing.T) {
 		})
 	}
 }
+
+func (*chainTipBatchEnvelopeSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

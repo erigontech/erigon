@@ -45,6 +45,18 @@ func TestPreLondonReceiptGasPriceIsIndependent(t *testing.T) {
 	require.Equal(t, uint256.NewInt(7), &txn.GasPrice)
 }
 
+func TestGasFeePaidIncludesBaseFee(t *testing.T) {
+	const gasUsed = 21_000
+	txn := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{GasLimit: 50_000},
+		FeeCap:   uint256.Int{20},
+		TipCap:   uint256.Int{2},
+	}
+	paid, err := GasFeePaid(txn, gasUsed, uint256.NewInt(10), nil)
+	require.NoError(t, err)
+	require.Equal(t, uint256.Int{12 * gasUsed}, paid)
+}
+
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
 // hashing the logs again on every call, and compute it only when unset.
 func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {

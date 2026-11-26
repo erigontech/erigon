@@ -265,16 +265,17 @@ func collectArgFiles(ctx *cli.Command, filter testFilter) ([]string, error) {
 // follows a path that is a symlink to a directory, which WalkDir does not
 // descend into.
 func collectFiles(path string) ([]string, error) {
-	root, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return nil, err
-	}
-	info, err := os.Stat(root)
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 	if !info.IsDir() {
 		return []string{path}, nil
+	}
+	// only a directory walk needs the resolved path: a piped /dev/stdin on Linux links to "pipe:[N]"
+	root, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
 	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {

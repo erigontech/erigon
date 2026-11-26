@@ -93,11 +93,11 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		}
 	}
 	baseFee, blobBaseFee := st.evm.Context.BaseFee, st.evm.Context.BlobBaseFee
-	if st.isFree || st.evm.Config().NoBaseFee && tx.Fees.MaxFee.IsZero() && tx.Fees.TipCap.IsZero() {
-		baseFee.Clear()
-	}
 	if st.evm.Config().NoBaseFee && tx.Fees.MaxFee.IsZero() {
 		blobBaseFee.Clear()
+		if tx.Fees.TipCap.IsZero() {
+			baseFee.Clear()
+		}
 	}
 	budget, err := tx.Fees.Budget(limits.Total(), tx.GetBlobGas(), &baseFee, &blobBaseFee)
 	if err != nil {
