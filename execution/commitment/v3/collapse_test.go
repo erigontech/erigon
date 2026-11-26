@@ -18,7 +18,6 @@ package v3
 
 import (
 	"bytes"
-	"context"
 	"math/bits"
 	"math/rand"
 	"slices"
@@ -71,16 +70,12 @@ func TestCollapseRuleAbsentDelete(t *testing.T) {
 func collapseRuleEvents(t *testing.T, pre, batch []commitmenttest.Op, reverse bool) []collapseTestEvent {
 	t.Helper()
 	b := newWitnessBed(t, pre)
-	b.v3Mem.Apply(batch)
-	tr := b.openV3(context.Background())
-	_, _, err := tr.RestoreState(b.v3State)
-	require.NoError(t, err)
 	items := collapseTestItems(batch)
 	if reverse {
 		slices.Reverse(items)
 	}
 	events := make([]collapseTestEvent, 0)
-	err = traceCollapsesDeletes(tr.ctx, items, func(sibling, prefix []byte) {
+	err := traceCollapsesDeletes(b.v3Mem, items, func(sibling, prefix []byte) {
 		events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
 	})
 	require.NoError(t, err)
@@ -385,10 +380,7 @@ func TestCollapseRuleReadsStorageOnlyForSiblings(t *testing.T) {
 	}
 	pre := witnessState(rand.New(rand.NewSource(9)), witnessShape{accounts: 16, slots: 1, accountPrefixes: prefixes, slotPrefixes: [][]byte{{1}}})
 	batch := []commitmenttest.Op{commitmenttest.DeleteAt(pre[0].Key)}
-	b := newWitnessBed(t, pre)
-	b.v3Mem.Apply(batch)
-	reader, _ := b.v3Mem.Open(t.Context())
-	counting := &countingReads{PatriciaContext: reader, reads: map[string]int{}}
+	counting := &countingReads{PatriciaContext: newWitnessBed(t, pre).v3Mem, reads: map[string]int{}}
 	events := 0
 	require.NoError(t, traceCollapsesDeletes(counting, collapseTestItems(batch), func([]byte, []byte) { events++ }))
 	require.Zero(t, events)
@@ -451,42 +443,22 @@ func countWitnessNodes(want, got [][]byte) int {
 
 func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []collapseTestEvent {
 	t.Helper()
-	b := newWitnessBed(t, pre)
-	ctx := b.openV3(context.Background()).ctx
-	live := make(map[byte]map[string]struct{})
-	deletes := make(map[byte]map[string]struct{})
-	for _, op := range pre {
-		plane := planeAccount
-		if len(op.Key) > length.Addr {
-			plane = planeStorage
-		}
-		if live[plane] == nil {
-			live[plane] = make(map[string]struct{})
-		}
-		live[plane][string(commitment.KeyToHexNibbleHash(op.Key))] = struct{}{}
-	}
-	for _, op := range batch {
-		if len(op.Key) == length.Addr {
-			if deletes[planeAccount] == nil {
-				deletes[planeAccount] = make(map[string]struct{})
+	ctx := newWitnessBed(t, pre).v3Mem
+	state := commitmenttest.State{}
+	state.Apply(pre)
+	state.Apply(batch)
+	index := func(ops []commitmenttest.Op) map[byte]map[string]struct{} {
+		out := map[byte]map[string]struct{}{planeAccount: {}, planeStorage: {}}
+		for _, op := range ops {
+			plane := planeAccount
+			if len(op.Key) > length.Addr {
+				plane = planeStorage
 			}
-			deletes[planeAccount][string(commitment.KeyToHexNibbleHash(op.Key))] = struct{}{}
-			for _, preOp := range pre {
-				if len(preOp.Key) > length.Addr && bytes.Equal(preOp.Key[:length.Addr], op.Key) {
-					delete(live[planeStorage], string(commitment.KeyToHexNibbleHash(preOp.Key)))
-				}
-			}
-			continue
+			out[plane][string(commitment.KeyToHexNibbleHash(op.Key))] = struct{}{}
 		}
-		if deletes[planeStorage] == nil {
-			deletes[planeStorage] = make(map[string]struct{})
-		}
-		deletes[planeStorage][string(commitment.KeyToHexNibbleHash(op.Key))] = struct{}{}
-		delete(live[planeStorage], string(commitment.KeyToHexNibbleHash(op.Key)))
+		return out
 	}
-	for key := range deletes[planeAccount] {
-		delete(live[planeAccount], key)
-	}
+	live, deletes := index(state.Ops()), index(batch)
 	groups := make(map[string][][]byte)
 	for key := range deletes[planeAccount] {
 		groups[""] = append(groups[""], []byte(key))
