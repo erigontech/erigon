@@ -1327,6 +1327,27 @@ func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
 }
 
+func TestRemoteFrameAdmissionAfterSenderPenalty(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.AccountSlots = 1
+	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), blocker)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Len(t, pool.remoteFrames.ready, 1)
+	pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+	require.Contains(t, pool.byHash, string(blocker.IDHash[:]))
+
+	// Gossip applies sender penalties before the worker checks frame slots,
+	// even when the frame arrived first.
+	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	reasons = submitRemoteTxns(t, pool, sender, candidate, newTestSenderTxnSlot(t, sender, 1))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, reasons)
+	require.NotContains(t, pool.byHash, string(blocker.IDHash[:]))
+	require.Len(t, pool.remoteFrames.ready, 1)
+	pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+	require.Contains(t, pool.byHash, string(candidate.IDHash[:]))
+}
+
 func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
@@ -1582,6 +1603,36 @@ func TestFramePoolBlobFeeFloor(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
 	require.Zero(t, pool.totalBlobsInPool.Load())
 	require.Empty(t, pool.frameReservations)
+}
+
+func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frame.Fees.MaxFee.SetUint64(2*frame.GetGasLimit() + 2*params.GasPerBlob)
+	slot := framePoolSlotWithBlob(t, frame)
+	var initial TxnSlots
+	initial.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, initial)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	pool.cfg.TotalBlobPoolLimit = 1
+
+	var replay TxnSlot
+	parser := NewTxnParseContext(frame.ChainID)
+	parser.WithSender(false)
+	_, err = parser.ParseTransaction(slot.Rlp, 0, &replay, nil, false, true, nil)
+	require.NoError(t, err)
+	var txns TxnSlots
+	txns.Append(&replay, sender[:], false)
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
+
+	replay.BlobBundles[0].Proofs[0][0] ^= 1
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 }
 
 func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {
