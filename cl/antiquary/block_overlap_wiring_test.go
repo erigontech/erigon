@@ -452,6 +452,32 @@ func TestAntiquateReportsTheCanonicalHeadOnlyWhenItHoldsBackASegment(t *testing.
 		require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
 		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the margin, not the canonical head, holds the next segment")
 	})
+	t.Run("the gap below the next indexed segment is shorter than a segment", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		dirs := datadir.New(t.TempDir())
+		writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+		writeStateFixture(t, dirs.Snap, "beaconblocks", limit+limit/2, 2*limit+limit/2, logger)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for slot := uint64(0); slot < limit; slot += 500 {
+				var root common.Hash
+				binary.BigEndian.PutUint64(root[:], slot+1)
+				if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+					return err
+				}
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, 2*limit+safetyMargin)
+		}))
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+		require.NoError(t, a.antiquate())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "no complete segment fits below the next indexed segment")
+	})
 }
 
 func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {

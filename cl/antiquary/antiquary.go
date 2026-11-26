@@ -439,7 +439,7 @@ func (s *Antiquary) antiquate() error {
 
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to -= min(to, safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-	uncapped := (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	uncapped := to
 	to = min(to, canonicalHead+1)
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
@@ -450,6 +450,7 @@ func (s *Antiquary) antiquate() error {
 		}
 		return true
 	})
+	uncapped = (uncapped / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	if uncapped > max(from, to) {
 		s.reportCanonicalHeadCap(canonicalHead, uncapped, time.Now())
 	}
