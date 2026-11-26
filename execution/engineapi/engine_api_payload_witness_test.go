@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -110,45 +109,34 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 	parent, err := eat.ExecutionModule.GetHeader(ctx, &parentHash, nil)
 	require.NoError(t, err)
 	require.NotNil(t, parent)
-	state := make([][]byte, len(witness.State))
-	for i, node := range witness.State {
-		state[i] = node
-	}
-	rootIndex := -1
-	for i, node := range state {
-		if crypto.Keccak256Hash(node) == parent.Root {
-			rootIndex = i
-			break
-		}
-	}
-	require.NotEqual(t, -1, rootIndex, "witness parent root")
-	state[0], state[rootIndex] = state[rootIndex], state[0]
-	decoded, err := trie.RLPDecode(state)
-	require.NoError(t, err)
-	require.Equal(t, parent.Root, decoded.Hash())
-	proof, account, err := payloadWitnessSenderProof(eat, parent, witness)
-	require.NoError(t, err)
-	require.NotEmpty(t, proof)
-	require.NotEmpty(t, account)
 	txns := make([][]byte, len(p.ExecutionPayload.Transactions))
 	for i, tx := range p.ExecutionPayload.Transactions {
 		txns[i] = tx
 	}
 	transactions, err := types.DecodeTransactions(txns)
 	require.NoError(t, err)
-	block := types.NewBlockFromNetwork(engineapitester.MockClPayloadToHeader(p), &types.Body{Transactions: transactions, Withdrawals: p.ExecutionPayload.Withdrawals}, nil)
+	header := engineapitester.MockClPayloadToHeader(p)
+	signer := types.MakeSigner(eat.ChainConfig, header.Number.Uint64(), header.Time)
+	for _, txn := range transactions {
+		sender, err := txn.Sender(*signer)
+		require.NoError(t, err)
+		proof, account, err := payloadWitnessAccountProof(parent, witness, sender.Value())
+		require.NoError(t, err)
+		require.NotEmpty(t, proof)
+		require.NotEmpty(t, account)
+	}
+	block := types.NewBlockFromNetwork(header, &types.Body{Transactions: transactions, Withdrawals: p.ExecutionPayload.Withdrawals}, nil)
 	root, err := jsonrpc.ReplayExecutionWitness(witness, block, eat.ChainConfig, merge.New(ethash.NewFaker()))
 	require.NoError(t, err)
 	require.Equal(t, p.ExecutionPayload.StateRoot, root, "witness post-state root")
 }
 
-func payloadWitnessSenderProof(eat engineapitester.EngineApiTester, parent *types.Header, witness *jsonrpc.ExecutionWitnessResult) ([][]byte, []byte, error) {
+func payloadWitnessAccountProof(parent *types.Header, witness *jsonrpc.ExecutionWitnessResult, addr common.Address) ([][]byte, []byte, error) {
 	nodes := make(map[string][]byte, len(witness.State))
 	for _, node := range witness.State {
 		nodes[string(crypto.Keccak256(node))] = node
 	}
-	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	return witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	return witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(addr[:]))
 }
 
 func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
@@ -163,7 +151,8 @@ func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
 	parent, err := eat.ExecutionModule.GetHeader(ctx, &payload.ExecutionPayload.ParentHash, nil)
 	require.NoError(t, err)
 	require.NotNil(t, parent)
-	proof, account, err := payloadWitnessSenderProof(eat, parent, witness)
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	proof, account, err := payloadWitnessAccountProof(parent, witness, sender)
 	require.NoError(t, err)
 	require.NotEmpty(t, account)
 	require.Greater(t, len(proof), 1)
@@ -174,7 +163,7 @@ func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
 	body[index+len(leaf)-1] ^= 1
 	_, changedWitness, err := engineapi.DecodePayloadStatusWithWitness(body)
 	require.NoError(t, err)
-	_, _, err = payloadWitnessSenderProof(eat, parent, changedWitness)
+	_, _, err = payloadWitnessAccountProof(parent, changedWitness, sender)
 	require.Error(t, err, "changed payload response must fail the sender proof check")
 }
 
