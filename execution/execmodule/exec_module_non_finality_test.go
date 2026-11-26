@@ -250,6 +250,60 @@ func TestExecModule_GivenSameHeadFCULowersFinalised_WhenReorgAboveIt_ThenReorg(t
 	}))
 }
 
+// TestExecModule_GivenHeadOnlyFCU_WhenReorgAtSameHeight_ThenReorg is the twin of
+// TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU: the same
+// two siblings, with the first adopted by a forkchoice that names a head and
+// nothing else. A bulk-insert driver sends that shape to let execution and prune
+// drain, and it must leave the node able to follow the network when the other
+// sibling wins.
+func TestExecModule_GivenHeadOnlyFCU_WhenReorgAtSameHeight_ThenReorg(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	initial, err := emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+
+	prefix, err := emt.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, prefix.Blocks))
+	first, err := emt.GenerateChainFrom(prefix.TopBlock, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	second, err := emt.GenerateChainFrom(prefix.TopBlock, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, first.TopBlock.Hash(), second.TopBlock.Hash())
+
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, first.Blocks))
+
+	status, err := emt.InsertBlocks(ctx, second.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := emt.ValidateChain(ctx, second.TopBlock)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	secondHash := second.TopBlock.Hash()
+	result, err := emt.UpdateForkChoice(ctx, second.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status,
+		"a head-only forkchoice records no finality, so the sibling must still be adoptable")
+
+	forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+	require.Equal(t, secondHash, forkchoice.HeadHash)
+	require.Equal(t, initial.FinalizedHash, forkchoice.FinalizedHash,
+		"head-only forkchoices must leave the stored finalized block where it was")
+	require.NoError(t, emt.DB.View(ctx, func(tx kv.Tx) error {
+		canonicalHashAfterReorg, err := rawdb.ReadCanonicalHash(tx, second.TopBlock.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, secondHash, canonicalHashAfterReorg)
+		return nil
+	}))
+}
+
 func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *testing.T) {
 	// in normal circumstances our MAX_REORG_DEPTH aligns with the depth of the finalised hash
 	// (i.e. on ethereum we have T-96 finalised block in 99.999999% of the time and our MAX_REORG_DEPTH=96)
