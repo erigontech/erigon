@@ -24,12 +24,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -536,17 +535,9 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 	headSSZ, err := head.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	var mu sync.Mutex
-	var requests []string
-	seen := func() []string {
-		mu.Lock()
-		defer mu.Unlock()
-		return slices.Clone(requests)
-	}
+	requests := mapset.NewSet[string]()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
-		mu.Unlock()
+		requests.Add(r.RequestURI)
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/eth/v2/debug/beacon/heads"):
 			_, _ = w.Write([]byte(`{"data":[{"slot":"100"}]}`))
@@ -562,28 +553,17 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 	endpoint := srv.URL + "/?apikey=K"
 	prefixedEndpoint := srv.URL + "/prefix/?apikey=K"
 
-	t.Run("getHead base query", func(t *testing.T) {
-		_, err := getHead(t.Context(), endpoint)
-		require.NoError(t, err)
-		require.Contains(t, seen(), "/eth/v2/debug/beacon/heads?apikey=K")
-	})
-
-	t.Run("getStateRootAtSlot base query", func(t *testing.T) {
-		_, err := getStateRootAtSlot(t.Context(), endpoint, 0)
-		require.NoError(t, err)
-		require.Contains(t, seen(), "/eth/v1/beacon/states/0/root?apikey=K")
-	})
-
 	t.Run("ArchiveSanitizer base query", func(t *testing.T) {
 		a := &ArchiveSanitizer{
 			chainCfg:     chainCfg{Chain: networkname.Mainnet},
-			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
 			BeaconApiURL: endpoint,
 			IntervalSlot: 50,
 		}
 		err := a.Run(t.Context())
 		require.Error(t, err, "the state request gets a 404; the URL is what this test pins")
-		require.Contains(t, seen(), "/eth/v2/debug/beacon/states/0?apikey=K")
+		require.True(t, requests.ContainsOne("/eth/v2/debug/beacon/heads?apikey=K"))
+		require.True(t, requests.ContainsOne("/eth/v1/beacon/states/0/root?apikey=K"))
+		require.True(t, requests.ContainsOne("/eth/v2/debug/beacon/states/0?apikey=K"))
 	})
 
 	t.Run("BenchmarkNode base query", func(t *testing.T) {
@@ -594,7 +574,7 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
 		}
 		require.NoError(t, b.Run(t.Context()))
-		require.Contains(t, seen(), "/eth/v1/beacon/states/0/validators?apikey=K")
+		require.True(t, requests.ContainsOne("/eth/v1/beacon/states/0/validators?apikey=K"))
 	})
 
 	t.Run("BenchmarkNode template query", func(t *testing.T) {
@@ -605,7 +585,7 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
 		}
 		require.NoError(t, b.Run(t.Context()))
-		require.Contains(t, seen(), "/prefix/validators?apikey=K&id=42")
+		require.True(t, requests.ContainsOne("/prefix/validators?apikey=K&id=42"))
 	})
 
 	t.Run("BenchmarkNode template invalid escape", func(t *testing.T) {
@@ -626,18 +606,18 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
 		}
 		require.NoError(t, b.Run(t.Context()))
-		require.Contains(t, seen(), "/prefix/?")
+		require.True(t, requests.ContainsOne("/prefix/"))
 	})
 
 	t.Run("ChainEndpoint base query", func(t *testing.T) {
 		c := &ChainEndpoint{
 			chainCfg:     chainCfg{Chain: networkname.Mainnet},
-			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
+			outputFolder: outputFolder{Datadir: t.TempDir()},
 			Endpoint:     prefixedEndpoint,
 		}
 		err := c.Run(t.Context())
 		require.Error(t, err, "the parent-block request gets a 404; the URLs are what this test pins")
-		require.Contains(t, seen(), "/prefix/eth/v2/beacon/blocks/head?apikey=K")
-		require.Contains(t, seen(), "/prefix/eth/v2/beacon/blocks/0x0100000000000000000000000000000000000000000000000000000000000000?apikey=K")
+		require.True(t, requests.ContainsOne("/prefix/eth/v2/beacon/blocks/head?apikey=K"))
+		require.True(t, requests.ContainsOne("/prefix/eth/v2/beacon/blocks/0x0100000000000000000000000000000000000000000000000000000000000000?apikey=K"))
 	})
 }
