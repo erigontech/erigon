@@ -194,6 +194,32 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	})
 }
 
+func TestMessageListenerPenalizesMalformedListEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   sentryproto.MessageId
+		data []byte
+	}{
+		{"truncated BAL length", sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, []byte{rlp.LongListCode + 1}},
+		{"truncated block bodies length", sentryproto.MessageId_BLOCK_BODIES_66, []byte{rlp.LongListCode + 1}},
+		{"payload extends past envelope", sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, []byte{0xc2, 1, 0xc1, 0x80}},
+		{"extra field after payload", sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, []byte{0xc3, 1, 0xc0, 0x80}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newMessageListenerTest(t)
+			defer test.ctxCancel()
+			peerId := PeerIdFromUint64(1)
+			mockExpectPenalizePeer(t, test.sentryClient, peerId)
+			err := test.messageListener.notifyListResponse(t.Context(), &sentryproto.InboundMessage{
+				Id:     tc.id,
+				PeerId: peerId.H512(),
+				Data:   tc.data,
+			})
+			require.True(t, rlp.IsInvalidRLPError(err))
+		})
+	}
+}
+
 func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	t.Parallel()
 
