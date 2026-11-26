@@ -731,3 +731,83 @@ func TestHistoricalReadinessRangeFindsGapBeforeSnapshot(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
 }
+
+func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		dumpReady bool
+		want      int
+	}{
+		{"dump ready", true, http.StatusOK},
+		{"dump pending", false, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			db, _, _, preState, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+			slot := uint64(clparams.SlotsPerDump)
+			fcu.FinalizedSlotVal = slot + 32
+			head, err := postState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, head.SetSlot(slot+32))
+			manager := syncedData.(*synced_data.SyncedDataManager)
+			root, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+			require.NoError(t, err)
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, root))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				for _, row := range []struct {
+					table    string
+					from, to uint64
+				}{
+					{kv.SlotData, 96, slot},
+					{kv.EffectiveBalancesDump, 0, slot},
+					{kv.RandaoMixes, 64, slot - 64},
+				} {
+					data, err := tx.GetOne(row.table, base_encoding.Encode64ToBytes4(row.from))
+					if err != nil {
+						return err
+					}
+					if len(data) == 0 {
+						t.Fatalf("missing %s at %d", row.table, row.from)
+					}
+					if err := tx.Put(row.table, base_encoding.Encode64ToBytes4(row.to), data); err != nil {
+						return err
+					}
+				}
+				if tc.dumpReady {
+					if err := beacon_indicies.MarkRootCanonical(tx, slot-1, common.Hash{1}); err != nil {
+						return err
+					}
+				} else if err := tx.Delete(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(slot)); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, slot-1)
+			}))
+			dirs := datadir.New(t.TempDir())
+			types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+			getters := map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+			if tc.dumpReady {
+				getters[kv.EffectiveBalancesDump] = types.KeyValueGetters[kv.EffectiveBalancesDump]
+			}
+			types.KeyValueGetters = getters
+			snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+			t.Cleanup(snapshots.Close)
+			require.NoError(t, snapshots.DumpCaplinState(t.Context(), 2000, 2000, 0, dirs, 1, log.LvlDebug, logger))
+			require.NoError(t, snapshots.OpenFolder())
+			handler.caplinStateSnapshots = snapshots
+			view := snapshots.View()
+			_, slotCovered := view.VisibleSegment(slot, kv.SlotData)
+			_, dumpCovered := view.VisibleSegment(slot, kv.EffectiveBalancesDump)
+			_, diffCovered := view.VisibleSegment(slot, kv.ValidatorEffectiveBalance)
+			view.Close()
+			require.True(t, slotCovered)
+			require.Equal(t, tc.dumpReady, dumpCovered)
+			require.False(t, diffCovered)
+			validatorTable := state_accessors.NewStaticValidatorTable()
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, validatorTable) }))
+			validatorTable.SetSlot(slot)
+			handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+			status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/48", "")
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}
