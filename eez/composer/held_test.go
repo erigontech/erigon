@@ -542,6 +542,17 @@ func TestHeldPoolKeepsDiscardedComposed(t *testing.T) {
 			p.Reserve(drained)
 			require.NotContains(t, p.inFlight, common.Hash{1})
 		}},
+		// Sent again while out of the pool, it is queued as a new object.
+		"resubmitted, reserved, evicted": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			push(t, p, held(sender, 0, Outbound, 1), 0)
+			p.Reserve(drained)
+			p.Evict(sender, Outbound, 0)
+		}},
+		"resubmitted, recovered, evicted": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			push(t, p, held(sender, 0, Outbound, 1), 0)
+			p.PushFront(drained)
+			p.Evict(sender, Outbound, 0)
+		}},
 	} {
 		for _, composed := range []bool{true, false} {
 			if c.settled && !composed {

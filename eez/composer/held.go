@@ -327,12 +327,25 @@ func (p *HeldPool) PushFront(recovered []*Held) {
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
-		if !p.byHash[tx.Hash] {
-			p.byHash[tx.Hash] = true
-			front = append(front, tx)
+		if p.byHash[tx.Hash] {
+			p.resubmitted(tx)
+			continue
 		}
+		p.byHash[tx.Hash] = true
+		front = append(front, tx)
 	}
 	p.txs = append(front, p.txs...)
+}
+
+// resubmitted gives the queued transaction of tx's hash, sent again while
+// tx was out of the pool, the Sync block tx last composed in.
+func (p *HeldPool) resubmitted(tx *Held) {
+	for _, q := range p.txs {
+		if q.Hash == tx.Hash {
+			q.sync = max(q.sync, tx.sync)
+			return
+		}
+	}
 }
 
 // replaced returns, for each chain of txs a replacement queued or in flight
@@ -374,9 +387,11 @@ func (p *HeldPool) Reserve(txs []*Held) {
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
-		if !p.byHash[tx.Hash] {
-			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync}
+		if p.byHash[tx.Hash] {
+			p.resubmitted(tx)
+			continue
 		}
+		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync}
 	}
 }
 
