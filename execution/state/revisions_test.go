@@ -56,7 +56,7 @@ func TestVersionedRevertFirstStorageWriteAfterRead(t *testing.T) {
 			require.NoError(t, ibs.SetState(addr, keyA, *uint256.NewInt(1)))
 			ibs.RevertToSnapshot(snap, nil)
 
-			_, ok := ibs.versionedWrites.GetStorage(addr, keyA)
+			_, ok := ibs.writes.GetStorage(addr, keyA)
 			require.False(t, ok, "the reverted write must not stay in the write set")
 		})
 	}

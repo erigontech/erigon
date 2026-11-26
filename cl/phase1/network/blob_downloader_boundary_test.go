@@ -1046,6 +1046,8 @@ type boundaryBlockReader struct {
 	block  *cltypes.SignedBeaconBlock
 	blocks map[uint64]*cltypes.SignedBeaconBlock
 	onRead func(uint64)
+
+	blindedErr error
 }
 
 func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
@@ -1060,6 +1062,13 @@ func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.
 		return r.blocks[slot], r.err
 	}
 	return r.block, r.err
+}
+
+func (r *boundaryBlockReader) ReadBlindedBlockBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	if r.blindedErr != nil {
+		return nil, r.blindedErr
+	}
+	return r.blocks[slot].Blinded()
 }
 
 type boundaryPeerCounter uint64
