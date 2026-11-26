@@ -14,7 +14,7 @@ func TestInitialSelection(t *testing.T) {
 		"storage":  domainType,
 		"logaddr":  idxType,
 	}
-	domainExts := extCfgMap[domainType] // .kv .bt .kvi .kvei .vi .v
+	domainExts := extCfgMap[domainType] // .kv .bt .kvi .kvei .vi .v .efi .ef
 	idxExts := extCfgMap[idxType]       // .efi .ef
 
 	tests := []struct {
@@ -53,6 +53,13 @@ func TestInitialSelection(t *testing.T) {
 			includeExts: []string{".ef"},
 			wantPresent: []string{"logaddr", ".ef"},
 			wantAbsent:  []string{".efi", ".kv", ".bt"},
+		},
+		{
+			name:           "include-exts selects the inverted index of a domain",
+			includeDomains: []string{"storage"},
+			includeExts:    []string{".ef", ".efi"},
+			wantPresent:    []string{"storage", ".ef", ".efi"},
+			wantAbsent:     []string{".kv", ".v"},
 		},
 		{
 			name:        "exclude-exts is a blacklist",

@@ -34,9 +34,7 @@ type SelectorModel struct {
 // NewSelectorModel initializes based on include/exclude lists
 func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts []string) *SelectorModel {
 	res, domains := getNames(&statecfg.Schema)
-	exts := make([]string, 0, 10)
-	exts = append(exts, extCfgMap[domainType]...)
-	exts = append(exts, extCfgMap[idxType]...)
+	exts := slices.Clone(extCfgMap[domainType])
 
 	sel := initialSelection(domains, res, includeDomains, includeExts, excludeDomains, excludeExts)
 	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
