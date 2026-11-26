@@ -90,8 +90,9 @@ type fundedPrefix struct {
 // keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
 // takes the place of previous. A batch of additions records the prefix in prefixes at its first costlier
 // replacement for the sender and updates it with each replacement it accepts, so the batch walks the
-// sender's transactions once. Transactions that the batch adds later are not covered. The caller must
-// replace previous when it returns true.
+// sender's transactions once. The prefix does not grow afterwards: a transaction that the batch adds, or
+// funds with a cheaper replacement, is not covered. Neither can be pending before the batch ends. The
+// caller must replace previous when it returns true.
 func (p *TxPool) keepsSenderFunded(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, replacement *TxnSlot, previous *metaTxn) (bool, error) {
 	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
 	costlier := newCost.Gt(oldCost)
