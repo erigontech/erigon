@@ -129,11 +129,11 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	currentSlot := f.recordBlockTimeliness(block, blockRoot, calledAtMs)
+	calledSlot := f.recordBlockTimeliness(block, blockRoot, calledAtMs)
 	// update_proposer_boost_root: conditionally set proposer boost root. A later slot start that
 	// already ran during the import has reset the boost that on_block would have set before it.
-	if f.proposerBoostResetSlot <= currentSlot {
-		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
+	if f.proposerBoostResetSlot <= calledSlot {
+		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, calledSlot)
 	}
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
@@ -182,7 +182,9 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	f.unrealizedFinalizations.Store(blockRoot, prepared.postPullupFinalized)
 	f.updateUnrealizedCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the post-pull-up checkpoints to the store.
-	currentEpoch := f.computeEpochAtSlot(currentSlot)
+	// The epoch is taken at commit: an epoch tick that ran during the import has already promoted the unrealized
+	// checkpoints, which would otherwise miss this block's advance.
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	}

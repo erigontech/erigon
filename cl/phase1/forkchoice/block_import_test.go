@@ -17,14 +17,20 @@
 package forkchoice
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
@@ -61,4 +67,47 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
 	require.Equal(t, common.Hash(blockRoot), store.ProposerBoostRoot())
+}
+
+// A block called in one epoch and committed after the next epoch's tick must leave the store
+// checkpoints as on_block followed by that tick does: the tick has already promoted the unrealized
+// checkpoints, so the block's own advance has to be pulled up when it is applied.
+func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
+	const targetIndex = 84 // advances unrealized justification in the fixture
+	slotTimeMs := func(f *ForkChoiceStore, slot uint64) uint64 {
+		return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
+	}
+	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
+		blocks, anchor, _ := tests.GetBellatrixRandom()
+		f := newBlockTestStore(t, anchor)
+		for _, block := range blocks[:targetIndex] {
+			f.OnTick(slotTimeMs(f, block.Block.Slot) + 1)
+			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+		}
+		block := blocks[targetIndex]
+		f.OnTick(slotTimeMs(f, block.Block.Slot) + 1)
+		nextEpochMs := slotTimeMs(f, (block.Block.Slot/f.beaconCfg.SlotsPerEpoch+1)*f.beaconCfg.SlotsPerEpoch) + 100
+		return f, block, nextEpochMs
+	}
+
+	serial, serialBlock, nextEpochMs := importUpTo(t)
+	justifiedBefore := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
+	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
+	serial.OnTick(nextEpochMs)
+
+	f, block, _ := importUpTo(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			f.OnTick(nextEpochMs)
+			return execution_client.PayloadStatusValidated, nil
+		})
+	f.engine = engine
+	require.NoError(t, f.OnBlock(t.Context(), block, true, true, false))
+
+	want := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
+	require.Greater(t, want.Epoch, justifiedBefore.Epoch, "the fixture block must advance justification")
+	require.Equal(t, want, f.justifiedCheckpoint.Load().(solid.Checkpoint))
+	require.Equal(t, serial.finalizedCheckpoint.Load().(solid.Checkpoint), f.finalizedCheckpoint.Load().(solid.Checkpoint))
 }
