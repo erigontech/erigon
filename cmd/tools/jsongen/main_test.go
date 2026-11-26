@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"path/filepath"
@@ -64,6 +65,19 @@ func requireGolden(t *testing.T, pkg, goldenPath, typeName, computed, slice stri
 	require.Equal(t, strings.ReplaceAll(string(want), "\r\n", "\n"), string(got))
 }
 
+func TestGenerateSliceOfAliasedElements(t *testing.T) {
+	t.Chdir("internal/shared")
+	require.NoError(t, run("Item", filepath.Join(t.TempDir(), "out.go"), "", "ItemPtrs"))
+}
+
+// The shared block must hold the name exactly as s.Field writes it, raw, or the two encoders
+// disagree and a name with an escape outgrows the block's buffer.
+func TestSharedLabelIsWrittenRaw(t *testing.T) {
+	var w bytes.Buffer
+	writeGroupMethod(&w, "sharedItems", "Item", 0, group{{ref: "x.N", name: "a\tb", appendFmt: "%s", size: 1}})
+	require.Contains(t, w.String(), `append(b, "\"a\tb\":"...)`)
+}
+
 // A field the generator cannot place must stop it, rather than produce a file that quietly
 // omits the field or writes what encoding/json would not. A form that does not suit the field's
 // type is not here: the ethjson writers are typed, so the generated file fails to compile.
@@ -84,6 +98,7 @@ func TestGenerateRejects(t *testing.T) {
 		"no such slice":         {"SliceOfValues", "Missing"},
 		"aliased slice":         {"SliceOfValues", "AliasedSlice"},
 		"slice variable":        {"SliceOfValues", "SliceVariable"},
+		"generic slice":         {"SliceOfValues", "GenericSlice"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir("testdata/bad")

@@ -58,7 +58,7 @@ func (xs Items) MarshalFastJSONTo(s *jsonstream.Stream) error {
 		s.WriteNil()
 		return nil
 	}
-	var shared itemsShared
+	var shared sharedItems
 	s.WriteArrayStart()
 	for _, x := range xs {
 		if x == nil {
@@ -74,39 +74,32 @@ func (xs Items) MarshalFastJSONTo(s *jsonstream.Stream) error {
 			s.RawFields(b)
 		}
 		s.WriteObjectEnd()
+		shared.prev = x
 	}
 	s.WriteArrayEnd()
 	return nil
 }
 
-// itemsShared holds each group of shared Item fields as last encoded, and the element it was encoded from.
-type itemsShared struct {
-	ok0  bool
-	key0 Item
+// sharedItems holds each group of shared Item fields as last encoded, and the previous element, which
+// the next one is compared with.
+type sharedItems struct {
+	prev *Item
 	len0 int
 	buf0 [118]byte
-	ok1  bool
-	key1 Item
 	len1 int
 	buf1 [69]byte
-	ok2  bool
-	key2 Item
 	len2 int
 	buf2 [61]byte
 }
 
 // group0 returns number, hash, empty of x, encoded again only when they differ from the previous element's.
-func (c *itemsShared) group0(x *Item) []byte {
-	if c.ok0 &&
-		x.Position.Number == c.key0.Position.Number &&
-		x.Hash == c.key0.Hash &&
-		x.Empty == c.key0.Empty {
+func (c *sharedItems) group0(x *Item) []byte {
+	if c.prev != nil &&
+		x.Position.Number == c.prev.Position.Number &&
+		x.Hash == c.prev.Hash &&
+		x.Empty == c.prev.Empty {
 		return c.buf0[:c.len0]
 	}
-	c.ok0 = true
-	c.key0.Position.Number = x.Position.Number
-	c.key0.Hash = x.Hash
-	c.key0.Empty = x.Empty
 	b := c.buf0[:0]
 	b = append(b, "\"number\":"...)
 	b = append(hexutil.AppendUint64(append(b, '"'), uint64(x.Position.Number)), '"')
@@ -121,17 +114,13 @@ func (c *itemsShared) group0(x *Item) []byte {
 }
 
 // group1 returns flag, stamp, null of x, encoded again only when they differ from the previous element's.
-func (c *itemsShared) group1(x *Item) []byte {
-	if c.ok1 &&
-		x.Flag == c.key1.Flag &&
-		(x.Stamp == nil) == (c.key1.Stamp == nil) && (x.Stamp == nil || *x.Stamp == *c.key1.Stamp) &&
-		(x.Null == nil) == (c.key1.Null == nil) && (x.Null == nil || *x.Null == *c.key1.Null) {
+func (c *sharedItems) group1(x *Item) []byte {
+	if c.prev != nil &&
+		x.Flag == c.prev.Flag &&
+		(x.Stamp == nil) == (c.prev.Stamp == nil) && (x.Stamp == nil || *x.Stamp == *c.prev.Stamp) &&
+		(x.Null == nil) == (c.prev.Null == nil) && (x.Null == nil || *x.Null == *c.prev.Null) {
 		return c.buf1[:c.len1]
 	}
-	c.ok1 = true
-	c.key1.Flag = x.Flag
-	c.key1.Stamp = x.Stamp
-	c.key1.Null = x.Null
 	b := c.buf1[:0]
 	b = append(b, "\"flag\":"...)
 	b = strconv.AppendBool(b, x.Flag)
@@ -150,15 +139,12 @@ func (c *itemsShared) group1(x *Item) []byte {
 }
 
 // group2 returns optStart, optNum of x, encoded again only when they differ from the previous element's.
-func (c *itemsShared) group2(x *Item) []byte {
-	if c.ok2 &&
-		(x.OptStart == nil) == (c.key2.OptStart == nil) && (x.OptStart == nil || *x.OptStart == *c.key2.OptStart) &&
-		x.OptNum == c.key2.OptNum {
+func (c *sharedItems) group2(x *Item) []byte {
+	if c.prev != nil &&
+		(x.OptStart == nil) == (c.prev.OptStart == nil) && (x.OptStart == nil || *x.OptStart == *c.prev.OptStart) &&
+		x.OptNum == c.prev.OptNum {
 		return c.buf2[:c.len2]
 	}
-	c.ok2 = true
-	c.key2.OptStart = x.OptStart
-	c.key2.OptNum = x.OptNum
 	b := c.buf2[:0]
 	if x.OptStart != nil {
 		b = append(b, "\"optStart\":"...)

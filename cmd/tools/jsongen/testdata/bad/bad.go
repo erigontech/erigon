@@ -87,3 +87,6 @@ type SlicesOfValues []SliceOfValues
 type AliasedSlice = []*SliceOfValues
 
 var SliceVariable []*SliceOfValues
+
+// The generated receiver carries no type parameters.
+type GenericSlice[T any] []*SliceOfValues

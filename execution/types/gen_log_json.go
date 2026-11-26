@@ -48,7 +48,7 @@ func (xs Logs) MarshalFastJSONTo(s *jsonstream.Stream) error {
 		s.WriteNil()
 		return nil
 	}
-	var shared logsShared
+	var shared sharedLogs
 	s.WriteArrayStart()
 	for _, x := range xs {
 		if x == nil {
@@ -63,37 +63,31 @@ func (xs Logs) MarshalFastJSONTo(s *jsonstream.Stream) error {
 		ethjson.Quantity(s, "logIndex", x.Index)
 		s.RawFields(shared.group1(x))
 		s.WriteObjectEnd()
+		shared.prev = x
 	}
 	s.WriteArrayEnd()
 	return nil
 }
 
-// logsShared holds each group of shared Log fields as last encoded, and the element it was encoded from.
-type logsShared struct {
-	ok0  bool
-	key0 Log
+// sharedLogs holds each group of shared Log fields as last encoded, and the previous element, which
+// the next one is compared with.
+type sharedLogs struct {
+	prev *Log
 	len0 int
 	buf0 [242]byte
-	ok1  bool
-	key1 Log
 	len1 int
 	buf1 [53]byte
 }
 
 // group0 returns blockNumber, transactionHash, transactionIndex, blockHash of x, encoded again only when they differ from the previous element's.
-func (c *logsShared) group0(x *Log) []byte {
-	if c.ok0 &&
-		x.BlockNumber == c.key0.BlockNumber &&
-		x.TxHash == c.key0.TxHash &&
-		x.TxIndex == c.key0.TxIndex &&
-		x.BlockHash == c.key0.BlockHash {
+func (c *sharedLogs) group0(x *Log) []byte {
+	if c.prev != nil &&
+		x.BlockNumber == c.prev.BlockNumber &&
+		x.TxHash == c.prev.TxHash &&
+		x.TxIndex == c.prev.TxIndex &&
+		x.BlockHash == c.prev.BlockHash {
 		return c.buf0[:c.len0]
 	}
-	c.ok0 = true
-	c.key0.BlockNumber = x.BlockNumber
-	c.key0.TxHash = x.TxHash
-	c.key0.TxIndex = x.TxIndex
-	c.key0.BlockHash = x.BlockHash
 	b := c.buf0[:0]
 	b = append(b, "\"blockNumber\":"...)
 	b = append(hexutil.AppendUint64(append(b, '"'), uint64(x.BlockNumber)), '"')
@@ -108,15 +102,12 @@ func (c *logsShared) group0(x *Log) []byte {
 }
 
 // group1 returns removed, blockTimestamp of x, encoded again only when they differ from the previous element's.
-func (c *logsShared) group1(x *Log) []byte {
-	if c.ok1 &&
-		x.Removed == c.key1.Removed &&
-		(x.BlockTimestamp == nil) == (c.key1.BlockTimestamp == nil) && (x.BlockTimestamp == nil || *x.BlockTimestamp == *c.key1.BlockTimestamp) {
+func (c *sharedLogs) group1(x *Log) []byte {
+	if c.prev != nil &&
+		x.Removed == c.prev.Removed &&
+		(x.BlockTimestamp == nil) == (c.prev.BlockTimestamp == nil) && (x.BlockTimestamp == nil || *x.BlockTimestamp == *c.prev.BlockTimestamp) {
 		return c.buf1[:c.len1]
 	}
-	c.ok1 = true
-	c.key1.Removed = x.Removed
-	c.key1.BlockTimestamp = x.BlockTimestamp
 	b := c.buf1[:0]
 	b = append(b, "\"removed\":"...)
 	b = strconv.AppendBool(b, x.Removed)

@@ -43,3 +43,8 @@ type Item struct {
 }
 
 type Items []*Item
+
+// ItemPtrs spells its element through an alias.
+type ItemPtrs []ItemPtr
+
+type ItemPtr = *Item

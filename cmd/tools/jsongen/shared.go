@@ -73,9 +73,6 @@ func sharedMember(ref, name, form string, t types.Type, omit bool) (*member, err
 	default:
 		return nil, fmt.Errorf("ethjson:%q cannot be shared", form)
 	}
-	if pointer && !omit {
-		m.size = max(m.size, len("null"))
-	}
 	return m, nil
 }
 
@@ -95,11 +92,14 @@ func (g group) mayBeEmpty() bool {
 	return true
 }
 
-// bufLen bounds the block: each member's name and value, and a comma between members.
+// label is the member's name as s.Field writes it: raw, so both encoders write the same bytes.
+func (m *member) label() string { return `"` + m.name + `":` }
+
+// bufLen bounds the block: each member's label and value, and a comma between members.
 func (g group) bufLen() int {
 	n := len(g) - 1
 	for _, m := range g {
-		n += len(`"":`) + len(m.name) + m.size
+		n += len(m.label()) + m.size
 	}
 	return n
 }
@@ -112,8 +112,11 @@ func checkSlice(scope *types.Scope, slice string, elem types.Type) error {
 	if tn, ok := obj.(*types.TypeName); !ok || tn.IsAlias() {
 		return fmt.Errorf("%s is not a defined type", slice)
 	}
+	if n, ok := obj.Type().(*types.Named); ok && n.TypeParams().Len() > 0 {
+		return fmt.Errorf("%s is generic", slice)
+	}
 	if s, ok := obj.Type().Underlying().(*types.Slice); ok {
-		if p, ok := s.Elem().(*types.Pointer); ok && types.Identical(p.Elem(), elem) {
+		if p, ok := types.Unalias(s.Elem()).(*types.Pointer); ok && types.Identical(p.Elem(), elem) {
 			return nil
 		}
 	}
@@ -123,7 +126,7 @@ func checkSlice(scope *types.Scope, slice string, elem types.Type) error {
 // writeSliceMethod writes the slice's MarshalFastJSONTo, and the cache of encoded groups it
 // keeps for the length of one call.
 func writeSliceMethod(w *bytes.Buffer, slice, elem string, fields []field) {
-	cache := strings.ToLower(slice[:1]) + slice[1:] + "Shared"
+	cache := "shared" + slice
 	var loop strings.Builder
 	var groups []group
 	for i, f := range fields {
@@ -151,8 +154,10 @@ func (xs %[2]s) %[1]s(s *jsonstream.Stream) error {
 		return nil
 	}
 `, method, slice, elem)
+	setPrev := ""
 	if len(groups) > 0 {
 		fmt.Fprintf(w, "\tvar shared %s\n", cache)
+		setPrev = "\n\t\tshared.prev = x"
 	}
 	fmt.Fprintf(w, `	s.WriteArrayStart()
 	for _, x := range xs {
@@ -161,19 +166,19 @@ func (xs %[2]s) %[1]s(s *jsonstream.Stream) error {
 			continue
 		}
 		s.WriteObjectStart()
-%s		s.WriteObjectEnd()
+%s		s.WriteObjectEnd()%s
 	}
 	s.WriteArrayEnd()
 	return nil
 }
-`, loop.String())
+`, loop.String(), setPrev)
 	if len(groups) == 0 {
 		return
 	}
 
-	fmt.Fprintf(w, "\n// %s holds each group of shared %s fields as last encoded, and the element it was encoded from.\ntype %s struct {\n", cache, elem, cache)
+	fmt.Fprintf(w, "\n// %s holds each group of shared %s fields as last encoded, and the previous element, which\n// the next one is compared with.\ntype %s struct {\n\tprev *%s\n", cache, elem, cache, elem)
 	for i, g := range groups {
-		fmt.Fprintf(w, "\tok%[1]d bool\n\tkey%[1]d %[2]s\n\tlen%[1]d int\n\tbuf%[1]d [%[3]d]byte\n", i, elem, g.bufLen())
+		fmt.Fprintf(w, "\tlen%[1]d int\n\tbuf%[1]d [%[2]d]byte\n", i, g.bufLen())
 	}
 	w.WriteString("}\n")
 	for i, g := range groups {
@@ -194,13 +199,12 @@ func groupFrom(fields []field) group {
 }
 
 func writeGroupMethod(w *bytes.Buffer, cache, elem string, i int, g group) {
-	key := fmt.Sprintf("c.key%d", i)
-	var same, assign, encode strings.Builder
+	var same, encode strings.Builder
 	names := make([]string, len(g))
 	certain := false // whether b holds a member already, so the next needs a comma
 	for j, m := range g {
 		names[j] = m.name
-		k := key + strings.TrimPrefix(m.ref, "x")
+		k := "c.prev" + strings.TrimPrefix(m.ref, "x")
 		same.WriteString(" &&\n\t\t")
 		if m.pointer {
 			// Through the pointers: two elements may hold the same value at different addresses.
@@ -208,9 +212,8 @@ func writeGroupMethod(w *bytes.Buffer, cache, elem string, i int, g group) {
 		} else {
 			fmt.Fprintf(&same, "%s == %s", m.ref, k)
 		}
-		fmt.Fprintf(&assign, "\t%s = %s\n", k, m.ref)
 
-		label := fmt.Sprintf("%q:", m.name)
+		label := m.label()
 		var prefix string
 		switch {
 		case j == 0:
@@ -240,13 +243,12 @@ func writeGroupMethod(w *bytes.Buffer, cache, elem string, i int, g group) {
 	fmt.Fprintf(w, `
 // group%[1]d returns %[5]s of x, encoded again only when they differ from the previous element's.
 func (c *%[2]s) group%[1]d(x *%[3]s) []byte {
-	if c.ok%[1]d%[4]s {
+	if c.prev != nil%[4]s {
 		return c.buf%[1]d[:c.len%[1]d]
 	}
-	c.ok%[1]d = true
-%[6]s	b := c.buf%[1]d[:0]
-%[7]s	c.len%[1]d = len(b)
+	b := c.buf%[1]d[:0]
+%[6]s	c.len%[1]d = len(b)
 	return b
 }
-`, i, cache, elem, same.String(), strings.Join(names, ", "), assign.String(), encode.String())
+`, i, cache, elem, same.String(), strings.Join(names, ", "), encode.String())
 }
