@@ -164,6 +164,8 @@ type AddressEntry struct {
 	// stamps: readers combine several cells' flags only through a destruct.
 	mu         sync.RWMutex
 	destructed atomic.Bool
+	// created is set once any CreateContract cell holds true, so readers can skip mu for the common never-created account.
+	created atomic.Bool
 }
 
 // putCell sets/updates a typed cell at txIdx; caller holds e.mu.Lock(). Returns the (possibly new) map to assign back and the cell.
@@ -732,6 +734,9 @@ func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, valu
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.CreateContract, _ = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
+	if value {
+		e.created.Store(true)
+	}
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
@@ -1640,6 +1645,9 @@ func (vm *VersionMap) FlushWrites(writes *WriteSet, complete bool) {
 			cells, cell := putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			e.CreateContract = cells
 			vw.bind(e, cell)
+			if vw.Val {
+				e.created.Store(true)
+			}
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			if e.Storage == nil {
