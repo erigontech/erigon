@@ -612,7 +612,7 @@ func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
 
 func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {
 	logger := log.New()
-	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
 	fcu.FinalizedSlotVal = 127
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		for slot := uint64(0); slot <= 95; slot++ {
@@ -627,22 +627,17 @@ func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {
 	}))
 	dirs := datadir.New(t.TempDir())
 	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
-	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData], kv.StateEvents: types.KeyValueGetters[kv.StateEvents]}
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
 	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	handler.caplinStateSnapshots = snapshots
-	validatorTable := state_accessors.NewStaticValidatorTable()
-	refilled, err := antiquary.FillStaticValidatorsTableIfNeeded(logger, snapshots, validatorTable)
-	require.NoError(t, err)
-	require.True(t, refilled)
-	require.GreaterOrEqual(t, validatorTable.Slot(), uint64(96))
-	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+	require.True(t, handler.stateReader.ValidatorTableCovers(96))
 	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
 }
 
 func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
 	logger := log.New()
-	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
 	fcu.FinalizedSlotVal = 160
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		data, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(96))
@@ -665,10 +660,7 @@ func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
 	delete(types.KeyValueGetters, kv.RandaoMixes)
 	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
 	handler.caplinStateSnapshots = snapshots
-	validatorTable := state_accessors.NewStaticValidatorTable()
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, validatorTable) }))
-	validatorTable.SetSlot(128)
-	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+	require.True(t, handler.stateReader.ValidatorTableCovers(128))
 	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/4", "")
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
 }
