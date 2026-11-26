@@ -886,55 +886,29 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer) error {
-	return d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, "", true)
-}
-
-// dumpStepRangeToPath writes the [stepFrom, stepTo) range of this domain to disk.
-//
-//   - dstDir: empty means d.dirs.SnapDomain (the live snapshots dir); a non-empty value redirects
-//     the .kv plus all its accessor outputs (.bt/.kvi/.kvei) to that directory instead.
-//   - integrate: when true, the new dirty files are integrated into the aggregator view via
-//     d.integrateDirtyFiles. When false, the on-disk files are produced but the aggregator's
-//     view of the snapshots dir is untouched (used by offline tools that build into a staging
-//     directory). The in-memory static handles are closed in the !integrate case so they do
-//     not leak; the files themselves remain on disk in dstDir.
-func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error {
+// dumpStepRangeToPath builds the [stepFrom, stepTo) file from the domain writer.
+// Once the build starts, it closes the writer on return.
+// An empty dstDir uses the live snapshots directory. The caller must publish
+// the returned files through the aggregator or close their handles.
+func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, writer *DomainBufferedWriter, dstDir string) (StaticFiles, error) {
 	if !d.Enabled || stepFrom == stepTo {
-		return nil
+		return StaticFiles{}, nil
 	}
-	wal := batch.domainWriters[d.Name]
-
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
 
-	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
-	defer wal.Close()
+	defer writer.Close()
+	coll, err := d.collateETL(ctx, stepFrom, stepTo, writer.valsCollector(), dstDir)
 	if err != nil {
-		return err
+		return StaticFiles{}, err
 	}
-
-	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
-	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
-	if err != nil {
-		return err
-	}
-
-	if integrate {
-		d.integrateDirtyFiles(static, uint64(stepFrom)*d.stepSize, uint64(stepTo)*d.stepSize)
-		return nil
-	}
-	// Files remain on disk in dstDir; close in-memory handles so they don't leak.
-	static.CleanupOnError()
-	return nil
+	return d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), dstDir)
 }
 
-// [stepFrom; stepTo)
-// In contrast to collate function collateETL puts contents of wal into file.
-// dstDir overrides the output directory; empty means d.dirs.SnapDomain.
-func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
+// collateETL writes the domain writer's buffered values for [stepFrom, stepTo).
+// An empty dstDir uses the domain snapshot directory.
+func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, dstDir string) (coll Collation, err error) {
 	if !d.Enabled {
 		return Collation{}, err
 	}
@@ -961,44 +935,19 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)
 
-	var fromTxNum, endTxNum uint64 = 0, uint64(stepTo) * d.stepSize
-	if stepFrom > 0 {
-		fromTxNum = uint64(stepFrom-1) * d.stepSize
-	}
-
 	var lastK, lastV []byte
 	var hasLast bool
 	write := func(k, v []byte) error {
 		if d.LargeValues {
-			bareKey := k[:len(k)-8]
-			val := v
-			if vt != nil {
-				val, err = vt(v, fromTxNum, endTxNum)
-				if err != nil {
-					return fmt.Errorf("vt: %w", err)
-				}
-			}
-			if _, err = comp.Write(bareKey); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
-			}
-			if _, err = comp.Write(val); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, val, err)
-			}
+			k = k[:len(k)-8]
 		} else {
-			if vt != nil {
-				v, err = vt(v[8:], fromTxNum, endTxNum)
-				if err != nil {
-					return fmt.Errorf("vt: %w", err)
-				}
-			} else {
-				v = v[8:]
-			}
-			if _, err = comp.Write(k); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
-			}
-			if _, err = comp.Write(v); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
-			}
+			v = v[8:]
+		}
+		if _, err := comp.Write(k); err != nil {
+			return fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
+		}
+		if _, err := comp.Write(v); err != nil {
+			return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
 		}
 		return nil
 	}
@@ -1126,7 +1075,7 @@ type StaticFiles struct {
 	existenceFilter *existence.Filter
 }
 
-// CleanupOnError - call it on collation fail. It closing all files
+// CleanupOnError closes the data and index handles, leaving the files on disk.
 func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesDecomp != nil {
 		sf.valuesDecomp.Close()
@@ -1528,18 +1477,18 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 	return nil
 }
 
-func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) retiredFiles {
 	if !d.Enabled {
-		return
+		return nil
 	}
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
 	if sf.valuesDecomp == nil {
-		return // build was skipped for this domain — don't overwrite existing dirty files
+		return nil // build was skipped for this domain — don't overwrite existing dirty files
 	}
 
-	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
+	retired := d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.version, _ = version.ParseVersion(filepath.Base(sf.valuesDecomp.FilePath()))
@@ -1547,7 +1496,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
-	d.dirtyFiles.Set(fi)
+	return append(retired, d.dirtyFiles.replace(fi)...)
 }
 
 // unwind restores the state before txNumUnwindTo using the supplied diffs

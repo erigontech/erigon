@@ -644,7 +644,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 		counts := s.peerCountsByDirection(peerId)
 		maxPeers := int(s.cfg.MaxPeerCount)
 		inbound := direction != network.DirOutbound
-		if conns := s.p2p.Host().Network().ConnsToPeer(peerId); len(conns) > 0 {
+		if conns := openConns(s.p2p.Host().Network(), peerId); len(conns) > 0 {
 			inbound = peerIsInbound(conns)
 		}
 		allowed := wantsOutbound(counts, maxPeers)
