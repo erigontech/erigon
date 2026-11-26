@@ -978,6 +978,55 @@ func TestFramePoolResimulatesRemovedDuplicate(t *testing.T) {
 	require.Contains(t, backend.calls[1:], common.Hash(frame.IDHash))
 }
 
+func TestFramePoolDuplicateAfterPossibleSenderPenalty(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		accountSlots   uint64
+		ordinaryResult txpoolcfg.DiscardReason
+		frameResult    txpoolcfg.DiscardReason
+	}{
+		{"penalty evicts the frame", 1, txpoolcfg.Spammer, txpoolcfg.Success},
+		{"frame stays pooled", 2, txpoolcfg.Success, txpoolcfg.DuplicateHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.cfg.AccountSlots = tc.accountSlots
+			key := uint256.Int{1}
+			pooled := framePoolSlot(t, sender, 1, 2, key)
+			var seed TxnSlots
+			seed.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
+			seed.Append(pooled, sender[:], false)
+			reasons, err := pool.AddLocalTxns(ctx, seed)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+			localCopy := framePoolSlot(t, sender, 1, 2, key)
+			var batch TxnSlots
+			batch.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], false)
+			batch.Append(localCopy, sender[:], true)
+			reasons, err = pool.AddLocalTxns(ctx, batch)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.ordinaryResult, tc.frameResult}, reasons)
+
+			entry := pool.byHash[string(pooled.IDHash[:])]
+			require.NotNil(t, entry)
+			want := pooled
+			if tc.frameResult == txpoolcfg.Success {
+				want = localCopy
+			}
+			require.Same(t, want, entry.TxnSlot)
+		})
+	}
+}
+
+func TestFramePoolMissingDuplicateAtInsertion(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.Equal(t, txpoolcfg.FrameValidationUnavailable, pool.finalizeFrameRejection(frame, txpoolcfg.DuplicateHash))
+}
+
 func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 	for _, nonce := range []uint64{0, 1} {
 		t.Run(fmt.Sprintf("sequence %d", nonce), func(t *testing.T) {

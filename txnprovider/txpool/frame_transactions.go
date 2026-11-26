@@ -209,6 +209,15 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission) uint64 
 }
 
 func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
+	// A remote ordinary input can trigger a sender penalty before insertion,
+	// even if it comes after the sender's frame in the batch.
+	remoteOrdinarySenders := make(map[common.Address]bool)
+	for i := range txns {
+		a := &txns[i]
+		if !a.local && a.txn.TxType() != FrameTxnType {
+			remoteOrdinarySenders[a.sender] = true
+		}
+	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	ordinaryMayReplace := make(map[*metaTxn]bool)
@@ -228,7 +237,8 @@ func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 			}
 			continue
 		}
-		if ordinaryMayReplace[pooled] {
+		mayBeEvicted := pooled != nil && pooled.subPool&IsLocal == 0 && remoteOrdinarySenders[a.sender]
+		if ordinaryMayReplace[pooled] || mayBeEvicted {
 			pooled = nil
 		}
 		// A frame replacement keeps the sender slot but can change its hash.
@@ -331,6 +341,11 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 // Earlier inputs may have added or replaced the sender's frame since simulation.
 // Resolve an unavailable result against the pool at this input's turn.
 func (p *TxPool) finalizeFrameRejection(txn *TxnSlot, reason txpoolcfg.DiscardReason) txpoolcfg.DiscardReason {
+	if reason == txpoolcfg.DuplicateHash && p.byHash[string(txn.IDHash[:])] == nil {
+		// The precheck skipped simulation because the hash was pooled. With
+		// that entry gone, the caller can retry the frame for a fresh result.
+		reason = txpoolcfg.FrameValidationUnavailable
+	}
 	switch reason {
 	case txpoolcfg.NonceTooLow:
 		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: reason})
