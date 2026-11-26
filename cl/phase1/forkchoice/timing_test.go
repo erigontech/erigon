@@ -212,9 +212,8 @@ func TestSlotStartTickDoesNotMakeLateLocalBlockTimely(t *testing.T) {
 }
 
 // importBlockWhileTimePasses imports a block of the slot after its parent, entering OnBlock
-// enterMs into the slot while the store is still at that time, and lets the store time move to
-// elDoneMs (relative to the same slot start) while the EL validates the payload.
-func importBlockWhileTimePasses(t *testing.T, enterMs, elDoneMs uint64) (*ForkChoiceStore, common.Hash) {
+// enterMs into the slot, and runs duringEL while the EL validates the payload.
+func importBlockWhileTimePasses(t *testing.T, enterMs uint64, duringEL func(f *ForkChoiceStore, slotStartMs uint64)) (*ForkChoiceStore, common.Hash) {
 	t.Helper()
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	var f *ForkChoiceStore
@@ -222,7 +221,7 @@ func importBlockWhileTimePasses(t *testing.T, enterMs, elDoneMs uint64) (*ForkCh
 	engine.EXPECT().
 		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-			f.OnTick(slotStartMs + elDoneMs)
+			duringEL(f, slotStartMs)
 			return execution_client.PayloadStatusValidated, nil
 		})
 	f, parent, _, block := buildExAnteStoreBeforeBlocks(t, engine, nil)
@@ -239,7 +238,9 @@ func importBlockWhileTimePasses(t *testing.T, enterMs, elDoneMs uint64) (*ForkCh
 // on_block runs atomically at the store time it is called with, so the time spent validating
 // the block must not make it late.
 func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
-	f, root := importBlockWhileTimePasses(t, 3000, 4500)
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
+		f.OnTick(slotStartMs + 4500)
+	})
 
 	timeliness, ok := f.getBlockTimeliness(root)
 	require.True(t, ok)
@@ -250,11 +251,30 @@ func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
 // The slot tick resets the proposer boost, so a block whose slot ends while it is imported must
 // not set the boost after that reset.
 func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
-	f, root := importBlockWhileTimePasses(t, 3000, 12000+100)
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
+		f.OnTick(slotStartMs + 12000 + 100)
+	})
 
 	timeliness, ok := f.getBlockTimeliness(root)
 	require.True(t, ok)
 	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// Two ticks can advance the store time to a slot and to the next one, then run their slot-start
+// work in the reverse order. The earlier reset finishing last must not let a block of the earlier
+// slot set the boost in the later slot.
+func TestReversedSlotStartResetsKeepBoostExpired(t *testing.T) {
+	f, _ := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
+		nextSlotMs := slotStartMs + 12000 + 100
+		f.OnTick(nextSlotMs)
+		// Replay the slot-start work of a tick that advanced the time into this slot before the
+		// tick above, but takes f.mu after it.
+		f.timeMs.Store(slotStartMs - 1)
+		f.onTickPerSlot(slotStartMs + 100)
+		f.timeMs.Store(nextSlotMs)
+	})
+
 	assert.Zero(t, f.ProposerBoostRoot())
 }
 

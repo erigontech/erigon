@@ -64,7 +64,8 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
-	f.proposerBoostResetSlot = currentSlot
+	// Ticks advance the time before taking f.mu, so their slot-start work can run in reverse order.
+	f.proposerBoostResetSlot = max(f.proposerBoostResetSlot, currentSlot)
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		// Only promote unrealized checkpoints when the node is synced (processing
 		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
