@@ -87,13 +87,9 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 	if !evm.intraBlockState.AddressInAccessList(address) {
 		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
 	}
-	if gas.Execution < gasCost {
+	remaining, _, ok := useMdGas(gas, gasCost, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
+	if !ok {
 		return nil, gas, ErrOutOfGas
-	}
-	remaining := gas
-	remaining.Execution -= gasCost
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
 	evm.intraBlockState.AddAddressToAccessList(address)
 	evm.intraBlockState.MarkAddressAccess(address, false)
