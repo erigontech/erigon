@@ -210,3 +210,23 @@ func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 	}
 	return r.StateReader.ReadAccountData(addr)
 }
+
+type memoAccountReader struct {
+	state.StateReader
+	accounts map[accounts.Address]*accounts.Account
+}
+
+func newMemoAccountReader(base state.StateReader) *memoAccountReader {
+	return &memoAccountReader{StateReader: base, accounts: map[accounts.Address]*accounts.Account{}}
+}
+
+func (r *memoAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if acc, ok := r.accounts[addr]; ok {
+		return acc, nil
+	}
+	acc, err := r.StateReader.ReadAccountData(addr)
+	if err == nil {
+		r.accounts[addr] = acc
+	}
+	return acc, err
+}
