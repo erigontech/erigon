@@ -60,6 +60,7 @@ const StartingUp = "eez node is starting up; cross-chain submissions are not acc
 // Source is the chain a front's transactions are signed for, read at its
 // latest block.
 type Source interface {
+	ChainID(ctx context.Context) (uint64, error)
 	Code(ctx context.Context, addr common.Address) ([]byte, error)
 	Balance(ctx context.Context, addr common.Address) (*uint256.Int, error)
 	PendingNonce(ctx context.Context, addr common.Address) (uint64, error)
@@ -81,7 +82,9 @@ type Front struct {
 	Info   json.RawMessage
 	Logger log.Logger
 
-	ready  atomic.Bool
+	ready atomic.Bool
+	// bound reports a Source checked to be the chain of ChainID.
+	bound  atomic.Bool
 	client http.Client
 }
 
@@ -255,6 +258,9 @@ func (f *Front) admit(ctx context.Context, raw []byte, tx types.Transaction) (co
 		return common.Hash{}, fmt.Errorf("signature recovery failed: %w", err)
 	}
 	sender, to := from.Value(), *tx.GetTo()
+	if err := f.bind(ctx); err != nil {
+		return common.Hash{}, err
+	}
 	code, err := f.Source.Code(ctx, to)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("source-chain code lookup failed for target %s: %w", to, err)
@@ -289,6 +295,23 @@ func (f *Front) admit(ctx context.Context, raw []byte, tx types.Transaction) (co
 	f.Logger.Info("[eez] cross-chain transaction held for the next Sync slot", "event", "eez.ingress.held",
 		"hash", h.Hash, "sender", sender, "nonce", h.Nonce, "direction", f.Direction)
 	return h.Hash, nil
+}
+
+// bind checks once that the source chain is the one transactions are
+// signed for: another chain's reads would hold them.
+func (f *Front) bind(ctx context.Context) error {
+	if f.bound.Load() {
+		return nil
+	}
+	id, err := f.Source.ChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("source-chain id lookup failed: %w", err)
+	}
+	if id != f.ChainID {
+		return fmt.Errorf("the %s front reads chain %d, not %d", f.Direction, id, f.ChainID)
+	}
+	f.bound.Store(true)
+	return nil
 }
 
 // forward relays body to the source chain.

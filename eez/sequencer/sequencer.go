@@ -181,6 +181,10 @@ type Config struct {
 	Announcements Announcements
 	// Composer, when set, composes the Sync blocks.
 	Composer SyncSlotComposer
+	// Held, when set, reports a transaction the composer holds: blocks take
+	// it only from the composer, though a replaced block returned it to the
+	// pool.
+	Held func(common.Hash) bool
 }
 
 // Sequencer produces an EEZ chain's blocks from the pool on the triggers of
@@ -505,6 +509,7 @@ func (s *Sequencer) produceN(ctx context.Context, kind Kind, head *types.Header,
 // produce builds the block of kind after parent from the pool.
 func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header) (*types.Header, error) {
 	txs := newPoolTxns(s.pool, parent.Hash(), s.cfg.DABudget, s.logger)
+	txs.held = s.cfg.Held
 	if err := txs.await(ctx, parent.Number.Uint64()); err != nil {
 		return nil, err
 	}

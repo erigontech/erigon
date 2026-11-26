@@ -196,6 +196,14 @@ var (
 		Name:  "eez.composer.l1front",
 		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects. Forwards other requests to an http(s) --eez.l1.rpc",
 	}
+	ComposerL2FrontFlag = cli.StringFlag{
+		Name:  "eez.composer.l2front",
+		Usage: "host:port of the L2 front, where wallets send the chain's transactions that call L1, with --eez.composer.l2rpc; rollup0 chains only",
+	}
+	ComposerL2RPCFlag = cli.StringFlag{
+		Name:  "eez.composer.l2rpc",
+		Usage: "http(s) URL of the chain's JSON-RPC, which the L2 front reads and forwards to",
+	}
 	BatchMaxGasFlag = cli.Uint64Flag{
 		Name:  "eez.batch.maxgas",
 		Usage: "Gas limit of a batch's L1 transaction, between 1,521,000 and 16,777,216 (EIP-7825)",
@@ -237,7 +245,7 @@ var Flags = []cli.Flag{
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
 	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
 	&ComposerFlag, &PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag,
-	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag,
+	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -308,6 +316,9 @@ type ComposerConfig struct {
 	MaxGas      uint64
 	// L1Front, when set, is where the L1 front listens.
 	L1Front string
+	// L2Front, when set, is where the L2 front listens; it reads and
+	// forwards to the chain's JSON-RPC at L2RPC.
+	L2Front, L2RPC string
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -509,7 +520,7 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	return s, nil
 }
 
-var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag}
+var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag, &ComposerL2FrontFlag, &ComposerL2RPCFlag}
 
 // composerConfig reads the composer flags, nil without --eez.composer.
 func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
@@ -532,13 +543,30 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
 		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
 		L1Front:     cmd.String(ComposerL1FrontFlag.Name),
+		L2Front:     cmd.String(ComposerL2FrontFlag.Name),
+		L2RPC:       cmd.String(ComposerL2RPCFlag.Name),
+	}
+	for _, f := range []struct {
+		flag *cli.StringFlag
+		addr string
+	}{{&ComposerL1FrontFlag, c.L1Front}, {&ComposerL2FrontFlag, c.L2Front}} {
+		if _, _, err := net.SplitHostPort(f.addr); f.addr != "" && err != nil {
+			return nil, fmt.Errorf("%w: --%s %q is not host:port", ErrConfig, f.flag.Name, f.addr)
+		}
+	}
+	switch {
+	case c.L2Front != "" && c.L2RPC == "":
+		return nil, fmt.Errorf("%w: --%s reads the chain through --%s", ErrConfig, ComposerL2FrontFlag.Name, ComposerL2RPCFlag.Name)
+	case c.L2RPC != "" && c.L2Front == "":
+		return nil, fmt.Errorf("%w: --%s serves --%s", ErrConfig, ComposerL2RPCFlag.Name, ComposerL2FrontFlag.Name)
+	case c.L2RPC != "":
+		if !isHTTP(c.L2RPC) {
+			return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL", ErrConfig, ComposerL2RPCFlag.Name, l1.RedactURL(c.L2RPC))
+		}
 	}
 	if c.L1Front != "" {
-		if _, _, err := net.SplitHostPort(c.L1Front); err != nil {
-			return nil, fmt.Errorf("%w: --%s %q is not host:port", ErrConfig, ComposerL1FrontFlag.Name, c.L1Front)
-		}
 		// The front forwards over HTTP.
-		if u, err := url.Parse(node); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if !isHTTP(node) {
 			return nil, fmt.Errorf("%w: --%s forwards to --%s over http(s), not %s", ErrConfig, ComposerL1FrontFlag.Name, L1RPCFlag.Name, l1.RedactURL(node))
 		}
 	}
@@ -546,7 +574,7 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		c.Builder = node
 	}
 	// eth_sendBundle goes over HTTP.
-	if u, err := url.Parse(c.Builder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if !isHTTP(c.Builder) {
 		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, l1.RedactURL(c.Builder), L1RPCFlag.Name)
 	}
 	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
@@ -656,7 +684,8 @@ func (c *Config) L1Only(chainConfig *chain.Config) (bool, error) {
 }
 
 // CheckChain refuses the flags cc's rule set does not run with: a chain whose
-// sequencer signs no heads has no overlay.
+// sequencer signs no heads has no overlay, and one other than rollup0's has
+// no L2 front.
 func (c *Config) CheckChain(cc *chain.Config) error {
 	l2, ok := cc.L2.(*config.L2Config)
 	if !ok {
@@ -666,6 +695,9 @@ func (c *Config) CheckChain(cc *chain.Config) error {
 }
 
 func (c *Config) checkRuleSet(ruleSet uint64) error {
+	if c.Sequencer != nil && c.Sequencer.Composer != nil && c.Sequencer.Composer.L2Front != "" && ruleSet != config.Rollup0 {
+		return fmt.Errorf("%w: --%s: only the rollup0 rule set has top-level calls to L1", ErrConfig, ComposerL2FrontFlag.Name)
+	}
 	if c.P2PListen == nil || (!config.IsRollupX(ruleSet) && !config.Announces(ruleSet)) {
 		return nil
 	}
@@ -752,4 +784,10 @@ func (f *L2Flags) Check(cfg *chain.Config) error {
 		return fmt.Errorf("%w: %s differ from the chain's l2 section, which init writes", ErrConfig, strings.Join(differ, ", "))
 	}
 	return nil
+}
+
+// isHTTP reports whether raw is an http(s) URL with a host.
+func isHTTP(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

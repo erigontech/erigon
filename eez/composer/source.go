@@ -70,6 +70,9 @@ type Call struct {
 	Data         []byte
 	// Return is the target's output.
 	Return []byte
+	// Gas is the gas the call used where Execute ran it, the creation of its
+	// source's proxy included.
+	Gas uint64
 }
 
 // Dispatcher runs c on its target rollup and returns the target's output.
@@ -78,8 +81,8 @@ type Dispatcher func(c *Call) ([]byte, error)
 // Source simulates the held transactions of one source chain on a fork of
 // its state at a block: a call to a proxy registered with manager runs on
 // its rollup through the dispatcher, and returns there without running the
-// proxy, moving value or spending gas. A transaction it keeps leaves its
-// writes for the next.
+// proxy or spending gas; its value moves to the manager, as the proxy
+// forwards it. A transaction it keeps leaves its writes for the next.
 type Source struct {
 	config    *chain.Config
 	header    *types.Header
@@ -88,7 +91,16 @@ type Source struct {
 	blockHash func(uint64) (common.Hash, error)
 	manager   accounts.Address
 	rollup    uint64
+	rules     *chain.Rules
 	index     int
+	// origin, gasPrice and gasLimit are the posting's sender, price and gas
+	// limit, zero for none; spent is the target gas of its entries so far.
+	origin          accounts.Address
+	gasPrice        uint256.Int
+	gasLimit, spent uint64
+	// open marks the posting open: outbound calls join it until a trigger
+	// runs.
+	open bool
 }
 
 // NewSource returns the simulation of the chain of config in the context of
@@ -96,7 +108,20 @@ type Source struct {
 // blockHash returns; rollup is the chain's rollup id.
 func NewSource(config *chain.Config, header *types.Header, reader state.StateReader, blockHash func(uint64) (common.Hash, error), manager common.Address, rollup uint64) *Source {
 	r := &reads{StateReader: reader}
-	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup}
+	blockCtx := core.NewEVMBlockContext(header, blockHash, nil, accounts.InternAddress(header.Coinbase), config)
+	rules := blockCtx.Rules(config)
+	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup, rules: rules, origin: accounts.ZeroAddress}
+}
+
+// proxyAt returns the manager's record of addr, ok when addr is a
+// registered proxy.
+func (s *Source) proxyAt(addr common.Address) (p protocol.Proxy, ok bool, err error) {
+	word, err := s.ibs.GetState(s.manager, accounts.InternKey(protocol.ProxyKey(addr)))
+	if err != nil {
+		return protocol.Proxy{}, false, err
+	}
+	p, ok = protocol.DecodeProxy(word.Bytes32())
+	return p, ok, nil
 }
 
 // Nonce returns addr's nonce in the simulation.
@@ -115,89 +140,97 @@ func (s *Source) Nonce(addr common.Address) (uint64, error) {
 // error; a transaction without calls or with a failed frame around one is
 // poison.
 func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
-	var (
-		calls   []*Call
-		failure error
-		starts  []int
-		spanned bool
-	)
-	hook := func(evm *vm.EVM, depth int, caller, addr accounts.Address, input []byte, value uint256.Int) ([]byte, bool, error) {
-		if failure != nil {
-			return nil, false, nil
-		}
-		word, err := evm.IntraBlockState().GetState(s.manager, accounts.InternKey(protocol.ProxyKey(addr.Value())))
-		if err != nil {
-			failure = err
-			return nil, true, vm.ErrExecutionReverted
-		}
-		p, ok := protocol.DecodeProxy(word.Bytes32())
-		if !ok {
-			return nil, false, nil
-		}
-		c := &Call{Target: p.Address, RollupID: p.RollupID, Source: caller.Value(), SourceRollup: s.rollup, Value: value, Data: bytes.Clone(input)}
-		out, err := dispatch(c)
-		if err != nil {
-			failure = err
-			return nil, true, vm.ErrExecutionReverted
-		}
-		c.Return = out
-		calls = append(calls, c)
-		return out, true, nil
+	if err := s.closePosting(); err != nil {
+		return nil, err
 	}
-	tracer := &tracing.Hooks{
-		OnEnter: func(int, byte, accounts.Address, accounts.Address, bool, []byte, uint64, uint256.Int, []byte) {
-			starts = append(starts, len(calls))
-		},
-		OnExit: func(_ int, _ []byte, _ uint64, err error, reverted bool) {
-			start := starts[len(starts)-1]
-			starts = starts[:len(starts)-1]
-			if (reverted || err != nil) && len(calls) > start {
-				spanned = true
+	var calls []*Call
+	err := s.entry(func() error {
+		var (
+			failure error
+			starts  []int
+			spanned bool
+		)
+		hook := func(_ *vm.EVM, depth int, caller, addr accounts.Address, input []byte, value uint256.Int) ([]byte, bool, error) {
+			if failure != nil {
+				return nil, false, nil
 			}
-		},
-	}
-	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{CallOverride: hook, Tracer: tracer})
-	rules := evm.ChainRules()
-	msg, err := tx.AsMessage(*types.MakeSigner(s.config, s.header.Number.Uint64(), s.header.Time), s.header.BaseFee, rules)
+			fail := func(err error) ([]byte, bool, error) {
+				failure = err
+				return nil, true, vm.ErrExecutionReverted
+			}
+			p, ok, err := s.proxyAt(addr.Value())
+			if err != nil {
+				return fail(err)
+			}
+			if !ok {
+				return nil, false, nil
+			}
+			c := &Call{Target: p.Address, RollupID: p.RollupID, Source: caller.Value(), SourceRollup: s.rollup, Value: value, Data: bytes.Clone(input)}
+			out, err := dispatch(c)
+			if err != nil {
+				return fail(err)
+			}
+			c.Return = out
+			calls = append(calls, c)
+			if !value.IsZero() {
+				if err := s.ibs.SubBalance(caller, value, tracing.BalanceChangeTransfer); err != nil {
+					return fail(err)
+				}
+				if err := s.ibs.AddBalance(s.manager, value, tracing.BalanceChangeTransfer); err != nil {
+					return fail(err)
+				}
+			}
+			return out, true, nil
+		}
+		tracer := &tracing.Hooks{
+			OnEnter: func(int, byte, accounts.Address, accounts.Address, bool, []byte, uint64, uint256.Int, []byte) {
+				starts = append(starts, len(calls))
+			},
+			OnExit: func(_ int, _ []byte, _ uint64, err error, reverted bool) {
+				start := starts[len(starts)-1]
+				starts = starts[:len(starts)-1]
+				if (reverted || err != nil) && len(calls) > start {
+					spanned = true
+				}
+			},
+		}
+		evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{CallOverride: hook, Tracer: tracer})
+		msg, err := tx.AsMessage(*types.MakeSigner(s.config, s.header.Number.Uint64(), s.header.Time), s.header.BaseFee, s.rules)
+		if err != nil {
+			return Poison(err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.ibs.SetTxContext(s.header.Number.Uint64(), s.index)
+		evm.Reset(core.NewEVMTxContext(msg), s.ibs)
+		// A cancelled EVM stops as if at a STOP: the context, not the result,
+		// tells a cut-short run.
+		stop := context.AfterFunc(ctx, evm.Cancel)
+		gp := new(core.GasPool).AddGas(s.header.GasLimit).AddBlobGas(s.config.GetMaxBlobGasPerBlock(s.header.Time))
+		_, err = core.ApplyMessage(evm, msg, gp, true, false, nil)
+		stop()
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case failure != nil:
+			return failure
+		case err != nil:
+			return Poison(fmt.Errorf("transaction invalid on the source chain: %w", err))
+		case spanned:
+			return Poison(ErrRevertedCall)
+		case len(calls) == 0:
+			return Poison(ErrNoCalls)
+		case accept != nil:
+			return accept(calls)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, Poison(err)
-	}
-	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	snapshot := s.ibs.PushSnapshot()
-	s.ibs.SetTxContext(s.header.Number.Uint64(), s.index)
-	evm.Reset(core.NewEVMTxContext(msg), s.ibs)
-	// A cancelled EVM stops as if at a STOP: the context, not the result,
-	// tells a cut-short run.
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	gp := new(core.GasPool).AddGas(s.header.GasLimit).AddBlobGas(s.config.GetMaxBlobGasPerBlock(s.header.Time))
-	_, err = core.ApplyMessage(evm, msg, gp, true, false, nil)
-	stop()
-	switch {
-	case ctx.Err() != nil:
-		err = ctx.Err()
-	case s.reads.failed() != nil:
-		err = s.reads.failed()
-	case failure != nil:
-		err = failure
-	case err != nil:
-		err = Poison(fmt.Errorf("transaction invalid on the source chain: %w", err))
-	case spanned:
-		err = Poison(ErrRevertedCall)
-	case len(calls) == 0:
-		err = Poison(ErrNoCalls)
-	case accept != nil:
-		err = accept(calls)
-	}
-	if err != nil {
-		s.ibs.RevertToSnapshot(snapshot, nil)
+	if err := s.finalize(); err != nil {
 		return nil, err
 	}
-	s.ibs.PopSnapshot(snapshot)
-	if err := s.ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
-		return nil, err
-	}
-	s.index++
 	return calls, nil
 }

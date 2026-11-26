@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -218,4 +219,22 @@ func TestFinalizedCommitmentErigonL1(t *testing.T) {
 	got, err := l1.FinalizedCommitment(ctx, l1.NewNative(m.DB, m.BlockReader, m.ReceiptsReader, m.Engine, m.ChainConfig), l1test.Registry, 1)
 	require.NoError(t, err)
 	require.Equal(t, l1.Commitment{Outcome: l1.CommitmentAnchor, Finalized: *f, Root: root}, got)
+}
+
+// TestEscrow: the ether a rollup holds in the registry at a block, from
+// its record there.
+func TestEscrow(t *testing.T) {
+	chain := finality(t, true, registryCode, record(rollupOf7, rootAtF))
+	f := common.Hash{0xb0, 1}
+	got, err := l1.Escrow(context.Background(), chain, registry, 7, f)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(5), got)
+
+	refused := errors.New("node down")
+	_, err = l1.Escrow(context.Background(), failing{MemoryChain: chain, call: refused}, registry, 7, f)
+	require.ErrorIs(t, err, refused)
+
+	bad := finality(t, true, registryCode, []byte{1})
+	_, err = l1.Escrow(context.Background(), bad, registry, 7, f)
+	require.ErrorIs(t, err, l1.ErrNotRollups)
 }

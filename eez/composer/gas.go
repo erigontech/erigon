@@ -49,13 +49,22 @@ var proofPlaceholder = bytes.Repeat([]byte{0xff}, 128)
 // PostBatchGas projects the gas of posting b with a proof of
 // proofPlaceholder: the larger of its execution and calldata at the standard
 // rate and its EIP-7623 floor.
-func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) {
+func PostBatchGas(b *protocol.ProofSystemBatch) (uint64, error) { return postingGas(b, 0) }
+
+// postingGas projects the gas of posting b as PostBatchGas does, its L1
+// calls taking target: execution, which the floor does not add to.
+func postingGas(b *protocol.ProofSystemBatch, target uint64) (uint64, error) {
 	standard, tokens, err := postBatchGas(b)
 	if err != nil {
 		return 0, err
 	}
-	return max(standard, txGas+10*tokens), nil
+	return floored(standard+target, tokens), nil
 }
+
+// floored is the gas of a posting executing execution, its L1 calls
+// included, with calldata of tokens: the larger of the two and its EIP-7623
+// floor.
+func floored(execution, tokens uint64) uint64 { return max(execution, floorGas(tokens)) }
 
 // postBatchGas projects the gas of posting b with a proof of
 // proofPlaceholder at the standard rate, and returns its calldata's EIP-7623
@@ -71,7 +80,10 @@ func postBatchGas(b *protocol.ProofSystemBatch) (standard, tokens uint64, err er
 }
 
 // FloorGas is the EIP-7623 floor of a transaction with input.
-func FloorGas(input []byte) uint64 { return txGas + 10*floorTokens(input) }
+func FloorGas(input []byte) uint64 { return floorGas(floorTokens(input)) }
+
+// floorGas is the EIP-7623 floor of calldata of tokens.
+func floorGas(tokens uint64) uint64 { return txGas + 10*tokens }
 
 // floorTokens are the EIP-7623 tokens of input: 1 a zero byte, 4 any other.
 func floorTokens(input []byte) uint64 {
@@ -104,10 +116,11 @@ type l1Cost struct{ entries, calldata, tokens, target, trigger uint64 }
 // budget projects the gas of a batch's posting as held transactions join
 // it, from the anchor entry every batch leads with, at the standard rate
 // and on the EIP-7623 floor of the calldata it prices, against a cap
-// leaving the drain margin under the ceiling. Its bundle takes the L1
-// block's gas, block, zero for any: the posting's, margin included, and
-// triggers, the gas limits of its triggers.
-type budget struct{ cap, projected, tokens, block, triggers uint64 }
+// leaving the drain margin under the ceiling; target is the gas of the L1
+// calls it makes. Its bundle takes the L1 block's gas, block, zero for any:
+// the posting's, margin included, and triggers, the gas limits of its
+// triggers.
+type budget struct{ cap, projected, tokens, target, block, triggers uint64 }
 
 // newBudget returns the budget of a batch of the anchor entry alone, posted
 // in a bundle of an L1 block of blockGas.
@@ -138,18 +151,18 @@ func (b *budget) after(c l1Cost) uint64 {
 }
 
 // floor is the EIP-7623 floor of the calldata priced so far.
-func (b *budget) floor() uint64 { return txGas + 10*b.tokens }
+func (b *budget) floor() uint64 { return floorGas(b.tokens) }
 
 // fits reports whether c keeps the projection and the floor within the cap,
 // and the bundle within the block.
 func (b *budget) fits(c l1Cost) bool {
-	posting := max(b.after(c), txGas+10*(b.tokens+c.tokens))
-	return posting <= b.cap && (b.block == 0 || posting+drainMargin+b.triggers+c.trigger <= b.block)
+	gas := floored(b.after(c), b.tokens+c.tokens)
+	return gas <= b.cap && (b.block == 0 || gas+drainMargin+b.triggers+c.trigger <= b.block)
 }
 
 // take charges c.
 func (b *budget) take(c l1Cost) {
-	b.projected, b.tokens, b.triggers = b.after(c), b.tokens+c.tokens, b.triggers+c.trigger
+	b.projected, b.tokens, b.target, b.triggers = b.after(c), b.tokens+c.tokens, b.target+c.target, b.triggers+c.trigger
 }
 
 // inboundCost is what deliveries add: each a deferred entry in the batch
@@ -168,4 +181,14 @@ func inboundCost(ds []*Delivery) (l1Cost, error) {
 		}
 	}
 	return c, nil
+}
+
+// outboundCost is what an outbound entry adds: itself in the batch and in
+// its DA, its transaction in the DA, and its target call's gas.
+func outboundCost(e *protocol.ExecutionEntry, raw []byte, target uint64) (l1Cost, error) {
+	enc, err := protocol.EncodeExecutionEntry(e)
+	if err != nil {
+		return l1Cost{}, err
+	}
+	return l1Cost{entries: 1, calldata: 2*calldataGas(enc) + calldataGas(raw), tokens: 2*floorTokens(enc) + floorTokens(raw), target: target}, nil
 }

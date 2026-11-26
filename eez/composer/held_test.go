@@ -18,6 +18,7 @@ package composer
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -386,9 +387,9 @@ func TestHeldPoolInvariants(t *testing.T) {
 		p := NewHeldPool()
 		next := byte(1)
 		var drained, released []*Held
-		live := map[common.Hash]bool{}
+		live, composed := map[common.Hash]bool{}, map[common.Hash]bool{}
 		for range 1 + r.IntN(159) {
-			switch r.IntN(5) {
+			switch r.IntN(6) {
 			case 0:
 				sender := addr(byte(1 + r.IntN(4)))
 				direction := Direction(r.IntN(2))
@@ -406,7 +407,14 @@ func TestHeldPoolInvariants(t *testing.T) {
 					live[tx.Hash] = true
 				}
 			case 1:
-				drained = append(drained, p.PopN(r.IntN(8))...)
+				popped := p.PopN(r.IntN(8))
+				if r.IntN(2) == 0 {
+					p.Composed(popped, uint64(1+r.IntN(4)))
+					for _, tx := range popped {
+						composed[tx.Hash] = true
+					}
+				}
+				drained = append(drained, popped...)
 			case 2:
 				p.PushFront(drained)
 				drained = nil
@@ -417,6 +425,24 @@ func TestHeldPoolInvariants(t *testing.T) {
 				}
 				released = append(released, drained...)
 				drained = nil
+			case 4:
+				k := chainKey{addr(byte(1 + r.IntN(4))), Direction(r.IntN(2))}
+				p.mu.Lock()
+				for _, tx := range p.txs {
+					if tx.chainKey() == k {
+						delete(live, tx.Hash)
+					}
+				}
+				for h, res := range p.inFlight {
+					if res.chainKey == k {
+						delete(live, h)
+					}
+				}
+				p.mu.Unlock()
+				p.Evict(k.sender, k.direction, 0)
+				// Recovery never returns an evicted transaction.
+				ofK := func(tx *Held) bool { return tx.chainKey() == k }
+				drained, released = slices.DeleteFunc(drained, ofK), slices.DeleteFunc(released, ofK)
 			default:
 				p.Reserve(released)
 				p.mu.Lock()
@@ -439,6 +465,10 @@ func TestHeldPoolInvariants(t *testing.T) {
 				seen[h] = true
 			}
 			require.Equal(t, live, seen, "seed %d", seed)
+			for h, tb := range p.discarded {
+				require.True(t, composed[h], "seed %d: %x discarded, never composed", seed, h)
+				require.NotZero(t, tb.sync, "seed %d", seed)
+			}
 			chains := map[chainKey][]uint64{}
 			for _, tx := range p.txs {
 				k := chainKey{tx.Sender, tx.Direction}
@@ -459,4 +489,126 @@ func hasDup(s []uint64) bool {
 		}
 	}
 	return false
+}
+
+// TestHeldPoolHolds: a transaction is held while queued or in flight, and
+// an outbound one a committed Sync block held once evicted.
+func TestHeldPoolHolds(t *testing.T) {
+	p := NewHeldPool()
+	a, b := held(addr(0xa), 0, Outbound, 1), held(addr(0xa), 1, Outbound, 2)
+	require.False(t, p.Holds(a.Hash))
+	require.NoError(t, p.Push(a, 0))
+	require.NoError(t, p.Push(b, 0))
+	require.True(t, p.Holds(a.Hash))
+	p.PopN(1)
+	require.True(t, p.Holds(a.Hash), "in flight")
+	p.Release([]*Held{a})
+	require.False(t, p.Holds(a.Hash))
+	in := held(addr(0xb), 0, Inbound, 3)
+	require.NoError(t, p.Push(in, 0))
+	p.Evict(in.Sender, in.Direction, in.Nonce)
+	require.False(t, p.Holds(in.Hash))
+}
+
+// TestHeldPoolKeepsDiscardedComposed: an outbound transaction a committed
+// Sync block held stays the composer's on every path that discards it; one
+// never composed leaves nothing behind.
+func TestHeldPoolKeepsDiscardedComposed(t *testing.T) {
+	sender := addr(0xa)
+	replace := func(t *testing.T, p *HeldPool) { push(t, p, held(sender, 0, Outbound, 9), 0) }
+	for name, c := range map[string]struct {
+		// settled: a batch carried it, so a Sync block held it.
+		settled bool
+		discard func(t *testing.T, p *HeldPool, drained []*Held)
+	}{
+		"evicted while queued": {discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			p.PushFront(drained)
+			p.Evict(sender, Outbound, 0)
+		}},
+		"evicted in flight": {discard: func(t *testing.T, p *HeldPool, _ []*Held) {
+			p.Evict(sender, Outbound, 0)
+		}},
+		"replaced while queued": {discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			p.PushFront(drained)
+			replace(t, p)
+		}},
+		"recovered behind a replacement": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			replace(t, p)
+			p.PushFront(drained)
+			require.Equal(t, []common.Hash{{9}}, hashes(p.PopN(math.MaxInt)))
+		}},
+		"reserved behind a replacement": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			replace(t, p)
+			p.Reserve(drained)
+			require.NotContains(t, p.inFlight, common.Hash{1})
+		}},
+		// Sent again while out of the pool, it is queued as a new object.
+		"resubmitted, reserved, evicted": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			push(t, p, held(sender, 0, Outbound, 1), 0)
+			p.Reserve(drained)
+			p.Evict(sender, Outbound, 0)
+		}},
+		"resubmitted, recovered, evicted": {settled: true, discard: func(t *testing.T, p *HeldPool, drained []*Held) {
+			again := held(sender, 0, Outbound, 1)
+			push(t, p, again, 0)
+			drained[0].Attempts = 2
+			p.PushFront(drained)
+			require.Equal(t, uint32(2), again.Attempts, "its charges carried")
+			p.Evict(sender, Outbound, 0)
+		}},
+	} {
+		for _, composed := range []bool{true, false} {
+			if c.settled && !composed {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/composed=%t", name, composed), func(t *testing.T) {
+				p := NewHeldPool()
+				push(t, p, held(sender, 0, Outbound, 1), 0)
+				drained := p.PopN(1)
+				if composed {
+					p.Composed(drained, 1)
+				}
+				if c.settled {
+					p.Release(drained)
+				}
+				c.discard(t, p, drained)
+				require.Equal(t, composed, p.Holds(common.Hash{1}))
+			})
+		}
+	}
+}
+
+// TestHeldPoolPrune: a discarded outbound transaction is let go once the
+// Sync block that last held it is final and the rollup spent its nonce,
+// past which the rollup's pool drops it; held again, it leaves no tomb.
+func TestHeldPoolPrune(t *testing.T) {
+	p := NewHeldPool()
+	a, b, c := held(addr(0xa), 0, Outbound, 1), held(addr(0xa), 1, Outbound, 2), held(addr(0xc), 0, Outbound, 3)
+	for _, tx := range []*Held{a, b, c} {
+		push(t, p, tx, 0)
+	}
+	p.Composed(p.PopN(3), 5)
+	p.Evict(a.Sender, Outbound, 0)
+	p.Evict(c.Sender, Outbound, 0)
+	nonces := map[common.Address]uint64{a.Sender: 1}
+	nonce := func(s common.Address) (uint64, error) { return nonces[s], nil }
+	require.ErrorIs(t, p.Prune(func(common.Address) (uint64, error) { return 0, errDown }, 5), errDown)
+	require.True(t, p.Holds(a.Hash), "a failed read lets nothing go")
+	require.NoError(t, p.Prune(nonce, 4))
+	require.True(t, p.Holds(a.Hash), "its Sync block not final")
+	require.NoError(t, p.Prune(nonce, 5))
+	require.False(t, p.Holds(a.Hash))
+	require.True(t, p.Holds(b.Hash))
+	require.True(t, p.Holds(c.Hash))
+	// Composed again in Sync block 7, it is the composer's while held, and
+	// its tomb names block 7 once discarded again.
+	push(t, p, c, 0)
+	p.Composed(p.PopN(1), 7)
+	p.PushFront([]*Held{c})
+	p.Evict(c.Sender, Outbound, 0)
+	nonces[c.Sender] = 1
+	require.NoError(t, p.Prune(nonce, 6))
+	require.True(t, p.Holds(c.Hash))
+	require.NoError(t, p.Prune(nonce, 7))
+	require.False(t, p.Holds(c.Hash))
 }

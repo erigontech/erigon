@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -37,6 +38,12 @@ import (
 // ErrStateRead reports a failed state read: the node's failure, not the
 // transaction's, so the transaction waits.
 var ErrStateRead = errors.New("state read failed")
+
+// transient reports a failure of the node, not of the transaction: a failed
+// state read or a run its context cut.
+func transient(err error) bool {
+	return errors.Is(err, ErrStateRead) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
 
 // PreState is what a block executes on: its parent's state, the header
 // chain the engine reads, and the hashes BLOCKHASH serves.
@@ -139,6 +146,16 @@ func (d *Draft) Fork() (*Draft, error) {
 	return f, nil
 }
 
+// simulation returns a simulation of the draft's chain on the draft's
+// state, whose proxies manager registers; rollup is the chain's rollup id. A
+// run it keeps writes into the draft.
+func (d *Draft) simulation(manager common.Address, rollup uint64) *Source {
+	return &Source{
+		config: d.config, header: d.header, ibs: d.ibs, reads: d.reads, blockHash: d.blockHash,
+		manager: accounts.InternAddress(manager), rollup: rollup, rules: d.chainRules, index: len(d.txs),
+	}
+}
+
 // Nonce returns addr's nonce in the draft.
 func (d *Draft) Nonce(addr common.Address) (uint64, error) {
 	n, err := d.ibs.GetNonce(accounts.InternAddress(addr))
@@ -146,6 +163,24 @@ func (d *Draft) Nonce(addr common.Address) (uint64, error) {
 		return 0, failed
 	}
 	return n, err
+}
+
+// syncTx builds the system transaction of the one Sync pair settling
+// outbound or delivering inbound, at the draft's next system nonce. An entry
+// that cannot lower is poison.
+func (d *Draft) syncTx(ctx protocol.SyncTxContext, outbound []protocol.OutboundSettlement, inbound []protocol.ExecutionEntry) (types.Transaction, error) {
+	nonce, err := d.Nonce(protocol.SystemAddress)
+	if err != nil {
+		return nil, err
+	}
+	pairs, err := protocol.BuildSyncPairs(outbound, inbound, ctx, nonce)
+	switch {
+	case err != nil:
+		return nil, Poison(err)
+	case len(pairs) != 1:
+		return nil, fmt.Errorf("lowered to %d Sync pairs, not one", len(pairs))
+	}
+	return types.DecodeTransaction(pairs[0].SystemTx)
 }
 
 // Txs returns the draft's transactions.

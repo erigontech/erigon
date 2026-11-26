@@ -141,6 +141,9 @@ func New(ctx context.Context, key *ecdsa.PrivateKey, to common.Address, priority
 // From returns the poster's address.
 func (p *Poster) From() common.Address { return p.from }
 
+// Tip returns the priority fee of a posting not replacing another.
+func (p *Poster) Tip() uint256.Int { return p.priority }
+
 // ChainID returns the id of the L1 chain the poster signs for.
 func (p *Poster) ChainID() uint64 { return p.chainID.Uint64() }
 

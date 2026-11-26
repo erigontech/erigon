@@ -77,6 +77,18 @@ func TestPoolTxns(t *testing.T) {
 	require.Equal(t, daSize(large), budget.Size(large))
 }
 
+// TestPoolTxnsLeaveTheHeld: a transaction the composer holds comes only
+// from the composer, though the pool has it back from a replaced block.
+func TestPoolTxnsLeaveTheHeld(t *testing.T) {
+	user := common.HexToAddress("0xa11ce")
+	held, free := transfer(t, 0, 10, user), transfer(t, 1, 10, common.HexToAddress("0xb0b0"))
+	p := newPoolTxns(fixed{held, free}, common.Hash{}, 1, log.New())
+	p.held = func(h common.Hash) bool { return h == held.Hash() }
+	got, err := p.ProvideTxns(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{free}, got)
+}
+
 func TestDABudget(t *testing.T) {
 	// A 6-block slot of full blocks fits one batch at the floor price.
 	require.Equal(t, 65_738, DABudget(6, MaxBatchGas))

@@ -198,7 +198,11 @@ type testPoster struct {
 	pooled bool
 	// hang has Sign wait for its context.
 	hang bool
+	tip  uint256.Int
 }
+
+func (p *testPoster) From() common.Address { return crypto.PubkeyToAddress(p.key.PublicKey) }
+func (p *testPoster) Tip() uint256.Int     { return p.tip }
 
 func (p *testPoster) Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error) {
 	if p.hang {
@@ -1046,10 +1050,33 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	}
 }
 
-// TestPartialCulprit: L1 stopped a partial batch at its first trigger when
-// unspent; a later trigger may only be stuck behind one that ran and
-// reverted.
+// TestComposerDisposesOfAPartialBatchLedByOutbound: the outbound
+// transaction leading a partial batch, in the block derivation rebuilt, ran;
+// L1 stopped at the first unspent trigger.
+func TestComposerDisposesOfAPartialBatchLedByOutbound(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out, cut := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	for _, tx := range []*Held{out, cut} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt)})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{cut}, pool.PopN(math.MaxInt))
+	require.Equal(t, uint32(1), cut.Attempts, "where L1 stopped")
+	require.Zero(t, out.Attempts)
+}
+
+// TestPartialCulprit: L1 stopped a partial batch at its first unspent
+// outbound transaction, else at its first inbound one when unspent; a later
+// inbound transaction may only be stuck behind one that ran and reverted.
 func TestPartialCulprit(t *testing.T) {
+	a, b := addr(0xa), addr(0xb)
 	spentOf := func(txs ...*Held) map[common.Hash]bool {
 		m := map[common.Hash]bool{}
 		for _, tx := range txs {
@@ -1057,17 +1084,23 @@ func TestPartialCulprit(t *testing.T) {
 		}
 		return m
 	}
-	b := addr(0xb)
-	t.Run("the first when unspent", func(t *testing.T) {
-		dropped, behind := held(b, 4, Inbound, 4), held(b, 5, Inbound, 5)
-		require.Equal(t, dropped, partialCulprit([]*Held{dropped, behind}, spentOf()))
+	t.Run("the first unspent outbound", func(t *testing.T) {
+		keptOut, cutOut := held(a, 5, Outbound, 1), held(a, 6, Outbound, 2)
+		includedIn, droppedIn := held(b, 3, Inbound, 3), held(b, 4, Inbound, 4)
+		// Drain order may lead with an inbound transaction.
+		txs := []*Held{includedIn, keptOut, cutOut, droppedIn}
+		require.Equal(t, cutOut, partialCulprit(txs, spentOf(includedIn, keptOut)))
 	})
-	t.Run("none behind a spent one", func(t *testing.T) {
-		reverted, stuck := held(b, 3, Inbound, 3), held(b, 4, Inbound, 4)
-		require.Nil(t, partialCulprit([]*Held{reverted, stuck}, spentOf(reverted)))
+	t.Run("the first inbound when unspent", func(t *testing.T) {
+		keptOut, droppedIn, behindIn := held(a, 5, Outbound, 1), held(b, 4, Inbound, 4), held(b, 5, Inbound, 5)
+		require.Equal(t, droppedIn, partialCulprit([]*Held{keptOut, droppedIn, behindIn}, spentOf(keptOut)))
+	})
+	t.Run("none behind a spent inbound", func(t *testing.T) {
+		revertedIn, stuckIn := held(b, 3, Inbound, 3), held(b, 4, Inbound, 4)
+		require.Nil(t, partialCulprit([]*Held{revertedIn, stuckIn}, spentOf(revertedIn)))
 	})
 	t.Run("none when all are spent", func(t *testing.T) {
-		x, y := held(b, 1, Inbound, 1), held(b, 2, Inbound, 2)
+		x, y := held(a, 1, Inbound, 1), held(a, 2, Inbound, 2)
 		require.Nil(t, partialCulprit([]*Held{x, y}, spentOf(x, y)))
 	})
 }
@@ -1254,6 +1287,9 @@ func TestComposerAuditsFinality(t *testing.T) {
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
+	// mu guards asked: recovery reads receipts concurrently.
+	mu    sync.Mutex
+	asked []common.Hash
 }
 
 func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
@@ -1263,6 +1299,9 @@ func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, erro
 func (l *triggers) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
 func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	l.mu.Lock()
+	l.asked = append(l.asked, h)
+	l.mu.Unlock()
 	if l.failed != nil {
 		return nil, l.failed
 	}
@@ -1348,6 +1387,24 @@ func TestComposerChargeEvictsTheChain(t *testing.T) {
 	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
 	h.c.RecoverFailed(t.Context())
 	require.Empty(t, pool.PopN(math.MaxInt))
+}
+
+// TestComposerRecoversOutboundTransactions: an outbound transaction of a
+// failed batch is the rollup's, never on L1: it is requeued, charged,
+// without a lookup.
+func TestComposerRecoversOutboundTransactions(t *testing.T) {
+	out := held(addr(0xa), 0, Outbound, 1)
+	node := &triggers{landed: map[common.Hash]bool{out.Hash: true}}
+	h := newHarness(t, newTestChain(t, 8), 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
+	require.Equal(t, uint32(1), out.Attempts)
+	require.NotContains(t, node.asked, out.Hash)
 }
 
 func TestComposerRecoversHeldTransactions(t *testing.T) {
@@ -1446,4 +1503,23 @@ func TestComposerDisposesOfAFailedBatchL1Settled(t *testing.T) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	require.NotContains(t, pool.inFlight, ran.Hash)
+}
+
+// TestComposerDisposesOfAFailedOutboundBatchL1Settled: a failed batch whose
+// height L1 settled after all is disposed of by what ran, as a partial one:
+// an outbound transaction not in the settled block waits again.
+func TestComposerDisposesOfAFailedOutboundBatchL1Settled(t *testing.T) {
+	chain := newTestChain(t, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+	out := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
+	require.Equal(t, uint32(1), out.Attempts, "where L1 stopped")
 }

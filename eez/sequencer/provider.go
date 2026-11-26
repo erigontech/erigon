@@ -95,6 +95,8 @@ type poolTxns struct {
 	pool   txnprovider.TxnProvider
 	parent common.Hash
 	budget int
+	// held, when set, reports a transaction the composer holds.
+	held   func(common.Hash) bool
 	logger log.Logger
 }
 
@@ -184,7 +186,11 @@ func (p *poolTxns) provide(ctx context.Context, opts []txnprovider.ProvideOption
 func (p *poolTxns) keep(txs []types.Transaction) []types.Transaction {
 	kept := txs[:0]
 	for _, tx := range txs {
-		if reason := refused(tx); reason != "" {
+		reason := refused(tx)
+		if reason == "" && p.held != nil && p.held(tx.Hash()) {
+			reason = "held by the composer"
+		}
+		if reason != "" {
 			p.logger.Debug("[eez] pool transaction refused", "event", "eez.sequencer.pool.refused", "tx", tx.Hash(), "reason", reason)
 			continue
 		}

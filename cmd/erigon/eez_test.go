@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"net"
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -290,7 +289,7 @@ func TestDABudgetFollowsTheComposer(t *testing.T) {
 // TestFrontServerTimeouts: the front bounds a request's body read, not only
 // its headers, as the node's RPC listener does.
 func TestFrontServerTimeouts(t *testing.T) {
-	srv := newFrontServer("127.0.0.1:0", http.NotFoundHandler(), log.New())
+	srv := newFrontServer(front{name: "L1", addr: "127.0.0.1:0"}, log.New())
 	require.Equal(t, rpccfg.DefaultHTTPTimeouts.ReadTimeout, srv.srv.ReadTimeout)
 	require.Equal(t, rpccfg.DefaultHTTPTimeouts.WriteTimeout, srv.srv.WriteTimeout)
 	require.Equal(t, rpccfg.DefaultHTTPTimeouts.IdleTimeout, srv.srv.IdleTimeout)
