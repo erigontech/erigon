@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -270,6 +271,44 @@ func newValidPayloadServer(t *testing.T) (*EngineServer, *stubExecutionModule, *
 	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 64)
 	return srv, stub, payload
+}
+
+func TestEngineRetriesIncompleteExecution(t *testing.T) {
+	ctx := t.Context()
+	incomplete := fmt.Errorf("[Execution] %w: missing block result", stagedsync.ErrIncompleteExecution)
+
+	t.Run("forkchoiceUpdated", func(t *testing.T) {
+		srv, stub, payload := newValidPayloadServer(t)
+		head := &engine_types.ForkChoiceState{HeadHash: payload.ParentHash}
+		number := uint64(payload.BlockNumber) - 1
+		stub.headerNumberFunc = func(context.Context, common.Hash) (*uint64, error) { return &number, nil }
+		stub.updateForkChoiceFunc = func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+			return execmodule.ForkChoiceResult{}, incomplete
+		}
+		reply, err := srv.ForkchoiceUpdatedV2(ctx, head, nil)
+		require.ErrorIs(t, err, incomplete)
+		require.Nil(t, reply)
+
+		stub.updateForkChoiceFunc = nil
+		reply, err = srv.ForkchoiceUpdatedV2(ctx, head, nil)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.ValidStatus, reply.PayloadStatus.Status)
+	})
+
+	t.Run("newPayload", func(t *testing.T) {
+		srv, stub, payload := newValidPayloadServer(t)
+		stub.validateChainBlockFunc = func(context.Context, *types.Block) (execmodule.ValidationResult, error) {
+			return execmodule.ValidationResult{}, incomplete
+		}
+		reply, err := srv.NewPayloadV2(ctx, payload)
+		require.ErrorIs(t, err, incomplete)
+		require.Nil(t, reply)
+
+		stub.validateChainBlockFunc = nil
+		reply, err = srv.NewPayloadV2(ctx, payload)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.ValidStatus, reply.Status)
+	})
 }
 
 // The witness view and onValid run after the engine lock is released, so a slow witness build delays no other

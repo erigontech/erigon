@@ -522,8 +522,6 @@ func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 		if v.blockHash != (common.Hash{}) {
 			return &RejectedBlockError{Number: v.blockNum, Hash: v.blockHash, Err: v.err}
 		}
-		// Missing execution results can wrap ErrInvalidBlock without identifying
-		// a block that forkchoice can reject.
 		return v.err
 	}
 

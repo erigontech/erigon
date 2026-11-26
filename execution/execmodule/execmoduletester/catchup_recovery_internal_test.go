@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/execmodule"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -54,7 +53,7 @@ func TestCatchupRetriesAfterMissingBlockResult(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 			// Inject the executor's missing-result error just before a batch would commit.
-			missingResult := fmt.Errorf("%w: block result missing", rules.ErrInvalidBlock)
+			missingResult := fmt.Errorf("%w: block result missing", stagedsync.ErrIncompleteExecution)
 			finishCfg := stagedsync.StageFinishCfg()
 			cycle := 0
 			m.posStagedSync.MockExecFunc(stages.Finish, func(_ bool, s *stagedsync.StageState, _ stagedsync.Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {

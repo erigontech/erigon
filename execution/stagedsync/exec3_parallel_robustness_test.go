@@ -177,10 +177,14 @@ func TestApplyLoopMissingBlocks(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := applyLoopMissingBlocks(tc.txResultBlocks, tc.appliedBlocks)
-			if !sameSet(got, tc.wantMissing) {
-				t.Fatalf("applyLoopMissingBlocks() = %v, want (set-equal) %v", got, tc.wantMissing)
+			err := checkAppliedBlockResults(tc.txResultBlocks, tc.appliedBlocks)
+			if len(tc.wantMissing) == 0 {
+				require.NoError(t, err)
+				return
 			}
+			require.ErrorIs(t, err, ErrIncompleteExecution)
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, err, fmt.Sprint(tc.wantMissing))
 		})
 	}
 }
@@ -198,19 +202,15 @@ func TestExecLoopExitCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("non-empty map returns ErrInvalidBlock with block nums", func(t *testing.T) {
+	t.Run("non-empty map reports unfinished blocks", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{
 			3: {},
 			7: {},
 		}
 		err := pe.execLoopExitCheck(context.Background(), "test-reason")
-		if err == nil {
-			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
-		}
-		if !errors.Is(err, rules.ErrInvalidBlock) {
-			t.Fatalf("expected wrapped ErrInvalidBlock, got: %v", err)
-		}
+		require.ErrorIs(t, err, ErrIncompleteExecution)
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		// Both block nums must appear in the error so the operator can
 		// see exactly which blocks were left orphaned.
 		for _, want := range []string{"3", "7", "test-reason"} {
@@ -531,34 +531,12 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	// Test passes iff no race detector fires AND no deadlock.
 }
 
-// TestApplyLoopPartialBatchReturnsErrLoopExhausted exercises the
-// apply-loop exit decision tree end-to-end with channel orchestration:
-// when applyResults closes after the exec loop hit its size-limit
-// (lastBlockResult < maxBlockNum, no missing blocks), the apply loop
-// must return ErrLoopExhausted so the stage loop resumes from the next
-// block. The previous bug spuriously flagged maxBlockNum as missing
-// because it wasn't applied — turning every legitimate partial batch
-// into an InvalidBlock error. This test locks in the corrected
-// behavior: completeness check sees no missing → exhausted → stage
-// loop continues — no re-execution.
-//
-// IMPORTANT: this test models the apply-loop's exit-branch decision
-// rather than driving the production apply loop end-to-end (which would
-// require full parallel-executor + workers + calculator setup). The
-// `run` closure is a hand-coded mirror of the production sequence in
-// exec3_parallel.go around line 355: applyLoopMissingBlocks → reachedMaxBlock
-// check → ErrLoopExhausted. If those production lines change, this
-// closure must be updated in lock-step or the test will pass vacuously.
+// A size-limited batch can resume from the next block only if every block
+// that started execution produced a result.
 func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
-	// Simulate the apply loop's exit-branch decision sequence.
-	// (We cannot run the full apply loop in a unit test — requires the
-	// parallel executor + workers + commitment calculator. Instead this
-	// test covers the same decision tree that exec3_parallel.go runs
-	// after the applyResults channel closes.)
 	type result struct {
 		err         error
 		isExhausted bool
-		isInvalid   bool
 		isOK        bool
 	}
 
@@ -567,11 +545,8 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 		// branch in execErr's anonymous func — keep these branches in sync with
 		// the production sequence): missing check → stopCause kind → maxBlock
 		// fallback → ErrLoopExhausted.
-		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-			return result{
-				err:       errors.New("invalid block: missing blocks"),
-				isInvalid: true,
-			}
+		if err := checkAppliedBlockResults(txResultBlocks, appliedBlocks); err != nil {
+			return result{err: err}
 		}
 		if sc != nil {
 			switch sc.kind {
@@ -615,12 +590,9 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 		}
 	})
 
-	t.Run("genuine silent failure mid-batch — InvalidBlock", func(t *testing.T) {
-		// Block 3 had tx-results but no blockResult. Real bug — must surface.
+	t.Run("missing block result stops the batch", func(t *testing.T) {
 		got := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
-		if !got.isInvalid {
-			t.Fatalf("expected InvalidBlock error, got: %+v", got)
-		}
+		require.ErrorIs(t, got.err, ErrIncompleteExecution)
 	})
 
 	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
@@ -940,30 +912,6 @@ func TestShouldMarkExhaustedAtBlock(t *testing.T) {
 	}
 }
 
-// sameSet compares two slices ignoring order. Used because
-// applyLoopMissingBlocks iterates a map; order is non-deterministic.
-func sameSet(a, b []uint64) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make(map[uint64]int, len(a))
-	for _, v := range a {
-		seen[v]++
-	}
-	for _, v := range b {
-		seen[v]--
-		if seen[v] < 0 {
-			return false
-		}
-	}
-	for _, c := range seen {
-		if c != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // TestApplyLoopFlush_InvalidTxWritesAreEstimate pins the versionMap invariant
 // that an invalidated tx's writes flush as Estimate, not Done.
 //
@@ -1025,19 +973,13 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 			"OCC must still see it as a dependency")
 }
 
-// Pins the close-branch precedence: the deferred failure must surface ahead of
-// the missing-blocks completeness error, otherwise a deliberate cancel masks
-// ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
-// production order — keep them in lock-step.
+// A missing result caused by stopping the batch must preserve the original root error.
 func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 		if deferredRootErr != nil {
 			return deferredRootErr
 		}
-		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-			return fmt.Errorf("%w: %d missing blockResult(s) %v", rules.ErrInvalidBlock, len(missing), missing)
-		}
-		return nil
+		return checkAppliedBlockResults(txResultBlocks, appliedBlocks)
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -1055,11 +997,9 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
 	})
 
-	t.Run("missing block only — invalid-block error stands", func(t *testing.T) {
+	t.Run("missing block only", func(t *testing.T) {
 		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
-		require.ErrorIs(t, err, rules.ErrInvalidBlock)
-		require.NotErrorIs(t, err, ErrWrongTrieRoot)
-		require.Contains(t, err.Error(), "missing blockResult")
+		require.ErrorIs(t, err, ErrIncompleteExecution)
 	})
 
 	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
@@ -1073,11 +1013,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies that a deliberate stopCause OR any
-// context cancellation (shutdown, parent/CL cancel) exempts the pending-block
-// completeness check — both are operational, not a block verdict. Only an
-// uncancelled exit with blocks still pending is a genuine silent miss that must
-// surface as ErrInvalidBlock.
+// A requested stop explains why some blocks can still be pending at exit.
 func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 	t.Run("pending blocks but stopCause returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
@@ -1093,7 +1029,8 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
 		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+		require.Error(t, err)
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 	})
 
 	t.Run("cancelled context (shutdown) is operational, not a silent miss", func(t *testing.T) {
