@@ -58,6 +58,9 @@ func ToWriteSetAfter(blockAccessList types.BlockAccessList, afterTxIndex int64, 
 	writes := &state.WriteSet{}
 	for i := range blockAccessList {
 		accountChanges := &blockAccessList[i]
+		if len(accountChanges.BalanceChanges)+len(accountChanges.NonceChanges)+len(accountChanges.CodeChanges)+len(accountChanges.StorageChanges) == 0 {
+			continue
+		}
 		addr := accounts.InternAddress(accountChanges.Address)
 		if balance, ok := changedIn(accountChanges.BalanceChanges, afterTxIndex, maxTxIndex); ok {
 			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{

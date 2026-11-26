@@ -831,7 +831,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
-func setAheadFlags(t *testing.T, balDriven bool) {
+func setAheadFlags(t testing.TB, balDriven bool) {
 	t.Helper()
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	bal, ignore, shadow, batch, parentReads := dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.BALShadowCompute, dbg.BatchCommitments, commitmentdb.ParentReadsWanted()
