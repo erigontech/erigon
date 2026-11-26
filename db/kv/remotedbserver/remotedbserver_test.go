@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -422,34 +421,80 @@ func TestRangeCopiesPairsAndClosesIterator(t *testing.T) {
 	require.True(t, it.closed)
 }
 
+// slotLimitedDB has one read-tx slot, handed to waiting readers in arrival order.
+// A reader signals on waiting only once it is queued, so a test that waits for the
+// signal knows the slot cannot be taken ahead of that reader.
 type slotLimitedDB struct {
 	kv.TemporalRoDB
-	slots  *semaphore.Weighted
-	begins chan struct{}
+	mu      sync.Mutex
+	held    bool
+	queue   []chan struct{}
+	waiting chan struct{}
+}
+
+func newSlotLimitedDB() *slotLimitedDB {
+	return &slotLimitedDB{waiting: make(chan struct{}, 3)}
 }
 
 func (db *slotLimitedDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	db.begins <- struct{}{}
-	if err := db.slots.Acquire(ctx, 1); err != nil {
-		return nil, err
+	db.mu.Lock()
+	if !db.held {
+		db.held = true
+		db.mu.Unlock()
+		return &slotTx{db: db}, nil
 	}
-	return &slotTx{slots: db.slots}, nil
+	turn := make(chan struct{})
+	db.queue = append(db.queue, turn)
+	db.mu.Unlock()
+	db.waiting <- struct{}{}
+
+	select {
+	case <-turn:
+		return &slotTx{db: db}, nil
+	case <-ctx.Done():
+		db.mu.Lock()
+		i := slices.Index(db.queue, turn)
+		if i >= 0 {
+			db.queue = slices.Delete(db.queue, i, i+1)
+		}
+		db.mu.Unlock()
+		if i < 0 { // the slot was handed over while ctx was being cancelled
+			db.release()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+func (db *slotLimitedDB) release() {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.queue) == 0 {
+		db.held = false
+		return
+	}
+	close(db.queue[0])
+	db.queue = db.queue[1:]
+}
+
+func (db *slotLimitedDB) free() bool {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return !db.held
 }
 
 type slotTx struct {
 	kv.TemporalTx
-	slots *semaphore.Weighted
-	once  sync.Once
+	db   *slotLimitedDB
+	once sync.Once
 }
 
-func (tx *slotTx) Rollback() { tx.once.Do(func() { tx.slots.Release(1) }) }
+func (tx *slotTx) Rollback() { tx.once.Do(tx.db.release) }
 
 func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
-	db := &slotLimitedDB{slots: semaphore.NewWeighted(1), begins: make(chan struct{}, 2)}
+	db := newSlotLimitedDB()
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	holder, err := s.begin(t.Context())
 	require.NoError(t, err)
-	<-db.begins
 
 	waitCtx, cancelWait := context.WithCancel(t.Context())
 	defer cancelWait()
@@ -461,7 +506,7 @@ func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
 		}
 		waiterDone <- err
 	}()
-	<-db.begins
+	<-db.waiting
 
 	rollbackDone := make(chan struct{})
 	go func() {
@@ -481,11 +526,10 @@ func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
 }
 
 func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
-	db := &slotLimitedDB{slots: semaphore.NewWeighted(1), begins: make(chan struct{}, 3)}
+	db := newSlotLimitedDB()
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	renewed, err := s.begin(t.Context())
 	require.NoError(t, err)
-	<-db.begins
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -496,13 +540,15 @@ func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
 			otherID <- id
 		}
 	}()
-	<-db.begins
+	<-db.waiting
 
 	renewDone := make(chan error, 1)
 	go func() {
 		renewErr := make(chan error, 1)
 		go func() { renewErr <- s.renew(ctx, renewed) }()
-		s.rollback(<-otherID)
+		other := <-otherID
+		<-db.waiting
+		s.rollback(other)
 		renewDone <- <-renewErr
 	}()
 
@@ -517,11 +563,10 @@ func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
 }
 
 func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
-	db := &slotLimitedDB{slots: semaphore.NewWeighted(1), begins: make(chan struct{}, 3)}
+	db := newSlotLimitedDB()
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	renewed, err := s.begin(t.Context())
 	require.NoError(t, err)
-	<-db.begins
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -532,7 +577,7 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 			otherID <- id
 		}
 	}()
-	<-db.begins
+	<-db.waiting
 
 	renewDone := make(chan error, 1)
 	go func() { renewDone <- s.renew(ctx, renewed) }()
@@ -543,7 +588,7 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 		cancel()
 		t.Fatal("renew blocked the begin that waits for the read-tx slot")
 	}
-	<-db.begins
+	<-db.waiting
 
 	renewedRollbackDone := make(chan struct{})
 	go func() {
@@ -569,5 +614,5 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 		t.Fatal("rollback of a renewing tx blocked the rollback that frees the read-tx slot")
 	}
 	<-renewedRollbackDone
-	require.True(t, db.slots.TryAcquire(1), "the tx opened by renew must be rolled back")
+	require.True(t, db.free(), "the tx opened by renew must be rolled back")
 }
