@@ -119,6 +119,7 @@ func responseBodyWeight(topic string, maxBytes uint64) int64 {
 
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
+	MarkPeerUseful(pid peer.ID)
 	ConsumeDuplicateLoss(pid peer.ID) bool
 	Config() *sentinel.SentinelConfig
 	ReqRespHandler() http.Handler
@@ -171,6 +172,16 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	s.logger.Debug("[Sentinel] Banning peer", "peer", pid)
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.dropPeer(pid)
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+// RewardPeer records that the peer answered one of our data requests with data that decoded.
+func (s *SentinelServer) RewardPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
+	var pid peer.ID
+	if err := pid.UnmarshalText([]byte(p.GetPid())); err != nil {
+		return nil, err
+	}
+	s.peerRequestBackend.MarkPeerUseful(pid)
 	return &sentinelproto.EmptyMessage{}, nil
 }
 

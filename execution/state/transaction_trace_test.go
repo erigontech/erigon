@@ -55,7 +55,7 @@ func TestTransactionTraceNonceIncludesEarlierTransactions(t *testing.T) {
 	trace, err := ctx.TransactionTrace(ibs)
 	require.NoError(t, err)
 	require.Equal(t, []NonceChange{{Address: address, Before: 1, After: 2}}, trace.Nonces)
-	read, ok := ibs.versionedReads.GetNonce(address)
+	read, ok := ibs.reads.GetNonce(address)
 	require.True(t, ok)
 	require.Equal(t, Version{TxIndex: 0}, read.Version)
 }

@@ -83,7 +83,7 @@ type stEnvMarshaling struct {
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	statedb := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	statedb := state.New(stateReader)
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
 		if err := statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis); err != nil {

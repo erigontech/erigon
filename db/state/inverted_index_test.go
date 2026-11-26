@@ -889,7 +889,7 @@ func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step
 	if err != nil {
 		return err
 	}
-	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+	reclaimFiles(ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize)))
 	return nil
 }
 

@@ -313,9 +313,9 @@ func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-	require.NoError(t, d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir(), false))
+	files, err := d.dumpStepRangeToPath(t.Context(), 0, 1, writer, t.TempDir())
+	require.NoError(t, err)
+	files.CleanupOnError()
 }
 
 func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
@@ -325,19 +325,22 @@ func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
-	require.NoError(t, writer.PutWithPrev([]byte("key1"), []byte("value1"), 1, nil))
+	// The compressor checks for cancellation in batches as it writes the keys and values.
+	for i := range uint64(2048) {
+		key := binary.BigEndian.AppendUint64(nil, i)
+		require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	}
 
-	vt := func([]byte, uint64, uint64) ([]byte, error) { return nil, fmt.Errorf("vt failed") }
-	_, err := d.collateETL(t.Context(), 0, 1, writer.valsCollector(), vt, "")
-	require.Error(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := d.collateETL(ctx, 0, 1, writer.valsCollector(), "")
+	require.ErrorIs(t, err, context.Canceled)
 	leftovers, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
 	require.NoError(t, err)
 	require.Empty(t, leftovers, "the values compressor is closed when collateETL fails")
 }
 
-// TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
-// dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
-// directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
+// Dumping to another directory must not change the domain's live files.
 func TestDumpStepRangeToPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -360,22 +363,12 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
 	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
 
-	// Snapshot dirtyFiles count before invoking; integrate=false must leave it unchanged.
-	countDirty := func() int {
-		n := 0
-		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-			n += len(items)
-			return true
-		})
-		return n
-	}
-	beforeDirty := countDirty()
+	beforeDirty := d.dirtyFiles.Len()
 
 	dstDir := t.TempDir()
-	batch := &TemporalMemBatch{}
-	batch.domainWriters[d.Name] = writer
-
-	require.NoError(t, d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir, false))
+	files, err := d.dumpStepRangeToPath(ctx, 0, 1, writer, dstDir)
+	require.NoError(t, err)
+	files.CleanupOnError()
 
 	// .kv must land in dstDir, not in d.dirs.SnapDomain.
 	expectedKV := d.kvNewFilePathIn(dstDir, 0, 1)
@@ -395,15 +388,13 @@ func TestDumpStepRangeToPath(t *testing.T) {
 		require.NoError(t, err, "expected .kvi at %s", kviPath)
 	}
 
-	// SnapDomain must be free of the new step file because integrate=false skips
-	// integrateDirtyFiles and dstDir overrides the write path.
+	// The output directory must not change the live snapshots directory.
 	snapKV := d.kvNewFilePath(0, 1)
 	_, err = os.Stat(snapKV)
 	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
-	// dirtyFiles count is unchanged: integrate=false skips integration.
-	require.Equal(t, beforeDirty, countDirty(), "dirtyFiles must not grow when integrate=false")
+	require.Equal(t, beforeDirty, d.dirtyFiles.Len(), "dumping files must not publish them")
 }
 
 func TestDomain_AfterPrune(t *testing.T) {
@@ -739,7 +730,7 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	if err != nil {
 		return err
 	}
-	d.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(d.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 
