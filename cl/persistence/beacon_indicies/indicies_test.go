@@ -72,10 +72,7 @@ func setupTestDB(t *testing.T) kv.RwDB {
 }
 
 func TestRangeBlockRootsReturnsCursorError(t *testing.T) {
-	db := setupTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := mdbxtest.NewTestTx(t)
 
 	const slot = uint64(12)
 	root := common.Hash{1}
