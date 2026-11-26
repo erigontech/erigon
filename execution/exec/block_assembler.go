@@ -153,7 +153,7 @@ func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, logger, nil); err != nil {
 		return err
 	}
 	writes, err := ibs.FinalizedWrites(ba.blockRules)
@@ -162,9 +162,9 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	}
 	ba.recordPhase(ibs, writes)
 	// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
-	// first tx observes them across the ResetVersionedIO below.
+	// first tx observes them across the ResetIO below.
 	ibs.FlushWritesToVersionMap(writes)
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	return nil
 }
 
@@ -209,7 +209,6 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	writer := state.NewNoopWriter() // the builder applies the recorded write sets
 	recordTxIO := func() error {
 		writes, err := ibs.FinalizedWrites(ba.blockRules)
 		if err != nil {
@@ -217,13 +216,13 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 		ba.recordPhase(ibs, writes)
 		// Publish this tx's writes to the versionMap so the next tx observes them;
-		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		// ResetIO below clears the per-tx write set used for BAL recording.
 		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 	clearTxIO := func() {
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 	}
 
 	gasUsed := &ba.gasUsed
@@ -245,7 +244,7 @@ func (ba *BlockAssembler) AddTransactions(
 		gasSnapshot := *gasUsed
 
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
+			ba.cfg.Engine, coinbase, gasPool, ibs, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
@@ -382,7 +381,7 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
 	// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
 	ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
 		ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
@@ -404,7 +403,7 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// written earlier in the block (fee recipient, withdrawal target) must be
 	// visible there or the commit reuses the stale pre-finalize value.
 	ibs.FlushWritesToVersionMap(writes)
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 	if ba.HasBAL() {
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.

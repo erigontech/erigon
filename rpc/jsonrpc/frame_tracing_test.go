@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -59,7 +60,6 @@ func frameTraceTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	ibs := state.New(state.NewNoopReader())
-	ibs.SetVersionMap(nil)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 0)
 	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
@@ -338,106 +338,114 @@ func TestFramePrestateTracerKeyedNonce(t *testing.T) {
 	require.Equal(t, common.HexToHash("0x1"), trace[types.FrameNonceManager].Storage[slot])
 }
 
+type framePrestateDiff struct {
+	Pre  map[common.Address]struct{} `json:"pre"`
+	Post map[common.Address]struct {
+		Balance hexutil.U256                `json:"balance"`
+		Code    hexutil.Bytes               `json:"code"`
+		Nonce   uint64                      `json:"nonce"`
+		Storage map[common.Hash]common.Hash `json:"storage"`
+	} `json:"post"`
+}
+
+func prepareFactoryFrame(t *testing.T, ibs *state.IntraBlockState, frame *types.Frame, childRuntime []byte, endowment uint64) {
+	t.Helper()
+	initCode := program.New().ReturnData(childRuntime).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).
+		Push(len(initCode)).Push0().Push(endowment).Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(*frame.Target), factoryCode, tracing.CodeChangeUnspecified))
+	frame.Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+}
+
 func TestFramePrestateTracerRollback(t *testing.T) {
+	const childEndowment = 7
 	factory := common.HexToAddress("0x2000")
 	child := types.CreateAddress(factory, 0)
 	failure := common.HexToAddress("0x3000")
-	nestedFailure := common.HexToAddress("0x4000")
-	revertedDestruction := common.HexToAddress("0x5000")
-	destroy := types.Frame{Mode: types.FrameSender, Target: &child, Limits: mdgas.MdGas{Execution: 20_000}}
+	revertCatcher := common.HexToAddress("0x4000")
+	revertingCaller := common.HexToAddress("0x5000")
+	sendAll := types.Frame{Mode: types.FrameSender, Target: &child, Limits: mdgas.MdGas{Execution: 20_000}}
 	fail := types.Frame{Mode: types.FrameSender, Target: &failure, Limits: mdgas.MdGas{Execution: 10_000}}
-	batchDestroy := destroy
-	batchDestroy.Flags = types.FrameAtomicBatch
+	batchSendAll := sendAll
+	batchSendAll.Flags = types.FrameAtomicBatch
+	revertCode := program.New().Push0().Push0().Op(vm.REVERT).Bytes()
+	catchInnerRevert := program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).
+		Op(vm.POP, vm.STOP).Bytes()
+	callChildThenRevert := program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).
+		Op(vm.POP).Append(revertCode).Bytes()
+
 	for _, tc := range []struct {
-		name          string
-		frames        []types.Frame
-		wantDestroyed bool
+		name             string
+		frames           []types.Frame
+		wantChildBalance uint64
 	}{
-		{name: "no revert", frames: []types.Frame{destroy}, wantDestroyed: true},
-		{name: "revert before destruction", frames: []types.Frame{fail, destroy}, wantDestroyed: true},
-		{name: "revert after destruction", frames: []types.Frame{destroy, fail}, wantDestroyed: true},
+		{name: "no revert", frames: []types.Frame{sendAll}},
+		{name: "separate frame reverts before transfer", frames: []types.Frame{fail, sendAll}},
+		{name: "transfer survives a later frame revert", frames: []types.Frame{sendAll, fail}},
 		{
-			name: "nested revert",
+			name: "earlier frame catches an inner revert",
 			frames: []types.Frame{
-				{Mode: types.FrameSender, Target: &nestedFailure, Limits: mdgas.MdGas{Execution: 20_000}},
-				destroy,
-			},
-			wantDestroyed: true,
-		},
-		{
-			name: "reverted destruction",
-			frames: []types.Frame{
-				{Mode: types.FrameSender, Target: &revertedDestruction, Limits: mdgas.MdGas{Execution: 40_000}},
+				{Mode: types.FrameSender, Target: &revertCatcher, Limits: mdgas.MdGas{Execution: 20_000}},
+				sendAll,
 			},
 		},
-		{name: "atomic batch rollback", frames: []types.Frame{batchDestroy, fail}},
+		{
+			name: "enclosing call reverts the transfer",
+			frames: []types.Frame{
+				{Mode: types.FrameSender, Target: &revertingCaller, Limits: mdgas.MdGas{Execution: 40_000}},
+			},
+			wantChildBalance: childEndowment,
+		},
+		{name: "atomic batch rollback", frames: []types.Frame{batchSendAll, fail}, wantChildBalance: childEndowment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evm, tx := frameTraceTestEnv(t)
 			ibs := evm.IntraBlockState()
-			runtime := program.New().Push(tx.SenderAddress).Op(vm.SELFDESTRUCT).Bytes()
-			initCode := program.New().ReturnData(runtime).Bytes()
-			factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(nestedFailure), program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertedDestruction), program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
-			tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+			runtime := program.New().Push(tx.SenderAddress).Op(vm.SENDALL).Bytes()
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(factory), uint256.Int{childEndowment}, tracing.BalanceChangeUnspecified))
+			prepareFactoryFrame(t, ibs, &tx.Frames[1], runtime, childEndowment)
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), revertCode, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertCatcher), catchInnerRevert, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertingCaller), callChildThenRevert, tracing.CodeChangeUnspecified))
 			tx.Frames = append(tx.Frames, tc.frames...)
-			var diff struct {
-				Pre  map[common.Address]json.RawMessage `json:"pre"`
-				Post map[common.Address]json.RawMessage `json:"post"`
-			}
+			var diff framePrestateDiff
 			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
-			destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
+			balance, err := ibs.GetBalance(accounts.InternAddress(child))
 			require.NoError(t, err)
-			require.Equal(t, tc.wantDestroyed, destroyed)
+			require.Equal(t, uint256.Int{tc.wantChildBalance}, balance)
 			require.NotContains(t, diff.Pre, child)
-			if tc.wantDestroyed {
-				require.NotContains(t, diff.Post, child)
-			} else {
-				require.Contains(t, diff.Post, child)
-				var account struct {
-					Code  hexutil.Bytes `json:"code"`
-					Nonce uint64        `json:"nonce"`
-				}
-				require.NoError(t, json.Unmarshal(diff.Post[child], &account))
-				require.Equal(t, hexutil.Bytes(runtime), account.Code)
-				require.EqualValues(t, 1, account.Nonce)
-			}
+			require.Contains(t, diff.Post, child)
+			account := diff.Post[child]
+			require.Equal(t, uint256.Int{tc.wantChildBalance}, uint256.Int(account.Balance))
+			require.Equal(t, hexutil.Bytes(runtime), account.Code)
+			require.EqualValues(t, 1, account.Nonce)
 		})
 	}
 }
 
-func TestFramePrestateTracerRetainedBalance(t *testing.T) {
+func TestFramePrestateTracerSendAllToSelf(t *testing.T) {
 	evm, tx := frameTraceTestEnv(t)
 	ibs := evm.IntraBlockState()
-	factory := common.HexToAddress("0x2000")
-	child := types.CreateAddress(factory, 0)
-	runtime := program.New().Push(1).Push0().Op(vm.SSTORE, vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
-	initCode := program.New().ReturnData(runtime).Bytes()
-	factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
-	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+	child := types.CreateAddress(*tx.Frames[1].Target, 0)
+	runtime := program.New().Sstore(0, 1).Op(vm.ADDRESS, vm.SENDALL).Bytes()
+	prepareFactoryFrame(t, ibs, &tx.Frames[1], runtime, 0)
 	tx.Frames = append(tx.Frames, types.Frame{
 		Mode: types.FrameSender, Target: &child, Value: uint256.Int{7},
 		Limits: mdgas.MdGas{Execution: 30_000, State: 100_000},
 	})
-	var diff struct {
-		Pre  map[common.Address]json.RawMessage `json:"pre"`
-		Post map[common.Address]json.RawMessage `json:"post"`
-	}
+	var diff framePrestateDiff
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
-	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
-	require.NoError(t, err)
-	require.True(t, destroyed)
-	require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), state.NewNoopWriter()))
+	require.NoError(t, ethapi.EndCallTx(ibs, evm.ChainRules(), nil))
 	balance, err := ibs.GetBalance(accounts.InternAddress(child))
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{7}, balance)
 	require.NotContains(t, diff.Pre, child)
 	require.Contains(t, diff.Post, child)
-	require.JSONEq(t, `{"balance":"0x7"}`, string(diff.Post[child]))
+	account := diff.Post[child]
+	require.Equal(t, uint256.Int{7}, uint256.Int(account.Balance))
+	require.Equal(t, hexutil.Bytes(runtime), account.Code)
+	require.EqualValues(t, 1, account.Nonce)
+	require.Equal(t, common.HexToHash("0x1"), account.Storage[common.Hash{}])
 }
 
 func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, traceVM bool) (*TraceCallResult, *types.Receipt) {

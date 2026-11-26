@@ -955,32 +955,25 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return indexIn, historyIn, nil
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
-	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
-	if valuesIn != nil {
-		d.dirtyFiles.Set(valuesIn)
-	}
+func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) retiredFiles {
+	retired := d.History.integrateMergedDirtyFiles(indexIn, historyIn)
+	return append(retired, d.dirtyFiles.replace(valuesIn)...)
 }
 
-func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
-	if in != nil {
-		ii.dirtyFiles.Set(in)
-	}
+func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) retiredFiles {
+	return ii.dirtyFiles.replace(in)
 }
 
-func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
-	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
-	// TODO: handle collision
-	if historyIn != nil {
-		h.dirtyFiles.Set(historyIn)
-	}
+func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) retiredFiles {
+	retired := h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
+	return append(retired, h.dirtyFiles.replace(historyIn)...)
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
-	hNames, hRetired := dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
+func (dt *DomainRoTx) cleanAfterMerge(mergedValues, mergedIndex, mergedHistory *FilesItem) (deleted []string, retired []*FilesItem) {
+	hNames, hRetired := dt.ht.cleanAfterMerge(mergedIndex, mergedHistory)
 	deleted = append(deleted, hNames...)
 	retired = append(retired, hRetired...)
-	outs := dt.garbage(mergedDomain)
+	outs := dt.garbage(mergedValues)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
@@ -991,14 +984,14 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
-	iNames, iRetired := ht.iit.cleanAfterMerge(mergedIdx)
+func (ht *HistoryRoTx) cleanAfterMerge(mergedIndex, mergedHistory *FilesItem) (deleted []string, retired []*FilesItem) {
+	iNames, iRetired := ht.iit.cleanAfterMerge(mergedIndex)
 	deleted = append(deleted, iNames...)
 	retired = append(retired, iRetired...)
-	if merged != nil && merged.endTxNum == 0 {
+	if mergedHistory != nil && mergedHistory.endTxNum == 0 {
 		return deleted, retired
 	}
-	outs := ht.garbage(merged)
+	outs := ht.garbage(mergedHistory)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
