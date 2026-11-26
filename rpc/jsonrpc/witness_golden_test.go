@@ -24,9 +24,11 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -277,21 +279,24 @@ func witnessGoldenCollapseCandidates(t *testing.T, api *DebugAPIImpl, m *execmod
 }
 
 func TestWitnessGoldenCollapseShapes(t *testing.T) {
-	var hph, v3 witnessGoldenCandidates
-	require.True(t, t.Run("hph", func(t *testing.T) { hph = witnessGoldenCandidatesFor(t, false) }))
-	require.True(t, t.Run("v3", func(t *testing.T) { v3 = witnessGoldenCandidatesFor(t, true) }))
-	for _, name := range []string{"transient-before", "transient-after", "cascade", "plain-storage", "empty-storage", "self-destruct", "inline-survivor"} {
-		switch name {
-		case "transient-before":
-			require.Empty(t, hph.legacy[name], name)
-			require.NotEmpty(t, v3.legacy[name], name)
-		default:
-			require.NotEmpty(t, hph.legacy[name], name)
-			require.NotEmpty(t, v3.legacy[name], name)
-		}
+	for _, variant := range []struct {
+		name string
+		v3   bool
+	}{{name: "hph"}, {name: "v3", v3: true}} {
+		t.Run(variant.name, func(t *testing.T) {
+			got := witnessGoldenCandidatesFor(t, variant.v3)
+			shapes := []string{"transient-before", "transient-after", "cascade", "plain-storage", "empty-storage", "self-destruct", "inline-survivor"}
+			require.ElementsMatch(t, shapes, slices.Collect(maps.Keys(got.legacy)))
+			for name, candidates := range got.legacy {
+				if name == "transient-before" && !variant.v3 {
+					require.Empty(t, candidates, name)
+				} else {
+					require.NotEmpty(t, candidates, name)
+				}
+			}
+			require.Empty(t, got.canonical["transient-after"])
+		})
 	}
-	require.Empty(t, hph.canonical["transient-after"])
-	require.Empty(t, v3.canonical["transient-after"])
 }
 
 func TestWitnessGoldenContractSStore(t *testing.T) {
@@ -388,7 +393,15 @@ func TestWitnessGoldenChainMatchesHPH(t *testing.T) {
 		v3 = collectChainWitnesses(t, true, run.m, run.chain)
 		v3Chain = run.chain
 		v3GenesisRoot = run.m.Genesis.Root()
-		requireGoldenChainStateless(t, run)
+		for i, block := range run.chain.Blocks {
+			for mode, data := range map[string][]byte{"legacy": v3.Legacy[i], "canonical": v3.Canonical[i]} {
+				var result ExecutionWitnessResult
+				require.NoError(t, json.Unmarshal(data, &result), "block %d mode %s", block.NumberU64(), mode)
+				root, err := ReplayExecutionWitness(&result, block, run.m.ChainConfig, run.m.Engine)
+				require.NoError(t, err, "block %d mode %s stateless replay", block.NumberU64(), mode)
+				require.Equal(t, block.Root(), root, "block %d mode %s post-state root", block.NumberU64(), mode)
+			}
+		}
 	}))
 	require.Len(t, hph.Legacy, len(v3.Legacy))
 	for n := range hph.Legacy {
@@ -419,20 +432,6 @@ func requireWitnessGoldenFixtureSuperset(t *testing.T, hph, v3 witnessGoldenFixt
 		require.NoError(t, json.Unmarshal(hph.data, &hphWitness))
 		require.NoError(t, json.Unmarshal(v3.data, &v3Witness))
 		requireWitnessStreamSuperset(t, hphWitness, v3Witness, fmt.Sprintf("block %d method %s mode %s", hph.block, hph.method, hph.mode))
-	}
-}
-
-func requireGoldenChainStateless(t *testing.T, run witnessGoldenRun) {
-	t.Helper()
-	debugAPI := newDebugApiForTest(run.m)
-	for _, block := range run.chain.Blocks {
-		for _, mode := range []string{"legacy", "canonical"} {
-			result, err := debugAPI.ExecutionWitness(context.Background(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), &mode)
-			require.NoError(t, err, "block %d mode %s", block.NumberU64(), mode)
-			root, err := ReplayExecutionWitness(result, block, run.m.ChainConfig, run.m.Engine)
-			require.NoError(t, err, "block %d mode %s stateless replay", block.NumberU64(), mode)
-			require.Equal(t, block.Root(), root, "block %d mode %s post-state root", block.NumberU64(), mode)
-		}
 	}
 }
 
