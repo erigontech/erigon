@@ -76,8 +76,28 @@ func BenchmarkProposerIndexForSlot2400k(b *testing.B) {
 	}
 }
 
-// BenchmarkProposerIndices2400k fills one epoch of the Fulu proposer lookahead.
+// BenchmarkProposerIndices2400k fills one epoch of the Fulu proposer lookahead on a copy with empty caches, so the
+// active-validator scan is measured.
 func BenchmarkProposerIndices2400k(b *testing.B) {
+	for _, version := range benchmarkVersions {
+		b.Run(version.name, func(b *testing.B) {
+			source := sharedBenchmarkState(b, version.version, benchmarkLargeValidatorCount)
+			epoch := Epoch(source) + 2
+			b.ReportAllocs()
+			for range b.N {
+				b.StopTimer()
+				s, err := source.Copy()
+				require.NoError(b, err)
+				b.StartTimer()
+				_, err = s.GetBeaconProposerIndices(epoch)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
+// BenchmarkProposerIndicesWarmCache2400k repeats the lookahead epoch with the active-validator cache already filled.
+func BenchmarkProposerIndicesWarmCache2400k(b *testing.B) {
 	for _, version := range benchmarkVersions {
 		b.Run(version.name, func(b *testing.B) {
 			source := sharedBenchmarkState(b, version.version, benchmarkLargeValidatorCount)
