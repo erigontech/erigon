@@ -34,7 +34,9 @@ type SelectorModel struct {
 // NewSelectorModel initializes based on include/exclude lists
 func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts []string) *SelectorModel {
 	res, domains := getNames(&statecfg.Schema)
-	exts := slices.Clone(extCfgMap[domainType])
+	exts := make([]string, 0, 10)
+	exts = append(exts, extCfgMap[domainType]...)
+	exts = append(exts, extCfgMap[idxType]...)
 
 	sel := initialSelection(domains, res, includeDomains, includeExts, excludeDomains, excludeExts)
 	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
@@ -58,7 +60,11 @@ func initialSelection(domains []string, domainTypes map[string]string, includeDo
 		if _, ok := sel[d]; !ok {
 			continue
 		}
-		for _, e := range extCfgMap[domainTypes[d]] {
+		exts := extCfgMap[idxType]
+		if domainTypes[d] == domainType {
+			exts = domainExts()
+		}
+		for _, e := range exts {
 			if len(includeExts) > 0 {
 				if slices.Contains(includeExts, e) {
 					sel[e] = struct{}{}
@@ -69,6 +75,12 @@ func initialSelection(domains []string, domainTypes map[string]string, includeDo
 		}
 	}
 	return sel
+}
+
+// domainExts returns the extensions of a domain: its domain and history files, and the
+// files of its history index.
+func domainExts() []string {
+	return slices.Concat(extCfgMap[domainType], extCfgMap[idxType])
 }
 
 func (m *SelectorModel) Init() tea.Cmd { return nil }

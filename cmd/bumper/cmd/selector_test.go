@@ -14,7 +14,7 @@ func TestInitialSelection(t *testing.T) {
 		"storage":  domainType,
 		"logaddr":  idxType,
 	}
-	domainExts := extCfgMap[domainType] // .kv .bt .kvi .kvei .vi .v .efi .ef
+	domainExts := extCfgMap[domainType] // .kv .bt .kvi .kvei .vi .v
 	idxExts := extCfgMap[idxType]       // .efi .ef
 
 	tests := []struct {
