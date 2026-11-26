@@ -33,47 +33,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func TestGetAttesterDutiesEpochBounds(t *testing.T) {
-	for _, tc := range []struct {
-		clockLead     uint64
-		nextEpochCode int
-	}{
-		{0, http.StatusOK},
-		{1, http.StatusOK},
-		{2, http.StatusServiceUnavailable},
-	} {
-		t.Run("clockLead="+strconv.FormatUint(tc.clockLead, 10), func(t *testing.T) {
-			_, blocks, _, _, headState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-			headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
-			require.NoError(t, err)
-			fcu.HeadVal = headRoot
-			fcu.HeadSlotVal = headState.Slot()
-			headEpoch := headState.Slot() / h.beaconChainCfg.SlotsPerEpoch
-			setDutiesClockEpoch(h, headEpoch+tc.clockLead)
-			currentEpoch := h.ethClock.GetCurrentEpoch()
-			require.Equal(t, headEpoch+tc.clockLead, currentEpoch)
-			require.NotEqual(t, headState.GetRandaoMixes(headEpoch), headState.GetRandaoMixes(headEpoch+1))
-
-			for _, request := range []struct {
-				epoch uint64
-				code  int
-			}{
-				{currentEpoch, http.StatusOK},
-				{currentEpoch + 1, tc.nextEpochCode},
-				{currentEpoch + 2, http.StatusBadRequest},
-			} {
-				t.Run(strconv.FormatUint(request.epoch, 10), func(t *testing.T) {
-					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(request.epoch, 10), strings.NewReader(`["0","1","2"]`))
-					req.Header.Set("Content-Type", "application/json")
-					recorder := httptest.NewRecorder()
-					h.mux.ServeHTTP(recorder, req)
-					require.Equal(t, request.code, recorder.Code, recorder.Body.String())
-				})
-			}
-		})
-	}
-}
-
 func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 	_, blocks, _, _, headState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -81,6 +40,9 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 	fcu.HeadVal = headRoot
 	fcu.HeadSlotVal = headState.Slot()
 	headEpoch := headState.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	require.NotEqual(t, headState.GetRandaoMixes(headEpoch), headState.GetRandaoMixes(headEpoch+1))
+
+	const validators = `["0","1","2"]`
 
 	for _, tc := range []struct {
 		name      string
@@ -89,19 +51,30 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 		body      string
 		code      int
 	}{
+		{"clock_0_request_0", 0, 0, validators, http.StatusOK},
+		{"clock_0_request_1", 0, 1, validators, http.StatusOK},
+		{"clock_0_request_2", 0, 2, validators, http.StatusBadRequest},
+		{"clock_1_request_1", 1, 1, validators, http.StatusOK},
+		{"clock_1_request_2", 1, 2, validators, http.StatusOK},
+		{"clock_1_request_3", 1, 3, validators, http.StatusBadRequest},
+		{"clock_2_request_2", 2, 2, validators, http.StatusOK},
+		{"clock_2_request_3", 2, 3, validators, http.StatusServiceUnavailable},
+		{"clock_2_request_4", 2, 4, validators, http.StatusBadRequest},
 		{"empty_beyond_seed", 2, 3, `[]`, http.StatusServiceUnavailable},
 		{"empty_at_seed_boundary", 2, 2, `[]`, http.StatusOK},
 		{"beyond_old_head_cap", 32, 33, `["0"]`, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			setDutiesClockEpoch(h, headEpoch+tc.clockLead)
+			clockEpoch := headEpoch + tc.clockLead
+			setDutiesClockEpoch(h, clockEpoch)
+			require.Equal(t, clockEpoch, h.ethClock.GetCurrentEpoch())
 			path := "/eth/v1/validator/duties/attester/" + strconv.FormatUint(headEpoch+tc.epochLead, 10)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 			h.mux.ServeHTTP(recorder, req)
 			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
-			if tc.code == http.StatusOK {
+			if tc.body == "[]" && tc.code == http.StatusOK {
 				var response struct {
 					Data          json.RawMessage `json:"data"`
 					DependentRoot common.Hash     `json:"dependent_root"`
