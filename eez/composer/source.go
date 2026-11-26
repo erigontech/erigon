@@ -92,6 +92,11 @@ type Source struct {
 	rollup    uint64
 	rules     *chain.Rules
 	index     int
+	// origin and gasPrice are the posting's sender and price.
+	origin   accounts.Address
+	gasPrice uint256.Int
+	// posting marks the posting open; closed, ended by the first trigger.
+	posting, closed bool
 }
 
 // NewSource returns the simulation of the chain of config in the context of
@@ -101,7 +106,7 @@ func NewSource(config *chain.Config, header *types.Header, reader state.StateRea
 	r := &reads{StateReader: reader}
 	blockCtx := core.NewEVMBlockContext(header, blockHash, nil, accounts.InternAddress(header.Coinbase), config)
 	rules := blockCtx.Rules(config)
-	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup, rules: rules}
+	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup, rules: rules, origin: accounts.ZeroAddress}
 }
 
 // Nonce returns addr's nonce in the simulation.
@@ -120,8 +125,11 @@ func (s *Source) Nonce(addr common.Address) (uint64, error) {
 // error; a transaction without calls or with a failed frame around one is
 // poison.
 func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
+	if err := s.closePosting(); err != nil {
+		return nil, err
+	}
 	var calls []*Call
-	err := s.atomic(func() error {
+	err := s.entry(func() error {
 		var (
 			failure error
 			starts  []int
@@ -195,6 +203,9 @@ func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatc
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := s.finalize(); err != nil {
 		return nil, err
 	}
 	return calls, nil

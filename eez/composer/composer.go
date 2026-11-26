@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -63,6 +64,9 @@ type Prover interface {
 
 // Poster signs postings and sends them to L1.
 type Poster interface {
+	// From is the postings' sender; Tip, the priority fee they pay.
+	From() common.Address
+	Tip() uint256.Int
 	Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error)
 	Send(ctx context.Context, txs []types.Transaction, target post.Target) (post.Sent, error)
 }

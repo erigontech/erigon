@@ -198,7 +198,11 @@ type testPoster struct {
 	pooled bool
 	// hang has Sign wait for its context.
 	hang bool
+	tip  uint256.Int
 }
+
+func (p *testPoster) From() common.Address { return crypto.PubkeyToAddress(p.key.PublicKey) }
+func (p *testPoster) Tip() uint256.Int     { return p.tip }
 
 func (p *testPoster) Sign(ctx context.Context, input []byte, gas uint64) (types.Transaction, error) {
 	if p.hang {

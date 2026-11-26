@@ -140,6 +140,8 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	m.deploy(aaTarget, slices.Concat([]byte{0x7f}, bytes.Repeat([]byte{0xaa}, 32), []byte{0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}))
 	m.deploy(bbTarget, slices.Concat([]byte{0x7f}, bytes.Repeat([]byte{0xbb}, 32), []byte{0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}))
 	m.deploy(counter, []byte{0x5f, 0x54, 0x60, 0x01, 0x01, 0x80, 0x5f, 0x55, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3})
+	m.deploy(tcounter, tcounterCode)
+	m.deploy(originTarget, originCode)
 	l2Key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	f := &crossFixture{w: w, call: call, output: output, l1: &memL1{m: m}, key: key, pool: NewHeldPool(), l2: newMemState(), l2Key: l2Key}
@@ -155,7 +157,7 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	}
 	f.registerL1Proxy(t, crypto.PubkeyToAddress(l2Key.PublicKey))
 	f.registerL1Proxy(t, l2Twice)
-	for _, c := range []struct{ proxy, target common.Address }{{aaProxy, aaTarget}, {bbProxy, bbTarget}, {counterProxy, counter}} {
+	for _, c := range []struct{ proxy, target common.Address }{{aaProxy, aaTarget}, {bbProxy, bbTarget}, {counterProxy, counter}, {tcounterProxy, tcounter}, {originProxy, originTarget}} {
 		f.l2.deploy(c.proxy, proxyCode)
 		f.l2.set(protocol.EEZL2Address, protocol.ProxyKey(c.proxy), proxyWord(c.target, 0))
 	}
@@ -169,7 +171,11 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	f.registerL1Proxy(t, l2Stingy)
 	pre := w.pre
 	pre.Reader = &overlay{StateReader: w.pre.Reader, m: f.l2}
-	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
+	posterKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	poster := &testPoster{key: posterKey}
+	poster.tip.SetUint64(2)
+	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, poster, nil, nil, nil, nil, log.New())
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
 		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: protocol.EEZL2Address,
@@ -229,9 +235,13 @@ var (
 	// aaProxy, bbProxy and counterProxy stand for L1's aaTarget and
 	// bbTarget, which return a word of 0xaa and 0xbb, and counter, which
 	// returns its count after one more.
-	aaProxy        = common.HexToAddress("0xb0000000000000000000000000000000000000f3")
-	bbProxy        = common.HexToAddress("0xb0000000000000000000000000000000000000f4")
-	counterProxy   = common.HexToAddress("0xb0000000000000000000000000000000000000f5")
+	aaProxy      = common.HexToAddress("0xb0000000000000000000000000000000000000f3")
+	bbProxy      = common.HexToAddress("0xb0000000000000000000000000000000000000f4")
+	counterProxy = common.HexToAddress("0xb0000000000000000000000000000000000000f5")
+	// tcounterProxy and originProxy stand for L1's tcounter and
+	// originTarget.
+	tcounterProxy  = common.HexToAddress("0xb0000000000000000000000000000000000000f6")
+	originProxy    = common.HexToAddress("0xb0000000000000000000000000000000000000f7")
 	aaTarget       = common.HexToAddress("0xd0000000000000000000000000000000000000aa")
 	bbTarget       = common.HexToAddress("0xd0000000000000000000000000000000000000bb")
 	counter        = common.HexToAddress("0xd0000000000000000000000000000000000000cc")
@@ -1167,6 +1177,25 @@ func TestComposeKeepsEachReturn(t *testing.T) {
 	}
 }
 
+// TestComposeOutboundSharesThePosting: a slot's outbound calls run on L1 as
+// the posting runs them, in one transaction from the poster at its price:
+// transient storage carries from one call to the next.
+func TestComposeOutboundSharesThePosting(t *testing.T) {
+	f := newCrossFixture(t)
+	f.holdOut(t, 0, tcounterProxy, 0, nil)
+	f.holdOut(t, 1, tcounterProxy, 0, nil)
+	f.holdOut(t, 2, originProxy, 0, nil)
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Len(t, fx.outbound, 3)
+	for i := range 2 {
+		require.Equal(t, num(uint64(i)), fx.outbound[i].ReturnData, "count %d", i)
+	}
+	poster := f.c.poster.(*testPoster)
+	// The anchor's child has a base fee of 1.
+	require.Equal(t, slices.Concat(word(poster.From()), num(3)), fx.outbound[2].ReturnData)
+}
+
 // TestComposeUndoesARefusedTransactionOnL1: what a refused outbound
 // transaction's calls did on L1 is undone before the next composes.
 func TestComposeUndoesARefusedTransactionOnL1(t *testing.T) {
@@ -1516,27 +1545,42 @@ func mustDraft(t *testing.T, f *crossFixture) *Draft {
 }
 
 // TestComposeOutboundBehindInboundWaits: an outbound transaction the drain
-// pops after an inbound one composed waits for the next slot, uncharged: a
-// Sync block's outbound entries precede its inbound ones.
+// pops after an inbound one ran, composed or evicted, waits for the next
+// slot, uncharged: the posting, which runs a Sync block's outbound calls,
+// precedes its triggers.
 func TestComposeOutboundBehindInboundWaits(t *testing.T) {
-	f := newCrossFixture(t)
-	f.c.x.MaxTxs = 2
-	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
-	// Waiting on a nonce gap, out of the drain's count, it has the drain pop
-	// the outbound transaction once the trigger composed.
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
-	other := *f
-	other.key = key
-	gapped := other.holdOn(t, 1, 1, f.call.Source, f.call.Data)
-	out := f.holdOutbound(t, 0)
-	fx := f.compose(t)
-	require.NotNil(t, fx)
-	require.Equal(t, []*Held{trigger}, fx.held)
-	require.Equal(t, []*Held{gapped, out}, f.pool.PopN(math.MaxInt))
-	require.Zero(t, out.Attempts)
-	require.Zero(t, out.Deferred)
+	for name, composes := range map[string]bool{"composed": true, "evicted": false} {
+		t.Run(name, func(t *testing.T) {
+			f := newCrossFixture(t)
+			f.c.x.MaxTxs = 2
+			to, data := f.call.Source, f.call.Data
+			if !composes {
+				// It makes no cross-chain call.
+				to, data = unproxied, nil
+			}
+			trigger := f.hold(t, 0, to, data)
+			// Waiting on a nonce gap, out of the drain's count, it has the
+			// drain pop the outbound transaction once the trigger ran.
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+			other := *f
+			other.key = key
+			gapped := other.holdOn(t, 1, 1, f.call.Source, f.call.Data)
+			out := f.holdOutbound(t, 0)
+			fx := f.compose(t)
+			if composes {
+				require.NotNil(t, fx)
+				require.Equal(t, []*Held{trigger}, fx.held)
+			} else {
+				require.Nil(t, fx)
+				require.False(t, f.pool.Holds(trigger.Hash), "evicted")
+			}
+			require.Equal(t, []*Held{gapped, out}, f.pool.PopN(math.MaxInt))
+			require.Zero(t, out.Attempts)
+			require.Zero(t, out.Deferred)
+		})
+	}
 }
 
 // TestComposeOutboundWaitsOnANonceGap: an outbound transaction whose nonce

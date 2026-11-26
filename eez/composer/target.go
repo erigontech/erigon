@@ -33,6 +33,10 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// errPostingClosed refuses an outbound call after a trigger ran: the
+// posting precedes the triggers of its bundle.
+var errPostingClosed = errors.New("the posting ran before the triggers")
+
 var (
 	// ErrFunding refuses a call whose value the manager cannot pay now.
 	ErrFunding = errors.New("the manager cannot pay the call's value")
@@ -51,15 +55,42 @@ const (
 	frameGas = 30_000_000
 )
 
-// Atomic runs f as one transaction on the simulation's state, sent by the
-// manager: the writes it makes through Execute stay when it returns nil.
-func (s *Source) Atomic(f func() error) error {
-	// One access list for the transaction: a snapshot reverts against it.
-	s.ibs.Prepare(s.rules, s.manager, accounts.InternAddress(s.header.Coinbase), accounts.NilAddress, vm.ActivePrecompiles(s.rules), nil)
-	return s.atomic(f)
+// PostedBy sets the posting's sender, from, and tip: outbound calls run
+// with from as their origin and the block's base fee plus tip as their gas
+// price.
+func (s *Source) PostedBy(from common.Address, tip *uint256.Int) {
+	s.origin = accounts.InternAddress(from)
+	s.gasPrice.Add(s.header.BaseFee, tip)
 }
 
-func (s *Source) atomic(f func() error) error {
+// Atomic runs f as the next entry of the posting, the one L1 transaction
+// that runs a batch's outbound calls in order: transient storage and warm
+// accounts carry from one entry to the next. The writes f makes through
+// Execute stay when it returns nil. Once Run ran, it refuses with
+// errPostingClosed.
+func (s *Source) Atomic(f func() error) error {
+	if s.closed {
+		return errPostingClosed
+	}
+	if !s.posting {
+		s.ibs.Prepare(s.rules, s.origin, accounts.InternAddress(s.header.Coinbase), s.manager, vm.ActivePrecompiles(s.rules), nil)
+		s.posting = true
+	}
+	return s.entry(f)
+}
+
+// closePosting ends the posting, which precedes the triggers.
+func (s *Source) closePosting() error {
+	s.closed = true
+	if !s.posting {
+		return nil
+	}
+	s.posting = false
+	return s.finalize()
+}
+
+// entry runs f, undoing its writes when it fails.
+func (s *Source) entry(f func() error) error {
 	snapshot := s.ibs.PushSnapshot()
 	err := f()
 	if failed := s.reads.failed(); failed != nil {
@@ -70,6 +101,11 @@ func (s *Source) atomic(f func() error) error {
 		return err
 	}
 	s.ibs.PopSnapshot(snapshot)
+	return nil
+}
+
+// finalize ends the current transaction.
+func (s *Source) finalize() error {
 	if err := s.ibs.FinalizeTx(s.rules, state.NewNoopWriter()); err != nil {
 		return err
 	}
@@ -150,12 +186,12 @@ func (s *Source) view(data []byte) ([]byte, error) {
 	return ret, nil
 }
 
-// frame calls `to` from `from` with value inside the current transaction,
-// as a contract would: no intrinsic gas, nonce or fee.
+// frame calls `to` from `from` with value inside the posting, as a
+// contract would: no intrinsic gas, nonce or fee.
 func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, gas uint64, override vm.CallOverride) ([]byte, uint64, error) {
 	gas = min(gas, s.header.GasLimit)
 	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override})
-	evm.Reset(evmtypes.TxContext{Origin: accounts.InternAddress(from)}, s.ibs)
+	evm.Reset(evmtypes.TxContext{Origin: s.origin, GasPrice: s.gasPrice}, s.ibs)
 	ret, left, _, err := evm.Call(accounts.InternAddress(from), accounts.InternAddress(to), data, mdgas.MdGas{Execution: gas}, value, false)
 	// A top frame's output lives in the state's buffer, which the next one
 	// overwrites.

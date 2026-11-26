@@ -1160,6 +1160,9 @@ func (p *chunkProver) ProveBy(_ context.Context, w *prove.Window, _ time.Time, _
 // chunkPoster signs postings and sends them nowhere.
 type chunkPoster struct{ key *ecdsa.PrivateKey }
 
+func (p *chunkPoster) From() common.Address { return crypto.PubkeyToAddress(p.key.PublicKey) }
+func (*chunkPoster) Tip() uint256.Int       { return uint256.Int{} }
+
 func (p *chunkPoster) Sign(_ context.Context, input []byte, gas uint64) (types.Transaction, error) {
 	to := common.Address{0xee}
 	return types.SignTx(&types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: gas, To: &to, Data: input}, ChainID: *uint256.NewInt(1)},

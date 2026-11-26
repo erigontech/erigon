@@ -19,12 +19,14 @@ package composer
 import (
 	"errors"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -42,11 +44,20 @@ var (
 	reentrant = common.HexToAddress("0xd000000000000000000000000000000000000004")
 	// payee takes any value.
 	payee = common.HexToAddress("0xd000000000000000000000000000000000000005")
-	// flagger returns its transient flag, then sets it.
-	flagger = common.HexToAddress("0xd000000000000000000000000000000000000006")
+	// tcounter returns its transient count, then counts one more.
+	tcounter = common.HexToAddress("0xd0000000000000000000000000000000000000ce")
+	// originTarget returns the transaction's origin and gas price.
+	originTarget = common.HexToAddress("0xd0000000000000000000000000000000000000dd")
+	// probe calls tcounter, then l1Proxy with the count.
+	probe   = common.HexToAddress("0xd000000000000000000000000000000000000007")
 	l1Proxy = common.HexToAddress("0xd0000000000000000000000000000000000000ff")
 	// l2Sender is a rollup account calling L1.
 	l2Sender = common.HexToAddress("0x277aF7Ba0CFBD9455Aa0401528f4BcEC683EA27E")
+)
+
+var (
+	tcounterCode = []byte{0x5f, 0x5c, 0x80, 0x60, 0x01, 0x01, 0x5f, 0x5d, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+	originCode   = []byte{0x32, 0x5f, 0x52, 0x3a, 0x60, 0x20, 0x52, 0x60, 0x40, 0x5f, 0xf3}
 )
 
 // l2Rollup is the rollup of l2Sender: not 1, whose proxies EEZL2's code,
@@ -75,7 +86,10 @@ func newTargetFixture(t *testing.T) *targetFixture {
 	m.deploy(revertTarget, []byte{0x61, 0xde, 0xad, 0x60, 0x00, 0x52, 0x60, 0x02, 0x60, 0x1e, 0xfd})
 	m.deploy(reentrant, append(callTo(l1Proxy), 0x00))
 	m.deploy(payee, []byte{0x00})
-	m.deploy(flagger, []byte{0x5f, 0x5c, 0x5f, 0x52, 0x60, 0x01, 0x5f, 0x5d, 0x60, 0x20, 0x5f, 0xf3})
+	m.deploy(tcounter, tcounterCode)
+	m.deploy(originTarget, originCode)
+	m.deploy(probe, slices.Concat([]byte{0x60, 0x20, 0x5f, 0x5f, 0x5f, 0x5f}, push20(tcounter), []byte{0x5a, 0xf1, 0x50},
+		[]byte{0x5f, 0x5f, 0x60, 0x20, 0x5f, 0x5f}, push20(l1Proxy), []byte{0x5a, 0xf1, 0x50, 0x00}))
 	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	src := NewSource(chain.TestChainOsakaConfig, header, m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, protocol.EEZL2Address, protocol.MainnetRollupID)
 	return &targetFixture{m: m, src: src}
@@ -108,7 +122,13 @@ func word(a common.Address) []byte {
 	return h[:]
 }
 
-// execute runs c through Execute in a transaction of its own.
+// num is n as a 32-byte word.
+func num(n uint64) []byte {
+	w := uint256.NewInt(n).Bytes32()
+	return w[:]
+}
+
+// execute runs c through Execute as the next entry of the posting.
 func (f *targetFixture) execute(c *Call) ([]byte, error) {
 	var out []byte
 	err := f.src.Atomic(func() error {
@@ -244,13 +264,55 @@ func TestAtomicUndoes(t *testing.T) {
 	require.Equal(t, uint64(7), f.balance(t, payee))
 }
 
-// TestAtomicStartsATransaction: transient storage does not outlive the
-// transaction that set it (EIP-1153).
-func TestAtomicStartsATransaction(t *testing.T) {
+// count runs an entry of the posting calling tcounter, refused with
+// refuse, and returns the count it saw.
+func (f *targetFixture) count(refuse error) (uint64, error) {
+	var out []byte
+	err := f.src.Atomic(func() error {
+		var err error
+		if out, err = f.src.Execute(&Call{Target: tcounter, Source: l2Sender, SourceRollup: l2Rollup}); err != nil {
+			return err
+		}
+		return refuse
+	})
+	return new(big.Int).SetBytes(out).Uint64(), err
+}
+
+// TestAtomicSharesThePosting: a batch's outbound calls run in one L1
+// transaction, the posting: transient storage carries from one to the next
+// (EIP-1153), a refused one's undone. A trigger, after the posting, runs in
+// a transaction of its own, and no outbound call follows it.
+func TestAtomicSharesThePosting(t *testing.T) {
 	f := newTargetFixture(t)
-	for range 2 {
-		out, err := f.execute(&Call{Target: flagger, Source: l2Sender, SourceRollup: l2Rollup})
-		require.NoError(t, err)
-		require.Equal(t, make([]byte, 32), out)
+	refused := errors.New("refused")
+	for i, c := range []struct {
+		refuse error
+		want   uint64
+	}{{nil, 0}, {nil, 1}, {refused, 2}, {nil, 2}} {
+		got, err := f.count(c.refuse)
+		require.ErrorIs(t, err, c.refuse)
+		require.Equal(t, c.want, got, "entry %d", i)
 	}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	e := &echo{}
+	_, err = f.src.Run(t.Context(), (&sourceFixture{key: key}).tx(t, 0, probe, 0, nil), e.dispatch, nil)
+	require.NoError(t, err)
+	require.Len(t, e.calls, 1)
+	require.Equal(t, make([]byte, 32), e.calls[0].Data, "the trigger's count")
+	_, err = f.count(nil)
+	require.ErrorIs(t, err, errPostingClosed)
+}
+
+// TestExecuteRunsInThePosting: a target sees the posting's sender as the
+// origin and its price, the block's base fee and the poster's tip, as the
+// gas price.
+func TestExecuteRunsInThePosting(t *testing.T) {
+	f := newTargetFixture(t)
+	poster := common.Address{0xee, 0x01}
+	f.src.PostedBy(poster, uint256.NewInt(2))
+	out, err := f.execute(&Call{Target: originTarget, Source: l2Sender, SourceRollup: l2Rollup})
+	require.NoError(t, err)
+	require.Equal(t, slices.Concat(word(poster), num(3)), out)
 }

@@ -128,6 +128,8 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		return c.x.L1.ViewState(ctx, fx.anchor, func(anchor *types.Header, reader state.StateReader) error {
 			blockHash := func(n uint64) (common.Hash, error) { return c.x.L1Hash(ctx, n) }
 			k.src = NewSource(c.x.L1Config, child(c.x.L1Config, anchor, ts), reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
+			tip := c.poster.Tip()
+			k.src.PostedBy(c.poster.From(), &tip)
 			return c.x.L2(ctx, parent, func(pre PreState) error {
 				header, err := c.x.Header(parent, pre.Headers)
 				if err != nil {

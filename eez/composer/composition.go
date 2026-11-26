@@ -112,8 +112,8 @@ func (k *composition) add(h *Held) error {
 		// It waits on the one of its chain ahead.
 		k.deferred = append(k.deferred, h)
 		return nil
-	case h.Direction == Outbound && len(k.fx.deliveries) > 0:
-		// Its entry would follow inbound ones.
+	case h.Direction == Outbound && k.src.closed:
+		// A trigger ran: the posting, which its call would join, precedes it.
 		k.deferred = append(k.deferred, h)
 		return nil
 	}
