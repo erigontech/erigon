@@ -974,8 +974,13 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
 		path := strings.Replace(b.Endpoint, "{slot}", strconv.FormatUint(i, 10), 1)
 		path = strings.Replace(path, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
-		uri := base.JoinPath(strings.TrimPrefix(path, "/")).String()
-		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
+		ref, err := url.Parse(path)
+		if err != nil {
+			return blobfetch.RedactURLError(err)
+		}
+		u := base.JoinPath(ref.EscapedPath())
+		u.RawQuery = joinRawQueries(base.RawQuery, ref.RawQuery)
+		elapsed, err := timeRequest(ctx, u.String(), b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
@@ -987,6 +992,17 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 		log.Info("Benchmarked", "slot", i, "elapsed", elapsed)
 	}
 	return nil
+}
+
+func joinRawQueries(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "&" + b
+	}
 }
 
 func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {

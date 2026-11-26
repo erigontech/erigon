@@ -33,7 +33,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -525,9 +527,15 @@ func writeRecSplitSegmentFixture(t *testing.T, segPath, idxPath, tmpDir string, 
 	require.NoError(t, idx.Build(t.Context()))
 }
 
-// TestCommandsBuildRequestURLsFromTheEndpointQuery pins the request URLs built on top of an --endpoint value that
-// carries a query: the request path joins onto the endpoint and the query stays on the final request.
 func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Mainnet)
+	require.NoError(t, err)
+	head := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.Phase0Version)
+	head.Block.Slot = 100
+	head.Block.ParentRoot = common.Hash{1}
+	headSSZ, err := head.EncodeSSZ(nil)
+	require.NoError(t, err)
+
 	var mu sync.Mutex
 	var requests []string
 	seen := func() []string {
@@ -544,26 +552,29 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"slot":"100"}]}`))
 		case strings.HasSuffix(r.URL.Path, "/states/0/root"):
 			_, _ = w.Write([]byte(`{"data":{"root":"0x0000000000000000000000000000000000000000000000000000000000000001"}}`))
+		case strings.HasSuffix(r.URL.Path, "/eth/v2/beacon/blocks/head"):
+			_, _ = w.Write(headSSZ)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(srv.Close)
 	endpoint := srv.URL + "/?apikey=K"
+	prefixedEndpoint := srv.URL + "/prefix/?apikey=K"
 
-	t.Run("getHead", func(t *testing.T) {
+	t.Run("getHead base query", func(t *testing.T) {
 		_, err := getHead(t.Context(), endpoint)
 		require.NoError(t, err)
 		require.Contains(t, seen(), "/eth/v2/debug/beacon/heads?apikey=K")
 	})
 
-	t.Run("getStateRootAtSlot", func(t *testing.T) {
+	t.Run("getStateRootAtSlot base query", func(t *testing.T) {
 		_, err := getStateRootAtSlot(t.Context(), endpoint, 0)
 		require.NoError(t, err)
 		require.Contains(t, seen(), "/eth/v1/beacon/states/0/root?apikey=K")
 	})
 
-	t.Run("ArchiveSanitizer", func(t *testing.T) {
+	t.Run("ArchiveSanitizer base query", func(t *testing.T) {
 		a := &ArchiveSanitizer{
 			chainCfg:     chainCfg{Chain: networkname.Mainnet},
 			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
@@ -575,7 +586,7 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 		require.Contains(t, seen(), "/eth/v2/debug/beacon/states/0?apikey=K")
 	})
 
-	t.Run("BenchmarkNode", func(t *testing.T) {
+	t.Run("BenchmarkNode base query", func(t *testing.T) {
 		b := &BenchmarkNode{
 			chainCfg: chainCfg{Chain: networkname.Mainnet},
 			BaseURL:  endpoint,
@@ -586,14 +597,47 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 		require.Contains(t, seen(), "/eth/v1/beacon/states/0/validators?apikey=K")
 	})
 
-	t.Run("ChainEndpoint", func(t *testing.T) {
+	t.Run("BenchmarkNode template query", func(t *testing.T) {
+		b := &BenchmarkNode{
+			chainCfg: chainCfg{Chain: networkname.Mainnet},
+			BaseURL:  prefixedEndpoint,
+			Endpoint: "/validators?id=42",
+			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
+		}
+		require.NoError(t, b.Run(t.Context()))
+		require.Contains(t, seen(), "/prefix/validators?apikey=K&id=42")
+	})
+
+	t.Run("BenchmarkNode template invalid escape", func(t *testing.T) {
+		b := &BenchmarkNode{
+			chainCfg: chainCfg{Chain: networkname.Mainnet},
+			BaseURL:  prefixedEndpoint,
+			Endpoint: "/eth/%zz",
+			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
+		}
+		require.Error(t, b.Run(t.Context()))
+	})
+
+	t.Run("BenchmarkNode template trailing slash", func(t *testing.T) {
+		b := &BenchmarkNode{
+			chainCfg: chainCfg{Chain: networkname.Mainnet},
+			BaseURL:  srv.URL + "/prefix",
+			Endpoint: "/",
+			OutCSV:   filepath.Join(t.TempDir(), "out.csv"),
+		}
+		require.NoError(t, b.Run(t.Context()))
+		require.Contains(t, seen(), "/prefix/?")
+	})
+
+	t.Run("ChainEndpoint base query", func(t *testing.T) {
 		c := &ChainEndpoint{
 			chainCfg:     chainCfg{Chain: networkname.Mainnet},
 			outputFolder: outputFolder{Datadir: datadir.New(t.TempDir()).DataDir},
-			Endpoint:     endpoint,
+			Endpoint:     prefixedEndpoint,
 		}
 		err := c.Run(t.Context())
-		require.Error(t, err, "the head request gets a 404; the URL is what this test pins")
-		require.Contains(t, seen(), "/eth/v2/beacon/blocks/head?apikey=K")
+		require.Error(t, err, "the parent-block request gets a 404; the URLs are what this test pins")
+		require.Contains(t, seen(), "/prefix/eth/v2/beacon/blocks/head?apikey=K")
+		require.Contains(t, seen(), "/prefix/eth/v2/beacon/blocks/0x0100000000000000000000000000000000000000000000000000000000000000?apikey=K")
 	})
 }
