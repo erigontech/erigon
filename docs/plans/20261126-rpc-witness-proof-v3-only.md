@@ -223,9 +223,9 @@
 - Modify: `execution/commitment/trie/proof.go`, `execution/commitment/trie/proof_test.go`
 - Modify: `rpc/jsonrpc/eth_call.go`, `execution/commitment/witness_test.go`
 
-- [ ] move `ProofFromNodes` and `childNode` as is; update every caller; `trie` keeps no copy
-- [ ] move the tests that cover them; add none; the PR body states the TDD skip for a pure move
-- [ ] run trie, witness, `TestGetProof*` and Task 2 golden tests, v3 on and off: green
+- [x] move `ProofFromNodes` and `childNode` as is; update every caller; `trie` keeps no copy
+- [x] move the tests that cover them; add none; the PR body states the TDD skip for a pure move
+- [x] run trie, witness, `TestGetProof*` and Task 2 golden tests, v3 on and off: green
 
 ### Task 5: op-stream format package and node-list encoder
 **Files:**

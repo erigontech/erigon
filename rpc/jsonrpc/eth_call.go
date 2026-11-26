@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -574,7 +575,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		StorageProof: make([]accounts.StorProofResult, len(storageKeys)),
 	}
 
-	accountProof, accountRLP, err := trie.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
+	accountProof, accountRLP, err := witnesstypes.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +608,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		storageProof, leaf, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
+		storageProof, leaf, err := witnesstypes.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
 			return nil, err
 		}

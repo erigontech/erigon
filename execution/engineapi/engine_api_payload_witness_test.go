@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -133,7 +134,7 @@ func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engi
 	require.NoError(t, err)
 	require.Equal(t, parent.Root, decoded.Hash())
 	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	proof, account, err := trie.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	proof, account, err := witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
 	require.NoError(t, err)
 	require.NotEmpty(t, proof)
 	require.NotEmpty(t, account)
@@ -178,7 +179,7 @@ func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
 		nodes[string(crypto.Keccak256(node))] = node
 	}
 	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	proof, account, err := trie.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
+	proof, account, err := witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(sender[:]))
 	require.NoError(t, err)
 	require.NotEmpty(t, account)
 	require.Greater(t, len(proof), 1)
