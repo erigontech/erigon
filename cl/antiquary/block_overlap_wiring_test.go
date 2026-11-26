@@ -17,6 +17,7 @@
 package antiquary
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -323,7 +324,9 @@ func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 	const head, tail = limit - 2, limit - 1
+	var logs bytes.Buffer
 	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	dirs := datadir.New(t.TempDir())
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	var slots []uint64
@@ -356,6 +359,7 @@ func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 
 	require.NoError(t, a.antiquate())
 	require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
+	require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead=9998 freezeBound=10000"), "the wait for the canonical index must be reported")
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
 		if err != nil {
@@ -368,8 +372,10 @@ func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return beacon_indicies.MarkRootCanonical(tx, tail, roots[tail])
 	}))
+	a.lastCanonicalHeadCapLog = time.Time{}
 	require.NoError(t, a.antiquate())
 	require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+	require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead="), "a canonical index that reaches the bound is not reported")
 	view := sn.View()
 	defer view.Close()
 	segment, ok := view.BeaconBlocksSegment(tail)

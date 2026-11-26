@@ -1018,3 +1018,17 @@ func TestBlobRetirementGapIsReported(t *testing.T) {
 	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0).Add(blobRetirementGapLogInterval))
 	require.Equal(t, 2, strings.Count(buf.String(), "gapSlot="))
 }
+
+func TestCanonicalHeadCapIsReportedOncePerInterval(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	a := &Antiquary{logger: logger}
+
+	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_000, 0))
+	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_060, 0))
+	require.Equal(t, 1, strings.Count(buf.String(), "canonicalHead="), "the log is rate limited")
+
+	a.reportCanonicalHeadCap(9_998, 10_000, time.Unix(1_000, 0).Add(canonicalHeadCapLogInterval))
+	require.Equal(t, 2, strings.Count(buf.String(), "canonicalHead="))
+}

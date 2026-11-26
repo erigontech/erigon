@@ -67,6 +67,7 @@ type Antiquary struct {
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
 	lastBlobGapLog                 time.Time
+	lastCanonicalHeadCapLog        time.Time
 	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, was stored at the last scan
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
@@ -438,6 +439,9 @@ func (s *Antiquary) antiquate() error {
 
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to -= min(to, safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	if canonicalHead+1 < to {
+		s.reportCanonicalHeadCap(canonicalHead, to, time.Now())
+	}
 	to = min(to, canonicalHead+1)
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
@@ -625,6 +629,16 @@ func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount fre
 	}
 	mxBlobRetirementGapSlot.SetUint64(0)
 	return true, nil
+}
+
+const canonicalHeadCapLogInterval = 10 * time.Minute
+
+func (s *Antiquary) reportCanonicalHeadCap(canonicalHead, to uint64, now time.Time) {
+	if now.Sub(s.lastCanonicalHeadCapLog) < canonicalHeadCapLogInterval {
+		return
+	}
+	s.lastCanonicalHeadCapLog = now
+	s.logger.Info("[Antiquary] Block freezing waits for the canonical index", "canonicalHead", canonicalHead, "freezeBound", to)
 }
 
 func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {
