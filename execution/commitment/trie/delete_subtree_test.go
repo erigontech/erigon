@@ -42,14 +42,12 @@ func requireValue(t *testing.T, tr *Trie, key, want []byte) {
 
 func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		rootHash common.Hash
-		prefix   []byte
-		removed  []string
-		kept     []string
+		name    string
+		prefix  []byte
+		removed []string
+		kept    []string
 	}{
 		{name: "empty trie"},
-		{name: "hash root", rootHash: common.Hash{1}},
 		{name: "short root", removed: []string{"\x10"}},
 		{name: "duo root", removed: []string{"\x10", "\x20"}},
 		{name: "full root", removed: []string{"\x10", "\x20", "\x30"}},
@@ -64,7 +62,7 @@ func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
 		{name: "missing prefix", prefix: []byte("a"), kept: []string{"b", "c"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tr := New(tc.rootHash)
+			tr := New(common.Hash{})
 			value := []byte{1}
 			for _, key := range tc.removed {
 				tr.Update([]byte(key), value)

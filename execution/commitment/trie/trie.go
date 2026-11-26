@@ -668,17 +668,14 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		newNode = n
 		return
 
-	case *HashNode:
-		if prefixExhausted {
-			return true, nil
-		}
-
 	case nil:
 		updated = false
 		newNode = nil
 		return
+
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
-	panic(fmt.Sprintf("%T: invalid node: %v (%v)", origNode, origNode, key[:keyStart]))
 }
 
 func preserveTerminalAccount(terminal Node) Node {
