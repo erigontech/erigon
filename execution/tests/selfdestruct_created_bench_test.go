@@ -28,8 +28,12 @@ func BenchmarkSelfdestructCreatedImport(b *testing.B) {
 	gspec, key, chainPack := sdcChain(b, 18)
 	for b.Loop() {
 		b.StopTimer()
-		m := execmoduletester.New(b, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+		m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		b.StartTimer()
-		require.NoError(b, m.InsertChain(chainPack))
+		err := m.InsertChain(chainPack)
+		b.StopTimer()
+		m.Close()
+		require.NoError(b, err)
+		b.StartTimer()
 	}
 }
