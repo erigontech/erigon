@@ -77,33 +77,54 @@ func TestEcrecoverPrestate(t *testing.T) {
 	input, signer := ecrecoverInput(t)
 	for _, wrapper := range []string{"direct", "mux", "debug"} {
 		t.Run(wrapper, func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			require.NoError(t, ibs.SetCode(signer, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
-			name := "prestateTracer"
-			var config json.RawMessage
-			if wrapper == "mux" {
-				name, config = "muxTracer", json.RawMessage(`{"prestateTracer":{}}`)
+			for _, tc := range []struct {
+				name string
+				gas  uint64
+				warm bool
+				err  error
+			}{
+				{name: "cold", gas: 6100},
+				{name: "cold out of gas", gas: 6099, err: vm.ErrOutOfGas},
+				{name: "warm", gas: 3200, warm: true},
+				{name: "warm out of gas", gas: 3199, warm: true, err: vm.ErrOutOfGas},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					ibs := state.New(state.NewNoopReader())
+					defer ibs.Close()
+					require.NoError(t, ibs.SetCode(signer, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+					if tc.warm {
+						ibs.AddAddressToAccessList(signer)
+					}
+					name := "prestateTracer"
+					var config json.RawMessage
+					if wrapper == "mux" {
+						name, config = "muxTracer", json.RawMessage(`{"prestateTracer":{}}`)
+					}
+					tracer, err := tracers.New(name, nil, config)
+					require.NoError(t, err)
+					if wrapper == "debug" {
+						tracer = debugtracer.New(t.TempDir(), debugtracer.WithWrappedTracer(tracer))
+					}
+					output, err := callEcrecover(ibs, tracer.Hooks, input, tc.gas)
+					require.ErrorIs(t, err, tc.err)
+					require.Empty(t, output)
+					result, err := tracer.GetResult()
+					require.NoError(t, err)
+					if wrapper == "mux" {
+						var results map[string]json.RawMessage
+						require.NoError(t, json.Unmarshal(result, &results))
+						result = results["prestateTracer"]
+					}
+					var pre prestateTrace
+					require.NoError(t, json.Unmarshal(result, &pre))
+					if tc.err != nil {
+						require.NotContains(t, pre, signer)
+						return
+					}
+					require.Contains(t, pre, signer)
+					require.Equal(t, "0x00", pre[signer].Code)
+				})
 			}
-			tracer, err := tracers.New(name, nil, config)
-			require.NoError(t, err)
-			if wrapper == "debug" {
-				tracer = debugtracer.New(t.TempDir(), debugtracer.WithWrappedTracer(tracer))
-			}
-			output, err := callEcrecover(ibs, tracer.Hooks, input, 6100)
-			require.NoError(t, err)
-			require.Empty(t, output)
-			result, err := tracer.GetResult()
-			require.NoError(t, err)
-			if wrapper == "mux" {
-				var results map[string]json.RawMessage
-				require.NoError(t, json.Unmarshal(result, &results))
-				result = results["prestateTracer"]
-			}
-			var pre prestateTrace
-			require.NoError(t, json.Unmarshal(result, &pre))
-			require.Contains(t, pre, signer)
-			require.Equal(t, "0x00", pre[signer].Code)
 		})
 	}
 }
