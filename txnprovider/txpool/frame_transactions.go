@@ -76,11 +76,10 @@ func (p *TxPool) RejectFramePrefix(hash common.Hash) {
 }
 
 type frameValidationResult struct {
-	validation      *protocol.FrameValidation
-	blocker         *metaTxn // the pooled entry that prevented simulation
-	reason          txpoolcfg.DiscardReason
-	sidecarVerified bool // Set when the sidecar matches verified pool data. Frame simulation checks only the inner transaction.
-	headChanged     bool
+	validation  *protocol.FrameValidation
+	blocker     *metaTxn // the pooled entry that prevented simulation
+	reason      txpoolcfg.DiscardReason
+	headChanged bool
 }
 
 // frameRevalidationBatch ties parked entries to the pool's state view while
@@ -201,8 +200,9 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission, cells b
 		a := &txns[i]
 		if a.txn.TxType() == FrameTxnType && a.frame.reason == txpoolcfg.Success {
 			a.frame = p.simulateFrameResult(ctx, a.txn, generation, stateBlockHash)
-			if a.frame.validation != nil && a.txn.HasBlobs() {
-				a.frame.sidecarVerified = p.reusePooledSidecar(a.txn, cells)
+			if a.frame.validation != nil && a.sidecarReason == txpoolcfg.NotSet &&
+				a.txn.HasBlobs() && p.reusePooledSidecar(a.txn, cells) {
+				a.sidecarReason = txpoolcfg.Success
 			}
 			if a.frame.headChanged && p.waitForStateChange(ctx, generation) {
 				break

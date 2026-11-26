@@ -1714,7 +1714,7 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	txns.Append(&replay, sender[:], false)
 	batch := newAdmissionBatch(txns, nil)
 	pool.prepareFrames(ctx, batch.txns, make(blobCells))
-	require.True(t, batch.txns[0].frame.sidecarVerified, "an exact copy must be checked before taking the admission lock")
+	require.Equal(t, txpoolcfg.Success, batch.txns[0].sidecarReason, "an exact copy must be checked before taking the admission lock")
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
@@ -1727,6 +1727,31 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	// A failed proof also decides the result of a later pooled frame from the same peer.
 	txns.Append(plain, other[:], false)
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
+
+	pool.ethBackend.(*frameValidationBackend).err = errors.New("simulation unavailable")
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
+	reasons, err = pool.addNewTxns(ctx, initial, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash, txpoolcfg.DuplicateHash}, reasons)
+
+	pool.cfg.TotalBlobPoolLimit = txpoolcfg.DefaultConfig.TotalBlobPoolLimit
+	var blob TxnSlot
+	_, err = parser.ParseTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, &frame.ChainID, 1), 0, &blob, nil, false, true, nil)
+	require.NoError(t, err)
+	var mixed TxnSlots
+	mixed.Append(&replay, sender[:], false)
+	mixed.Append(&blob, sender[:], false)
+	batch, err = pool.prepareTxns(ctx, mixed, nil)
+	require.NoError(t, err)
+	require.True(t, batch.txns[1].needsPreparation, "the earlier frame proof can still skip this sidecar")
+	// The sender is now over its limit. Admission must wait for the frame's
+	// proof before charging a penalty for the next input.
+	pool.cfg.AccountSlots = 0
+	reasons, err = pool.addNewTxns(ctx, mixed, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
 }

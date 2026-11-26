@@ -353,6 +353,41 @@ func TestPooledBlobProofFormatAfterOsaka(t *testing.T) {
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+
+	// A higher price floor rejects the inner transaction, but the two remote
+	// copies still need a result for the proof format supplied by their peer.
+	pool.cfg.MinFeeCap = blob.GetFeeCap().Uint64() + 1
+	txns.Append(&blob, sender[:], false)
+	want := []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}
+	reasons, err = prepareTxnReasons(ctx, pool, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, want, reasons)
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, want, reasons)
+}
+
+func TestRemoteBlobSidecarBeforeAndAfterLocalAdmission(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	sender := common.Address{1}
+	blob := makeBlobSlot(0x52, false)
+	pool.cfg.MinFeeCap = blob.GetFeeCap().Uint64() + 1
+	withoutSidecar := blob
+	withoutSidecar.BlobBundles = nil
+
+	// The same remote input is underpriced on both sides of the local input.
+	// Only the later copy can be a duplicate and needs its sidecar checked.
+	var txns TxnSlots
+	txns.Append(&withoutSidecar, sender[:], false)
+	txns.Append(&blob, sender[:], true)
+	txns.Append(&withoutSidecar, sender[:], false)
+	txns.Append(&blob, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.UnderPriced, txpoolcfg.Success, txpoolcfg.UnequalBlobTxExt, txpoolcfg.DuplicateHash,
+	}, reasons)
 }
 
 func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {

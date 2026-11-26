@@ -547,7 +547,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	unwindTxns = TxnSlots{}
 	for i, txn := range ordinary.Txns {
 		a := txnAdmission{txn: txn, local: ordinary.IsLocal[i]}
-		if err := p.validateCandidate(&a, cacheView, nil, true); err != nil {
+		if err := p.validateCandidate(&a, cacheView, true); err != nil {
 			return frames, err
 		}
 		if a.reason == txpoolcfg.NotSet {
@@ -1775,15 +1775,22 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 // indices through preparation, insertion and promotion. Keeping the installed
 // entry ties an eviction to the input that added it, even for repeated hashes.
 type txnAdmission struct {
-	txn              *TxnSlot
-	sender           common.Address
-	source           remoteSource
-	frame            frameValidationResult
-	installed        *metaTxn
-	reason           txpoolcfg.DiscardReason
-	fixedReason      txpoolcfg.DiscardReason // a preparation failure or an applied sender penalty survives admission retries
+	txn       *TxnSlot
+	sender    common.Address
+	source    remoteSource
+	frame     frameValidationResult
+	installed *metaTxn
+	reason    txpoolcfg.DiscardReason
+	// The sidecar is independent of policy and frame simulation, which checks only
+	// the inner transaction. Its verification result survives admission retries.
+	sidecarReason    txpoolcfg.DiscardReason
+	penalized        bool // this input has already incurred its sender penalty
 	local            bool
 	needsPreparation bool // authorization recovery or sidecar verification still pending
+}
+
+func (a *txnAdmission) sidecarRejected() bool {
+	return a.sidecarReason != txpoolcfg.NotSet && a.sidecarReason != txpoolcfg.Success
 }
 
 type admissionBatch struct {
@@ -1814,13 +1821,22 @@ func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 	return batch
 }
 
-func (batch *admissionBatch) hasUnprepared() bool {
+// A remote blob frame can make later inputs from its peer skip proof checks.
+// Leave that suffix for ordered validation after frame simulation.
+func (batch *admissionBatch) earlyPreparationPrefix() []txnAdmission {
+	var prefix []txnAdmission
 	for i := range batch.txns {
-		if batch.txns[i].needsPreparation {
-			return true
+		a := &batch.txns[i]
+		if a.needsPreparation {
+			if !batch.hasFrames {
+				return batch.txns
+			}
+			prefix = batch.txns[:i+1]
+		} else if batch.hasFrames && !a.local && a.txn.TxType() == FrameTxnType && a.txn.HasBlobs() {
+			break
 		}
 	}
-	return false
+	return prefix
 }
 
 // Read the results under the pool lock, after all replacements and evictions.
@@ -1844,38 +1860,39 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 		return admissionBatch{}, err
 	}
 	batch := newAdmissionBatch(txns, sources)
-	if !batch.hasUnprepared() {
+	prefix := batch.earlyPreparationPrefix()
+	if len(prefix) == 0 {
 		return batch, nil
 	}
 	err := p.withLockedState(ctx, &txns, func(_ kv.TemporalTx, view kvcache.CacheView) error {
-		return p.precheckUnprepared(&batch, 0, view)
+		for i := range prefix {
+			a := &prefix[i]
+			if a.needsPreparation {
+				if err := p.precheckCandidate(a, &batch, view); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return admissionBatch{}, err
 	}
-	p.prepareCandidates(&batch)
+	p.prepareCandidates(prefix, batch.preparedCells)
 	return batch, nil
 }
 
 // The caller holds the pool lock. Nonce, balance and pool limits can defer
 // expensive preparation. Only ordered validation charges a sender penalty,
 // because its evictions can make later inputs eligible.
-func (p *TxPool) precheckUnprepared(batch *admissionBatch, start int, view kvcache.CacheView) error {
-	for i := start; i < len(batch.txns); i++ {
-		a := &batch.txns[i]
-		if !a.needsPreparation {
-			continue
-		}
-		if err := p.precheckCandidate(a, batch, view); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (p *TxPool) precheckCandidate(a *txnAdmission, batch *admissionBatch, view kvcache.CacheView) error {
 	a.reason = txpoolcfg.NotSet
-	if err := p.validateCandidate(a, view, nil, false); err != nil {
+	// A remote copy of a pooled blob needs a proof result even if policy
+	// rejects the transaction. Admission rechecks policy if the hash disappears.
+	if !a.local && a.txn.TxType() == BlobTxnType && p.byHash[string(a.txn.IDHash[:])] != nil {
+		return nil
+	}
+	if err := p.validateCandidate(a, view, false); err != nil {
 		return err
 	}
 	if a.reason == txpoolcfg.NotSet && a.txn.TxType() == BlobTxnType && !batch.hasFrames && p.cfg.MaxNonceGap != 0 {
@@ -1905,23 +1922,25 @@ func (p *TxPool) precheckBlobNonceGap(txn *TxnSlot, view kvcache.CacheView, batc
 }
 
 // Each candidate's static preparation runs at most once, outside the pool lock.
-func (p *TxPool) prepareCandidates(batch *admissionBatch) {
+func (p *TxPool) prepareCandidates(txns []txnAdmission, cells blobCells) {
 	var offenders kzgOffenders
-	for i := range batch.txns {
-		a := &batch.txns[i]
+	for i := range txns {
+		a := &txns[i]
 		if a.needsPreparation && a.reason == txpoolcfg.NotSet {
 			a.needsPreparation = false
 			switch {
 			case a.txn.TxType() == SetCodeTxnType:
 				p.recoverAuthorizations(a.txn)
 			case !a.local && offenders.skip(a.source):
-				a.reason = txpoolcfg.SkippedAfterKZGFailure
-			case !p.reusePooledSidecar(a.txn, batch.preparedCells):
-				if reason := p.validateBlobSidecar(a.txn, batch.preparedCells); reason != txpoolcfg.Success {
-					a.reason = reason
-				}
+				a.sidecarReason = txpoolcfg.SkippedAfterKZGFailure
+			case p.reusePooledSidecar(a.txn, cells):
+				a.sidecarReason = txpoolcfg.Success
+			default:
+				a.sidecarReason = p.validateBlobSidecar(a.txn, cells)
 			}
-			a.fixedReason = a.reason
+			if a.sidecarRejected() {
+				a.reason = a.sidecarReason
+			}
 		}
 		if a.reason == txpoolcfg.UnmatchedBlobTxExt && !a.local {
 			offenders.add(a.source)
@@ -1949,9 +1968,20 @@ func (o *kzgOffenders) add(source remoteSource) {
 
 func (p *TxPool) validateTxns(batch *admissionBatch, view kvcache.CacheView) error {
 	var offenders kzgOffenders
+	// An earlier candidate can install a hash before its copy reaches insertion.
+	// Only batches with sidecars can need that lookup for proof checks or peer skips.
+	var earlier map[common.Hash]bool
+	if len(batch.txns) > 1 && batch.preparedCells != nil {
+		earlier = make(map[common.Hash]bool)
+	}
+	needPreparation := false
 	for i := range batch.txns {
 		a := &batch.txns[i]
 		switch {
+		case a.sidecarRejected():
+			a.reason = a.sidecarReason
+		case a.penalized:
+			a.reason = txpoolcfg.Spammer
 		case a.needsPreparation:
 			if err := p.precheckCandidate(a, batch, view); err != nil {
 				return err
@@ -1959,51 +1989,60 @@ func (p *TxPool) validateTxns(batch *admissionBatch, view kvcache.CacheView) err
 		case a.txn.TxType() != FrameTxnType:
 			// Frame results have already been checked against this head. Recheck
 			// ordinary pool policy against this view and all earlier sender penalties.
-			a.reason = a.fixedReason
+			a.reason = txpoolcfg.NotSet
 		}
-		// A prechecked sender penalty still depends on this input reaching validation.
-		pendingPenalty := a.needsPreparation && a.reason == txpoolcfg.Spammer
-		if (a.reason == txpoolcfg.NotSet || pendingPenalty) && !a.local && offenders.skip(a.source) {
-			a.reason = txpoolcfg.SkippedAfterKZGFailure
-			continue
-		}
-		if a.reason == txpoolcfg.NotSet {
-			if a.needsPreparation {
-				// Prepare all newly eligible inputs together outside the lock.
-				// A pending blob proof can still affect later inputs from the same peer.
-				if err := p.precheckUnprepared(batch, i+1, view); err != nil {
-					return err
-				}
-				return errPreparationRequired
-			}
-			if err := p.validateCandidate(a, view, batch.preparedCells, false); err != nil {
+		skipPeer := !a.local && offenders.skip(a.source)
+		if a.reason == txpoolcfg.NotSet && !a.needsPreparation && !skipPeer {
+			if err := p.validateCandidate(a, view, false); err != nil {
 				return err
 			}
 		}
-		if a.reason == txpoolcfg.Spammer && a.fixedReason != txpoolcfg.Spammer {
+		// Even when policy rejects the inner transaction, a remote duplicate
+		// needs its own sidecar result before insertion can report DuplicateHash.
+		uncheckedSidecar := a.sidecarReason == txpoolcfg.NotSet && a.txn.HasBlobs()
+		mayDuplicate := !a.local && a.reason != txpoolcfg.NotSet && (uncheckedSidecar || skipPeer) &&
+			(earlier[a.txn.IDHash] || p.byHash[string(a.txn.IDHash[:])] != nil)
+		// A prechecked sender penalty still depends on this input reaching validation.
+		pendingPenalty := a.needsPreparation && a.reason == txpoolcfg.Spammer
+		if skipPeer && (a.reason == txpoolcfg.NotSet || pendingPenalty || a.sidecarRejected() || mayDuplicate) {
+			a.reason = txpoolcfg.SkippedAfterKZGFailure
+			continue
+		}
+		if uncheckedSidecar && (a.reason == txpoolcfg.NotSet || mayDuplicate) {
+			a.needsPreparation = true
+			a.reason = txpoolcfg.NotSet
+		}
+		if a.reason == txpoolcfg.NotSet {
+			if earlier != nil {
+				earlier[a.txn.IDHash] = true
+			}
+			needPreparation = needPreparation || a.needsPreparation
+		}
+		// Prepare eligible inputs together outside the lock. A pending proof may
+		// skip a later input, so charge no further sender penalties until the retry.
+		if !needPreparation && a.reason == txpoolcfg.Spammer && !a.penalized {
 			p.punishSpammer(a.txn.SenderID)
 			// Keep the rejection across retries. The evictions can make this
 			// input look eligible, but it has already incurred the penalty.
-			a.fixedReason = txpoolcfg.Spammer
+			a.penalized = true
 			a.needsPreparation = false
 		} else if a.reason == txpoolcfg.UnmatchedBlobTxExt && !a.local {
 			offenders.add(a.source)
 		}
 	}
+	if needPreparation {
+		return errPreparationRequired
+	}
 	return nil
 }
 
 // A candidate that passes validation keeps NotSet until insertion decides its result.
-func (p *TxPool) validateCandidate(a *txnAdmission, view kvcache.CacheView, cells blobCells, unwinding bool) error {
+func (p *TxPool) validateCandidate(a *txnAdmission, view kvcache.CacheView, unwinding bool) error {
 	if a.txn.TxType() == FrameTxnType {
 		if a.frame.validation == nil {
 			a.reason = txpoolcfg.InvalidFrame
 		} else if a.txn.HasBlobs() {
-			reason := p.validateBlobTxn(a.txn, a.local)
-			if reason == txpoolcfg.Success && !a.frame.sidecarVerified {
-				reason = p.validateBlobSidecar(a.txn, cells)
-			}
-			if reason != txpoolcfg.Success {
+			if reason := p.validateBlobTxn(a.txn, a.local); reason != txpoolcfg.Success {
 				a.reason = reason
 			}
 		}
@@ -2141,7 +2180,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 		})
 		switch {
 		case errors.Is(err, errPreparationRequired):
-			p.prepareCandidates(&batch)
+			p.prepareCandidates(batch.txns, batch.preparedCells)
 		case errors.Is(err, errFrameStateChanged):
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -2169,13 +2208,10 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 	for i := range txns {
 		a := &txns[i]
 		txn := a.txn
-		if !a.local {
-			// A pooled hash cannot establish that a peer's sidecar is valid. Preserve
-			// both sidecar rejections and skips caused by an earlier remote proof failure.
-			switch a.reason {
-			case txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.SkippedAfterKZGFailure:
-				continue
-			}
+		// A pooled hash cannot establish that a peer's sidecar is valid. Preserve
+		// both sidecar rejections and skips caused by an earlier remote proof failure.
+		if !a.local && (a.sidecarRejected() || a.reason == txpoolcfg.SkippedAfterKZGFailure) {
+			continue
 		}
 		if found := p.byHash[string(txn.IDHash[:])]; found != nil {
 			a.reason = txpoolcfg.DuplicateHash
