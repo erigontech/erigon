@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -113,9 +112,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, err := prepareTxnReasons(ctx, pool, slots, []remoteSource{peer, peer})
+		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer})
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -127,9 +126,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -141,7 +140,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], true)
 		slots.Append(&s1, a1[:], true)
 
-		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	})
@@ -261,36 +260,23 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	pool := seedBlobKZGTestPool(t, ctx)
-	pool.cfg.AccountSlots = 1
 	require.NoError(t, pool.start(ctx))
 	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
 
-	goodBlob := makeBlobSlot(0x61, false)
-	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-	skipped.IDHash[0] = 0x62
 	pooled := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	pooled.IDHash[0] = 0x60
 	var local TxnSlots
-	local.Append(&goodBlob, a0[:], true)
-	local.Append(skipped, a1[:], true)
 	local.Append(pooled, a2[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	extra := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
-	extra.IDHash[0] = 0x64
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, submitRemoteTxns(t, pool, a1, extra))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
 	bad := makeBlobSlot(0x61, true)
-	skippedCopy := *skipped
+	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	skipped.IDHash[0] = 0x62
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
-	fromAttacker.Append(&skippedCopy, a1[:], false)
-	// This sender is over the limit, but a skipped input must not charge a penalty.
-	overLimit := makeBlobSlot(0x65, false)
-	fromAttacker.Append(&overLimit, a1[:], false)
-	// The precheck already rejects SetCode before Prague.
-	fromAttacker.Append(newTestSetCodeTxnSlot(1, 0, 300_000, 300_000, 100_000), a1[:], false)
+	fromAttacker.Append(skipped, a1[:], false)
 	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
 
 	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
@@ -302,11 +288,8 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.SkippedAfterKZGFailure,
-		txpoolcfg.TypeNotActivated, txpoolcfg.NotReplaced,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.NotReplaced,
 	}, reasons)
-	require.Contains(t, pool.byHash, string(extra.IDHash[:]))
-	require.Same(t, &goodBlob, pool.byHash[string(bad.IDHash[:])].TxnSlot)
 }
 
 func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
@@ -326,90 +309,16 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			tc.limit(&pool.cfg)
 
 			bad := makeBlobSlot(0x80, true)
-			second := makeBlobSlot(0x81, true)
 			a0 := [20]byte{1}
 			var slots TxnSlots
 			slots.Append(&bad, a0[:], false)
-			slots.Append(&second, a0[:], false)
-			batch, err := pool.prepareTxns(ctx, slots, nil)
-			require.NoError(t, err)
-			require.NoError(t, pool.withLockedState(ctx, &slots, func(_ kv.TemporalTx, view kvcache.CacheView) error {
-				return pool.planPreparation(&batch, view)
-			}), "both inputs can be rejected before proof verification")
 			pool.AddRemoteTxns(ctx, slots, nil, nil)
 
 			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason, tc.reason}, reasons)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})
 	}
-}
-
-func TestPooledBlobProofFormatAfterOsaka(t *testing.T) {
-	ctx := t.Context()
-	pool := seedBlobKZGTestPool(t, ctx)
-	require.NoError(t, pool.start(ctx))
-	blob := makeBlobSlot(0x51, false)
-	var txns TxnSlots
-	sender := common.Address{1}
-	txns.Append(&blob, sender[:], false)
-	reasons, err := pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-
-	pool.osakaTime = common.NewUint64(0)
-	reasons, err = pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
-
-	// A higher price floor rejects the inner transaction, but the two remote
-	// copies still need a result for the proof format supplied by their peer.
-	pool.cfg.MinFeeCap = blob.GetFeeCap().Uint64() + 1
-	txns.Append(&blob, sender[:], false)
-	want := []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}
-	reasons, err = prepareTxnReasons(ctx, pool, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, want, reasons)
-	reasons, err = pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, want, reasons)
-}
-
-func TestRemoteBlobSidecarBeforeAndAfterLocalAdmission(t *testing.T) {
-	ctx := t.Context()
-	pool := seedBlobKZGTestPool(t, ctx)
-	sender := common.Address{1}
-	blob := makeBlobSlot(0x52, false)
-	pool.cfg.MinFeeCap = blob.GetFeeCap().Uint64() + 1
-	withoutSidecar := blob
-	withoutSidecar.BlobBundles = nil
-
-	// A possible duplicate still gets the price rejection if the earlier copy
-	// fails insertion. Its sidecar must not cause later inputs to be skipped.
-	pool.pendingBlobFee.Store(blob.GetBlobFeeCap().Uint64() + 1)
-	badCopy := makeBlobSlot(0x52, true)
-	other := common.Address{2}
-	var rejected TxnSlots
-	rejected.Append(&blob, sender[:], true)
-	rejected.Append(&badCopy, sender[:], false)
-	rejected.Append(newTestTxnSlot(0, 0, 300_000, 300_000, 100_000), other[:], false)
-	reasons, err := pool.addNewTxns(ctx, rejected, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow, txpoolcfg.UnderPriced, txpoolcfg.Success}, reasons)
-
-	// The same remote input is underpriced on both sides of the local input.
-	// Only the later copy can be a duplicate and needs its sidecar checked.
-	pool.pendingBlobFee.Store(blob.GetBlobFeeCap().Uint64())
-	var txns TxnSlots
-	txns.Append(&withoutSidecar, sender[:], false)
-	txns.Append(&blob, sender[:], true)
-	txns.Append(&withoutSidecar, sender[:], false)
-	txns.Append(&blob, sender[:], false)
-	reasons, err = pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{
-		txpoolcfg.UnderPriced, txpoolcfg.Success, txpoolcfg.UnequalBlobTxExt, txpoolcfg.DuplicateHash,
-	}, reasons)
 }
 
 func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
@@ -433,9 +342,10 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		batch := newAdmissionBatch(slots, nil)
-		require.ErrorIs(t, pool.planPreparation(&batch, cacheView), errPreparationRequired)
-		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
+		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, false)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
+		assert.Len(t, goodTxns.Txns, 1)
 	})
 
 	t.Run("bad proof is still rejected", func(t *testing.T) {
@@ -479,21 +389,4 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 	for _, slot := range local.Txns {
 		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 	}
-}
-
-func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
-	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks["Cancun"])
-	pool.cfg.AccountSlots = 1
-	blob := makeBlobSlot(3, false)
-	blob.Nonce = 1
-	blobTx := blob.Txn.(*types.BlobTx)
-	blobTx.Nonce, blobTx.GasLimit = blob.Nonce, 100_000
-	pool.cfg.BlobSlots = uint64(len(blob.GetBlobHashes()))
-	pool.cfg.TotalBlobPoolLimit = pool.cfg.BlobSlots
-	resubmitted := blob
-	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), &blob)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 2), &resubmitted)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
-	require.Contains(t, pool.byHash, string(blob.IDHash[:]))
 }

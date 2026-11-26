@@ -509,38 +509,6 @@ func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
 	require.False(t, pool.hasUnprocessedRemoteTxns.Load())
 }
 
-func TestRemoteSenderPenaltyAfterStateRecovery(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.cfg.AccountSlots = 2
-	highest := newTestSenderTxnSlot(t, sender, 2)
-	reasons := submitRemoteTxns(t, pool, sender,
-		newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), highest)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-
-	// The first input's penalty could free a slot for SetCode. The state
-	// view can go stale while its signers are recovered outside the lock.
-	setCode, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 4)
-	setCode.Txn = &authorizationReadProbe{Transaction: setCode.Txn, pool: pool, onUnlocked: pool.MarkStateStale}
-	var batch TxnSlots
-	batch.Append(newTestSenderTxnSlot(t, sender, 3), sender[:], false)
-	batch.Append(setCode, sender[:], false)
-	pool.AddRemoteTxns(ctx, batch, nil, nil)
-	reasons, err := pool.processRemoteBatch(ctx)
-	require.NoError(t, err)
-	require.Empty(t, reasons)
-	require.Equal(t, []AuthAndNonce{auth}, setCode.AuthAndNonces)
-	require.Equal(t, batch.Txns, pool.unprocessedRemoteTxns.Txns)
-	require.NotNil(t, pool.byHash[string(highest.IDHash[:])], "a queued batch must not have charged its penalty")
-
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	reasons, err = pool.processRemoteBatch(ctx)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
-	require.NotContains(t, pool.byHash, string(highest.IDHash[:]))
-	require.Len(t, pool.byHash, 3, "one penalty leaves two original transactions and the new SetCode")
-	require.Empty(t, pool.unprocessedRemoteTxns.Txns)
-}
-
 func TestAuthorizationRecoveryIsCached(t *testing.T) {
 	pool := &TxPool{chainID: *uint256.NewInt(1)}
 	key, err := crypto.GenerateKey()

@@ -1880,7 +1880,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason, err := pool.validateOrdinaryTxn(txn, false, view, false)
+			reason, err := pool.validateTx(txn, false, view)
 			asrt.NoError(err)
 
 			if reason != test.expected {
@@ -2020,7 +2020,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result, err := pool.validateOrdinaryTxn(txn, false, view, false)
+	result, err := pool.validateTx(txn, false /* isLocal */, view)
 	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
 }
@@ -2056,7 +2056,7 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	reason, err := pool.validateOrdinaryTxn(txn, true, view, false)
+	reason, err := pool.validateTx(txn, true, view)
 	require.Error(t, err)
 	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
 	require.ErrorContains(t, err, "validateTx: sender info")
@@ -3798,113 +3798,6 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
 }
 
-func submitRemoteTxns(t *testing.T, pool *TxPool, sender common.Address, txns ...*TxnSlot) []txpoolcfg.DiscardReason {
-	t.Helper()
-	var slots TxnSlots
-	for _, txn := range txns {
-		slots.Append(txn, sender[:], false)
-	}
-	pool.AddRemoteTxns(t.Context(), slots, nil, nil)
-	reasons, err := pool.processRemoteBatch(t.Context())
-	require.NoError(t, err)
-	return reasons
-}
-
-func newTestSetCodeWithAuthorization(t *testing.T, chainID uint256.Int, nonce uint64) (*TxnSlot, AuthAndNonce) {
-	t.Helper()
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	auth, err := types.SignAuthorization(key, chainID, common.Address{2}, 0)
-	require.NoError(t, err)
-	slot := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
-	slot.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
-	slot.IDHash = slot.Txn.Hash()
-	return slot, AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), 0}
-}
-
-func TestRemoteSenderPenaltyFollowsBatchOrder(t *testing.T) {
-	for _, order := range []string{"ordinary then SetCode", "SetCode then ordinary", "SetCode then SetCode"} {
-		t.Run(order, func(t *testing.T) {
-			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-			pool.cfg.AccountSlots = 2
-			seeded := submitRemoteTxns(t, pool, sender,
-				newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), newTestSenderTxnSlot(t, sender, 2))
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, seeded)
-
-			setCode, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 4)
-			first, second := newTestSenderTxnSlot(t, sender, 3), setCode
-			switch order {
-			case "SetCode then ordinary":
-				first, second = second, first
-			case "SetCode then SetCode":
-				first, _ = newTestSetCodeWithAuthorization(t, pool.chainID, 3)
-			}
-
-			// The first input's penalty frees a slot for the second. If the second
-			// is SetCode, its authorizations must be ready when that slot opens.
-			reasons := submitRemoteTxns(t, pool, sender, first, second)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
-			require.Equal(t, 3, pool.all.count(first.SenderID), "one penalty leaves two seeded transactions plus the admitted input")
-			require.Nil(t, first.AuthAndNonces, "a penalized input does not need authorization recovery")
-			if second == setCode {
-				require.Equal(t, []AuthAndNonce{auth}, setCode.AuthAndNonces)
-			}
-		})
-	}
-}
-
-func TestRemoteAdmissionAboveAccountSlots(t *testing.T) {
-	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.cfg.AccountSlots = 2
-
-	pooled, auth := newTestSetCodeWithAuthorization(t, pool.chainID, 2)
-	resubmitted := *pooled
-	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), pooled)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0)))
-	require.Len(t, pool.byHash, 3, "a duplicate must not trigger the sender penalty")
-
-	// The first input evicts the highest nonce. The copy now needs its own admission and authorization recovery.
-	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 3), &resubmitted)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
-	installed := pool.byHash[string(resubmitted.IDHash[:])]
-	require.NotNil(t, installed)
-	require.Same(t, &resubmitted, installed.TxnSlot)
-	require.Same(t, installed, pool.auths[auth])
-
-	setCode := newTestSetCodeTxnSlot(3, 0, 1, 2, 100_000)
-	setCode.IDHash[0] = 4
-	// In the reverse order the copy is a duplicate. The later penalty must leave it evicted.
-	reasons = submitRemoteTxns(t, pool, sender, pooled, setCode)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash, txpoolcfg.Spammer}, reasons)
-	require.Nil(t, setCode.AuthAndNonces, "a pooled duplicate cannot free a slot for authorization recovery")
-	require.NotContains(t, pool.byHash, string(pooled.IDHash[:]))
-	require.NotContains(t, pool.auths, auth)
-	require.Len(t, pool.byHash, 2, "the submitting transaction keeps its rejection after its penalty frees a slot")
-}
-
-func TestSenderPenaltyKeepsBatchTogetherForPromotion(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	other := common.Address{2}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender, other), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	pool.cfg.AccountSlots, pool.cfg.MaxNonceGap = 2, 1
-	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0),
-		newTestSenderTxnSlot(t, sender, 1), newTestSenderTxnSlot(t, sender, 2))
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-
-	// The penalty makes SetCode eligible for admission. The other sender's
-	// nonce 2 survives only if promotion also sees its nonce 0 later in the batch.
-	setCode, _ := newTestSetCodeWithAuthorization(t, pool.chainID, 2)
-	var txns TxnSlots
-	txns.Append(encodeRemoteTxn(t, newTestTxnSlot(2, 0, 2, 3, 100_000)), other[:], true)
-	txns.Append(newTestSenderTxnSlot(t, sender, 3), sender[:], false)
-	txns.Append(setCode, sender[:], false)
-	txns.Append(encodeRemoteTxn(t, newTestTxnSlot(0, 0, 2, 3, 100_000)), other[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Spammer, txpoolcfg.Success, txpoolcfg.Success}, reasons)
-}
-
 func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -4009,11 +3902,6 @@ func nonceRetrySender(t testing.TB, pool *TxPool, nonce uint64) {
 	require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 }
 
-func prepareTxnReasons(ctx context.Context, pool *TxPool, txns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
-	batch, err := pool.prepareTxns(ctx, txns, sources)
-	return batch.reasons(), err
-}
-
 func TestBlobNonceRetryPrecheck(t *testing.T) {
 	for _, fork := range []string{"Cancun", "Osaka"} {
 		t.Run(fork, func(t *testing.T) {
@@ -4026,7 +3914,7 @@ func TestBlobNonceRetryPrecheck(t *testing.T) {
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			for nonce := uint64(1); nonce <= 3; nonce++ {
 				nonceRetrySender(t, pool, nonce)
-				reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			}
@@ -4064,7 +3952,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 				txns = prefix
 			case "reorg":
 				nonceRetrySender(t, pool, 66)
-				reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
 				nonceRetrySender(t, pool, 65)
@@ -4075,7 +3963,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 			case "gap boundary":
 				nonceRetrySender(t, pool, 1)
 			}
-			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			for _, reason := range reasons {
 				require.Equal(t, txpoolcfg.NotSet, reason)
@@ -4120,7 +4008,7 @@ func TestBlobNonceRetryFrameBypass(t *testing.T) {
 			} else {
 				txns.Append(frame, sender[:], true)
 			}
-			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.NotSet, reasons[0])
 		})
@@ -4136,11 +4024,11 @@ func TestBlobNonceRetryStillChecksHonestSidecar(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
-	reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	nonceRetrySender(t, pool, 1000)
-	reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
@@ -4167,7 +4055,7 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			nonceRetrySender(t, pool, tc.nonce)
-			reasons, err = prepareTxnReasons(t.Context(), pool, txns, nil)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})

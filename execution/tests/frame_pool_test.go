@@ -60,18 +60,16 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
 		sender: {Nonce: 1, Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
 		types.FrameNonceManager: {Nonce: 1, Storage: map[common.Hash]common.Hash{
-			types.FrameNonceSlot(sender, uint256.Int{1}): common.BigToHash(big.NewInt(2)),
+			types.FrameNonceSlot(sender, uint256.Int{1}): common.BigToHash(big.NewInt(1)),
 		}},
 	}}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	for _, tc := range []struct {
-		name  string
-		keys  []uint256.Int
-		nonce uint64
+		name string
+		key  uint256.Int
 	}{
 		{name: "legacy"},
-		{name: "keyed", keys: []uint256.Int{{1}}},
-		{name: "first key is behind and second is consumed", keys: []uint256.Int{{0}, {1}}, nonce: 1},
+		{name: "keyed", key: uint256.Int{1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -90,8 +88,11 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			})
 			require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 			frame := &types.FrameTransaction{
-				NonceKeys: tc.keys, Nonce: tc.nonce, ChainID: *cfg.ChainID, SenderAddress: sender,
+				NonceKeys: []uint256.Int{tc.key}, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+			}
+			if tc.key.IsZero() {
+				frame.NonceKeys = nil
 			}
 			frame.Fees.MaxFee.SetUint64(10 * common.GWei * frame.GetGasLimit())
 			var encoded bytes.Buffer
