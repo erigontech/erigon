@@ -19,6 +19,7 @@ package engineapitester
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -33,6 +34,32 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 )
+
+func TestEngineXTestRunnerClosesCachedTesters(t *testing.T) {
+	closeErrs := []error{
+		errors.New("Amsterdam tester"),
+		errors.New("Bogota tester"),
+		errors.New("Bogota tester with custom account list"),
+	}
+	entries := make([]testerEntry, len(closeErrs))
+	for i, closeErr := range closeErrs {
+		closeTester := func() error { return closeErr }
+		entries[i] = testerEntry{
+			tester:  EngineApiTester{cleanup: &cleanupHandle{cleanups: []func() error{closeTester}}},
+			dataDir: t.TempDir(),
+		}
+	}
+	runner := EngineXTestRunner{testers: map[testerGroupKey]testerGroup{
+		{fork: "Amsterdam"}: {"": entries[0]},
+		{fork: "Bogota"}:    {"": entries[1], "custom list": entries[2]},
+	}}
+
+	err := runner.Close()
+	for i, closeErr := range closeErrs {
+		require.ErrorIs(t, err, closeErr)
+		require.NoDirExists(t, entries[i].dataDir)
+	}
+}
 
 func TestEngineXTestDefinitionV_20_02(t *testing.T) {
 	input := []byte(`{

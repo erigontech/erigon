@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 var testHash = common.Hash{0x01, 0x02, 0x03, 0x04}
@@ -168,4 +169,89 @@ func TestSyncContributionPoolKeepsOneEpochFromTheHeadForBlocks(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, utils.BitsOnCount(aggregate.SyncCommiteeBits) > 0, "slot %d", slot)
 	}
+}
+
+func TestSyncContributionPoolSignatureIsAggregateOfAddedMessages(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(6)
+	// A validator's signature is aggregated once per occupied committee position.
+	current := s.CurrentSyncCommittee().Copy()
+	keys := current.GetCommittee()
+	keys[20] = keys[3]
+	current.SetCommittee(keys)
+	require.NoError(t, s.SetCurrentSyncCommittee(current))
+
+	pool := NewSyncContributionPool(&clparams.MainnetBeaconConfig)
+	var wantSignatures [][]byte
+	wantBits := make([]byte, 16)
+	for _, step := range []struct {
+		validator int
+		positions []int
+	}{
+		{0, []int{0}},
+		{3, []int{3, 20}},
+		{1, []int{1}},
+		{3, nil},
+		{5, []int{5}},
+		{2, []int{2}},
+	} {
+		require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[step.validator]))
+		for _, position := range step.positions {
+			utils.FlipBitOn(wantBits, position)
+			wantSignatures = append(wantSignatures, msgs[step.validator].Signature[:])
+		}
+		wantSignature, err := bls.AggregateSignatures(wantSignatures)
+		require.NoError(t, err)
+
+		contribution := pool.GetSyncContribution(0, 0, testHash)
+		require.Equal(t, hexutil.Bytes(wantBits), contribution.AggregationBits, "after validator %d", step.validator)
+		require.Equal(t, common.Bytes96(wantSignature), contribution.Signature, "after validator %d", step.validator)
+	}
+}
+
+func TestSyncContributionPoolRejectsMalformedSignatureWithoutChangingContribution(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(2)
+	pool := NewSyncContributionPool(&clparams.MainnetBeaconConfig)
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[0]))
+
+	malformed := msgs[1]
+	for i := range malformed.Signature {
+		malformed.Signature[i] = 0xFF
+	}
+	require.Error(t, pool.AddSyncCommitteeMessage(s, 0, &malformed))
+	contribution := pool.GetSyncContribution(0, 0, testHash)
+	require.Equal(t, 1, utils.BitsOnCount(contribution.AggregationBits))
+	require.Equal(t, msgs[0].Signature, contribution.Signature)
+
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msgs[1]))
+	contribution = pool.GetSyncContribution(0, 0, testHash)
+	require.Equal(t, 2, utils.BitsOnCount(contribution.AggregationBits))
+	wantSignature, err := bls.AggregateSignatures([][]byte{msgs[0].Signature[:], msgs[1].Signature[:]})
+	require.NoError(t, err)
+	require.Equal(t, common.Bytes96(wantSignature), contribution.Signature)
+}
+
+func TestSyncContributionPoolCleanupDropsRunningSignature(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(2)
+	const staleSlot = 10
+	epoch := s.BeaconConfig().SlotsPerEpoch
+	pool := NewSyncContributionPool(s.BeaconConfig())
+
+	require.NoError(t, s.SetSlot(staleSlot))
+	stale := msgs[0]
+	stale.Slot = staleSlot
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &stale))
+
+	require.NoError(t, s.SetSlot(staleSlot+epoch+1))
+	later := msgs[1]
+	later.Slot = staleSlot + epoch + 1
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &later))
+	require.Zero(t, utils.BitsOnCount(pool.GetSyncContribution(staleSlot, 0, testHash).AggregationBits))
+
+	require.NoError(t, s.SetSlot(staleSlot))
+	again := msgs[1]
+	again.Slot = staleSlot
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &again))
+	contribution := pool.GetSyncContribution(staleSlot, 0, testHash)
+	require.Equal(t, 1, utils.BitsOnCount(contribution.AggregationBits))
+	require.Equal(t, msgs[1].Signature, contribution.Signature)
 }

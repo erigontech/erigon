@@ -32,7 +32,7 @@ func createdOverStorage(t *testing.T) (accounts.Address, accounts.StorageKey, *s
 	require.NoError(t, ibs.SetState(x, k2, *uint256.NewInt(1)))
 	ibs.EndTransaction()
 	writes := finalizedWrites(t, ibs, rules)
-	vm.FlushVersionedWrites(writes, false)
+	vm.FlushWrites(writes, false)
 	return x, k5, reader, vm, writes
 }
 
@@ -199,7 +199,7 @@ func slotRead(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Addre
 	ibs.SetTxContext(1, txIdx)
 	_, err := ibs.GetState(x, k)
 	require.NoError(t, err)
-	read, ok := ibs.VersionedReads().storage[x][k]
+	read, ok := ibs.Reads().storage[x][k]
 	require.True(t, ok)
 	return ReadSet{storage: map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]{x: {k: read}}}
 }
@@ -255,7 +255,7 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	writes, err := ibs.FinalizedWrites(rules)
 	require.NoError(t, err)
 	ibs.FlushWritesToVersionMap(writes)
-	ibs.ResetVersionedIO()
+	ibs.ResetIO()
 
 	ibs.SetTxContext(1, 1)
 	snap := ibs.PushSnapshot()
