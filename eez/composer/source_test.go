@@ -225,6 +225,11 @@ func callTo(a common.Address) []byte {
 	return slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f, 0x5f}, push20(a), []byte{0x5a, 0xf1, 0x50})
 }
 
+// staticCallTo calls a statically with no data, dropping the outcome.
+func staticCallTo(a common.Address) []byte {
+	return slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f}, push20(a), []byte{0x5a, 0xfa, 0x50})
+}
+
 // forward calls a with the calldata and value it got, then returns 32 bytes
 // of the output; with revert it reverts instead.
 func forward(a common.Address, revert bool) []byte {

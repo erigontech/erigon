@@ -28,6 +28,7 @@ import (
 	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -152,7 +153,7 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	var created uint64
 	if !registered {
 		// The posting creates it, in the call's entry.
-		if _, created, err = s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil); err != nil {
+		if _, created, err = s.frame(common.Address{}, manager, protocol.EncodeCreateCrossChainProxy(c.Source, c.SourceRollup), uint256.Int{}, nil, nil); err != nil {
 			return nil, Poison(fmt.Errorf("create the proxy of %s on rollup %d: %w", c.Source, c.SourceRollup, err))
 		}
 	}
@@ -160,19 +161,29 @@ func (s *Source) Execute(c *Call) ([]byte, error) {
 	if err != nil {
 		return nil, Poison(err)
 	}
-	reentered := false
 	// The top frame is the manager's call to the proxy itself.
-	hook := func(_ *vm.EVM, depth int, _, addr accounts.Address, _ []byte, _ uint256.Int) ([]byte, bool, error) {
+	isProxy := func(depth int, addr accounts.Address) bool {
 		if depth == 0 {
+			return false
+		}
+		_, ok, err := s.proxyAt(addr.Value())
+		return err == nil && ok
+	}
+	hook := func(_ *vm.EVM, depth int, _, addr accounts.Address, _ []byte, _ uint256.Int) ([]byte, bool, error) {
+		if !isProxy(depth, addr) {
 			return nil, false, nil
 		}
-		if _, ok, err := s.proxyAt(addr.Value()); err != nil || !ok {
-			return nil, false, nil
-		}
-		reentered = true
 		return nil, true, vm.ErrExecutionReverted
 	}
-	ret, used, err := s.frame(manager, proxy, data, c.Value, hook)
+	// The override skips static frames; entering a proxy from one is poison
+	// as well.
+	reentered := false
+	tracer := &tracing.Hooks{OnEnter: func(depth int, _ byte, _, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+		if isProxy(depth, to) {
+			reentered = true
+		}
+	}}
+	ret, used, err := s.frame(manager, proxy, data, c.Value, hook, tracer)
 	switch {
 	case errors.Is(err, vm.ErrInsufficientBalance):
 		return nil, fmt.Errorf("%w: %w", ErrFunding, err)
@@ -198,9 +209,9 @@ func (s *Source) view(data []byte) ([]byte, error) {
 
 // frame calls `to` from `from` with value inside the posting, as a
 // contract would: no intrinsic gas, nonce or fee.
-func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, override vm.CallOverride) ([]byte, uint64, error) {
+func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, override vm.CallOverride, tracer *tracing.Hooks) ([]byte, uint64, error) {
 	gas := min(frameGas, s.header.GasLimit)
-	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override})
+	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override, Tracer: tracer})
 	evm.Reset(evmtypes.TxContext{Origin: s.origin, GasPrice: s.gasPrice}, s.ibs)
 	ret, left, _, err := evm.Call(accounts.InternAddress(from), accounts.InternAddress(to), data, mdgas.MdGas{Execution: gas}, value, false)
 	// A top frame's output lives in the state's buffer, which the next one

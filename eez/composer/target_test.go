@@ -42,6 +42,11 @@ var (
 	revertTarget = common.HexToAddress("0xd000000000000000000000000000000000000003")
 	// reentrant calls l1Proxy, a registered proxy.
 	reentrant = common.HexToAddress("0xd000000000000000000000000000000000000004")
+	// staticReentrant reads l1Proxy statically and ignores the outcome.
+	staticReentrant = common.HexToAddress("0xd000000000000000000000000000000000000008")
+	// staticOfReentrant reads reentrant statically: its call to l1Proxy runs
+	// in a static frame.
+	staticOfReentrant = common.HexToAddress("0xd000000000000000000000000000000000000009")
 	// payee takes any value.
 	payee = common.HexToAddress("0xd000000000000000000000000000000000000005")
 	// tcounter returns its transient count, then counts one more.
@@ -85,6 +90,8 @@ func newTargetFixture(t *testing.T) *targetFixture {
 	m.deploy(callerTarget, []byte{0x33, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3})
 	m.deploy(revertTarget, []byte{0x61, 0xde, 0xad, 0x60, 0x00, 0x52, 0x60, 0x02, 0x60, 0x1e, 0xfd})
 	m.deploy(reentrant, append(callTo(l1Proxy), 0x00))
+	m.deploy(staticReentrant, append(staticCallTo(l1Proxy), 0x00))
+	m.deploy(staticOfReentrant, append(staticCallTo(reentrant), 0x00))
 	m.deploy(payee, []byte{0x00})
 	m.deploy(tcounter, tcounterCode)
 	m.deploy(originTarget, originCode)
@@ -204,6 +211,8 @@ func TestExecuteRefuses(t *testing.T) {
 		{"a reverting target", Call{Target: revertTarget}, 0, ErrCallFailed, true},
 		{"a target calling a proxy", Call{Target: reentrant}, 0, ErrReentry, true},
 		{"a target that is a proxy", Call{Target: l1Proxy}, 0, ErrReentry, true},
+		{"a target reading a proxy statically", Call{Target: staticReentrant}, 0, ErrReentry, true},
+		{"a target calling a proxy in a static frame", Call{Target: staticOfReentrant}, 0, ErrReentry, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newTargetFixture(t)
