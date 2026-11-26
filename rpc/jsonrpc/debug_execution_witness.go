@@ -1103,8 +1103,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context.
-	// Witness generation requires the sequential HexPatriciaHashed (Witness()
-	// type-asserts it); the parallel trie cannot serve it.
+	// Witness generation uses sequential HPH or v3; this option replaces parallel HPH.
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
 	if domains != nil {
 		defer domains.Close()

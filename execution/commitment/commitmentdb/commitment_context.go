@@ -399,6 +399,10 @@ type witnessTrie interface {
 	WitnessesByHash(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (byHash map[string][]byte, provedKeys [][]byte, rootHash []byte, err error)
 }
 
+type leanWitnessTrie interface {
+	WitnessNodes(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error)
+}
+
 func (sdc *SharedDomainsCommitmentContext) witnessTrie() (witnessTrie, error) {
 	wt, ok := sdc.Trie().(witnessTrie)
 	if !ok {
@@ -420,6 +424,9 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Contex
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
+	if wt, ok := sdc.Trie().(leanWitnessTrie); ok {
+		return wt.WitnessNodes(ctx, sdc.updates, produceExclusionProofs)
+	}
 	wt, err := sdc.witnessTrie()
 	if err != nil {
 		return nil, nil, err

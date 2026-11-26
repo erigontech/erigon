@@ -206,15 +206,15 @@
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] write the differential test first, red: `Trie.WitnessNodes` against `trie.WitnessNodesForKeysByHash` over v3
+- [x] write the differential test first, red: `Trie.WitnessNodes` against `trie.WitnessNodesForKeysByHash` over v3
       `WitnessesByHash`, as sets, on the `TestWitnessMatchesHPH` shapes and seeds, both exclusion settings, and each edge
       key alone (full, partial at a child boundary, partial at an extension end, absent, under the account-root extension)
-- [ ] write the error-case tests: nil trie context, corrupt record (`errWitnessHash`)
-- [ ] add `Trie.WitnessNodes(ctx, updates, produceExclusionProofs) (nodes [][]byte, root []byte, err error)` with the rules in
+- [x] write the error-case tests: nil trie context, corrupt record (`errWitnessHash`)
+- [x] add `Trie.WitnessNodes(ctx, updates, produceExclusionProofs) (nodes [][]byte, root []byte, err error)` with the rules in
       Technical Details
-- [ ] `SharedDomainsCommitmentContext.WitnessNodes` calls it for v3; the HPH path keeps `trie.WitnessNodesForKeysByHash`
-- [ ] correct the stale comment at `debug_execution_witness.go:1106-1108`
-- [ ] run v3 and commitmentdb tests, then Task 1 and Task 2 tests, v3 on and off: green
+- [x] `SharedDomainsCommitmentContext.WitnessNodes` calls it for v3; the HPH path keeps `trie.WitnessNodesForKeysByHash`
+- [x] correct the stale comment at `debug_execution_witness.go:1106-1108`
+- [x] run v3 and commitmentdb tests, then Task 1 and Task 2 tests, v3 on and off: green
 
 ### Task 4: move ProofFromNodes to a format-only package
 **Files:**

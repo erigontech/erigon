@@ -50,13 +50,33 @@ type witnessRoot struct {
 type witnessWalk struct {
 	ctx       commitment.PatriciaContext
 	exclusion bool
+	lean      bool
+	rootHash  []byte
 	byHash    map[string][]byte
+	leanNodes [][]byte
+	leanSeen  map[string]struct{}
 	nodes     map[string]*witnessNode
 	roots     map[string]*witnessRoot
 	kbuf      []byte
 }
 
 func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (map[string][]byte, [][]byte, []byte, error) {
+	w, keys, root, err := t.runWitnessWalk(ctx, updates, produceExclusionProofs, false)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return w.byHash, keys, root, nil
+}
+
+func (t *Trie) WitnessNodes(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) ([][]byte, []byte, error) {
+	w, _, root, err := t.runWitnessWalk(ctx, updates, produceExclusionProofs, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	return w.leanNodes, root, nil
+}
+
+func (t *Trie) runWitnessWalk(ctx context.Context, updates *commitment.Updates, produceExclusionProofs, lean bool) (*witnessWalk, [][]byte, []byte, error) {
 	if t.ctx == nil {
 		return nil, nil, nil, errTrieContext
 	}
@@ -67,7 +87,16 @@ func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates,
 		reads = &recordCache{PatriciaContext: t.ctx, recs: t.preRecs}
 	}
 	t.preRecs, t.preRoot = nil, nil
-	w := &witnessWalk{ctx: reads, exclusion: produceExclusionProofs, byHash: make(map[string][]byte), nodes: make(map[string]*witnessNode), roots: make(map[string]*witnessRoot)}
+	w := &witnessWalk{
+		ctx:       reads,
+		exclusion: produceExclusionProofs,
+		lean:      lean,
+		rootHash:  want,
+		byHash:    make(map[string][]byte),
+		leanSeen:  make(map[string]struct{}),
+		nodes:     make(map[string]*witnessNode),
+		roots:     make(map[string]*witnessRoot),
+	}
 	for _, key := range keys {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
@@ -76,13 +105,22 @@ func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates,
 			return nil, nil, nil, fmt.Errorf("witness key %x: %w", key, err)
 		}
 	}
-	return w.byHash, keys, want, nil
+	return w, keys, want, nil
 }
 
 func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
 	if _, ok := w.byHash[string(hash[:])]; !ok {
 		w.byHash[string(hash[:])] = rlp
 	}
+	if !w.lean || len(rlp) < 32 && !bytes.Equal(hash[:], w.rootHash) {
+		return
+	}
+	key := string(rlp)
+	if _, ok := w.leanSeen[key]; ok {
+		return
+	}
+	w.leanSeen[key] = struct{}{}
+	w.leanNodes = append(w.leanNodes, rlp)
 }
 
 func (w *witnessWalk) load(plane byte, addrHash, path []byte) (*witnessNode, error) {
@@ -184,6 +222,9 @@ func (w *witnessWalk) walkPlane(plane byte, addrHash, fullKey, k []byte, want []
 		}
 		return nil
 	}
+	if !w.exclusion && bytes.Equal(k, r.n.path) {
+		return nil
+	}
 	w.emit(r.branch.rlp, r.branch.hash)
 	return w.descend(plane, addrHash, fullKey, r.branch.n, k[len(r.n.path):])
 }
@@ -218,6 +259,9 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, k [
 					return err
 				}
 				w.emit(behind.rlp, behind.hash)
+				return nil
+			}
+			if !w.exclusion && len(k) == len(ext) {
 				return nil
 			}
 			k = k[len(ext):]

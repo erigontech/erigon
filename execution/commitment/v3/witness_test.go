@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -126,6 +127,22 @@ func (b *witnessBed) v3Witness(t testing.TB, keys witnessKeys, exclusion bool) [
 	require.NoError(t, err)
 	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 	require.NoError(t, err)
+	return nodes
+}
+
+func (b *witnessBed) v3NativeWitness(t testing.TB, keys witnessKeys, exclusion bool) [][]byte {
+	t.Helper()
+	ctx := context.Background()
+	tr := b.openV3(ctx)
+	_, _, err := tr.RestoreState(b.v3State)
+	require.NoError(t, err)
+	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	defer u.Close()
+	keys.touch(u)
+	nodes, root, err := tr.WitnessNodes(ctx, u, exclusion)
+	require.NoError(t, err)
+	require.NotEmpty(t, nodes)
+	require.Equal(t, root, crypto.Keccak256(nodes[0]))
 	return nodes
 }
 
@@ -354,8 +371,20 @@ func TestWitnessRejectsCorruptRecords(t *testing.T) {
 			u.TouchHashedKey([]byte{1, 4})
 			_, _, _, err = tr.WitnessesByHash(t.Context(), u, false)
 			require.ErrorIs(t, err, errWitnessHash)
+			_, _, err = tr.WitnessNodes(t.Context(), u, false)
+			require.ErrorIs(t, err, errWitnessHash)
 		})
 	}
+}
+
+func TestWitnessNodesRequiresContext(t *testing.T) {
+	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	defer u.Close()
+	u.TouchHashedKey([]byte{1, 4})
+	nodes, root, err := (&Trie{}).WitnessNodes(t.Context(), u, false)
+	require.ErrorIs(t, err, errTrieContext)
+	require.Nil(t, nodes)
+	require.Nil(t, root)
 }
 
 func TestWitnessMatchesHPH(t *testing.T) {
@@ -376,14 +405,21 @@ func TestWitnessMatchesHPH(t *testing.T) {
 					edges := witnessEdgeKeys(rng, b)
 					for _, exclusion := range []bool{false, true} {
 						label := fmt.Sprintf("seed=%d round=%d exclusion=%t", seed, round, exclusion)
-						requireSameNodes(t, b.hphWitness(t, keys, exclusion), b.v3Witness(t, keys, exclusion), label)
+						hph := b.hphWitness(t, keys, exclusion)
+						v3 := b.v3Witness(t, keys, exclusion)
+						requireSameNodes(t, hph, v3, label)
+						requireSameNodes(t, v3, b.v3NativeWitness(t, keys, exclusion), label+" native")
 						for _, key := range edges.plain {
 							single := witnessKeys{plain: [][]byte{key}}
-							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), fmt.Sprintf("%s plain=%x", label, key))
+							edgeLabel := fmt.Sprintf("%s plain=%x", label, key)
+							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), edgeLabel)
+							requireSameNodes(t, b.v3Witness(t, single, exclusion), b.v3NativeWitness(t, single, exclusion), edgeLabel+" native")
 						}
 						for _, key := range edges.hashed {
 							single := witnessKeys{hashed: [][]byte{key}}
-							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), fmt.Sprintf("%s hashed=%x", label, key))
+							edgeLabel := fmt.Sprintf("%s hashed=%x", label, key)
+							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), edgeLabel)
+							requireSameNodes(t, b.v3Witness(t, single, exclusion), b.v3NativeWitness(t, single, exclusion), edgeLabel+" native")
 						}
 					}
 				}
