@@ -1825,24 +1825,6 @@ func newAdmissionBatch(txns TxnSlots, sources []remoteSource) admissionBatch {
 	return batch
 }
 
-// A remote blob frame can make later inputs from its peer skip proof checks.
-// Leave that suffix for ordered validation after frame simulation.
-func (batch *admissionBatch) earlyPreparationPrefix() []txnAdmission {
-	var prefix []txnAdmission
-	for i := range batch.txns {
-		a := &batch.txns[i]
-		if a.needsPreparation {
-			if !batch.hasFrames {
-				return batch.txns
-			}
-			prefix = batch.txns[:i+1]
-		} else if batch.hasFrames && !a.local && a.txn.TxType() == FrameTxnType && a.txn.HasBlobs() {
-			break
-		}
-	}
-	return prefix
-}
-
 // Read the results under the pool lock, after all replacements and evictions.
 func (batch *admissionBatch) reasons() []txpoolcfg.DiscardReason {
 	reasons := make([]txpoolcfg.DiscardReason, len(batch.txns))
@@ -1864,13 +1846,16 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 		return admissionBatch{}, err
 	}
 	batch := newAdmissionBatch(txns, sources)
-	prefix := batch.earlyPreparationPrefix()
-	if len(prefix) == 0 {
+	candidates := batch.txns
+	for len(candidates) != 0 && !candidates[0].needsPreparation {
+		candidates = candidates[1:]
+	}
+	if len(candidates) == 0 {
 		return batch, nil
 	}
 	err := p.withLockedState(ctx, &txns, func(_ kv.TemporalTx, view kvcache.CacheView) error {
-		for i := range prefix {
-			a := &prefix[i]
+		for i := range candidates {
+			a := &candidates[i]
 			if a.needsPreparation {
 				if err := p.precheckCandidate(a, &batch, view); err != nil {
 					return err
@@ -1882,7 +1867,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	if err != nil {
 		return admissionBatch{}, err
 	}
-	p.prepareCandidates(prefix, batch.preparedCells)
+	p.prepareCandidates(candidates, batch.preparedCells)
 	return batch, nil
 }
 
@@ -2039,10 +2024,8 @@ func (p *TxPool) planPreparation(batch *admissionBatch, view kvcache.CacheView) 
 		a := &txns[i]
 		skipPeer := !a.local && offenders.skip(a.source)
 		if a.pendingPreparation() {
-			if !skipPeer || a.txn.TxType() != FrameTxnType {
-				if err := p.precheckCandidate(a, batch, view); err != nil {
-					return err
-				}
+			if err := p.precheckCandidate(a, batch, view); err != nil {
+				return err
 			}
 			if !skipPeer {
 				remoteBlob := !a.local && a.txn.HasBlobs()
@@ -2183,6 +2166,10 @@ func (p *TxPool) waitForCondition(ctx context.Context, stop <-chan struct{}, rea
 	}
 }
 
+// Local batches can mix ordinary transactions and frames. Gossip admits ordinary
+// transactions first, drops frames from peers whose proofs failed in that batch,
+// and submits each remaining frame separately.
+//
 // Preparing a deferred input preserves earlier frame simulations. Admission rechecks
 // their generation before using them. Any new simulation shares the original deadline.
 // Returning errStateViewStale lets the caller wait for recovery outside that budget.

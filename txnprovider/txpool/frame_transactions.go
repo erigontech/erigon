@@ -215,65 +215,39 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission, cells b
 func (p *TxPool) precheckFrames(txns []txnAdmission) (uint64, common.Hash) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	firstRemoval := p.possibleFrameRemovals(txns)
-	mayBeReplaced := make(map[*metaTxn]bool)
+	ordinaryMayReplace := make(map[*metaTxn]bool)
+	frameMayReplace := make(map[*metaTxn]bool)
 	for i := range txns {
 		a := &txns[i]
+		var pooled *metaTxn
+		if len(p.all.senderIDFrameTxn) != 0 {
+			senderID, _ := p.senders.getID(a.sender)
+			pooled = p.all.senderIDFrameTxn[senderID]
+		}
 		if a.txn.TxType() != FrameTxnType {
+			// An ordinary transaction at the same account nonce can free a
+			// legacy frame's sender slot. Later frames then need simulation.
+			if pooled != nil && !pooled.keyedNonce && pooled.TxnSlot.Nonce == a.txn.Nonce {
+				ordinaryMayReplace[pooled] = true
+			}
 			continue
 		}
-		senderID, _ := p.senders.getID(a.sender)
-		pooled := p.all.senderIDFrameTxn[senderID]
-		if first, ok := firstRemoval[pooled]; ok && first < i {
-			// An earlier input may remove this blocker. Simulate against the head
-			// now so the frame is ready if its sender slot opens at insertion.
+		if ordinaryMayReplace[pooled] {
 			pooled = nil
 		}
-		// A surviving pooled hash decides the local result, but an earlier frame
-		// from this sender can replace it. Remote copies must also honor sidecar
-		// checks and earlier proof failures from the same peer. Neither applies
-		// to a single remote frame without blobs.
+		// A frame replacement keeps the sender slot but can change its hash.
+		// A remote copy of a pooled blob frame also needs a result for its own sidecar.
 		sameHash := pooled != nil && pooled.TxnSlot.IDHash == a.txn.IDHash
-		if sameHash && !mayBeReplaced[pooled] && (a.local || (len(txns) == 1 && !a.txn.HasBlobs())) {
+		if sameHash && !frameMayReplace[pooled] && (a.local || !a.txn.HasBlobs()) {
 			a.frame = frameValidationResult{reason: txpoolcfg.DuplicateHash, blocker: pooled}
 		} else {
 			a.frame = p.precheckFrame(a.txn, a.local, pooled)
 			if a.frame.reason == txpoolcfg.Success && pooled != nil && !sameHash {
-				mayBeReplaced[pooled] = true
+				frameMayReplace[pooled] = true
 			}
 		}
 	}
 	return p.stateGeneration, p.stateBlockHash
-}
-
-// possibleFrameRemovals records the first ordinary input that could replace a
-// pooled frame at its account nonce or evict a remote frame through a sender
-// penalty. Only later inputs can use the freed slot. The caller holds the pool lock.
-func (p *TxPool) possibleFrameRemovals(txns []txnAdmission) map[*metaTxn]int {
-	if len(txns) < 2 || len(p.all.senderIDFrameTxn) == 0 {
-		return nil
-	}
-	firstRemoval := make(map[*metaTxn]int)
-	for i := range txns {
-		a := &txns[i]
-		if a.txn.TxType() == FrameTxnType {
-			continue
-		}
-		senderID, _ := p.senders.getID(a.sender)
-		blocker := p.all.senderIDFrameTxn[senderID]
-		if blocker == nil {
-			continue
-		}
-		if _, seen := firstRemoval[blocker]; seen {
-			continue
-		}
-		mayEvict := !a.local && blocker.subPool&IsLocal == 0
-		mayReplace := !blocker.keyedNonce && blocker.TxnSlot.Nonce == a.txn.Nonce
-		if mayEvict || mayReplace {
-			firstRemoval[blocker] = i
-		}
-	}
-	return firstRemoval
 }
 
 // precheckFrame requires the pool lock.

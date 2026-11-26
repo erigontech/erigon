@@ -1409,40 +1409,25 @@ func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
 }
 
-func TestFramePoolAdmissionAroundSenderPenalty(t *testing.T) {
-	for _, order := range []string{"frame first", "penalty first"} {
-		t.Run(order, func(t *testing.T) {
-			ctx, pool, sender := keyedFramePoolEnv(t)
-			pool.cfg.AccountSlots = 1
-			blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
-			var initial TxnSlots
-			initial.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
-			initial.Append(blocker, sender[:], false)
-			reasons, err := pool.addNewTxns(ctx, initial, nil)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+func TestRemoteFrameAdmissionAfterSenderPenalty(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.AccountSlots = 1
+	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), blocker)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Len(t, pool.remoteFrames.ready, 1)
+	pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+	require.Contains(t, pool.byHash, string(blocker.IDHash[:]))
 
-			// The candidate conflicts with the pooled frame until the penalty evicts it.
-			candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
-			overLimit := newTestSenderTxnSlot(t, sender, 1)
-			var txns TxnSlots
-			want := []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame, txpoolcfg.Spammer}
-			if order == "penalty first" {
-				txns.Append(overLimit, sender[:], false)
-				txns.Append(candidate, sender[:], true)
-				want = []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}
-			} else {
-				txns.Append(candidate, sender[:], true)
-				txns.Append(overLimit, sender[:], false)
-			}
-			reasons, err = pool.addNewTxns(ctx, txns, nil)
-			require.NoError(t, err)
-			require.Equal(t, want, reasons)
-			require.NotContains(t, pool.byHash, string(blocker.IDHash[:]))
-			_, pooled := pool.byHash[string(candidate.IDHash[:])]
-			require.Equal(t, order == "penalty first", pooled)
-		})
-	}
+	// Gossip applies sender penalties before the worker checks frame slots,
+	// even when the frame arrived first.
+	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	reasons = submitRemoteTxns(t, pool, sender, candidate, newTestSenderTxnSlot(t, sender, 1))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, reasons)
+	require.NotContains(t, pool.byHash, string(blocker.IDHash[:]))
+	require.Len(t, pool.remoteFrames.ready, 1)
+	pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+	require.Contains(t, pool.byHash, string(candidate.IDHash[:]))
 }
 
 func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
@@ -1708,14 +1693,11 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1}).Txn.(*types.FrameTransaction)
 	frame.Fees.MaxFee.SetUint64(2*frame.GetGasLimit() + 2*params.GasPerBlob)
 	slot := framePoolSlotWithBlob(t, frame)
-	other := common.Address{2}
-	plain := framePoolSlot(t, other, 1, 2, uint256.Int{1})
 	var initial TxnSlots
-	initial.Append(slot, sender[:], false)
-	initial.Append(plain, other[:], false)
-	reasons, err := pool.addNewTxns(ctx, initial, nil)
+	initial.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, initial)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 	pool.cfg.TotalBlobPoolLimit = 1
 
 	var replay TxnSlot
@@ -1737,36 +1719,15 @@ func TestRemoteFrameChecksPooledSidecar(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 
-	// A failed proof also decides the result of a later pooled frame from the same peer.
-	txns.Append(plain, other[:], false)
-	reasons, err = pool.addNewTxns(ctx, txns, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
-
+	// A remote copy still needs a sidecar result when simulation is unavailable.
 	pool.ethBackend.(*frameValidationBackend).err = errors.New("simulation unavailable")
 	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
-	reasons, err = pool.addNewTxns(ctx, initial, nil)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+	replay.BlobBundles[0].Proofs[0] = slot.BlobBundles[0].Proofs[0]
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash, txpoolcfg.DuplicateHash}, reasons)
-
-	pool.cfg.TotalBlobPoolLimit = txpoolcfg.DefaultConfig.TotalBlobPoolLimit
-	var blob TxnSlot
-	_, err = parser.ParseTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, &frame.ChainID, 1), 0, &blob, nil, false, true, nil)
-	require.NoError(t, err)
-	var mixed TxnSlots
-	mixed.Append(&replay, sender[:], false)
-	mixed.Append(&blob, sender[:], false)
-	batch, err = pool.prepareTxns(ctx, mixed, nil)
-	require.NoError(t, err)
-	require.True(t, batch.txns[1].needsPreparation, "the earlier frame proof can still skip this sidecar")
-	// The sender is now over its limit. Admission must wait for the frame's
-	// proof before charging a penalty for the next input.
-	pool.cfg.AccountSlots = 0
-	reasons, err = pool.addNewTxns(ctx, mixed, nil)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
 }
 
 func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {
