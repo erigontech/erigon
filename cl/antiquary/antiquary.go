@@ -419,7 +419,7 @@ func (s *Antiquary) antiquate() error {
 		return nil
 	}
 
-	var from, to uint64
+	var from, to, canonicalHead uint64
 
 	if err := s.mainDB.View(s.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
@@ -430,13 +430,15 @@ func (s *Antiquary) antiquate() error {
 			return err
 		}
 		to = highest
-		return nil
+		canonicalHead, _, err = beacon_indicies.ReadCanonicalHead(roTx)
+		return err
 	}); err != nil {
 		return err
 	}
 
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	to = min(to, canonicalHead+1)
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
 		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
