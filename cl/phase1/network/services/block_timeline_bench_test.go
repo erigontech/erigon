@@ -30,8 +30,9 @@ type benchClock struct{ eth_clock.EthereumClock }
 func (benchClock) GetCurrentSlot() uint64       { return timelineSlot }
 func (benchClock) GetSlotTime(uint64) time.Time { return timelineSlotStart }
 
-// BenchmarkBlockTimelineImport measures what one gossip block costs the import path: its arrival and one import
-// attempt. The line itself is written by the writer goroutine.
+// BenchmarkBlockTimelineImport measures what one gossip block costs the import path: its arrival, one import attempt
+// and the clock reads around them, which the gossip path makes also with debug logging off. The line itself is written
+// by the writer goroutine.
 func BenchmarkBlockTimelineImport(b *testing.B) {
 	for _, tc := range []struct {
 		name string
@@ -45,10 +46,12 @@ func BenchmarkBlockTimelineImport(b *testing.B) {
 			block, root := timelineBlock(timelineSlot, 6), common.Hash{1}
 			b.ReportAllocs()
 			for b.Loop() {
-				timelines.seen(block, at(time.Second))
-				timelines.importAttempt(block, root, at(time.Second), at(2*time.Second), nil)
+				timelines.seen(block, time.Now())
+				start := time.Now()
+				timelines.importStarted(block, start)
+				timelines.importEnded(block, root, start, time.Now(), nil)
 				// A logged block ignores later imports, so drop its entry to measure a new block each time.
-				delete(timelines.pending, blockGossipKey(block))
+				delete(timelines.pending, block.Signature)
 			}
 		})
 	}

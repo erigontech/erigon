@@ -17,20 +17,18 @@
 package services
 
 import (
-	"context"
+	"encoding/binary"
 	"errors"
 	"math"
 	"testing"
 	"testing/synctest"
 	"time"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -71,7 +69,26 @@ func timelineBlockByProposer(slot, proposer uint64, blobs int) *cltypes.SignedBe
 	for range blobs {
 		block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	}
+	binary.BigEndian.PutUint64(block.Signature[:], slot)
+	binary.BigEndian.PutUint64(block.Signature[8:], proposer)
+	block.Signature[16] = byte(blobs)
 	return block
+}
+
+func importOnce(timelines *blockTimelines, block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
+	timelines.importStarted(block, start)
+	timelines.importEnded(block, root, start, end, err)
+}
+
+func nextRecord(t *testing.T, records chan *log.Record) *log.Record {
+	t.Helper()
+	select {
+	case r := <-records:
+		return r
+	case <-time.After(5 * time.Second):
+		t.Fatal("no timeline line")
+		return nil
+	}
 }
 
 func at(offset time.Duration) time.Time { return timelineSlotStart.Add(offset) }
@@ -92,27 +109,23 @@ func TestBlockTimelineLogsTheStagesOfAnImportedBlock(t *testing.T) {
 	block, root := timelineBlock(timelineSlot, 18), common.Hash{0x0a}
 
 	timelines.seen(block, at(1500*time.Millisecond))
-	timelines.importAttempt(block, root, at(1600*time.Millisecond), at(1700*time.Millisecond), forkchoice.ErrEIP7594ColumnDataNotAvailable)
-	timelines.importAttempt(block, root, at(3900*time.Millisecond), at(4300*time.Millisecond), nil)
+	importOnce(timelines, block, root, at(1600*time.Millisecond), at(1700*time.Millisecond), forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	importOnce(timelines, block, root, at(3900*time.Millisecond), at(4300*time.Millisecond), nil)
 
-	select {
-	case r := <-records:
-		require.Equal(t, log.LvlDebug, r.Lvl)
-		require.Equal(t, map[string]any{
-			"slot":             uint64(timelineSlot),
-			"root":             root,
-			"number":           uint64(26_000_000 + timelineSlot),
-			"blobs":            18,
-			"seenMs":           int64(1500),
-			"firstImportMs":    int64(1600),
-			"importStartMs":    int64(3900),
-			"importedMs":       int64(4300),
-			"attempts":         2,
-			"waitedForColumns": true,
-		}, recordFields(t, r))
-	case <-time.After(5 * time.Second):
-		t.Fatal("no timeline line")
-	}
+	r := nextRecord(t, records)
+	require.Equal(t, log.LvlDebug, r.Lvl)
+	require.Equal(t, map[string]any{
+		"slot":             uint64(timelineSlot),
+		"root":             root,
+		"number":           uint64(26_000_000 + timelineSlot),
+		"blobs":            18,
+		"seenMs":           int64(1500),
+		"firstImportMs":    int64(1600),
+		"importStartMs":    int64(3900),
+		"importedMs":       int64(4300),
+		"attempts":         2,
+		"waitedForColumns": true,
+	}, recordFields(t, r))
 }
 
 func TestBlockTimelineMarksAStageThatWasNotSeen(t *testing.T) {
@@ -121,27 +134,30 @@ func TestBlockTimelineMarksAStageThatWasNotSeen(t *testing.T) {
 	go timelines.run(t.Context())
 	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x0b}
 
-	timelines.importAttempt(block, root, at(time.Second), at(1200*time.Millisecond), nil)
+	importOnce(timelines, block, root, at(time.Second), at(1200*time.Millisecond), nil)
 
-	r := <-records
-	fields := recordFields(t, r)
+	fields := recordFields(t, nextRecord(t, records))
 	require.Equal(t, "-", fields["seenMs"], "a block that did not come through gossip has no arrival time")
 	require.Equal(t, int64(1000), fields["firstImportMs"])
 	require.Equal(t, 1, fields["attempts"])
 	require.Equal(t, false, fields["waitedForColumns"])
 }
 
-func TestBlockTimelineSkipsBlocksOfOldSlots(t *testing.T) {
-	logger, records := timelineLogger(log.LvlDebug)
-	timelines := newBlockTimelines(timelineClock(t, timelineSlot+blockTimelineSlots+1), logger)
-	go timelines.run(t.Context())
-	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x0c}
+func TestBlockTimelineTracksBlocksUpToTwoSlotsOld(t *testing.T) {
+	for _, tc := range []struct {
+		age   uint64
+		lines int
+	}{{age: 2, lines: 1}, {age: 3, lines: 0}} {
+		logger, _ := timelineLogger(log.LvlDebug)
+		timelines := newBlockTimelines(timelineClock(t, timelineSlot+tc.age), logger)
+		block := timelineBlock(timelineSlot, 0)
 
-	timelines.seen(block, at(time.Second))
-	timelines.importAttempt(block, root, at(time.Second), at(2*time.Second), nil)
+		timelines.seen(block, at(time.Second))
+		importOnce(timelines, block, common.Hash{0x0c}, at(time.Second), at(2*time.Second), nil)
 
-	require.Never(t, func() bool { return len(records) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
-	require.Empty(t, timelines.pending)
+		require.Len(t, timelines.lines, tc.lines, "block %d slots old", tc.age)
+		require.Len(t, timelines.pending, tc.lines, "block %d slots old", tc.age)
+	}
 }
 
 func TestBlockTimelineIsOffWithoutDebugLogging(t *testing.T) {
@@ -151,7 +167,7 @@ func TestBlockTimelineIsOffWithoutDebugLogging(t *testing.T) {
 	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x0d}
 
 	timelines.seen(block, at(time.Second))
-	timelines.importAttempt(block, root, at(time.Second), at(2*time.Second), nil)
+	importOnce(timelines, block, root, at(time.Second), at(2*time.Second), nil)
 
 	require.Empty(t, timelines.pending)
 	require.Empty(t, timelines.lines)
@@ -159,24 +175,20 @@ func TestBlockTimelineIsOffWithoutDebugLogging(t *testing.T) {
 }
 
 func TestBlockTimelineDropsLinesInsteadOfBlockingAnImport(t *testing.T) {
-	logger, _ := timelineLogger(log.LvlDebug)
-	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
-	for range blockTimelineBuffer {
-		timelines.lines <- blockTimeline{}
-	}
+	synctest.Test(t, func(t *testing.T) {
+		logger, _ := timelineLogger(log.LvlDebug)
+		timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+		for range blockTimelineBuffer {
+			timelines.lines <- blockTimeline{}
+		}
+		block := timelineBlock(timelineSlot, 0)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		timelines.importAttempt(timelineBlock(timelineSlot, 0), common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("an import waited for the timeline writer")
-	}
-	require.Len(t, timelines.lines, blockTimelineBuffer)
-	require.True(t, timelines.pending[blockGossipKey(timelineBlock(timelineSlot, 0))].logged, "the import reached the send")
+		// A blocking send deadlocks the bubble and fails the test.
+		importOnce(timelines, block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+
+		require.Len(t, timelines.lines, blockTimelineBuffer)
+		require.True(t, timelines.pending[block.Signature].logged, "the import reached the send")
+	})
 }
 
 func TestBlockTimelineForgetsABlockThatNeverImports(t *testing.T) {
@@ -188,14 +200,14 @@ func TestBlockTimelineForgetsABlockThatNeverImports(t *testing.T) {
 
 	stuck := timelineBlock(timelineSlot, 0)
 	timelines.seen(stuck, at(time.Second))
-	timelines.importAttempt(stuck, common.Hash{0x0e}, at(time.Second), at(2*time.Second), errors.New("parent unknown"))
+	importOnce(timelines, stuck, common.Hash{0x0e}, at(time.Second), at(2*time.Second), errors.New("parent unknown"))
 	require.Len(t, timelines.pending, 1)
 
 	currentSlot = timelineSlot + blockTimelineSlots + 1
 	next := timelineBlock(currentSlot, 0)
 	timelines.seen(next, at(time.Second))
 	require.Len(t, timelines.pending, 1)
-	require.Contains(t, timelines.pending, blockGossipKey(next))
+	require.Contains(t, timelines.pending, next.Signature)
 }
 
 func TestBlockTimelineKeepsPendingBlocksBounded(t *testing.T) {
@@ -208,54 +220,25 @@ func TestBlockTimelineKeepsPendingBlocksBounded(t *testing.T) {
 	require.Len(t, timelines.pending, maxPendingBlockTimelines)
 }
 
-func TestGossipBlockThatWaitsForColumnsLogsItsTimeline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		service, block, processing, peerDas := newFuluColumnGossipFixture(t)
-		root, err := block.Block.HashSSZ()
-		require.NoError(t, err)
-		logger, records := timelineLogger(log.LvlDebug)
-		service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
-		storage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), service.beaconCfg, service.emitter)
-		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).DoAndReturn(func(slot uint64, root common.Hash) (bool, error) {
-			return storage.ColumnSidecarExists(t.Context(), slot, root, 0)
-		}).Times(2)
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		go service.timelines.run(ctx)
-		go service.loop(ctx)
-		synctest.Wait()
-
-		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
-		synctest.Wait()
-		processing.err = nil
-		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
-		sidecar.SignedBlockHeader = block.SignedBeaconBlockHeader()
-		require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, sidecar))
-		synctest.Wait()
-
-		require.Len(t, records, 1)
-		fields := recordFields(t, <-records)
-		require.Equal(t, common.Hash(root), fields["root"])
-		require.Equal(t, 2, fields["attempts"])
-		require.Equal(t, true, fields["waitedForColumns"])
-		require.IsType(t, int64(0), fields["seenMs"], "a gossip block has an arrival time")
-	})
-}
-
-func TestBlockTimelineTakesTheLineFieldsFromTheImportedBlock(t *testing.T) {
-	logger, records := timelineLogger(log.LvlDebug)
+func TestBlockTimelineGivesEachBlockOfOneProposerAndSlotItsOwnLine(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
 	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
-	go timelines.run(t.Context())
-	first, imported := timelineBlock(timelineSlot, 2), timelineBlock(timelineSlot, 5)
-	imported.Block.Body.ExecutionPayload.BlockNumber++
+	gossiped, other := timelineBlock(timelineSlot, 2), timelineBlock(timelineSlot, 5)
+	other.Block.Body.ExecutionPayload.BlockNumber++
 
-	timelines.seen(first, at(time.Second))
-	timelines.importAttempt(imported, common.Hash{0x10}, at(2*time.Second), at(3*time.Second), nil)
+	timelines.seen(gossiped, at(time.Second))
+	importOnce(timelines, gossiped, common.Hash{0x0f}, at(2*time.Second), at(3*time.Second), nil)
+	importOnce(timelines, other, common.Hash{0x10}, at(4*time.Second), at(5*time.Second), nil)
 
-	fields := recordFields(t, <-records)
-	require.Equal(t, imported.Block.Body.ExecutionPayload.BlockNumber, fields["number"])
-	require.Equal(t, 5, fields["blobs"])
-	require.Equal(t, common.Hash{0x10}, fields["root"])
+	require.Len(t, timelines.lines, 2)
+	first, second := <-timelines.lines, <-timelines.lines
+	require.Equal(t, common.Hash{0x0f}, first.root)
+	require.Equal(t, 2, first.blobs)
+	require.Equal(t, at(time.Second), first.seen)
+	require.Equal(t, common.Hash{0x10}, second.root)
+	require.Equal(t, 5, second.blobs)
+	require.Equal(t, other.Block.Body.ExecutionPayload.BlockNumber, second.number)
+	require.True(t, second.seen.IsZero(), "the other block did not arrive on gossip")
 }
 
 func TestBlockTimelineCountsTheBlobsOfAGloasBid(t *testing.T) {
@@ -270,9 +253,9 @@ func TestBlockTimelineCountsTheBlobsOfAGloasBid(t *testing.T) {
 		bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	}
 
-	timelines.importAttempt(block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+	importOnce(timelines, block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
 
-	require.Equal(t, 3, recordFields(t, <-records)["blobs"])
+	require.Equal(t, 3, recordFields(t, nextRecord(t, records))["blobs"])
 }
 
 func TestBlockTimelineSkipsBlocksOfFutureSlots(t *testing.T) {
@@ -303,7 +286,7 @@ func TestGossipBlockQueuedForItsParentKeepsItsArrival(t *testing.T) {
 	delete(processing.ForkChoiceStorage.(*mock_services.ForkChoiceStorageMock).Headers, block.Block.ParentRoot)
 
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, block), ErrIgnore)
-	line := service.timelines.pending[blockGossipKey(block)]
+	line := service.timelines.pending[block.Signature]
 	require.NotNil(t, line, "a block queued for its parent passed the signature check")
 	require.False(t, line.seen.IsZero())
 }
@@ -315,28 +298,18 @@ func TestBlockTimelineOfAGloasBlockHasNoFakeNumber(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	block.Block.Slot = timelineSlot
 
-	timelines.importAttempt(block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
+	importOnce(timelines, block, common.Hash{0x11}, at(time.Second), at(2*time.Second), nil)
 
-	require.Equal(t, "-", recordFields(t, <-records)["number"], "a Gloas block carries no execution block number")
+	require.Equal(t, "-", recordFields(t, nextRecord(t, records))["number"], "a Gloas block carries no execution block number")
 }
-
-// notAcceptedStore returns no error from OnBlock but does not take the block, as fork choice does for a block at the
-// finalized horizon.
-type notAcceptedStore struct {
-	forkchoice.ForkChoiceStorage
-}
-
-func (notAcceptedStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
-	return nil
-}
-
-func (notAcceptedStore) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) { return nil, false }
 
 func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
 	service, block, processing, _ := newFuluColumnGossipFixture(t)
 	logger, _ := timelineLogger(log.LvlDebug)
 	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
-	service.forkchoiceStore = notAcceptedStore{ForkChoiceStorage: processing}
+	// The fork choice mock returns no error from OnBlock but does not take the block, as fork choice does for a block
+	// at the finalized horizon.
+	service.forkchoiceStore = processing.ForkChoiceStorage
 
 	accepted, err := service.processAndStoreBlock(t.Context(), block, false)
 	require.NoError(t, err)
@@ -344,17 +317,22 @@ func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
 	require.Empty(t, service.timelines.lines, "an import is complete only once fork choice holds the block")
 }
 
-func TestBlockTimelineLogsABlockImportedByTwoPathsOnce(t *testing.T) {
+func TestBlockTimelineOfOverlappingImportsCountsBothAndLogsOnce(t *testing.T) {
 	logger, _ := timelineLogger(log.LvlDebug)
 	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
 	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x10}
 
-	timelines.seen(block, at(time.Second))
-	timelines.importAttempt(block, root, at(time.Second), at(1200*time.Millisecond), nil)
-	timelines.importAttempt(block, root, at(1100*time.Millisecond), at(1300*time.Millisecond), nil)
+	timelines.seen(block, at(900*time.Millisecond))
+	timelines.importStarted(block, at(time.Second))
+	timelines.importStarted(block, at(1100*time.Millisecond))
+	timelines.importEnded(block, root, at(1100*time.Millisecond), at(1200*time.Millisecond), nil)
+	timelines.importEnded(block, root, at(time.Second), at(1300*time.Millisecond), nil)
 
 	require.Len(t, timelines.lines, 1)
 	line := <-timelines.lines
-	require.Equal(t, 1, line.attempts)
-	require.Equal(t, at(time.Second), line.seen)
+	require.Equal(t, 2, line.attempts)
+	require.Equal(t, at(time.Second), line.firstImport)
+	require.Equal(t, at(1100*time.Millisecond), line.importStart)
+	require.Equal(t, at(1200*time.Millisecond), line.imported)
+	require.Equal(t, at(900*time.Millisecond), line.seen)
 }

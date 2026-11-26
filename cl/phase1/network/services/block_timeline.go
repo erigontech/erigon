@@ -46,8 +46,8 @@ type blockTimelines struct {
 	logger log.Logger
 
 	mu sync.Mutex
-	// Keyed by proposer and slot, which the gossip path has without hashing the block.
-	pending map[proposerIndexAndSlot]*blockTimeline
+	// Keyed by the block signature, which identifies a signed block without hashing it.
+	pending map[common.Bytes96]*blockTimeline
 	lines   chan blockTimeline
 }
 
@@ -68,7 +68,7 @@ func newBlockTimelines(clock eth_clock.EthereumClock, logger log.Logger) *blockT
 	return &blockTimelines{
 		clock:   clock,
 		logger:  logger,
-		pending: make(map[proposerIndexAndSlot]*blockTimeline),
+		pending: make(map[common.Bytes96]*blockTimeline),
 		lines:   make(chan blockTimeline, blockTimelineBuffer),
 	}
 }
@@ -107,8 +107,8 @@ func msSince(slotStart, t time.Time) any {
 	return t.Sub(slotStart).Milliseconds()
 }
 
-// seen records when the block arrived on gossip. Callers record it only after the block signature is verified, as
-// the entry is shared by the blocks of one proposer and slot.
+// seen records when the block arrived on gossip. Callers record it only after the signature check, as another block
+// can carry a copy of the signature.
 func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
 	t.update(block, func(line *blockTimeline) {
 		if line.seen.IsZero() {
@@ -117,14 +117,21 @@ func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
 	})
 }
 
-// importAttempt records one fork choice import of the block and queues its line once an attempt succeeds, that is,
-// once fork choice holds the block.
-func (t *blockTimelines) importAttempt(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
+// importStarted records the start of one fork choice import of the block. Imports by different paths can overlap, so
+// an attempt counts when it starts, not when it ends.
+func (t *blockTimelines) importStarted(block *cltypes.SignedBeaconBlock, start time.Time) {
 	t.update(block, func(line *blockTimeline) {
 		line.attempts++
 		if line.firstImport.IsZero() {
 			line.firstImport = start
 		}
+	})
+}
+
+// importEnded records the result of an import that started at start, and queues the line of the block once fork
+// choice holds it.
+func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
+	t.update(block, func(line *blockTimeline) {
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			line.waitedForColumns = true
 		}
@@ -157,7 +164,7 @@ func (t *blockTimelines) update(block *cltypes.SignedBeaconBlock, apply func(*bl
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := blockGossipKey(block)
+	key := block.Signature
 	line, ok := t.pending[key]
 	if !ok {
 		for pendingKey, pending := range t.pending {
