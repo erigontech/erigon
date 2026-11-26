@@ -545,6 +545,9 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
+	// An unwind can return a transaction when the sender is already above its
+	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
+	// transactions and leave others queued behind the missing nonce.
 	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, true)
 	if err != nil {
 		return frames, err
@@ -1310,7 +1313,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	return p.validateTxWithCells(txn, isLocal, stateCache, nil, false)
 }
 
-func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, unwinding bool) (txpoolcfg.DiscardReason, error) {
+func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, skipSlotLimit bool) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1431,19 +1434,21 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 
-	// Any peer can relay a transaction that its sender signed earlier, so only one that would take
-	// a new slot counts as spam. This check must run after every check that rejects the transaction.
-	//
-	// An unwind can return a transaction when the sender is already above its
-	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
-	// transactions and leave others queued behind the missing nonce.
-	if !unwinding && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
-		next := senderNonce
-		for p.all.get(txn.SenderID, next) != nil {
-			next++
-		}
-		if reason, _ := p.nonceGapReason(txn, next); reason != txpoolcfg.NotSet {
+	// Any peer can relay a transaction that its sender signed earlier, so only a transaction
+	// that passes every other admission check and keeps a new slot counts as spam.
+	if !skipSlotLimit && !isLocal && newSlot && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
+		if reason := p.checkInsertion(txn, false, nil); reason != txpoolcfg.NotSet {
 			return reason, nil
+		}
+		// Pooled nonces can only narrow the gap from the account nonce.
+		if reason, _ := p.nonceGapReason(txn, senderNonce); reason != txpoolcfg.NotSet && !p.hasParkedLegacyFrame(txn.SenderID) {
+			next := senderNonce
+			for p.all.get(txn.SenderID, next) != nil {
+				next++
+			}
+			if reason, _ := p.nonceGapReason(txn, next); reason != txpoolcfg.NotSet {
+				return reason, nil
+			}
 		}
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
@@ -1775,7 +1780,8 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, false)
+		// A spam penalty needs the sidecar and authorization checks that follow this precheck.
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, true)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
 			return err
 		}
@@ -1862,7 +1868,7 @@ func (o *kzgOffenders) add(i int) {
 // A remote KZG failure skips later txns from that peer; with nil sources,
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
 // Non-nil sources must be index-aligned with txns.
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, unwinding bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, skipSlotLimit bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1881,7 +1887,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
-		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, unwinding)
+		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, skipSlotLimit)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
@@ -2263,37 +2269,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
-	// Don't add blob txn to queued if it's less than current pending blob base fee
-	if mt.TxnSlot.HasBlobs() && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
-		return txpoolcfg.FeeTooLow
-	}
-
-	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
-	senderAddr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
-	if !ok {
-		p.logger.Info("senderID not registered, discarding transaction for safety")
-		return txpoolcfg.InvalidSender
-	}
-	if owner, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; !mt.keyedNonce && ok && owner != found {
-		return txpoolcfg.ErrAuthorityReserved
-	}
-
-	// Check if we have txn with same authorization in the pool
-	if mt.TxnSlot.TxType() == SetCodeTxnType {
-		for _, a := range mt.TxnSlot.AuthAndNonces {
-			// Self authorization nonce should be senderNonce + 1
-			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
-				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				// This pool rule is stricter than execution. Its rejection depends only on
-				// the transaction, so cache it to avoid repeating authorization recovery.
-				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.InvalidAuthorizationNonce)
-				return txpoolcfg.InvalidAuthorizationNonce
-			}
-			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
-				p.logger.Debug("setCodeTxn ", "duplicateAuthority", a.authority, "nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				return txpoolcfg.ErrAuthorityReserved
-			}
-		}
+	if reason := p.checkInsertion(mt.TxnSlot, mt.keyedNonce, found); reason != txpoolcfg.NotSet {
+		return reason
 	}
 
 	if found != nil {
@@ -2339,6 +2316,43 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
+	return txpoolcfg.NotSet
+}
+
+// checkInsertion returns why txn cannot take the slot of found, or a new slot when found is nil.
+func (p *TxPool) checkInsertion(txn *TxnSlot, keyedNonce bool, found *metaTxn) txpoolcfg.DiscardReason {
+	// Don't add blob txn to queued if it's less than current pending blob base fee
+	if txn.HasBlobs() && txn.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
+		return txpoolcfg.FeeTooLow
+	}
+
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	senderAddr, ok := p.senders.senderID2Addr[txn.SenderID]
+	if !ok {
+		p.logger.Info("senderID not registered, discarding transaction for safety")
+		return txpoolcfg.InvalidSender
+	}
+	if owner, ok := p.auths[AuthAndNonce{senderAddr, txn.Nonce}]; !keyedNonce && ok && owner != found {
+		return txpoolcfg.ErrAuthorityReserved
+	}
+
+	// Check if we have txn with same authorization in the pool
+	if txn.TxType() == SetCodeTxnType {
+		for _, a := range txn.AuthAndNonces {
+			// Self authorization nonce should be senderNonce + 1
+			if a.authority == senderAddr && a.nonce != txn.Nonce+1 {
+				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", txn.IDHash))
+				// This pool rule is stricter than execution. Its rejection depends only on
+				// the transaction, so cache it to avoid repeating authorization recovery.
+				p.discardReasonsLRU.Add(string(txn.IDHash[:]), txpoolcfg.InvalidAuthorizationNonce)
+				return txpoolcfg.InvalidAuthorizationNonce
+			}
+			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
+				p.logger.Debug("setCodeTxn ", "duplicateAuthority", a.authority, "nonce", a.nonce, "txn", fmt.Sprintf("%x", txn.IDHash))
+				return txpoolcfg.ErrAuthorityReserved
+			}
+		}
+	}
 	return txpoolcfg.NotSet
 }
 
