@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -88,12 +89,17 @@ func (c FinalityContext) RetireToBlockNum() uint64 {
 	return c.retentionBlockNum
 }
 
+func (c FinalityContext) CollateToBlockNum() uint64 {
+	return c.collateToBlockNum
+}
+
 func (c FinalityContext) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
 
 func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
+	var lowestUnwindableBlock uint64
 	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
 		if err != nil {
@@ -103,8 +109,13 @@ func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRo
 			lastBlockInStep = 0
 		}
 		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return err
+		}
+		lowestUnwindableBlock, err = changeset.ReadLowestUnwindableBlock(tx)
 		return err
 	})
-	ok = err == nil && c.retentionBlockNum > 0 && lastBlockInStep <= c.collateToBlockNum
+	// A block that still has a changeset can be unwound, so it must stay out of the files.
+	ok = err == nil && c.retentionBlockNum > 0 && lastBlockInStep <= c.collateToBlockNum && lastBlockInStep < lowestUnwindableBlock
 	return
 }
