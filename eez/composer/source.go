@@ -81,8 +81,8 @@ type Dispatcher func(c *Call) ([]byte, error)
 // Source simulates the held transactions of one source chain on a fork of
 // its state at a block: a call to a proxy registered with manager runs on
 // its rollup through the dispatcher, and returns there without running the
-// proxy, moving value or spending gas. A transaction it keeps leaves its
-// writes for the next.
+// proxy or spending gas; its value moves to the manager, as the proxy
+// forwards it. A transaction it keeps leaves its writes for the next.
 type Source struct {
 	config    *chain.Config
 	header    *types.Header
@@ -168,6 +168,16 @@ func (s *Source) Run(ctx context.Context, tx types.Transaction, dispatch Dispatc
 			}
 			c.Return = out
 			calls = append(calls, c)
+			if !value.IsZero() {
+				err := s.ibs.SubBalance(caller, value, tracing.BalanceChangeTransfer)
+				if err == nil {
+					err = s.ibs.AddBalance(s.manager, value, tracing.BalanceChangeTransfer)
+				}
+				if err != nil {
+					failure = err
+					return nil, true, vm.ErrExecutionReverted
+				}
+			}
 			return out, true, nil
 		}
 		tracer := &tracing.Hooks{

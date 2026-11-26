@@ -256,6 +256,9 @@ var (
 	nobody     = common.HexToAddress("0xc000000000000000000000000000000000000008")
 	// invalider calls the proxy, then hits INVALID.
 	invalider = common.HexToAddress("0xc000000000000000000000000000000000000009")
+	// spender sends its balance through the proxy, then calls it again if
+	// any is left.
+	spender = common.HexToAddress("0xc00000000000000000000000000000000000000a")
 )
 
 type sourceFixture struct {
@@ -283,6 +286,9 @@ func newSourceFixture(t *testing.T) *sourceFixture {
 	m.deploy(unproxied, append(callTo(nobody), 0x00))
 	m.deploy(invalider, append(callTo(proxy), 0xfe))
 	m.deploy(registrar, slices.Concat(callTo(manager), callTo(late), []byte{0x00}))
+	spend := slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f, 0x47}, push20(proxy), []byte{0x5a, 0xf1, 0x50})
+	// SELFBALANCE ISZERO PUSH1 end JUMPI, then the second call, then end.
+	m.deploy(spender, slices.Concat(spend, []byte{0x47, 0x15, 0x60, byte(2*len(spend) + 5), 0x57}, spend, []byte{0x5b, 0x00}))
 	header := &types.Header{Number: *uint256.NewInt(100), Time: 1_800_000_000, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	f.src = NewSource(chain.TestChainOsakaConfig, header, m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, manager, 0)
 	return f
@@ -323,13 +329,22 @@ func TestSourceDispatchesProxyCalls(t *testing.T) {
 	want.Value.SetUint64(5)
 	require.Equal(t, []*Call{want}, calls)
 	require.Equal(t, e.calls, calls)
-	balance, err := f.src.ibs.GetBalance(accounts.InternAddress(proxy))
-	require.NoError(t, err)
-	require.True(t, balance.IsZero(), "the value stays with the caller")
-	balance, err = f.src.ibs.GetBalance(accounts.InternAddress(forwarder))
-	require.NoError(t, err)
-	require.Equal(t, uint256.NewInt(5), &balance)
+	for a, want := range map[common.Address]uint64{proxy: 0, forwarder: 0, manager: 5} {
+		balance, err := f.src.ibs.GetBalance(accounts.InternAddress(a))
+		require.NoError(t, err)
+		require.Equal(t, want, balance.Uint64(), "the proxy forwards the value to the manager: %s", a)
+	}
 	require.Equal(t, uint64(1), f.nonce(t), "kept")
+}
+
+// TestSourceMovesTheValue: a caller whose balance went through a proxy has
+// none left, as on its chain, where the proxy forwards it.
+func TestSourceMovesTheValue(t *testing.T) {
+	f := newSourceFixture(t)
+	calls, err := f.src.Run(t.Context(), f.tx(t, 0, spender, 5, nil), (&echo{}).dispatch, nil)
+	require.NoError(t, err)
+	require.Len(t, calls, 1, "nothing left for a second call")
+	require.Equal(t, uint64(5), calls[0].Value.Uint64())
 }
 
 // TestSourceStopsOnCancellation: a run whose context ends, before or while
