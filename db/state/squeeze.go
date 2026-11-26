@@ -947,6 +947,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 
+	// The commitment domain is unaligned, so its files can start past 0. A resume continues at their end,
+	// and a fold below them would read their newer branches, so a hole before them can not be rebuilt.
+	if files := acRo.d[kv.CommitmentDomain].files; len(files) > 0 && (files[0].startTxNum > 0 || contiguousEnd(files) < files.EndTxNum()) {
+		return nil, fmt.Errorf("commitment files from txNum %d to %d do not start at 0 or have a gap: remove the commitment files and rebuild", files[0].startTxNum, files.EndTxNum())
+	}
 	if existing := acRo.TxNumsInFiles(kv.CommitmentDomain); existing > 0 {
 		skipped := 0
 		for _, r := range ranges {

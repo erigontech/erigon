@@ -1268,3 +1268,37 @@ func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
 	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
 	require.NoError(t, agg.MergeLoop(t.Context()))
 }
+
+// A resume must refuse a missing first commitment range instead of reporting success without it.
+func TestRebuildCommitmentFilesResumeRefusesMissingFirstRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+
+	var first string
+	require.NoError(t, db.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		files := state.AggTx(tx).Files(kv.CommitmentDomain)
+		require.Greater(t, len(files), 1)
+		require.Zero(t, files[0].StartRootNum())
+		first = strings.TrimSuffix(files[0].Fullpath(), filepath.Ext(files[0].Fullpath()))
+		return nil
+	}))
+	agg.Close()
+
+	matches, err := filepath.Glob(first + ".*")
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	for _, fn := range matches {
+		require.NoError(t, dir.RemoveFile(fn))
+	}
+
+	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
+	db, err = temporal.New(db, agg, nil)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, agg.OpenFolder(db))
+
+	_, err = state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	require.ErrorContains(t, err, "do not start at 0")
+}
