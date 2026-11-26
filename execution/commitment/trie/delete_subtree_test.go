@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
@@ -37,6 +38,105 @@ func requireValue(t *testing.T, tr *Trie, key, want []byte) {
 	}
 	require.True(t, ok)
 	require.Equal(t, want, v)
+}
+
+func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rootHash common.Hash
+		prefix   []byte
+		removed  []string
+		kept     []string
+	}{
+		{name: "empty trie"},
+		{name: "hash root", rootHash: common.Hash{1}},
+		{name: "short root", removed: []string{"\x10"}},
+		{name: "duo root", removed: []string{"\x10", "\x20"}},
+		{name: "full root", removed: []string{"\x10", "\x20", "\x30"}},
+		{name: "duo with terminal value", removed: []string{"\x10", ""}},
+		{name: "full with terminal value", removed: []string{"\x10", "\x20", ""}},
+		{name: "duo after extension", prefix: []byte("a"), removed: []string{"a\x10", "a\x20"}},
+		{name: "full after extension", prefix: []byte("a"), removed: []string{"a\x10", "a\x20", "a\x30"}},
+		{name: "duo after odd nibble path", prefix: []byte("a"), removed: []string{"a\x10", "a\x20"}, kept: []string{"b"}},
+		{name: "full after odd nibble path", prefix: []byte("a"), removed: []string{"a\x10", "a\x20", "a\x30"}, kept: []string{"b"}},
+		{name: "inside extension", prefix: []byte("a"), removed: []string{"ab\x10", "ab\x20"}},
+		{name: "inside leaf", prefix: []byte("a"), removed: []string{"ab"}, kept: []string{"b"}},
+		{name: "missing prefix", prefix: []byte("a"), kept: []string{"b", "c"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := New(tc.rootHash)
+			value := []byte{1}
+			for _, key := range tc.removed {
+				tr.Update([]byte(key), value)
+			}
+			for _, key := range tc.kept {
+				tr.Update([]byte(key), value)
+			}
+
+			require.NotPanics(t, func() { tr.DeleteSubtree(tc.prefix) })
+
+			for _, key := range tc.removed {
+				got, _ := tr.Get([]byte(key))
+				require.Nil(t, got, "value at key %x", key)
+			}
+			for _, key := range tc.kept {
+				requireValue(t, tr, []byte(key), value)
+			}
+			if len(tc.kept) == 0 {
+				require.Equal(t, empty.RootHash, tr.Hash())
+			}
+		})
+	}
+}
+
+func TestTrieDeleteSubtree_AccountRoot(t *testing.T) {
+	account := &AccountNode{Storage: ValueNode{1}, Code: CodeNode{1}}
+	tr := NewInMemoryTrie(account)
+	tr.DeleteSubtree(nil)
+	require.Same(t, account, tr.RootNode)
+	require.Nil(t, account.Storage)
+	require.Nil(t, account.Code)
+	require.Equal(t, empty.RootHash, account.Root)
+	require.True(t, account.RootCorrect)
+}
+
+func TestTrieDeleteSubtree_AccountAtPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prefix  []byte
+		removed []string
+	}{
+		{name: "empty key"},
+		{name: "nonempty key", prefix: []byte("a")},
+		{name: "empty key at duo", removed: []string{"\x10"}},
+		{name: "empty key at full", removed: []string{"\x10", "\x20"}},
+		{name: "nonempty key at duo", prefix: []byte("a"), removed: []string{"a\x10"}},
+		{name: "nonempty key at full", prefix: []byte("a"), removed: []string{"a\x10", "a\x20"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := CodeNode{1}
+			account := testAccount(2, u256.U64(200), withCodeHash(crypto.Keccak256Hash(code)))
+			account.Root = common.Hash{1}
+			tr := newEmpty()
+			for _, key := range tc.removed {
+				tr.Update([]byte(key), []byte{1})
+			}
+			tr.UpdateAccount(tc.prefix, account)
+			require.NoError(t, tr.UpdateAccountCode(tc.prefix, code))
+
+			tr.DeleteSubtree(tc.prefix)
+
+			account.Root = empty.RootHash
+			got, ok := tr.GetAccount(tc.prefix)
+			require.True(t, ok)
+			require.Equal(t, account, got)
+			cachedCode, _ := tr.GetAccountCode(tc.prefix)
+			require.Empty(t, cachedCode)
+			want := newEmpty()
+			want.UpdateAccount(tc.prefix, account)
+			require.Equal(t, want.Hash(), tr.Hash())
+		})
+	}
 }
 
 func TestTrieDeleteSubtree_ShortNode(t *testing.T) {

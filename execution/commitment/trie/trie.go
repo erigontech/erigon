@@ -506,6 +506,7 @@ func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (upda
 // up. If preserveAccountNode is set, it clears a matching account's storage and
 // cached code but keeps the account node.
 func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
+	prefixExhausted := preserveAccountNode && keyStart == len(key)-1
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
@@ -514,7 +515,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
 			if preserveAccountNode {
-				removeNodeEntirely = len(key) == keyStart || matchlen == len(key[keyStart:])-1
+				removeNodeEntirely = len(key) == keyStart || (matchlen < len(n.Key) && keyStart+matchlen == len(key)-1)
 			}
 
 			if removeNodeEntirely {
@@ -552,6 +553,12 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
+		if prefixExhausted {
+			if i2 == nibbles.Terminator {
+				return true, preserveTerminalAccount(n.child2)
+			}
+			return true, nil
+		}
 		switch key[keyStart] {
 		case i1:
 			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode)
@@ -586,6 +593,9 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		return
 
 	case *FullNode:
+		if prefixExhausted {
+			return true, preserveTerminalAccount(n.Children[nibbles.Terminator])
+		}
 		child := n.Children[key[keyStart]]
 		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
@@ -644,10 +654,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
 			if preserveAccountNode {
-				n.Storage = nil
-				n.Code = nil
-				n.Root = empty.RootHash
-				n.RootCorrect = true
+				clearAccountSubtree(n)
 				return true, n
 			}
 
@@ -661,14 +668,32 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		newNode = n
 		return
 
+	case *HashNode:
+		if prefixExhausted {
+			return true, nil
+		}
+
 	case nil:
 		updated = false
 		newNode = nil
 		return
-
-	default:
-		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
+	panic(fmt.Sprintf("%T: invalid node: %v (%v)", origNode, origNode, key[:keyStart]))
+}
+
+func preserveTerminalAccount(terminal Node) Node {
+	if account, ok := terminal.(*AccountNode); ok {
+		clearAccountSubtree(account)
+		return NewShortNode([]byte{nibbles.Terminator}, account)
+	}
+	return nil
+}
+
+func clearAccountSubtree(account *AccountNode) {
+	account.Storage = nil
+	account.Code = nil
+	account.Root = empty.RootHash
+	account.RootCorrect = true
 }
 
 // DeleteSubtree removes the subtree at keyPrefix. When keyPrefix identifies an
