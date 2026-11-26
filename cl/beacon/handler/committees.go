@@ -63,8 +63,10 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 
 	buildResponse := func(s *state.CachingBeaconState, epoch uint64) ([]*committeeResponse, error) {
-		if !seedMixAvailable(s, epoch) {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("committees for epoch %d require a RANDAO mix unavailable in state epoch %d", epoch, state.Epoch(s)))
+		cfg := s.BeaconConfig()
+		stateEpoch := state.Epoch(s)
+		if !randaoMixAvailable(stateEpoch+cfg.MinSeedLookahead+1, epoch, cfg.EpochsPerHistoricalVector) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("committees for epoch %d require a RANDAO mix unavailable in state epoch %d", epoch, stateEpoch))
 		}
 		resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 		committeeCount := s.CommitteeCount(epoch)
@@ -196,10 +198,4 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		}
 	}
 	return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
-}
-
-func seedMixAvailable(s *state.CachingBeaconState, epoch uint64) bool {
-	cfg := s.BeaconConfig()
-	latestSeedEpoch := state.Epoch(s) + cfg.MinSeedLookahead + 1
-	return randaoMixAvailable(latestSeedEpoch, epoch, cfg.EpochsPerHistoricalVector)
 }

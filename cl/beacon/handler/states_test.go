@@ -808,11 +808,19 @@ func TestGetRandaoHistoricalEpochBoundary(t *testing.T) {
 	}
 }
 
+func requireCommitteeStatus(t *testing.T, h *ApiHandler, stateID string, epoch uint64, want int) {
+	t.Helper()
+
+	path := fmt.Sprintf("/eth/v1/beacon/states/%s/committees?epoch=%d", stateID, epoch)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, want, rec.Code, "GET %s", path)
+}
+
 func TestGetCommitteesHeadSeedBounds(t *testing.T) {
-	_, blocks, _, _, head, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, blocks, _, _, head, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headEpoch := state.Epoch(head)
 	recentSlot := blocks[0].Block.Slot
-	fcu.LowestAvailableSlotVal = &recentSlot
 	require.Less(t, recentSlot/h.beaconChainCfg.SlotsPerEpoch, headEpoch)
 	require.NotEqual(t, head.GetRandaoMixes(headEpoch), head.GetRandaoMixes(headEpoch+1))
 
@@ -825,10 +833,7 @@ func TestGetCommitteesHeadSeedBounds(t *testing.T) {
 				{headEpoch + 2, http.StatusOK},
 				{headEpoch + 3, http.StatusBadRequest},
 			} {
-				path := fmt.Sprintf("/eth/v1/beacon/states/%s/committees?epoch=%d", stateID, tc.epoch)
-				rec := httptest.NewRecorder()
-				h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
-				require.Equal(t, tc.code, rec.Code, "GET %s", path)
+				requireCommitteeStatus(t, h, stateID, tc.epoch, tc.code)
 			}
 		})
 	}
@@ -836,9 +841,7 @@ func TestGetCommitteesHeadSeedBounds(t *testing.T) {
 
 func TestGetCommitteesHeadSeedRetention(t *testing.T) {
 	_, _, _, _, head, h, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	advanced, err := head.Copy()
-	require.NoError(t, err)
-	cfg := advanced.BeaconConfig()
+	cfg := head.BeaconConfig()
 	vectorLength := cfg.EpochsPerHistoricalVector
 
 	for _, tc := range []struct {
@@ -854,13 +857,9 @@ func TestGetCommitteesHeadSeedRetention(t *testing.T) {
 		{vectorLength + 1, 3, http.StatusBadRequest},
 	} {
 		t.Run(fmt.Sprintf("state_%d_epoch_%d", tc.stateEpoch, tc.epoch), func(t *testing.T) {
-			require.NoError(t, advanced.SetSlot(tc.stateEpoch*cfg.SlotsPerEpoch))
-			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(advanced, syncedData.HeadRoot()))
-
-			path := fmt.Sprintf("/eth/v1/beacon/states/head/committees?epoch=%d", tc.epoch)
-			rec := httptest.NewRecorder()
-			h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
-			require.Equal(t, tc.code, rec.Code, "GET %s", path)
+			require.NoError(t, head.SetSlot(tc.stateEpoch*cfg.SlotsPerEpoch))
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(head, syncedData.HeadRoot()))
+			requireCommitteeStatus(t, h, "head", tc.epoch, tc.code)
 		})
 	}
 }
@@ -869,16 +868,11 @@ func TestGetCommitteesHeadSeedBoundUsesViewedStateEpoch(t *testing.T) {
 	_, _, _, _, head, h, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headEpoch := state.Epoch(head)
 	slotsPerEpoch := head.BeaconConfig().SlotsPerEpoch
-	advanced, err := head.Copy()
-	require.NoError(t, err)
-	require.NoError(t, advanced.SetSlot((headEpoch+1)*slotsPerEpoch))
-	h.syncedData = overwriteBeforeViewSyncedData{SyncedData: syncedData, t: t, next: advanced}
+	require.NoError(t, head.SetSlot((headEpoch+1)*slotsPerEpoch))
+	h.syncedData = overwriteBeforeViewSyncedData{SyncedData: syncedData, t: t, next: head}
 	require.Equal(t, headEpoch, h.syncedData.HeadSlot()/slotsPerEpoch)
 
-	path := fmt.Sprintf("/eth/v1/beacon/states/head/committees?epoch=%d", headEpoch+3)
-	rec := httptest.NewRecorder()
-	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
-	require.Equal(t, http.StatusOK, rec.Code, "GET %s", path)
+	requireCommitteeStatus(t, h, "head", headEpoch+3, http.StatusOK)
 }
 
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
