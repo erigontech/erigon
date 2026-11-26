@@ -1237,14 +1237,16 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		b.timelines.importStarted(block, start)
 		err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true)
 		end := time.Now()
+		if err == nil {
+			_, accepted = b.forkchoiceStore.GetHeader(blockRoot)
+		}
+		b.timelines.importEnded(block, common.Hash(blockRoot), start, end, accepted, err)
 		if err != nil {
-			b.timelines.importEnded(block, common.Hash(blockRoot), start, end, err)
 			return false, err
 		}
-		if _, accepted = b.forkchoiceStore.GetHeader(blockRoot); !accepted {
+		if !accepted {
 			return false, nil
 		}
-		b.timelines.importEnded(block, common.Hash(blockRoot), start, end, nil)
 		go b.importBlockOperations(block)
 	}
 	if !persisted {

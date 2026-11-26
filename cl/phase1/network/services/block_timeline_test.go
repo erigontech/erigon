@@ -78,7 +78,7 @@ func timelineBlockByProposer(slot, proposer uint64, blobs int) *cltypes.SignedBe
 
 func importOnce(timelines *blockTimelines, block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
 	timelines.importStarted(block, start)
-	timelines.importEnded(block, root, start, end, err)
+	timelines.importEnded(block, root, start, end, err == nil, err)
 }
 
 func nextRecord(t *testing.T, records chan *log.Record) *log.Record {
@@ -318,6 +318,7 @@ func TestBlockNotAcceptedByForkChoiceLogsNoTimeline(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, accepted)
 	require.Empty(t, service.timelines.lines, "an import is complete only once fork choice holds the block")
+	require.Zero(t, service.timelines.pending[block.Signature].inFlight, "the attempt has ended")
 }
 
 func TestBlockTimelineOfOverlappingImportsCountsBothAndLogsOnce(t *testing.T) {
@@ -328,8 +329,8 @@ func TestBlockTimelineOfOverlappingImportsCountsBothAndLogsOnce(t *testing.T) {
 	timelines.seen(block, at(900*time.Millisecond))
 	timelines.importStarted(block, at(time.Second))
 	timelines.importStarted(block, at(1100*time.Millisecond))
-	timelines.importEnded(block, root, at(1100*time.Millisecond), at(1200*time.Millisecond), nil)
-	timelines.importEnded(block, root, at(time.Second), at(1300*time.Millisecond), nil)
+	timelines.importEnded(block, root, at(1100*time.Millisecond), at(1200*time.Millisecond), true, nil)
+	timelines.importEnded(block, root, at(time.Second), at(1300*time.Millisecond), true, nil)
 
 	require.Len(t, timelines.lines, 1)
 	line := <-timelines.lines
@@ -349,7 +350,7 @@ func TestBlockTimelineKeepsTheEarliestArrivalAndStart(t *testing.T) {
 	timelines.seen(block, at(time.Second))
 	timelines.importStarted(block, at(1300*time.Millisecond))
 	timelines.importStarted(block, at(1200*time.Millisecond))
-	timelines.importEnded(block, root, at(1200*time.Millisecond), at(1400*time.Millisecond), nil)
+	timelines.importEnded(block, root, at(1200*time.Millisecond), at(1400*time.Millisecond), true, nil)
 
 	require.Len(t, timelines.lines, 1)
 	line := <-timelines.lines
@@ -429,7 +430,7 @@ func TestBlockTimelineWaitsForAnImportInFlightBeforeTheFallback(t *testing.T) {
 	timelines.importStarted(block, at(time.Second))
 	timelines.importedElsewhere(block, root)
 	require.Empty(t, timelines.lines, "the import in flight logs the line")
-	timelines.importEnded(block, root, at(time.Second), at(2*time.Second), nil)
+	timelines.importEnded(block, root, at(time.Second), at(2*time.Second), true, nil)
 
 	require.Len(t, timelines.lines, 1)
 	line := <-timelines.lines

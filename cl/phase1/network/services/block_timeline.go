@@ -125,15 +125,15 @@ func (t *blockTimelines) importStarted(block *cltypes.SignedBeaconBlock, start t
 	})
 }
 
-// importEnded records the result of an import that started at start, and queues the line of the block once fork
-// choice holds it.
-func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
+// importEnded records the end of an import that started at start, and queues the line of the block if fork choice
+// accepted it. Every importStarted must be followed by one importEnded.
+func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, accepted bool, err error) {
 	t.update(block, existingEntry, func(line *blockTimeline) {
 		line.inFlight--
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			line.waitedForColumns = true
 		}
-		if err != nil {
+		if !accepted {
 			return
 		}
 		line.importStart, line.imported = start, end

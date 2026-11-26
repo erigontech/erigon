@@ -49,7 +49,7 @@ func BenchmarkBlockTimelineImport(b *testing.B) {
 				timelines.seen(block, time.Now())
 				start := time.Now()
 				timelines.importStarted(block, start)
-				timelines.importEnded(block, root, start, time.Now(), nil)
+				timelines.importEnded(block, root, start, time.Now(), true, nil)
 				// A logged block ignores later imports, so drop its entry to measure a new block each time.
 				delete(timelines.pending, block.Signature)
 			}
