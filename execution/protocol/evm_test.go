@@ -51,8 +51,6 @@ func TestGetHashFnAnswersZeroForALaterBlock(t *testing.T) {
 	}
 }
 
-// A walk back over several ancestors answers their hashes and remembers them, so repeated
-// lookups cost no more header reads.
 func TestGetHashFnWalksBackOverAncestors(t *testing.T) {
 	const chainLength = 10
 	hashes := make(map[uint64]common.Hash, chainLength)

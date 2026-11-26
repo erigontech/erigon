@@ -22,6 +22,7 @@ package protocol
 import (
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -116,7 +117,9 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
 
-	hashLookupCache := map[uint64]common.Hash{refNumber: refHash}
+	// lru.New only returns err on -ve size
+	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
+	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
 		if n >= blockNumber {
@@ -133,7 +136,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			return refHash, nil
 		}
 
-		if hash, ok := hashLookupCache[n]; ok {
+		if hash, ok := hashLookupCache.Get(n); ok {
 			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
 		}
@@ -145,7 +148,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 		for {
 			for {
-				hash, ok := hashLookupCache[lastKnownNumber-1]
+				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
 
 				if !ok {
 					break
@@ -172,7 +175,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
-			hashLookupCache[lastKnownNumber] = lastKnownHash
+			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
 
 			if n == lastKnownNumber {
 				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
