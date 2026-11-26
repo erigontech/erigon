@@ -364,6 +364,23 @@ func TestExecuteBuysThePostingsGas(t *testing.T) {
 	require.False(t, IsPoison(err))
 }
 
+// TestRunAfterAnEmptyPosting: a trigger of a bundle without outbound calls
+// still runs after its posting: the poster's nonce moved on and its gas
+// bought.
+func TestRunAfterAnEmptyPosting(t *testing.T) {
+	f := newTargetFixture(t)
+	poster := common.Address{0xee, 0x01}
+	f.m.fund(poster, 1e9)
+	f.src.PostedBy(poster, uint256.NewInt(2), 1_000_000)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	_, err = f.src.Run(t.Context(), (&sourceFixture{key: key}).tx(t, 0, probe, 0, nil), (&echo{}).dispatch, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), f.nonce(t, poster))
+	require.Equal(t, uint64(1e9-3_000_000), f.balance(t, poster))
+}
+
 // TestExecuteWithinThePostingsGas: a frame gets at most what the posting's
 // gas limit leaves after the entries before it, past the two calls that
 // reach the proxy; one failing on what they left waits, where it would run

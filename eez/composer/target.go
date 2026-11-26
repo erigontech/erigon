@@ -127,12 +127,18 @@ func (s *Source) startPosting() error {
 	return s.ibs.SubBalance(s.origin, fee, tracing.BalanceDecreaseGasBuy)
 }
 
-// closePosting ends the posting, which precedes the triggers.
+// closePosting ends the posting, which precedes the triggers: one no
+// outbound call opened still moves its sender's nonce on and buys its gas.
 func (s *Source) closePosting() error {
-	open := s.posting == postingOpen
+	phase := s.posting
 	s.posting = postingClosed
-	if !open {
+	switch {
+	case phase == postingClosed, phase == postingIdle && s.gasLimit == 0:
 		return nil
+	case phase == postingIdle:
+		if err := s.startPosting(); err != nil {
+			return err
+		}
 	}
 	return s.finalize()
 }
