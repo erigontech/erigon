@@ -95,8 +95,8 @@ func TestSubnetsOfConnectedPeersIgnoresTopicPeersThatAreGone(t *testing.T) {
 	require.NotContains(t, peerToSubnets, peer.ID("gone"))
 }
 
-// idleTestSentinel is a sentinel with the subnet-coverage dependencies: a clock and a gossipsub with
-// no subscriptions, so no peer is needed by a subnet.
+// idleTestSentinel returns a Sentinel whose router tracks remote subscriptions
+// without joining the subnet topics itself.
 func idleTestSentinel(t *testing.T, local host.Host, lastUseful map[peer.ID]time.Time) *Sentinel {
 	t.Helper()
 	s := testSentinel(t, local)
@@ -134,21 +134,15 @@ func TestEvictIdlePeersFreesAnInboundSlotWhenOnlyTheInboundShareIsFull(t *testin
 }
 
 func TestEvictIdlePeersKeepsThePeerASubnetNeeds(t *testing.T) {
-	local, remote := connectedPair(t)
+	local := newListeningHost(t)
 	now := time.Now()
-	s := idleTestSentinel(t, local, map[peer.ID]time.Time{remote.ID(): now.Add(-2 * peerIdleWindow)})
-	topicName := fmt.Sprintf("/eth2/%x/%s/%s", common.Bytes4{1, 2, 3, 4}, gossip.TopicNameBeaconAttestation(0), gossip.SSZSnappyCodec)
-	remotePS, err := pubsub.NewGossipSub(t.Context(), remote)
-	require.NoError(t, err)
-	topic, err := remotePS.Join(topicName)
-	require.NoError(t, err)
-	_, err = topic.Subscribe()
-	require.NoError(t, err)
-	require.Eventually(t, func() bool { return len(s.p2p.Pubsub().ListPeers(topicName)) == 1 }, 5*time.Second, 10*time.Millisecond)
+	lastUseful := map[peer.ID]time.Time{}
+	s, remotes := subnet0Sentinel(t, local, 1, lastUseful)
+	lastUseful[remotes[0]] = now.Add(-2 * peerIdleWindow)
 
 	s.cfg.MaxPeerCount = 1
 	s.evictIdlePeers(now)
-	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()), "the only peer of subnet 0 stays")
+	require.Equal(t, network.Connected, local.Network().Connectedness(remotes[0]), "the only peer of subnet 0 stays")
 }
 
 func TestEvictIdlePeersKeepsAUsefulPeerAndAStaticPeer(t *testing.T) {
@@ -232,29 +226,28 @@ func withClosingPeer(s *Sentinel, local host.Host, closing peer.ID, lastUseful m
 	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: closing}}, ps: s.p2p.Pubsub(), lastUseful: lastUseful}
 }
 
-var subnet0Topic = fmt.Sprintf("/eth2/%x/%s/%s", common.Bytes4{1, 2, 3, 4}, gossip.TopicNameBeaconAttestation(0), gossip.SSZSnappyCodec)
-
-func connectSubnet0Peers(t *testing.T, local host.Host, n int) []peer.ID {
+func subnet0Sentinel(t *testing.T, local host.Host, peerCount int, lastUseful map[peer.ID]time.Time) (*Sentinel, []peer.ID) {
 	t.Helper()
-	remotes := make([]peer.ID, 0, n)
-	for range n {
-		remote := connectOutbound(t, local)
+	s := idleTestSentinel(t, local, lastUseful)
+	topicName := fmt.Sprintf("/eth2/%x/%s/%s", common.Bytes4{1, 2, 3, 4}, gossip.TopicNameBeaconAttestation(0), gossip.SSZSnappyCodec)
+	remotes := make([]peer.ID, 0, peerCount)
+	for range peerCount {
+		remote := newListeningHost(t)
 		remotePS, err := pubsub.NewGossipSub(t.Context(), remote)
 		require.NoError(t, err)
-		topic, err := remotePS.Join(subnet0Topic)
+		topic, err := remotePS.Join(topicName)
 		require.NoError(t, err)
 		_, err = topic.Subscribe()
 		require.NoError(t, err)
+		// Dial after both routers are ready. If a router receives its peer's protocol
+		// update before it processes its first stream error, it may never retry.
+		require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}))
 		remotes = append(remotes, remote.ID())
 	}
-	return remotes
-}
-
-func subnet0Sentinel(t *testing.T, local host.Host, remotes []peer.ID, lastUseful map[peer.ID]time.Time) *Sentinel {
-	t.Helper()
-	s := idleTestSentinel(t, local, lastUseful)
-	require.Eventually(t, func() bool { return len(s.p2p.Pubsub().ListPeers(subnet0Topic)) == len(remotes) }, 5*time.Second, 10*time.Millisecond)
-	return s
+	require.Eventually(t, func() bool {
+		return len(s.p2p.Pubsub().ListPeers(topicName)) == peerCount
+	}, 5*time.Second, 10*time.Millisecond)
+	return s, remotes
 }
 
 func TestPeerCountsByDirectionSkipsAPeerWhoseConnectionsAreClosed(t *testing.T) {
@@ -269,14 +262,13 @@ func TestPeerCountsByDirectionSkipsAPeerWhoseConnectionsAreClosed(t *testing.T) 
 func TestEvictIdlePeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
 	local := newListeningHost(t)
 	now := time.Now()
-	remotes := connectSubnet0Peers(t, local, minimumPeersPerSubnet+1)
 	lastUseful := map[peer.ID]time.Time{}
+	s, remotes := subnet0Sentinel(t, local, minimumPeersPerSubnet+1, lastUseful)
 	for _, pid := range remotes {
 		lastUseful[pid] = now
 	}
 	idle, closing := remotes[0], remotes[len(remotes)-1]
 	lastUseful[idle] = now.Add(-2 * peerIdleWindow)
-	s := subnet0Sentinel(t, local, remotes, lastUseful)
 	withClosingPeer(s, local, closing, lastUseful)
 
 	s.cfg.MaxPeerCount = 1
@@ -286,9 +278,8 @@ func TestEvictIdlePeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
 
 func TestPruneExcessPeersCountsOnlyConnectedPeersInSubnetCoverage(t *testing.T) {
 	local := newListeningHost(t)
-	remotes := connectSubnet0Peers(t, local, 2)
+	s, remotes := subnet0Sentinel(t, local, 2, nil)
 	closing, last := remotes[0], remotes[1]
-	s := subnet0Sentinel(t, local, remotes, nil)
 	withClosingPeer(s, local, closing, nil)
 
 	s.cfg.MaxPeerCount = 0
