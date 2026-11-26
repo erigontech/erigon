@@ -415,6 +415,13 @@ func TestCaplinStateRemoveOverlapsReportsDownloaderKeys(t *testing.T) {
 	}
 }
 
+func TestDownloaderKeysUseSnapshotRoot(t *testing.T) {
+	root := t.TempDir()
+	caplinDir := filepath.Join(root, "consensus-files")
+	name := filepath.Join(caplinDir, "v1.1-000000-000050-PendingDepositsDump.seg")
+	require.Equal(t, []string{"consensus-files/v1.1-000000-000050-PendingDepositsDump.seg"}, downloaderKeys(root, caplinDir, []string{filepath.Base(name)}))
+}
+
 func TestCaplinStateRemoveOverlapsSkipsTheCallbackWithNothingToRemove(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())

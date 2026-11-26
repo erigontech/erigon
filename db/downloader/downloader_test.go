@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -1470,4 +1473,94 @@ func TestDownloadRequestsCountIsReadUnderLock(t *testing.T) {
 	}
 	wg.Wait()
 	require.Zero(t, d.activeDownloadRequests)
+}
+
+func TestSeedableFilesPreserveSnapshotKeys(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	rootNames := []string{
+		snaptype.BeaconBlocks.FileName(snaptype.Version{}, 0, 50_000),
+		snaptype.BlobSidecars.FileName(snaptype.Version{}, 0, 50_000),
+		snaptype.BlobSidecars.IdxFileNames(0, 50_000)[0],
+		"salt-blocks.txt",
+		state.ERIGONDB_SETTINGS_FILE,
+	}
+	for _, name := range rootNames {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), nil, 0o644))
+	}
+
+	stateName := snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, stateName), nil, 0o644))
+
+	got, err := SeedableFiles(dirs, "", true)
+	require.NoError(t, err)
+	require.ElementsMatch(t, append(rootNames, filepath.ToSlash(filepath.Join("caplin", stateName))), got)
+}
+
+func TestAddNewSeedableFileKeepsUnknownFileBehavior(t *testing.T) {
+	for _, name := range []string{
+		filepath.Join("caplin", snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)),
+		"salt-blocks.txt",
+		filepath.Join("caplin", "v1.1-000000-000050-BlockProposers.seg"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			test := newDownloaderTest(t)
+			require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), []byte("data"), 0o644))
+			require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), name))
+		})
+	}
+}
+
+func checkSeedableFile(t *testing.T, dir, name string, all bool, want []string) {
+	t.Helper()
+	dirs := datadir.New(filepath.Join(t.TempDir(), dir))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte(name), 0o644))
+	keys, err := SeedableFiles(dirs, "mainnet", all)
+	require.NoError(t, err)
+	if !slices.Equal(keys, want) {
+		t.Errorf("SeedableFiles(all=%t) = %q, want %q", all, keys, want)
+	}
+}
+
+func TestSeedableNestedFileKeys(t *testing.T) {
+	names := []string{"salt-blocks.txt", "salt-state.txt", "erigondb.toml"}
+	for _, typ := range slices.Concat(snaptype2.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes) {
+		names = append(names, typ.FileName(snaptype.Version{}, 0, 50_000))
+		names = append(names, typ.IdxFileNames(0, 50_000)...)
+	}
+	for _, name := range names {
+		key := "caplin/" + name
+		t.Run(name, func(t *testing.T) {
+			checkSeedableFile(t, "caplin-node", key, true, []string{key})
+			if filepath.Ext(name) == ".seg" {
+				checkSeedableFile(t, "caplin-node", key, false, []string{key})
+			}
+		})
+	}
+}
+
+func TestSeedableBareCaplinStateRange(t *testing.T) {
+	for _, typ := range snaptype.CaplinStateSnapshotTypes {
+		name := typ.FileName(snaptype.Version{}, 0, 50_000)
+		t.Run(name, func(t *testing.T) { checkSeedableFile(t, "caplin-node", name, false, nil) })
+	}
+}
+
+func TestSeedableAllRootFiles(t *testing.T) {
+	for _, name := range []string{"v1.0-accounts.0-32.seg", "oops-000000-000100-headers.seg", "v1.0-000000-000100-nosuchtype.seg"} {
+		t.Run(name, func(t *testing.T) { checkSeedableFile(t, "el", name, true, []string{name}) })
+	}
+}
+
+func TestSeedRPCUnknownELFile(t *testing.T) {
+	const name = "v1.0-000000-000100-nosuchtype.seg"
+	d := newDownloaderTest(t)
+	require.NoError(t, os.WriteFile(filepath.Join(d.dirs.Snap, name), []byte(name), 0o644))
+	server, err := NewGrpcServer(d.downloader)
+	require.NoError(t, err)
+	_, err = server.Seed(t.Context(), &downloaderproto.SeedRequest{Paths: []string{name}})
+	if err != nil {
+		t.Fatalf("Seed(%q) = %v, want success", name, err)
+	}
+	require.Contains(t, d.downloader.torrentsByName, name)
 }

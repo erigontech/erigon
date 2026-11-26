@@ -65,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -832,15 +831,6 @@ func (d *Downloader) VerifyData(
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
-	ff, isStateFile, ok := snaptype.ParseFileName("", name)
-	if ok {
-		// An unregistered caplin table name leaves ff.Type nil but populates
-		// CaplinTypeString; those stay seedable by name.
-		if !isStateFile && ff.Type == nil && ff.CaplinTypeString == "" {
-			return fmt.Errorf("nil ptr after parsing file: %s", name)
-		}
-	}
-
 	// if we don't have the torrent file we build it if we have the .seg file
 	_, err := BuildTorrentIfNeed(ctx, name, d.snapDir(), d.torrentFS)
 	if err != nil {
@@ -1557,7 +1547,7 @@ func (d *Downloader) saveMetainfoFromTorrent(t *torrent.Torrent) error {
 }
 
 func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap, chainName, all)
+	files, err := seedableSegmentFiles(dirs.Snap, dirs.Snap, chainName, all)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
@@ -1582,7 +1572,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 	// check if dirs.SnapCaplin exists
 	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
-		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, dirs.Snap, chainName, all)
 		if err != nil {
 			return nil, err
 		}

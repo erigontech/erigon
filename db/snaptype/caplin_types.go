@@ -47,3 +47,7 @@ func init() {
 func IsCaplinType(t Enum) bool {
 	return t >= MinCaplinEnum && t < MaxCaplinEnum
 }
+
+func IsBlobSidecarType(t Enum) bool {
+	return t == CaplinEnums.BlobSidecars
+}

@@ -99,7 +99,8 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 // isBlobSidecarFile matches blob sidecar segments and their index, which is named after
 // the index (blocksidecars), not the segment type.
 func isBlobSidecarFile(name string) bool {
-	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	info, _, ok := snaptype.ParseFileName("", name)
+	return ok && info.Type != nil && snaptype.IsBlobSidecarType(info.Type.Enum())
 }
 
 // BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
@@ -121,12 +122,11 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, er
 	}
 	var tip uint64
 	for _, p := range items {
-		if !isBlobSidecarFile(p.Name) {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok || info.Type == nil || !snaptype.IsBlobSidecarType(info.Type.Enum()) {
 			continue
 		}
-		if info, _, ok := snaptype.ParseFileName("", p.Name); ok {
-			tip = max(tip, info.To)
-		}
+		tip = max(tip, info.To)
 	}
 	if tip <= r.ServeWindowSlots {
 		return 0, nil
@@ -674,11 +674,13 @@ func SnapshotsToDownload(
 	}
 
 	for _, p := range preverifiedBlockSnapshots.Items {
-		isCaplinFile := strings.Contains(p.Name, "beaconblocks") || isBlobSidecarFile(p.Name) || strings.Contains(p.Name, "caplin")
-		if caplin == NoCaplin && isCaplinFile {
+		info, _, parsed := snaptype.ParseFileName("", p.Name)
+		caplinType := parsed && info.Type != nil && (info.Type.Enum() == snaptype.BeaconBlocks.Enum() || snaptype.IsBlobSidecarType(info.Type.Enum()))
+		caplinFile := strings.Contains(p.Name, datadir.SnapCaplinDir) || caplinType
+		if caplin == NoCaplin && caplinFile {
 			continue
 		}
-		if caplin == OnlyCaplin && !isCaplinFile {
+		if caplin == OnlyCaplin && !caplinFile {
 			continue
 		}
 
@@ -688,7 +690,7 @@ func SnapshotsToDownload(
 		if skipBlobDownload(p.Name, blobs, blobFloor) {
 			continue
 		}
-		if !caplinState && strings.Contains(p.Name, "caplin/") {
+		if !caplinState && strings.Contains(p.Name, datadir.SnapCaplinDir+"/") {
 			continue
 		}
 		if headerchain &&
@@ -897,7 +899,7 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 	if strings.HasPrefix(name, "salt") {
 		return false // not applicable
 	}
-	if strings.HasPrefix(name, "caplin/") {
+	if strings.HasPrefix(name, datadir.SnapCaplinDir+"/") {
 		return false // not applicable, caplin files are slot-based
 	}
 	if stateFile {

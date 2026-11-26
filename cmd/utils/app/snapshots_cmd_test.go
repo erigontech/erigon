@@ -1915,3 +1915,17 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.False(t, hasState)
 	require.False(t, broken)
 }
+
+func TestDUUnknownCaplinArchiveBytes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	const name = "v1.1-000000-000050-rcache-extra.seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, name), make([]byte, 64), 0o644))
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	estimates, err := duTestEstimates(t, files, dirs.Snap, 0)
+	require.NoError(t, err)
+	require.Equal(t, "archive", estimates[0].Mode)
+	if got := estimates[0].TotalBytes; got != 0 {
+		t.Fatalf("archive estimate = %d bytes, want 0", got)
+	}
+}

@@ -130,18 +130,10 @@ func IsStateFileV2(name string) bool {
 	return StateFileRegex.MatchString(name)
 }
 
-func IsCaplin(dir string, fileName string) bool {
-	if strings.Contains(fileName, "caplin") || strings.Contains(dir, "caplin") {
-		return true
-	}
-	return false
-}
-
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res.Path = filepath.Join(dir, fileName)
 	res.Ext = filepath.Ext(fileName)
 	res.name = fileName
-	caplin := IsCaplin(dir, fileName)
 
 	fileName = filepath.Base(fileName)
 
@@ -228,12 +220,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
-		} else if !caplin {
+		} else {
 			return res, isStateFile, false
 		}
-	}
-	if caplin {
-		return res, isStateFile, true
 	}
 	return res, isStateFile, true
 }
