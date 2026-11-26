@@ -212,6 +212,9 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	// on_block runs atomically at the store time it is called with, so the time spent importing
+	// the block must not make it late.
+	calledAtMs := f.timeMs.Load()
 	if block != nil && block.Block != nil {
 		finishImport := f.BeginPayloadImport(block.Block.Slot)
 		defer finishImport()
@@ -536,7 +539,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
-	storeTimeMs := f.timeMs.Load()
 	var prepared *preparedPostState
 	if overlap != nil {
 		prepared = overlap.prepared
@@ -547,7 +549,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		importedBlock,
 		blockRoot,
 		headBeforeBlock,
-		storeTimeMs,
+		calledAtMs,
 		lastProcessedState,
 		prepared,
 	)

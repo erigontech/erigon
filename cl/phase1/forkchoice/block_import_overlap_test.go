@@ -549,8 +549,9 @@ func TestBlockImportOverlapPriorEpochBlockUsesCommitTime(t *testing.T) {
 	overlapRoots = append(overlapRoots, overlapRoot)
 	publishOverlapHead(t, overlap, overlapRoot)
 
-	serial.store.OnTick((serial.store.genesisTime+nextSlot*serial.store.beaconCfg.SecondsPerSlot)*1000 + 100)
+	tickOverlapStore(serial, serialBlock)
 	require.NoError(t, serial.store.OnBlock(t.Context(), serialBlock, true, true, false))
+	serial.store.OnTick((serial.store.genesisTime+nextSlot*serial.store.beaconCfg.SecondsPerSlot)*1000 + 100)
 	serialRoot, err := serialBlock.Block.HashSSZ()
 	require.NoError(t, err)
 	serialRoots = append(serialRoots, serialRoot)
@@ -1208,8 +1209,8 @@ func TestBlockImportOverlapReverseInterleavings(t *testing.T) {
 
 		serialBlocks, serialAnchor, _ := tests.GetBellatrixRandom()
 		serial, serialBlock, serialSetupRoot := newNonBoundaryOverlapTestStore(t, serialBlocks, serialAnchor, newReturningEngine(t, execution_client.PayloadStatusValidated, nil), true)
-		serial.store.OnTick((serial.store.genesisTime+(serialBlock.Block.Slot+1)*cfg.SecondsPerSlot)*1000 + 100)
 		require.NoError(t, serial.store.OnBlock(t.Context(), serialBlock, true, true, false))
+		serial.store.OnTick((serial.store.genesisTime+(serialBlock.Block.Slot+1)*cfg.SecondsPerSlot)*1000 + 100)
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
 		serialRoot, err := serialBlock.Block.HashSSZ()

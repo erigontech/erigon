@@ -1,6 +1,7 @@
 package forkchoice
 
 import (
+	"context"
 	"math"
 	"testing"
 
@@ -8,9 +9,12 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 // newTestForkChoiceStore creates a minimal ForkChoiceStore for timing tests.
@@ -205,6 +209,69 @@ func TestSlotStartTickDoesNotMakeLateLocalBlockTimely(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, timeliness[clparams.AttestationTimelinessIndex])
 	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// importBlockWhileTimePasses imports a block of the slot after its parent, entering OnBlock
+// enterMs into the slot while the store is still at that time, and lets the store time move to
+// elDoneMs (relative to the same slot start) while the EL validates the payload.
+func importBlockWhileTimePasses(t *testing.T, enterMs, elDoneMs uint64) (*ForkChoiceStore, common.Hash) {
+	t.Helper()
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	var f *ForkChoiceStore
+	var slotStartMs uint64
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			f.OnTick(slotStartMs + elDoneMs)
+			return execution_client.PayloadStatusValidated, nil
+		})
+	f, parent, _, block := buildExAnteStoreBeforeBlocks(t, engine, nil)
+	f.OnTick(parent.Block.Slot * f.beaconCfg.SecondsPerSlot * 1000)
+	require.NoError(t, f.OnBlock(t.Context(), parent, false, true, false))
+	slotStartMs = (f.genesisTime + block.Block.Slot*f.beaconCfg.SecondsPerSlot) * 1000
+	f.OnTick(slotStartMs + enterMs)
+	require.NoError(t, f.OnBlock(t.Context(), block, true, true, false))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return f, root
+}
+
+// on_block runs atomically at the store time it is called with, so the time spent validating
+// the block must not make it late.
+func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
+	f, root := importBlockWhileTimePasses(t, 3000, 4500)
+
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Equal(t, root, f.ProposerBoostRoot())
+}
+
+// The slot tick resets the proposer boost, so a block whose slot ends while it is imported must
+// not set the boost after that reset.
+func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
+	f, root := importBlockWhileTimePasses(t, 3000, 12000+100)
+
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// Spec test fixtures can move the store time back to an earlier slot, whose blocks must still
+// get the proposer boost.
+func TestSpecTestTimeMovedBackKeepsProposerBoost(t *testing.T) {
+	f, parent, _, block := buildExAnteStoreBeforeBlocks(t, nil, nil)
+	slotMs := f.beaconCfg.SecondsPerSlot * 1000
+	f.OnTick(parent.Block.Slot * slotMs)
+	require.NoError(t, f.OnBlock(t.Context(), parent, false, true, false))
+	f.OnTick((block.Block.Slot + 3) * slotMs)
+	f.SetTimeForSpecTest(block.Block.Slot * slotMs)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, common.Hash(root), f.ProposerBoostRoot())
 }
 
 func TestRecordBlockTimeliness_PreGloas_Timely(t *testing.T) {

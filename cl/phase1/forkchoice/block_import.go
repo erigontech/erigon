@@ -105,7 +105,7 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	block *cltypes.BeaconBlock,
 	blockRoot common.Hash,
 	headBeforeBlock common.Hash,
-	storeTimeMs uint64,
+	calledAtMs uint64,
 	postState *state.CachingBeaconState,
 	prepared *preparedPostState,
 ) (pendingEnvelopeFound bool, err error) {
@@ -129,9 +129,12 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
-	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
+	currentSlot := f.recordBlockTimeliness(block, blockRoot, calledAtMs)
+	// update_proposer_boost_root: conditionally set proposer boost root. A later slot start that
+	// already ran during the import has reset the boost that on_block would have set before it.
+	if f.proposerBoostResetSlot <= currentSlot {
+		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
+	}
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	if blockVersion >= clparams.GloasVersion {

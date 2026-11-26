@@ -64,6 +64,7 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
+	f.proposerBoostResetSlot = currentSlot
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		// Only promote unrealized checkpoints when the node is synced (processing
 		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
@@ -90,4 +91,5 @@ func (f *ForkChoiceStore) SetTimeForSpecTest(timeMs uint64) {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
+	f.proposerBoostResetSlot = f.slotAtTimeMs(timeMs)
 }
