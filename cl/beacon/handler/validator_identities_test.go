@@ -188,13 +188,7 @@ func TestPostStateValidatorIdentitiesMatchPubkeysInServedState(t *testing.T) {
 func TestHistoricalValidatorEndpointsReplayPending(t *testing.T) {
 	db, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	slot := blocks[len(blocks)-1].Block.Slot
-	var err error
-	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.HeadSlotVal = slot
 	fcu.FinalizedSlotVal = slot + 1
-	lowest := slot + 1
-	fcu.LowestAvailableSlotVal = &lowest
 	table := state_accessors.NewStaticValidatorTable()
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, table) }))
 	table.SetSlot(slot - 1)
