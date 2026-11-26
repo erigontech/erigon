@@ -334,7 +334,6 @@ func (k *composition) outbound(h *Held, tx types.Transaction) (func(), error) {
 	}
 	return func() {
 		k.gas.take(cost)
-		k.fx.targetGas += cost.target
 		if k.escrow != nil {
 			k.escrow.Sub(k.escrow, &value)
 		}

@@ -183,9 +183,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 	if len(fx.held) == 0 {
 		return nil
 	}
-	if k.gas != nil {
-		fx.projected = k.gas.projected
-	}
+	fx.projected, fx.targetGas = k.gas.projected, k.gas.target
 	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.composed", "held", len(fx.held), "outbound", len(fx.outbound),
 		"inbound", len(fx.deliveries), "txs", len(fx.txs), "waiting", waiting, "postingGas", fx.projected)
 	return fx
@@ -331,11 +329,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		return nodeFault(err)
 	}
 	bundle := []types.Transaction{tx}
-	for _, h := range e.fx.held {
-		// An outbound transaction is the rollup's, in the Sync block.
-		if h.Direction == Outbound {
-			continue
-		}
+	for _, h := range bundled(e.fx.held) {
 		trigger, err := types.DecodeTransaction(h.Raw)
 		if err != nil {
 			return err

@@ -1226,8 +1226,6 @@ func TestComposeEvictsAnUndecodableTransaction(t *testing.T) {
 func TestComposedWindowCountsTargetGas(t *testing.T) {
 	mined := *loadSyncWindow(t).batch
 	mined.BlockNumber = protocol.LiveBlockNumber
-	posting, err := PostBatchGas(&mined)
-	require.NoError(t, err)
 	for _, over := range []bool{false, true} {
 		f := newCrossFixture(t)
 		f.hold(t, 0, f.call.Source, f.call.Data)
@@ -1236,7 +1234,9 @@ func TestComposedWindowCountsTargetGas(t *testing.T) {
 		c, prover, _, chain := f.poster(t, nil)
 		composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
 		require.NotZero(t, c.pending.fx.targetGas)
-		c.cfg.MaxGas = posting + c.pending.fx.targetGas
+		posting, err := postingGas(&mined, c.pending.fx.targetGas)
+		require.NoError(t, err)
+		c.cfg.MaxGas = posting
 		if over {
 			c.cfg.MaxGas--
 		}
