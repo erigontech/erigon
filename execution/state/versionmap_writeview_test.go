@@ -2,6 +2,7 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -170,6 +171,63 @@ func TestVersionMapWriteView_StorageChanges(t *testing.T) {
 	}
 	require.Equal(t, val100, revived[unchanged],
 		"a post-destruct write-back is stamped Created, so it survives")
+}
+
+// The apply loop folds a tx's storage while exec workers write the same contract,
+// so StorageChanges must not wait for the account lock of a contract no tx created.
+func TestVersionMapWriteView_StorageChangesSkipsAccountLockWithoutCreate(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 3
+	addr := getAddress(1)
+	key := accounts.InternKey(common.Hash{0x01})
+	keys := &WriteSet{}
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, valStatus: ValueChanged}, Val: *uint256.NewInt(7)})
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: txIdx}, *uint256.NewInt(7), true)
+
+	e := vm.load(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	done := make(chan int)
+	go func() {
+		n := 0
+		for _, inner := range NewVersionMapWriteView(keys, vm, txIdx).StorageChanges() {
+			n += len(inner)
+		}
+		done <- n
+	}()
+	select {
+	case n := <-done:
+		require.Equal(t, 1, n)
+	case <-time.After(5 * time.Second):
+		t.Fatal("StorageChanges waited for the account lock of a contract no tx created")
+	}
+}
+
+// A creation published by FlushWrites clears the contract's storage, so a later tx's
+// slot write must not carry the origin it read before the creation.
+func TestVersionMapWriteView_StorageChangesAfterFlushedCreate(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(1)
+	key := accounts.InternKey(common.Hash{0x01})
+	vm := NewVersionMap(nil)
+	created := &WriteSet{}
+	created.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: Version{TxIndex: 0}}, Val: true})
+	vm.FlushWrites(created, true)
+
+	keys := &WriteSet{}
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, valStatus: ValueChanged}, Val: *uint256.NewInt(7), orig: *uint256.NewInt(5)})
+	n := 0
+	for _, inner := range NewVersionMapWriteView(keys, vm, 1).StorageChanges() {
+		for _, vw := range inner {
+			require.Equal(t, uint256.Int{}, vw.orig, "the creation cleared the slot, so the pre-creation origin is dropped")
+			n++
+		}
+	}
+	require.Equal(t, 1, n)
 }
 
 func TestStorageValueStatus(t *testing.T) {
