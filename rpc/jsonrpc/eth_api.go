@@ -518,7 +518,7 @@ func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, n
 // rejects a block that tx has not executed yet. It never selects an overlay, so
 // callers can keep dependent reads on one view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		return nil, false, nil
 	}
 	blockNum, hash, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)

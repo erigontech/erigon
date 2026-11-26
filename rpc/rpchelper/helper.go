@@ -45,6 +45,24 @@ func (e NonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
+// CanonicalBlockNumberByHash returns the height of hash when hash is the canonical
+// block at that height. found is false for an unknown hash; a known hash that is
+// not canonical is a NonCanonicalHashError.
+func CanonicalBlockNumberByHash(ctx context.Context, tx kv.Getter, br dbservices.FullBlockReader, hash common.Hash) (number uint64, found bool, err error) {
+	n, err := br.HeaderNumber(ctx, tx, hash)
+	if err != nil || n == nil {
+		return 0, false, err
+	}
+	canonical, ok, err := br.CanonicalHash(ctx, tx, *n)
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok || canonical != hash {
+		return 0, false, NonCanonicalHashError{hash}
+	}
+	return *n, true, nil
+}
+
 // BlockNotExecutedError reports a block past the execution stage's progress.
 type BlockNotExecutedError struct{ Block, LastExecuted uint64 }
 

@@ -405,7 +405,7 @@ func blockAccessListPrunedHistoryError() *rpc.CustomError {
 }
 
 func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
-	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+	if numberOrHash.IsPending() {
 		return nil, errBlockAccessListNotFound
 	}
 	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader)

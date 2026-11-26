@@ -137,3 +137,23 @@ func TestBlockNumberOrHash_UnmarshalJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestBlockNumberOrHashIsPending(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sel  BlockNumberOrHash
+		want bool
+	}{
+		{"pending", BlockNumberOrHashWithNumber(PendingBlockNumber), true},
+		{"latest", BlockNumberOrHashWithNumber(LatestBlockNumber), false},
+		{"number", BlockNumberOrHashWithNumber(7), false},
+		{"hash", BlockNumberOrHashWithHash(common.Hash{0x01}, false), false},
+		{"empty", BlockNumberOrHash{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.sel.IsPending(); got != tc.want {
+				t.Fatalf("IsPending() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

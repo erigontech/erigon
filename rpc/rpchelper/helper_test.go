@@ -182,3 +182,38 @@ func TestResolveExecutedBlockKeepsReaderError(t *testing.T) {
 	var notExecuted *BlockNotExecutedError
 	require.NotErrorAs(t, err, &notExecuted)
 }
+
+func TestCanonicalBlockNumberByHash(t *testing.T) {
+	tx := newExecutedChainTx(t)
+	aboveHeadHash := common.Hash{0x03, 9}
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, aboveHeadHash, 9))
+
+	t.Run("canonical", func(t *testing.T) {
+		number, found, err := CanonicalBlockNumberByHash(t.Context(), tx, rawdbBlockReader{}, hashOf(4))
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, uint64(4), number)
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		_, found, err := CanonicalBlockNumberByHash(t.Context(), tx, rawdbBlockReader{}, common.Hash{0x04})
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+
+	for name, hash := range map[string]common.Hash{
+		"another canonical block at its height": sideHash,
+		"no canonical block at its height":      aboveHeadHash,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := CanonicalBlockNumberByHash(t.Context(), tx, rawdbBlockReader{}, hash)
+			require.ErrorAs(t, err, &NonCanonicalHashError{})
+		})
+	}
+
+	t.Run("reader error", func(t *testing.T) {
+		readerErr := errors.New("canonical hash read failed")
+		_, _, err := CanonicalBlockNumberByHash(t.Context(), tx, failingBlockReader{err: readerErr}, hashOf(4))
+		require.ErrorIs(t, err, readerErr)
+	})
+}

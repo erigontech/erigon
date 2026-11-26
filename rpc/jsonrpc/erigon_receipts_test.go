@@ -1147,3 +1147,16 @@ func TestGetLogsServesCachedLogsWithoutCopy(t *testing.T) {
 		require.NotNil(t, second[i].BlockTimestamp)
 	}
 }
+
+func TestGetBlockReceiptsByBlockHashRejectsUnknownAndNonCanonicalHash(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	unknown := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	_, err := api.GetBlockReceiptsByBlockHash(m.Ctx, unknown)
+	require.EqualError(t, err, fmt.Sprintf("block not found %x", unknown))
+
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+	_, err = api.GetBlockReceiptsByBlockHash(m.Ctx, orphaned)
+	require.EqualError(t, err, fmt.Sprintf("the hash %s is not cannonical", orphaned))
+}
