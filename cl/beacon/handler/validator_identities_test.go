@@ -199,9 +199,9 @@ func TestHistoricalValidatorEndpointsReplayPending(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, table) }))
 	table.SetSlot(slot - 1)
 	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
-	for _, path := range []string{"validator_identities", "validators/0"} {
-		t.Run(path, func(t *testing.T) {
-			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/"+path, "")
+	for _, tc := range []struct{ method, path string }{{http.MethodGet, "validator_identities"}, {http.MethodGet, "validators/0"}, {http.MethodGet, "validators"}, {http.MethodPost, "validators"}} {
+		t.Run(tc.method+"/"+tc.path, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, tc.method, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/"+tc.path, `{}`)
 			require.Equal(t, http.StatusServiceUnavailable, status, body)
 		})
 	}
