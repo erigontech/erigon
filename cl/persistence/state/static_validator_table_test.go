@@ -18,12 +18,42 @@ package state_accessors
 
 import (
 	"bytes"
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+type validatorCursorTx struct {
+	kv.Tx
+	cursor kv.Cursor
+}
+
+func (tx validatorCursorTx) Cursor(string) (kv.Cursor, error) { return tx.cursor, nil }
+
+type validatorErrorCursor struct {
+	kv.Cursor
+	err error
+}
+
+func (c validatorErrorCursor) First() ([]byte, []byte, error) { return nil, nil, c.err }
+func (c validatorErrorCursor) Close()                         {}
+
+func TestReadValidatorsTableReturnsCursorError(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	wantErr := errors.New("cursor first failed")
+	err := db.View(t.Context(), func(tx kv.Tx) error {
+		tx = validatorCursorTx{Tx: tx, cursor: validatorErrorCursor{err: wantErr}}
+		return ReadValidatorsTable(tx, NewStaticValidatorTable())
+	})
+	require.ErrorIs(t, err, wantErr)
+}
 
 func TestStaticValidatorTable(t *testing.T) {
 	// Make 5 validators.
