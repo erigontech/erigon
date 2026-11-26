@@ -57,7 +57,7 @@ type blockTimeline struct {
 	root                                     common.Hash
 	blobs                                    int
 	seen, firstImport, importStart, imported time.Time
-	attempts                                 int
+	attempts, inFlight                       int
 	waitedForColumns                         bool
 	// logged keeps the entry of a logged block until its slot leaves the window, so a later import of the same
 	// block by another path does not log it again.
@@ -120,6 +120,7 @@ func (t *blockTimelines) seen(block *cltypes.SignedBeaconBlock, now time.Time) {
 func (t *blockTimelines) importStarted(block *cltypes.SignedBeaconBlock, start time.Time) {
 	t.update(block, newEntryEvictingArrival, func(line *blockTimeline) {
 		line.attempts++
+		line.inFlight++
 		keepEarliest(&line.firstImport, start)
 	})
 }
@@ -128,6 +129,7 @@ func (t *blockTimelines) importStarted(block *cltypes.SignedBeaconBlock, start t
 // choice holds it.
 func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root common.Hash, start, end time.Time, err error) {
 	t.update(block, existingEntry, func(line *blockTimeline) {
+		line.inFlight--
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			line.waitedForColumns = true
 		}
@@ -140,9 +142,12 @@ func (t *blockTimelines) importEnded(block *cltypes.SignedBeaconBlock, root comm
 }
 
 // importedElsewhere queues the line of a tracked block that another path put into fork choice, with no import times.
+// An import in flight may already have put the block there, and it queues the line with its times itself.
 func (t *blockTimelines) importedElsewhere(block *cltypes.SignedBeaconBlock, root common.Hash) {
 	t.update(block, existingEntry, func(line *blockTimeline) {
-		t.queue(line, block, root)
+		if line.inFlight == 0 {
+			t.queue(line, block, root)
+		}
 	})
 }
 

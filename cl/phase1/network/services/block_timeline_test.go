@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -418,4 +419,59 @@ func TestBlockTimelineImportKeepsEntriesWithAttemptsWhenFull(t *testing.T) {
 	require.Len(t, timelines.pending, maxPendingBlockTimelines)
 	require.NotContains(t, timelines.pending, block.Signature)
 	require.Empty(t, timelines.lines)
+}
+
+func TestBlockTimelineWaitsForAnImportInFlightBeforeTheFallback(t *testing.T) {
+	logger, _ := timelineLogger(log.LvlDebug)
+	timelines := newBlockTimelines(timelineClock(t, timelineSlot), logger)
+	block, root := timelineBlock(timelineSlot, 0), common.Hash{0x16}
+
+	timelines.importStarted(block, at(time.Second))
+	timelines.importedElsewhere(block, root)
+	require.Empty(t, timelines.lines, "the import in flight logs the line")
+	timelines.importEnded(block, root, at(time.Second), at(2*time.Second), nil)
+
+	require.Len(t, timelines.lines, 1)
+	line := <-timelines.lines
+	require.Equal(t, at(time.Second), line.importStart)
+	require.Equal(t, at(2*time.Second), line.imported)
+}
+
+// pausingStore publishes the block in fork choice and then waits, as OnBlock does while it finishes an import.
+type pausingStore struct {
+	*onBlockErrorStore
+	published, release chan struct{}
+}
+
+func (s pausingStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvailability bool) error {
+	err := s.onBlockErrorStore.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvailability)
+	close(s.published)
+	<-s.release
+	return err
+}
+
+func TestBlockSeenInForkChoiceDuringAnImportGetsTheTimedLine(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixture(t)
+	logger, _ := timelineLogger(log.LvlDebug)
+	service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
+	processing.err = nil
+	store := pausingStore{onBlockErrorStore: processing, published: make(chan struct{}), release: make(chan struct{})}
+	service.forkchoiceStore = store
+
+	imported := make(chan error, 1)
+	go func() {
+		_, err := service.processAndStoreBlock(t.Context(), block, false)
+		imported <- err
+	}()
+	<-store.published
+	accepted, err := service.processAndStoreBlock(t.Context(), block, false)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	close(store.release)
+	require.NoError(t, <-imported)
+
+	require.Len(t, service.timelines.lines, 1)
+	line := <-service.timelines.lines
+	require.False(t, line.importStart.IsZero(), "the line has the times of the import")
+	require.False(t, line.imported.IsZero())
 }
