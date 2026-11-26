@@ -89,10 +89,8 @@ func TestStaticValidatorTable(t *testing.T) {
 
 func TestReadValidatorsTableGap(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	src := NewStaticValidatorTable()
-	require.NoError(t, src.AddValidator(solid.NewValidator(), 0, 0))
 	var b bytes.Buffer
-	require.NoError(t, src.validatorTable[0].Serialize(&b))
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&b))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		for _, index := range []uint64{0, 2} {
 			if err := tx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(index), b.Bytes()); err != nil {
