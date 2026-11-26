@@ -29,10 +29,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -53,8 +55,10 @@ func (m *mockOpContext) CallInput() []byte           { return nil }
 func (m *mockOpContext) Code() []byte                { return nil }
 func (m *mockOpContext) CodeHash() accounts.CodeHash { return accounts.CodeHash{} }
 
-// mockIBS implements tracing.IntraBlockState for tests.
-type mockIBS struct{}
+// mockIBS implements tracing.IntraBlockState for tests. A test can change the refund counter between steps.
+type mockIBS struct {
+	refund uint64
+}
 
 func (m *mockIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
 func (m *mockIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
@@ -68,15 +72,7 @@ func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, 
 }
 func (m *mockIBS) Exist(accounts.Address) (bool, error)             { return false, nil }
 func (m *mockIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() uint64                                { return 0 }
-
-// refundIBS is a mockIBS whose refund counter a test can change between steps.
-type refundIBS struct {
-	mockIBS
-	refund uint64
-}
-
-func (m *refundIBS) GetRefund() uint64 { return m.refund }
+func (m *mockIBS) GetRefund() uint64                                { return m.refund }
 
 // captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
@@ -107,9 +103,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, rData, 1, nil)
 
 	// The EVM ends the root frame, then ExecuteTraceTx closes the stream.
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	stream.Flush()
 
 	// Parse the outer object and extract the first structLog entry.
@@ -141,9 +135,7 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 	}
 
 	// The EVM ends the root frame, then ExecuteTraceTx closes the stream.
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	stream.Flush()
 
 	var outer struct {
@@ -209,9 +201,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	for i := range 4 {
 		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	stream.Flush()
 
 	if !json.Valid(buf.Bytes()) {
@@ -219,9 +209,11 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	}
 }
 
-// closeStreamLikeCaller writes the tail ExecuteTraceTx appends once execution is
-// over: exactly one array end and one object end, whatever the logger emitted.
-func closeStreamLikeCaller(stream *jsonstream.Stream) {
+// closeStreamLikeCaller ends the root frame, which writes the last step, and then writes the
+// tail ExecuteTraceTx appends once execution is over: exactly one array end and one object
+// end, whatever the logger emitted.
+func closeStreamLikeCaller(l *JsonStreamLogger, stream *jsonstream.Stream) {
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 	stream.WriteArrayEnd()
 	stream.Field("gas")
 	stream.Uint(0)
@@ -239,8 +231,7 @@ func TestJsonStreamLoggerStateGasCost(t *testing.T) {
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 10, State: 30}, scope, nil, 1, nil)
 	l.OnOpcodeV2(1, byte(vm.SSTORE), mdgas.MdGas{Execution: 60}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 1, nil)
 	l.OnOpcodeV2(2, byte(vm.STOP), mdgas.MdGas{Execution: 80}, mdgas.MdGasCost{}, scope, nil, 1, nil)
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	closeStreamLikeCaller(stream)
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 	var result struct {
 		StructLogs []map[string]json.RawMessage `json:"structLogs"`
@@ -285,9 +276,8 @@ func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
 			}
 			// Two frames exit, as in any trace of a transaction that makes a call.
 			l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
-			l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 
-			closeStreamLikeCaller(stream)
+			closeStreamLikeCaller(l, stream)
 			require.NoError(t, stream.Flush())
 			require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
 		})
@@ -305,9 +295,8 @@ func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
 
 	l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
 	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{}, nil, 1, nil)
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 
-	closeStreamLikeCaller(stream)
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 
 	var decoded struct {
@@ -489,9 +478,7 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 
 	// Close the way the production epilogue does: ClosePending would repair an
 	// imbalance into valid JSON and hide exactly what this pins.
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
 
@@ -523,9 +510,7 @@ func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
 	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 
 	var out struct {
@@ -598,9 +583,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 			peakBuffer = n
 		}
 	}
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	stream.WriteArrayEnd()
-	stream.WriteObjectEnd()
+	closeStreamLikeCaller(l, stream)
 	require.NoError(tb, stream.Flush())
 	return out.n, peakBuffer, out.writes
 }
@@ -675,8 +658,7 @@ func TestJsonStreamLogger_StackFollowsValueChanges(t *testing.T) {
 		}
 		l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{stack: stack}, nil, 1, nil)
 	}
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	closeStreamLikeCaller(stream)
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 
 	var decoded struct {
@@ -707,8 +689,7 @@ func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
 	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSstore, nil, 1, vm.ErrWriteProtection)
 	l.OnOpcodeV2(1, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSload, nil, 1, vm.ErrOutOfGas)
 	l.OnOpcodeV2(2, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, sstore, nil, 1, nil)
-	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-	closeStreamLikeCaller(stream)
+	closeStreamLikeCaller(l, stream)
 	require.NoError(t, stream.Flush())
 
 	var result struct {
@@ -727,30 +708,26 @@ func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
 // from before the opcode. A REVERT that completes is not a halt.
 func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		op         vm.OpCode
-		stepErr    error // error of the opcode hook: a halt found before the opcode runs
-		fault      error // error of the fault hook: a halt found while the opcode runs
-		faultPc    uint64
-		faultOp    vm.OpCode
-		faultDepth int // the halted step is pc 1, op, depth 1
-		limit      int
-		halted     bool
-		wantLogs   int
+		name     string
+		op       vm.OpCode
+		stepErr  error // error of the opcode hook: a halt found before the opcode runs
+		fault    error // error of the fault hook: a halt found while the opcode runs
+		written  bool  // the step is already written when the fault arrives
+		limit    int
+		halted   bool
+		wantLogs int
 	}{
-		{name: "halt while the opcode runs", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 1, halted: true, wantLogs: 2},
+		{name: "halt while the opcode runs", op: vm.JUMP, fault: vm.ErrInvalidJump, halted: true, wantLogs: 2},
 		{name: "halt before the opcode runs", op: vm.SSTORE, stepErr: vm.ErrOutOfGas, halted: true, wantLogs: 2},
-		{name: "completed REVERT", op: vm.REVERT, fault: vm.ErrExecutionReverted, faultPc: 1, faultOp: vm.REVERT, faultDepth: 1, wantLogs: 2},
-		{name: "fault at another pc", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 7, faultOp: vm.JUMP, faultDepth: 1, wantLogs: 2},
-		{name: "fault of another opcode", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMPI, faultDepth: 1, wantLogs: 2},
-		{name: "fault at another depth", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 2, wantLogs: 2},
-		{name: "fault of a step past the limit", op: vm.JUMP, fault: vm.ErrInvalidJump, faultPc: 1, faultOp: vm.JUMP, faultDepth: 1, limit: 1, wantLogs: 1},
+		{name: "completed REVERT", op: vm.REVERT, fault: vm.ErrExecutionReverted, wantLogs: 2},
+		{name: "fault after the step was written", op: vm.CALL, fault: vm.ErrOutOfGas, written: true, wantLogs: 2},
+		{name: "fault of a step past the limit", op: vm.JUMP, fault: vm.ErrInvalidJump, limit: 1, wantLogs: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			stream := jsonstream.New(&buf)
 			l := NewJsonStreamLogger(&LogConfig{Limit: tc.limit, DisableStorage: true, EnableMemory: true, EnableReturnData: true}, t.Context(), stream)
-			ibs := &refundIBS{refund: 4}
+			ibs := &mockIBS{refund: 4}
 			l.env = &tracing.VMContext{IntraBlockState: ibs}
 
 			rData := []byte{0x22}
@@ -762,11 +739,13 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 			scope.stack = nil
 			scope.memory[0], rData[0] = 0xff, 0xff
 			ibs.refund = 9
-			if tc.fault != nil {
-				l.OnFaultV2(tc.faultPc, byte(tc.faultOp), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, tc.faultDepth, vm.VMErrorFromErr(tc.fault))
+			if tc.written {
+				l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false) // a child frame of the step ends
 			}
-			l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
-			closeStreamLikeCaller(stream)
+			if tc.fault != nil {
+				l.OnFaultV2(1, byte(tc.op), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, 1, vm.VMErrorFromErr(tc.fault))
+			}
+			closeStreamLikeCaller(l, stream)
 			require.NoError(t, stream.Flush())
 
 			var result struct {
@@ -803,4 +782,78 @@ func TestJsonStreamLogger_HaltedStepHasErrorAndNoCost(t *testing.T) {
 			require.JSONEq(t, `20`, string(step["stateGasCost"]))
 		})
 	}
+}
+
+// The logger writes a CALL or CREATE step when its child frame ends, so it relies on the
+// interpreter never reporting a fault for that opcode afterwards. Every call and create
+// opcode is run here with a child that returns, reverts, or halts before or while its opcode
+// runs, and no fault may follow the exit of a child of the faulted step.
+func TestNoFaultAfterChildFrameExits(t *testing.T) {
+	push := func(b []byte) []byte { return append([]byte{byte(vm.PUSH1) + byte(len(b)-1)}, b...) }
+	// store puts b at the end of the first memory word.
+	store := func(b []byte) []byte {
+		return append(push(b), byte(vm.PUSH0), byte(vm.MSTORE))
+	}
+	returning := func(code []byte) []byte {
+		return append(store(code), byte(vm.PUSH1), byte(len(code)), byte(vm.PUSH1), byte(32-len(code)), byte(vm.RETURN))
+	}
+	children := map[string][]byte{
+		"returns":          {byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.RETURN)},
+		"reverts":          {byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)},
+		"halts while run":  {byte(vm.PUSH1), 5, byte(vm.JUMP)},
+		"halts before run": {byte(vm.INVALID)},
+	}
+	create := func(init []byte, op vm.OpCode) []byte {
+		code := store(init)
+		if op == vm.CREATE2 {
+			code = append(code, byte(vm.PUSH0))
+		}
+		return append(code, byte(vm.PUSH1), byte(len(init)), byte(vm.PUSH1), byte(32-len(init)), byte(vm.PUSH0), byte(op))
+	}
+	faults := 0
+	for name, child := range children {
+		for _, op := range []vm.OpCode{vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL, vm.CREATE, vm.CREATE2} {
+			t.Run(name+"/"+op.String(), func(t *testing.T) {
+				var code []byte
+				if op == vm.CREATE || op == vm.CREATE2 {
+					code = create(child, op)
+				} else {
+					// Deploy the child, then call it with no arguments.
+					code = append(create(returning(child), vm.CREATE), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0))
+					addr := byte(vm.DUP5)
+					if op == vm.CALL || op == vm.CALLCODE {
+						code, addr = append(code, byte(vm.PUSH0)), byte(vm.DUP6)
+					}
+					code = append(code, addr, byte(vm.GAS), byte(op))
+				}
+				code = append(code, byte(vm.STOP))
+				type event struct {
+					kind  string
+					depth int
+				}
+				var events []event
+				hooks := &tracing.Hooks{
+					OnOpcodeV2: func(_ uint64, _ byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, depth int, _ error) {
+						events = append(events, event{"opcode", depth})
+					},
+					OnFaultV2: func(_ uint64, _ byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, depth int, _ error) {
+						events = append(events, event{"fault", depth})
+					},
+					OnExitV2: func(int, []byte, mdgas.MdGasUsage, error, bool) { events = append(events, event{kind: "exit"}) },
+				}
+				_, _, err := runtime.Execute(code, nil, &runtime.Config{ChainConfig: chain.TestChainOsakaConfig, GasLimit: 1_000_000, EVMConfig: vm.Config{Tracer: hooks}})
+				require.NoError(t, err)
+				for i, e := range events {
+					if e.kind != "fault" {
+						continue
+					}
+					faults++
+					for j := i - 1; j >= 0 && (events[j].kind != "opcode" || events[j].depth != e.depth); j-- {
+						require.NotEqual(t, "exit", events[j].kind, "a fault at depth %d after a child frame of its step ended", e.depth)
+					}
+				}
+			})
+		}
+	}
+	require.Positive(t, faults, "the children that halt while their opcode runs report a fault")
 }
