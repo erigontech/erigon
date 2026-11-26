@@ -176,11 +176,8 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 			clear(out)
 			// A creation earlier in the block clears storage without writing its slots, so a
 			// later tx's read can predate the clear and its origin is not the slot's prev value.
-			createdEarlier := false
-			if e := v.vm.load(addr); e != nil && e.created.Load() {
-				created, res, ok := v.vm.ReadCreateContract(addr, v.txIdx)
-				createdEarlier = ok && created && res.resolved()
-			}
+			created, res, ok := v.vm.ReadCreateContract(addr, v.txIdx)
+			createdEarlier := ok && created && res.resolved()
 			if cap(scratch) < len(inner) {
 				scratch = make([]VersionedWrite[uint256.Int], len(inner))
 			}
