@@ -139,6 +139,9 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 					return err
 				}
 				k.draft.ctx = ctx
+				if err := c.x.Pool.Prune(k.draft.Nonce, c.finalized()); err != nil {
+					return err
+				}
 				// The posting carries the window's blocks before any effect; the
 				// bundle's block may have 1/1024 less gas than the anchor.
 				block := anchor.GasLimit - anchor.GasLimit/1024

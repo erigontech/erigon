@@ -239,6 +239,7 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 		return
 	}
 	if e.kind == emitEffects {
+		c.x.Pool.Composed(e.fx.held, e.sync)
 		c.postEffects(ctx, e, sync)
 		return
 	}

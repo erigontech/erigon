@@ -175,7 +175,8 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	require.NoError(t, err)
 	poster := &testPoster{key: posterKey}
 	poster.tip.SetUint64(2)
-	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, poster, nil, nil, nil, nil, log.New())
+	none := func() uint64 { return 0 }
+	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, poster, nil, none, none, nil, log.New())
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
 		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: protocol.EEZL2Address,
@@ -1217,7 +1218,7 @@ func TestComposeEvictsAnUndecodableTransaction(t *testing.T) {
 	require.NoError(t, f.pool.Push(h, 0))
 	require.Nil(t, f.compose(t))
 	require.Zero(t, f.pool.Len())
-	require.True(t, f.pool.Holds(h.Hash), "never a plain transaction")
+	require.False(t, f.pool.Holds(h.Hash), "never in a Sync block")
 }
 
 // TestComposedWindowCountsTargetGas: a posting whose outbound calls take it
@@ -1249,6 +1250,74 @@ func TestComposedWindowCountsTargetGas(t *testing.T) {
 			require.False(t, p.SlotSkipped)
 		}
 	}
+}
+
+// TestSyncCommittedKeepsItsOutbound: the outbound transactions of a
+// committed Sync block stay the composer's once evicted: a replacement of
+// the block returns them to the rollup's pool. Those of a Sync block not
+// committed do not.
+func TestSyncCommittedKeepsItsOutbound(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		f := newCrossFixture(t)
+		out := f.holdOutbound(t, 0)
+		c, _, _, chain := f.poster(t, nil)
+		composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+		require.Len(t, composed.Txs, 2)
+		if committed {
+			sync := f.sealed(t, composed.Txs)
+			chain[sync.NumberU64()] = sync
+			c.SyncCommitted(t.Context(), sync.Header())
+		}
+		f.pool.Evict(out.Sender, Outbound, out.Nonce)
+		require.Equal(t, committed, f.pool.Holds(out.Hash), "committed %v", committed)
+	}
+}
+
+// TestComposedOutboundRecoveredStaysHeld: the outbound transaction of a
+// committed Sync block whose batch failed, requeued, stays the composer's
+// once a replacement takes its place: the Sync block's replacement returns
+// it to the rollup's pool.
+func TestComposedOutboundRecoveredStaysHeld(t *testing.T) {
+	f := newCrossFixture(t)
+	out := f.holdOutbound(t, 0)
+	comp, prover, _, chain := f.poster(t, nil)
+	comp.Recover(f.pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	prover.err = status.Error(codes.InvalidArgument, "window refused")
+	composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+	require.Len(t, composed.Txs, 2)
+	sync := f.sealed(t, composed.Txs)
+	chain[sync.NumberU64()] = sync
+	comp.SyncCommitted(t.Context(), sync.Header())
+	comp.RecoverFailed(t.Context())
+	require.Equal(t, 1, f.pool.Len(), "requeued")
+	replacement := &Held{Raw: []byte{1}, Hash: common.Hash{0xee}, Sender: out.Sender, Nonce: out.Nonce, Direction: Outbound}
+	replacement.MaxFee.Mul(&out.MaxFee, uint256.NewInt(2))
+	replacement.Tip.Mul(&out.Tip, uint256.NewInt(2))
+	require.NoError(t, f.pool.Push(replacement, out.Nonce))
+	require.Equal(t, []*Held{replacement}, f.pool.PopN(math.MaxInt))
+	require.True(t, f.pool.Holds(out.Hash))
+}
+
+// TestComposePrunesSpentDiscards: a composition lets go of the discarded
+// outbound transactions whose nonces the rollup spent past a final Sync
+// block.
+func TestComposePrunesSpentDiscards(t *testing.T) {
+	f := newCrossFixture(t)
+	f.c.finalized = func() uint64 { return 460 }
+	spent, kept := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Outbound, 2)
+	for _, h := range []*Held{spent, kept} {
+		push(t, f.pool, h, 0)
+	}
+	f.pool.Composed(f.pool.PopN(2), 460)
+	for _, h := range []*Held{spent, kept} {
+		f.pool.Evict(h.Sender, Outbound, h.Nonce)
+	}
+	f.l2.fund(spent.Sender, 0)
+	f.l2.accounts[spent.Sender].Nonce = 1
+	f.hold(t, 0, f.call.Source, f.call.Data)
+	require.NotNil(t, f.compose(t))
+	require.False(t, f.pool.Holds(spent.Hash))
+	require.True(t, f.pool.Holds(kept.Hash))
 }
 
 // TestComposeOutboundFillsTheBlock: an outbound pair the Sync block cannot
