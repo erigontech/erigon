@@ -630,9 +630,10 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
-		// The prune is off, but a step goes into files only after its blocks' changesets are gone.
-		if s.FinalityCtx != nil && producesStateFiles(cfg.blockReader) {
-			end, err := collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
+		// The prune is off, but blocks in state files can not be unwound, and a step goes into files only after its
+		// blocks' changesets are gone.
+		if s.FinalityCtx != nil {
+			end, err := keptChangesetsFrom(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
 			if err != nil {
 				return err
 			}
@@ -689,14 +690,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
 	// collated lose theirs.
 	var changesetsPruneTo uint64
-	switch {
-	case !cfg.syncCfg.AlwaysGenerateChangesets:
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		changesetsPruneTo, err = keptChangesetsFrom(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
+	} else {
 		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
 		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
-	case producesStateFiles(cfg.blockReader):
-		changesetsPruneTo, err = collatableStepsEnd(ctx, tx, cfg.blockReader, s.FinalityCtx.CollateToBlockNum())
-	default:
-		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
 	}
 	if err != nil {
 		return err
@@ -796,6 +794,15 @@ func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 	return lastBlock + 1, nil
 }
 
+// keptChangesetsFrom is the first block that keeps its changeset when changesets are kept for deep unwinds: the
+// blocks in state files, and in the steps about to be collated, lose theirs.
+func keptChangesetsFrom(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, collateTo uint64) (uint64, error) {
+	if !producesStateFiles(blockReader) {
+		return blocksInFilesEnd(ctx, tx, blockReader)
+	}
+	return collatableStepsEnd(ctx, tx, blockReader, collateTo)
+}
+
 // collatableStepsEnd is the block after the visible state files and after the steps not yet in them whose
 // blocks all reach no higher than collateTo.
 func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, collateTo uint64) (uint64, error) {
@@ -804,17 +811,20 @@ func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbser
 		return 0, err
 	}
 	txNumsReader := blockReader.TxnumReader()
-	stepSize := tx.Debug().StepSize()
-	for step := tx.Debug().TxNumsInFiles(kv.StateDomains...) / stepSize; ; step++ {
-		lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, (step+1)*stepSize-1)
-		if err != nil {
-			return 0, err
-		}
-		if !ok || lastBlock > collateTo {
-			return end, nil
-		}
-		end = lastBlock + 1
+	collateToTxNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, collateTo)
+	if err != nil || !ok {
+		return end, err
 	}
+	stepSize := tx.Debug().StepSize()
+	stepsEnd := (collateToTxNum + 1) / stepSize * stepSize
+	if stepsEnd <= tx.Debug().TxNumsInFiles(kv.StateDomains...) {
+		return end, nil
+	}
+	lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, stepsEnd-1)
+	if err != nil || !ok {
+		return end, err
+	}
+	return lastBlock + 1, nil
 }
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in

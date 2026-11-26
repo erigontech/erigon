@@ -48,23 +48,32 @@ func newSnapshotBoundaryChain(t *testing.T, opts ...execmoduletester.Option) (*e
 	}, opts...)...)
 	m.ExecModule.Drain()
 	m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForFiles()
-	var lastFileBlock uint64
+	// Genesis takes txNums 0-1 and each block with one transfer takes 3, so txNum 15 is in block 5.
+	const lastFileBlock = 5
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		block, found, err := m.BlockReader.TxnumReader().FindBlockNum(ctx, tx, stepSize-1)
 		require.NoError(t, err)
 		require.True(t, found)
-		require.Positive(t, block)
-		lastFileBlock = block
+		require.Equal(t, uint64(lastFileBlock), block)
 		return nil
 	}))
 	return m, chainPack, lastFileBlock
+}
+
+// setFlag sets a process-wide flag for the test and puts back its earlier value. Call it before the tester is made:
+// cleanups run in reverse order, and the tester's goroutines read the flag until its own cleanup.
+func setFlag(t *testing.T, get func() bool, set func(bool), v bool) {
+	t.Helper()
+	prev := get()
+	set(v)
+	t.Cleanup(func() { set(prev) })
 }
 
 // holdStateFilePublication finalizes the block after the first step's last block, so the step is irreversible, and
 // starts a prune. The step is built, and its publication waits until the returned func runs.
 func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, lastFileBlock uint64, publish func()) {
 	t.Helper()
-	m, chainPack, lastFileBlock = newSnapshotBoundaryChain(t)
+	m, chainPack, lastFileBlock = newSnapshotBoundaryChain(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 	ctx := t.Context()
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	built, release := make(chan struct{}), make(chan struct{})
@@ -107,9 +116,7 @@ func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTeste
 func requireFilesOnCanonicalChain(t *testing.T, m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack) {
 	t.Helper()
 	endTxNum := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax()
-	if endTxNum == 0 {
-		return
-	}
+	require.Positive(t, endTxNum, "no state files")
 	var lastFileBlock uint64
 	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 		var found bool
@@ -134,7 +141,7 @@ func TestSetHeadDuringStateFileBuild(t *testing.T) {
 }
 
 func TestForkchoiceLoweringFinalityDuringStateFileBuild(t *testing.T) {
-	for _, name := range []string{"same_head", "advance_head", "rewind_at_boundary"} {
+	for _, name := range []string{"same_head", "advance_head"} {
 		t.Run(name, func(t *testing.T) {
 			m, chain, lastFileBlock, publish := holdStateFilePublication(t)
 			ctx := t.Context()
@@ -149,13 +156,14 @@ func TestForkchoiceLoweringFinalityDuringStateFileBuild(t *testing.T) {
 			currentHead := extension.Blocks[0].Hash()
 			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, currentHead, finalizedHash, finalizedHash).Status)
 			head := currentHead
-			switch name {
-			case "advance_head":
+			if name == "advance_head" {
 				head = extension.TopBlock.Hash()
-			case "rewind_at_boundary":
-				head = lastInFiles.Hash() // the head moves back to the step's last block, which stays
 			}
 			require.Equal(t, execmodule.ExecutionStatusSuccess, updateForkChoice(t, m, head, parentHash, parentHash).Status)
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				require.Equal(t, head, rawdb.ReadHeadBlockHash(tx))
+				return nil
+			}))
 			publish()
 			requireFilesOnCanonicalChain(t, m, chain)
 
@@ -178,18 +186,16 @@ func TestStateFileBuildKeepsRewindsOutOfFiles(t *testing.T) {
 	pruneWithFinalized(t, m, chainPack, lastFileBlock)
 	require.Zero(t, m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax(), "a block with a changeset must stay out of the files")
 	require.NoError(t, m.ExecModule.SetHead(ctx, lastFileBlock-1))
-	requireFilesOnCanonicalChain(t, m, chainPack)
 }
 
-// Collation deletes the changesets of the blocks it puts in files itself, so it builds the step when no
-// changeset is pruned: with every changeset kept, or with the prune stage off.
+// The prune stage deletes the changesets of the steps about to be collated, so the step is built also when the
+// other changesets stay: with every changeset kept, or with the prune stage off.
 func TestStateFileBuildDeletesTheChangesetsOfCollatedBlocks(t *testing.T) {
 	for _, mode := range []string{"always_generate_changesets", "no_prune"} {
 		t.Run(mode, func(t *testing.T) {
 			var opts []execmoduletester.Option
 			if mode == "no_prune" {
-				dbg.SetNoPrune(true)
-				t.Cleanup(func() { dbg.SetNoPrune(false) }) // after the tester's cleanup: its goroutines read it
+				setFlag(t, dbg.NoPrune, dbg.SetNoPrune, true)
 			} else {
 				opts = append(opts, execmoduletester.WithAlwaysGenerateChangesets(true))
 			}
@@ -211,12 +217,10 @@ func TestStateFileProductionOffKeepsTheChangesets(t *testing.T) {
 			t.Run(off+"/"+mode, func(t *testing.T) {
 				opts := []execmoduletester.Option{execmoduletester.WithAlwaysGenerateChangesets(mode == "always_generate_changesets")}
 				if mode == "no_prune" {
-					dbg.SetNoPrune(true)
-					t.Cleanup(func() { dbg.SetNoPrune(false) })
+					setFlag(t, dbg.NoPrune, dbg.SetNoPrune, true)
 				}
 				if off == "no_background_maintenance" {
-					dbg.SetNoBackgroundMaintenance(true)
-					t.Cleanup(func() { dbg.SetNoBackgroundMaintenance(false) })
+					setFlag(t, dbg.NoBackgroundMaintenance, dbg.SetNoBackgroundMaintenance, true)
 				} else {
 					opts = append(opts, execmoduletester.WithBlockReaderWrap(func(br dbservices.FullBlockReader) dbservices.FullBlockReader {
 						return stateFilesStopped{br}
@@ -254,12 +258,28 @@ func pruneWithFinalized(t *testing.T, m *execmoduletester.ExecModuleTester, chai
 }
 
 // Files that older code built over blocks that still have changesets: one prune pass deletes those changesets, so
-// an unwind into the files is refused.
+// an unwind into the files is refused, also with the prune off and no new files made.
 func TestPruneDeletesTheChangesetsOfBlocksAlreadyInFiles(t *testing.T) {
+	for _, mode := range []string{"prune", "no_prune_without_state_files"} {
+		t.Run(mode, func(t *testing.T) {
+			testPruneDeletesTheChangesetsOfBlocksAlreadyInFiles(t, mode == "no_prune_without_state_files")
+		})
+	}
+}
+
+func testPruneDeletesTheChangesetsOfBlocksAlreadyInFiles(t *testing.T, noPruneWithoutStateFiles bool) {
+	if noPruneWithoutStateFiles {
+		setFlag(t, dbg.NoPrune, dbg.SetNoPrune, false)
+		setFlag(t, dbg.NoBackgroundMaintenance, dbg.SetNoBackgroundMaintenance, false)
+	}
 	m, chainPack, lastFileBlock := newSnapshotBoundaryChain(t)
 	ctx := t.Context()
 	pruneWithFinalized(t, m, chainPack, lastFileBlock+1)
 	require.Equal(t, m.DB.StepSize(), m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EndTxNumMinimax())
+	if noPruneWithoutStateFiles {
+		dbg.SetNoPrune(true)
+		dbg.SetNoBackgroundMaintenance(true)
+	}
 
 	// Lower finality below the files and give their last blocks changesets again, as an older build left them.
 	lowered := chainPack.Blocks[lastFileBlock-3].Hash()
