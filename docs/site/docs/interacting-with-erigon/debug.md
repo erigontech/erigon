@@ -68,6 +68,114 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawReceipts","params":["0x12
 | ------------- | -------------------------------------------- |
 | Array of DATA | Array of binary-encoded transaction receipts |
 
+### debug\_getRawHeader
+
+Returns the RLP-encoded header of a block.
+
+#### Parameters
+
+| Parameter     | Type                    | Description                                                                  |
+| ------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| blockNrOrHash | QUANTITY \| TAG \| DATA | Block number, tag ("earliest", "latest", "safe", "finalized"), or block hash |
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawHeader","params":["0x123456"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type | Description                                                   |
+| ---- | ------------------------------------------------------------- |
+| DATA | RLP-encoded block header, or `null` if the block is not found |
+
+### debug\_getRawBlock
+
+Returns the RLP-encoded block, including its transactions.
+
+#### Parameters
+
+| Parameter     | Type                    | Description                                                                  |
+| ------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| blockNrOrHash | QUANTITY \| TAG \| DATA | Block number, tag ("earliest", "latest", "safe", "finalized"), or block hash |
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawBlock","params":["0x123456"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type | Description                                            |
+| ---- | ------------------------------------------------------ |
+| DATA | RLP-encoded block, or `null` if the block is not found |
+
+### debug\_getRawBlockAccessList
+
+Returns the RLP-encoded block access list ([EIP-7928](https://eips.ethereum.org/EIPS/eip-7928)) of a block. The JSON form of the same list is returned by `eth_getBlockAccessList`.
+
+#### Parameters
+
+| Parameter     | Type                    | Description                                                                  |
+| ------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| blockNrOrHash | QUANTITY \| TAG \| DATA | Block number, tag ("earliest", "latest", "safe", "finalized"), or block hash |
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawBlockAccessList","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type | Description                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| DATA | RLP-encoded block access list. If the block has no stored access list, the call fails with error code `-32001` (`Resource not found`) |
+
+### debug\_getRawTransaction
+
+Returns the EIP-2718 binary encoding of a transaction included in a block. Transactions that are only in the transaction pool are not returned.
+
+#### Parameters
+
+| Parameter | Type           | Description             |
+| --------- | -------------- | ----------------------- |
+| txHash    | DATA, 32 bytes | Hash of the transaction |
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawTransaction","params":["0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type | Description                                                           |
+| ---- | --------------------------------------------------------------------- |
+| DATA | Binary-encoded transaction, or `null` if the transaction is not found |
+
+### debug\_getBadBlocks
+
+Returns the most recent bad blocks that the node has seen and rejected.
+
+#### Parameters
+
+None
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getBadBlocks","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type            | Description                                                                                                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Array of Object | One object per bad block, with the fields `hash` (block hash), `block` (the block with full transaction objects, as in `eth_getBlockByHash`) and `rlp` (RLP-encoded block). Empty array if there are none |
+
 ### debug\_accountRange
 
 Returns a range of accounts involved in the given block range.
@@ -355,6 +463,28 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[85899
 | Type     | Description           |
 | -------- | --------------------- |
 | QUANTITY | Previous memory limit |
+
+### debug\_setHead
+
+Rewinds the local chain to the given block number. This is a destructive operation: blocks above the new head must be processed again.
+
+#### Parameters
+
+| Parameter | Type     | Description                                                                                                   |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| number    | QUANTITY | Block number of the new head. It must not be above the current head, and its state history must not be pruned |
+
+#### Example
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"debug_setHead","params":["0x123456"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+#### Returns
+
+| Type | Description                            |
+| ---- | -------------------------------------- |
+| null | Returns `null` on success, or an error |
 
 ### debug\_setGCPercent
 
