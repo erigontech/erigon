@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -130,4 +131,33 @@ func TestGetIndexedPayloadAttestationLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetActiveValidatorsIndicesIsExactLengthAndCounted(t *testing.T) {
+	s := state.New(&clparams.MainnetBeaconConfig)
+	var want []uint64
+	for i := range 100 {
+		var pk [48]byte
+		binary.BigEndian.PutUint64(pk[:], uint64(i))
+		v := solid.NewValidator()
+		v.SetPublicKey(pk)
+		v.SetEffectiveBalance(32_000_000_000)
+		v.SetActivationEpoch(0)
+		v.SetExitEpoch(^uint64(0))
+		switch {
+		case i%5 == 1:
+			v.SetActivationEpoch(10)
+		case i%5 == 2:
+			v.SetExitEpoch(1)
+		default:
+			want = append(want, uint64(i))
+		}
+		require.NoError(t, s.AddValidator(v, 32_000_000_000))
+	}
+
+	before := shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64()
+	got := s.GetActiveValidatorsIndices(1)
+	require.Equal(t, want, got)
+	require.Equal(t, len(got), cap(got))
+	require.Equal(t, before+1, shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64())
 }

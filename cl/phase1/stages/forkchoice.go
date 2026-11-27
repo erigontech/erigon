@@ -713,14 +713,15 @@ func shuffleInputForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainC
 		return shuffleInput{}, false
 	}
 
+	stateRoot := b.StateRoots().Get(int(refSlot % beaconConfig.SlotsPerHistoricalRoot))
+
 	// Pre-cache active validators if not already cached
-	preCacheActiveValidatorsForEpoch(b, epoch, blockRootAtBegginingPrevEpoch)
+	preCacheActiveValidatorsForEpoch(b, epoch, blockRootAtBegginingPrevEpoch, stateRoot)
 
 	// Skip if the shuffled set is already pre-cached
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
 		return shuffleInput{}, false
 	}
-	stateRoot := b.StateRoots().Get(int(refSlot % beaconConfig.SlotsPerHistoricalRoot))
 	if stateRoot != (common.Hash{}) {
 		if shuffledIndicies, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, stateRoot); ok {
 			caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
@@ -749,9 +750,15 @@ func preCacheShuffledSet(in shuffleInput) {
 	log.Info("[CL] pre-cached shuffled set", "epoch", in.epoch, "len", len(shuffledIndicies), "mix", in.mix)
 }
 
-func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
+func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot, stateRoot common.Hash) {
 	if indicies, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 {
 		return
+	}
+	if stateRoot != (common.Hash{}) {
+		if indicies, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, stateRoot); ok && len(indicies) > 0 {
+			caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies)
+			return
+		}
 	}
 
 	indicies := b.GetActiveValidatorsIndices(epoch)
