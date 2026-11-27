@@ -297,30 +297,24 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			drops.unparsableItem(p.Name)
 			continue
 		}
-		if dot < lastSep {
+		parsed, _, _ := snaptype.ParseFileName("", p.Name)
+		switch {
+		case parsed.TypeString == "":
 			drops.unparsedItem(p.Name)
+			continue
+		case parsed.Type == nil:
+			drops.unreadable++
+			continue
+		case dot < lastSep || !strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) || !spellsRegisteredName(parsed.Type, parsed.TypeString):
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
-		var typeName string
+		typeName := parsed.Type.Name()
 		include := false
 		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
 			idxIndex = 1
-		}
-		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
-		switch {
-		case parsedOK && parsed.Type != nil && strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) && spellsRegisteredName(parsed.Type, parsed.TypeString):
-			typeName = parsed.Type.Name()
-		case parsedOK && parsed.Type != nil:
-			drops.unparsableItem(p.Name)
-			continue
-		case parsed.TypeString != "":
-			drops.unreadable++
-			continue
-		default:
-			drops.unparsedItem(p.Name)
-			continue
 		}
 
 		for _, typ := range types {
