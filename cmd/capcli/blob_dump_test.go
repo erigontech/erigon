@@ -26,20 +26,27 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 func blobSegment(t *testing.T, name string) snaptype.FileInfo {
@@ -186,7 +193,7 @@ func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 1, nil })
+	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, bool, error) { return 1, false, nil })
 	require.ErrorContains(t, err, "count mismatch")
 
 	for _, name := range old {
@@ -207,11 +214,11 @@ func TestDumpBlobSegmentKeepsOldFilesWhenCompressFails(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(slot uint64) (uint64, error) {
+	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(_ kv.Tx, slot uint64) (uint64, bool, error) {
 		if slot == 40_000-1 {
 			cancel()
 		}
-		return 0, nil
+		return 0, false, nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
@@ -235,7 +242,7 @@ func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 0, nil }))
+	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, bool, error) { return 0, false, nil }))
 
 	entries, err := os.ReadDir(dirs.Snap)
 	require.NoError(t, err)
@@ -254,4 +261,113 @@ func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
 	st, err := os.Stat(filepath.Join(dirs.Snap, idx(version.V1_1)))
 	require.NoError(t, err)
 	require.Greater(t, st.Size(), int64(1))
+}
+
+func TestCheckBlobsSnapshotsCountUsesZeroForSkippedPayload(t *testing.T) {
+	for name, tc := range map[string]struct {
+		skipped bool
+		stored  bool
+		err     string
+	}{
+		"skipped payload":                 {skipped: true},
+		"skipped payload, stored sidecar": {skipped: true, stored: true},
+		"non-skipped payload":             {err: "blob count mismatch, have 0, want 1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, cfg, _, err := clparams.GetConfigsByNetworkName(networkname.Sepolia)
+			require.NoError(t, err)
+			slot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+			from := slot / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
+			to := from + snaptype.CaplinMergeLimit
+
+			block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+			block.Block.Slot = slot
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.BlockHash = common.Hash{1}
+			block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+
+			child := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+			child.Block.Slot = slot + 1
+			child.Block.ParentRoot = root
+			childBid := child.Block.Body.GetSignedExecutionPayloadBid().Message
+			childBid.ParentBlockHash = common.Hash{2}
+			if !tc.skipped {
+				childBid.ParentBlockHash = bid.BlockHash
+			}
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+
+			dirs := datadir.New(t.TempDir())
+			writeCapcliSnapshotSegment(t, dirs, snaptype.BeaconBlocks, from, to, func(current uint64) []byte {
+				switch current {
+				case slot:
+					return capcliBlockSnapshotWord(t, block)
+				case slot + 1:
+					return capcliBlockSnapshotWord(t, child)
+				default:
+					return nil
+				}
+			})
+			var blobWord []byte
+			if tc.stored {
+				blobWord, err = blobSidecarAt(0).EncodeSSZ(nil)
+				require.NoError(t, err)
+			}
+			writeCapcliSnapshotSegment(t, dirs, snaptype.BlobSidecars, from, to, func(current uint64) []byte {
+				if tc.stored && current == slot {
+					return blobWord
+				}
+				return nil
+			})
+
+			db, err := openCaplinDB(t.Context(), dirs.CaplinIndexing, false)
+			require.NoError(t, err)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
+				return beacon_indicies.MarkRootCanonical(tx, slot+1, childRoot)
+			}))
+			db.Close()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			cmd := &CheckBlobsSnapshotsCount{
+				chainCfg:     chainCfg{Chain: networkname.Sepolia},
+				outputFolder: outputFolder{Datadir: dirs.DataDir},
+				From:         slot,
+			}
+			err = cmd.Run(ctx)
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func writeCapcliSnapshotSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, word func(uint64) []byte) {
+	t.Helper()
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, sType.FileName(version.ZeroVersion, from, to))
+	require.True(t, ok)
+	c, err := seg.NewCompressor(t.Context(), "test "+sType.Name(), f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	for slot := from; slot < to; slot++ {
+		require.NoError(t, c.AddWord(word(slot)))
+	}
+	require.NoError(t, c.Compress())
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
+}
+
+func capcliBlockSnapshotWord(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {
+	t.Helper()
+	var encoded bytes.Buffer
+	compressor, err := zstd.NewWriter(&encoded)
+	require.NoError(t, err)
+	_, err = snapshot_format.WriteBlockForSnapshot(compressor, block, nil)
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+	return encoded.Bytes()
 }

@@ -10,7 +10,7 @@ Erigon stores the majority of its chain data in **snapshot files** (`.seg` segme
 
 ## `seg du` — Disk Usage Report
 
-The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the configured node type, and estimated sizes for each pruning mode. Each estimate sums the files the downloader would select for that mode, plus any file in the state directories whose name Erigon does not recognise, which every row counts.
 
 ### Syntax
 
@@ -50,12 +50,12 @@ total: 1.8TB (4285 files)
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
-The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
+The estimator only sums files already on disk, so no node-type estimate can exceed what is present. Commitment history and Caplin data are left out of every row, as a default node does not download them. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are printed in the fixed order `archive → full → blocks → minimal`. When a headers or bodies segment cannot be read, or the indexed bodies do not cover every block in the headers and bodies segments on disk, `seg du` logs a warning and prints the report without estimates (`"estimates": null` in JSON).
 
 **Header fields explained:**
 
-- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
-- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **Chain** — read from `chaindata` when it can be opened; `unknown` otherwise.
+- **Mode** — the configured pruning mode read from `chaindata`; `mode unknown` when it cannot be read.
 - **blocks 0–N** — the highest block number across all block segment files.
 - **steps 0–N** — the highest step number across all state files. A step is an internal Erigon unit covering a fixed number of *transactions* (`config3.DefaultStepSize` = 390,625 txNums), so the number of blocks per step varies with chain activity.
 
@@ -105,17 +105,17 @@ Use `--json` to get a machine-readable object suitable for scripting:
 erigon seg du --datadir /data/erigon --json | jq '.estimates'
 ```
 
-The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`, `caplin_bytes`.
 
 :::tip
-Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+`seg du` reads only snapshot files for its figures. `chaindata`, when it can be opened, supplies the chain name and the configured mode; without it both show as unknown and the figures are the same.
 :::
 
 ---
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` shows the mode configured in `chaindata`. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 

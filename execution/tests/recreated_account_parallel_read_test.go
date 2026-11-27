@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -45,8 +46,8 @@ import (
 // while the re-creation is still running. Parallel import must accept the
 // block the serial generator built.
 func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	// The constructor self-destructs while the account still holds its
 	// pre-block wei and deploys 32 bytes of code once that wei is gone.
@@ -77,7 +78,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -101,8 +101,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -132,8 +130,8 @@ func iterations(n uint64) []byte {
 // the earlier tx's value. tx0 credits A; tx1, still running when tx0 folds, only
 // bumps A's nonce with a CREATE2.
 func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	a := common.HexToAddress("0xaaaa")
 	config := chain.TestChainOsakaConfig.Copy()
@@ -151,7 +149,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -174,8 +171,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -190,17 +185,24 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	}))
 }
 
-// A BAL block dispatches a bounded window of txs past the commit frontier. A block
-// of many more txs than the window, each depending on the one before it, must still
-// complete and match the serial result.
-func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+// A block dispatches a bounded window of txs past the commit frontier, with or without a
+// block access list. A block of many more txs than the window, each depending on the one
+// before it, must still complete and match the serial result.
+func TestParallelBlockPastDispatchWindow(t *testing.T) {
+	t.Run("bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, true) })
+	t.Run("no_bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, false) })
+}
 
-	const txs = 80
+func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+	const txs = 300
 	counter := common.HexToAddress("0xc0c0")
 	config := chain.TestChainOsakaConfig.Copy()
-	config.AmsterdamTime = common.NewUint64(0)
+	if withBAL {
+		config.AmsterdamTime = common.NewUint64(0)
+	}
 	signer := types.LatestSignerForChainID(config.ChainID)
 	key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
 	require.NoError(t, err)
@@ -210,8 +212,7 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
 	}
 
-	dbg.Exec3Parallel = false
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	ethconfig.Defaults.Sync.ExecWorkerCount = 16
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
@@ -225,8 +226,6 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -236,4 +235,98 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 		require.Equal(t, *uint256.NewInt(txs), v)
 		return nil
 	}))
+}
+
+// Under Amsterdam, tx 0 funds flag slowly, and tx 1 creates x by CREATE2 only while flag has no
+// balance, so only a transient run of tx 1 creates x. Tx 2 reads x's balance, waits, and credits x
+// as the beneficiary of a SELFDESTRUCT, which creates x. Parallel import, with and without the
+// block access list, must accept the block the serial generator built: tx 2 must not keep a write
+// that depends on the transient create.
+func TestParallelCreditOfAnAccountThatATransientRunCreated(t *testing.T) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+	prevIgnoreBAL := dbg.IgnoreBAL
+	t.Cleanup(func() { dbg.IgnoreBAL = prevIgnoreBAL })
+
+	runtime := make([]byte, 32)
+	runtime[31] = 1
+	initCode := program.New().ReturnData(runtime).Bytes()
+	flag := common.HexToAddress("0xf1a9")
+	factory := common.HexToAddress("0xfac7")
+	funder := common.HexToAddress("0xf00d")
+	bomb := common.HexToAddress("0xb0b0")
+	payer := common.HexToAddress("0x9a9e")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+
+	// funder counts calldata[0] down, then sends the tx value to calldata[32].
+	funderCode := countdownLoop(program.New().Push(0).Op(vm.CALLDATALOAD))
+	funderCode.Push(0).Push(0).Push(0).Push(0).Op(vm.CALLVALUE).Push(32).Op(vm.CALLDATALOAD, vm.GAS, vm.CALL, vm.STOP)
+	// payer reads x's balance, counts calldata[0] down, sends the tx value to bomb, which
+	// self-destructs to x, and counts calldata[32] down.
+	payerCode := program.New().Push(x).Op(vm.BALANCE, vm.POP)
+	countdownLoop(payerCode.Push(0).Op(vm.CALLDATALOAD))
+	payerCode.Push(0).Push(0).Push(0).Push(0).Op(vm.CALLVALUE).Push(bomb).Op(vm.GAS, vm.CALL, vm.POP)
+	countdownLoop(payerCode.Push(32).Op(vm.CALLDATALOAD)).Op(vm.STOP)
+
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	alloc := types.GenesisAlloc{
+		factory: {Code: createWhileUnfunded(flag, initCode), Nonce: 1},
+		funder:  {Code: funderCode.Bytes(), Nonce: 1},
+		payer:   {Code: payerCode.Bytes(), Nonce: 1},
+		bomb:    {Code: program.New().Selfdestruct(x).Bytes(), Nonce: 1},
+	}
+	keys := revivalKeys(t, alloc, 3)
+	gspec := &types.Genesis{Config: config, GasLimit: 60_000_000, Alloc: alloc}
+	signer := types.LatestSignerForChainID(config.ChainID)
+	calls := []struct {
+		to    common.Address
+		value uint64
+		data  []byte
+	}{
+		{funder, 1, append(iterations(300_000), common.LeftPadBytes(flag[:], 32)...)},
+		{factory, 0, iterations(30_000)},
+		{payer, 1, append(iterations(150_000), iterations(450_000)...)},
+	}
+	ethconfig.Defaults.Sync.ExecWorkerCount = 1
+	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+	chainPack, err := gen.GenerateChain(1, func(_ int, bg *blockgen.BlockGen) {
+		for i, call := range calls {
+			sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+			txn, err := types.SignTx(types.NewTransaction(bg.TxNonce(sender), call.to, uint256.NewInt(call.value), 16_500_000, uint256.NewInt(10_000_000_000), call.data), *signer, keys[i])
+			require.NoError(t, err)
+			bg.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	for _, receipt := range chainPack.Receipts[0] {
+		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
+	}
+
+	for _, ignoreBAL := range []bool{false, true} {
+		for _, workers := range []int{4, 8} {
+			t.Run(fmt.Sprintf("ignoreBAL=%v/workers=%d", ignoreBAL, workers), func(t *testing.T) {
+				dbg.IgnoreBAL = ignoreBAL
+				ethconfig.Defaults.Sync.ExecWorkerCount = workers
+				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+				require.NoError(t, m.InsertChain(chainPack))
+			})
+		}
+	}
+}
+
+// createWhileUnfunded counts calldata[0] down, then creates initCode by CREATE2 with salt 0 if
+// flag has no balance.
+func createWhileUnfunded(flag common.Address, initCode []byte) []byte {
+	build := func(done uint64) (*program.Program, uint64) {
+		p := countdownLoop(program.New().Push(0).Op(vm.CALLDATALOAD))
+		p.Push(flag).Op(vm.BALANCE, vm.PUSH2).Append([]byte{byte(done >> 8), byte(done)}).Op(vm.JUMPI)
+		p.Create2(initCode, 0).Op(vm.STOP)
+		_, at := p.Jumpdest()
+		p.Op(vm.STOP)
+		return p, at
+	}
+	_, done := build(0)
+	p, _ := build(done)
+	return p.Bytes()
 }

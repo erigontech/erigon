@@ -84,9 +84,8 @@ func (dks *PubSubDecryptionKeysSource) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() {
-		err := p2pHost.Close()
-		if err != nil {
-			dks.logger.Error("failed to close p2p host", "err", err)
+		if closeErr := p2pHost.Close(); closeErr != nil {
+			dks.logger.Error("failed to close p2p host", "err", closeErr)
 		}
 	}()
 
@@ -110,8 +109,8 @@ func (dks *PubSubDecryptionKeysSource) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() {
-		if err := topic.Close(); err != nil && !errors.Is(err, context.Canceled) {
-			dks.logger.Error("failed to close decryption keys topic", "err", err)
+		if closeErr := topic.Close(); closeErr != nil && !errors.Is(closeErr, context.Canceled) {
+			dks.logger.Error("failed to close decryption keys topic", "err", closeErr)
 		}
 	}()
 
@@ -285,16 +284,15 @@ func (dks *PubSubDecryptionKeysSource) connectBootstrapNodes(ctx context.Context
 		wg.Go(func() error {
 			connect := func() error {
 				dks.logger.Info("connecting to bootstrap node", "node", node)
-				err := host.Connect(ctx, node)
-				if err != nil {
-					dks.logger.Warn("failed to connect to bootstrap node, trying again", "node", node, "err", err)
+				connectErr := host.Connect(ctx, node)
+				if connectErr != nil {
+					dks.logger.Warn("failed to connect to bootstrap node, trying again", "node", node, "err", connectErr)
 				}
-				return err
+				return connectErr
 			}
 
-			err = backoff.Retry(connect, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
-			if err != nil {
-				dks.logger.Error("failed to connect to bootstrap node", "node", node, "err", err)
+			if retryErr := backoff.Retry(connect, backoff.WithContext(backoff.NewExponentialBackOff(), ctx)); retryErr != nil {
+				dks.logger.Error("failed to connect to bootstrap node", "node", node, "err", retryErr)
 				return nil
 			}
 

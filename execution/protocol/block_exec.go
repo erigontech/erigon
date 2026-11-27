@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,6 +86,26 @@ func ExecuteBlockEphemerally(
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
+	blockNum := block.NumberU64()
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+	blockRules := blockContext.Rules(chainConfig)
+	_, noopWriter := stateWriter.(*state.NoopWriter)
+	writesState := stateWriter != nil && !noopWriter
+	// endPhase writes the finished phase to stateWriter and publishes it to the version map for the next one.
+	endPhase := func() error {
+		writes, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return err
+		}
+		ibs.FlushWritesToVersionMap(writes)
+		if writesState {
+			if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+				return err
+			}
+		}
+		ibs.ResetIO()
+		return nil
+	}
 
 	gasUsed := new(GasUsed)
 	gp := new(GasPool)
@@ -105,14 +126,17 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
+	ibs.SetTxContext(blockNum, -1)
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer); err != nil {
 		return nil, err
+	}
+	if err := endPhase(); err != nil {
+		return nil, fmt.Errorf("init of block %d: %w", blockNum, err)
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
@@ -125,18 +149,22 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, header, txn, gasUsed, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil
 		}
 
 		if err != nil {
-			if !vmConfig.StatelessExec {
+			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
+			ibs.ResetIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
+			if err := endPhase(); err != nil {
+				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
+			}
 			includedTxs = append(includedTxs, txn)
 			if !vmConfig.NoReceipts {
 				receipts = append(receipts, receipt)
@@ -177,9 +205,13 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
+		ibs.SetTxContext(blockNum, len(txs))
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
+		}
+		if err := endPhase(); err != nil {
+			return nil, fmt.Errorf("finalize of block %d: %w", blockNum, err)
 		}
 	}
 	newRoot := newBlock.Root()
@@ -303,7 +335,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 func FinalizeBlockExecution(
 	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.StateWriter, cc *chain.Config,
+	cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
@@ -314,9 +346,7 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
-	if ibs.IsVersioned() {
-		ibs.StartAccessRecording()
-	}
+	ibs.StartAccessRecording()
 
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
@@ -326,23 +356,11 @@ func FinalizeBlockExecution(
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.BalIO() via ApplyWrites after
-	// assembly, so so.data must not also be flushed here. versionMap==nil callers
-	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
-	if !ibs.IsVersioned() {
-		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
-		}
-	}
-
 	return newBlock, retRequests, nil
 }
 
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
@@ -351,9 +369,6 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	if err != nil {
 		return err
 	}
-	if stateWriter == nil {
-		stateWriter = state.NewNoopWriter()
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
+	ibs.EndTransaction()
+	return nil
 }

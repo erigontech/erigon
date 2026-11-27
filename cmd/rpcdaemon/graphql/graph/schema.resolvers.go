@@ -330,7 +330,7 @@ func (r *queryResolver) Syncing(ctx context.Context) (*model.SyncState, error) {
 func (r *queryResolver) ChainID(ctx context.Context) (string, error) {
 	chainID, err := r.GraphQLAPI.GetChainID(ctx)
 
-	return "0x" + strconv.FormatUint(chainID.Uint64(), 16), err
+	return hexutil.EncodeUint64(chainID.Uint64()), err
 }
 
 // From is the resolver for the from field.

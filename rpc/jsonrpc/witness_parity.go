@@ -64,7 +64,7 @@ func CompareWitnessNodeSets(erigon, reth *ExecutionWitnessResult) WitnessParity 
 	}
 }
 
-func byteSet(items []hexutil.Bytes) map[string]struct{} {
+func byteSet[T ~[]byte](items []T) map[string]struct{} {
 	set := make(map[string]struct{}, len(items))
 	for _, it := range items {
 		set[string(it)] = struct{}{}

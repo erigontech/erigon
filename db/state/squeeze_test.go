@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type testAggConfig struct {
@@ -57,7 +58,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(db, uint64(txCount), unboundedFinalityCtx)
+	err := agg.BuildFiles(db, uint64(txCount), allIrreversible)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -213,6 +214,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -281,6 +283,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 // and validates. This exercises ExpandShortenedKeysInBranch via the public read-path API
 // (DebugGetLatestFromFiles → replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch).
 func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -355,6 +358,12 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) { testRebuildCommitmentBasedOnFiles(t, v3) })
+	}
+}
+
+func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
@@ -370,9 +379,9 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmenttest.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
+		_, _, rootInFiles, err = commitmenttest.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {
@@ -383,10 +392,11 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		//db.Close()
 	}
 
-	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true)
+	t.Cleanup(statecfg.SetCommitmentV3(v3))
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true, v3)
 }
 
-func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles bool) {
+func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles, foldV3 bool) {
 	t.Helper()
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
@@ -422,6 +432,11 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
+	if foldV3 {
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
+		require.NoError(t, err)
+		require.Equal(t, finalRoot, checks[0].Root)
+	}
 }
 
 type rebuildHeaders map[uint64]common.Hash
@@ -456,19 +471,20 @@ func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	for _, c := range []struct {
-		filedSteps uint64
-		resume     bool
-	}{{5, false}, {4, false}, {5, true}} {
-		t.Run(fmt.Sprintf("filedSteps=%d/resume=%t", c.filedSteps, c.resume), func(t *testing.T) {
-			testRebuildCommitmentWithHistory(t, c.filedSteps, c.resume)
-		})
+	for _, v3 := range []bool{false, true} {
+		for _, c := range []struct {
+			filedSteps uint64
+			resume     bool
+		}{{5, false}, {4, false}, {5, true}} {
+			t.Run(fmt.Sprintf("v3=%t/filedSteps=%d/resume=%t", v3, c.filedSteps, c.resume), func(t *testing.T) {
+				testRebuildCommitmentWithHistory(t, v3, c.filedSteps, c.resume)
+			})
+		}
 	}
 }
 
-func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bool) {
-	schema := statecfg.Schema
-	t.Cleanup(func() { statecfg.Schema = schema })
+func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
+	t.Cleanup(statecfg.SetCommitmentV3(v3))
 	statecfg.EnableHistoricalCommitment()
 	const stepSize = 16
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -537,7 +553,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 			require.NoError(t, domains.Flush(ctx, rwTx))
 			domains.Close()
 			require.NoError(t, rwTx.Commit())
-			require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+			require.NoError(t, agg.BuildFiles(db, txNum, allIrreversible))
 			rwTx, err = db.BeginTemporalRw(ctx) //nolint:gocritic
 			require.NoError(t, err)
 			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
@@ -549,7 +565,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
 	if txNum < filesBoundary {
-		require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+		require.NoError(t, agg.BuildFiles(db, txNum, allIrreversible))
 	}
 
 	dirs := agg.Dirs()
@@ -585,7 +601,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 
 		logger, flushes := log.New(), &flushRecorder{}
 		logger.SetHandler(flushes)
-		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, unboundedFinalityCtx, logger, false)
+		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, allIrreversible, logger, false)
 		require.NoError(t, err)
 		require.Equal(t, roots[toBlock], common.Hash(root))
 		return flushes.direct
@@ -612,6 +628,19 @@ func testRebuildCommitmentWithHistory(t *testing.T, filedSteps uint64, resume bo
 	}
 	require.Equal(t, direct, rebuild(lastBlock), "steps with state files go straight to files, the rest and a resumed step through the DB")
 	require.Equal(t, history, commitmentHistory(t, tdb, txNum), "the rebuilt commitment history reads as the original")
+	if !v3 {
+		return
+	}
+	filesEnd := txNum / stepSize * stepSize
+	for b, last := range lastTxNums {
+		if last >= filesEnd {
+			break
+		}
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{last + 1}, nil)
+		require.NoError(t, err, "block %d", b)
+		require.Equal(t, uint64(b), checks[0].BlockNum)
+		require.Equal(t, roots[uint64(b)], common.Hash(checks[0].Root), "block %d", b)
+	}
 }
 
 func TestDumpCommitmentStepClosesCollationOnBuildError(t *testing.T) {
@@ -650,12 +679,12 @@ func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
 
 	const n = 3
 	var served byte
-	next := func() (bool, []byte) {
+	next := func() (bool, []byte, []byte) {
 		if served == n {
-			return false, nil
+			return false, nil, nil
 		}
 		served++
-		return true, bytes.Repeat([]byte{served}, length.Addr)
+		return true, bytes.Repeat([]byte{served}, length.Addr), nil
 	}
 	keys, err := state.RebuildCommitmentShardKeysForTest(ctx, domains, rwTx, next)
 	require.NoError(t, err)
@@ -673,7 +702,7 @@ func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[str
 	for it.HasNext() {
 		k, _, err := it.Next()
 		require.NoError(t, err)
-		if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if !commitment.IsCommitmentStateKey(k) {
 			keys[string(k)] = struct{}{}
 		}
 	}
@@ -852,7 +881,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, allIrreversible)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -1070,7 +1099,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Build files
 	t.Logf("Building files for %d txs...", totalTxs)
-	err = agg.BuildFiles(db, totalTxs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, totalTxs, allIrreversible)
 	require.NoError(t, err)
 
 	// Validate
@@ -1230,4 +1259,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
 	}
+}
+
+func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
+	require.NoError(t, agg.MergeLoop(t.Context()))
 }

@@ -396,7 +396,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 
 // Prepare implements rules.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
-func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Header) error {
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return rules.ErrUnknownAncestor

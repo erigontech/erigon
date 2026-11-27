@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -178,6 +179,9 @@ func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot common.Hash) (common.Hash, err
 
 func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (common.Hash, error) {
 	var blockRoot common.Hash
+	if slot > math.MaxUint32 {
+		return blockRoot, nil // beyond the 4-byte slot keys, so no block can be stored at it
+	}
 
 	bRoot, err := tx.GetOne(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -366,7 +370,8 @@ func RangeBlockRoots(tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, bea
 		return err
 	}
 	defer cursor.Close()
-	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
+	k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot))
+	for ; err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
 		if !fn(base_encoding.Decode64FromBytes4(k), common.BytesToHash(v)) {
 			break
 		}
@@ -395,6 +400,22 @@ func WriteBeaconBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock) error {
 		return err
 	}
 	return nil
+}
+
+// ReadBlockRootsAtSlot returns the roots of the blocks stored at slot, canonical or not.
+func ReadBlockRootsAtSlot(tx kv.Tx, slot uint64) ([]common.Hash, error) {
+	cursor, err := tx.Cursor(kv.BeaconBlocks)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+	prefix := dbutils.EncodeBlockNumber(slot)
+	var roots []common.Hash
+	k, _, err := cursor.Seek(prefix)
+	for ; err == nil && bytes.HasPrefix(k, prefix); k, _, err = cursor.Next() {
+		roots = append(roots, common.BytesToHash(k[len(prefix):]))
+	}
+	return roots, err
 }
 
 func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {

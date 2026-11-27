@@ -30,6 +30,7 @@ const (
 	KV_GetLatest_FullMethodName               = "/remote.KV/GetLatest"
 	KV_HistorySeek_FullMethodName             = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName              = "/remote.KV/IndexRange"
+	KV_IndexJoin_FullMethodName               = "/remote.KV/IndexJoin"
 	KV_HistoryRange_FullMethodName            = "/remote.KV/HistoryRange"
 	KV_RangeAsOf_FullMethodName               = "/remote.KV/RangeAsOf"
 	KV_HistoryStartFrom_FullMethodName        = "/remote.KV/HistoryStartFrom"
@@ -65,6 +66,8 @@ type KVClient interface {
 	GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error)
 	HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error)
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
+	// IndexJoin returns the timestamps that match every clause of the query; a clause matches the timestamps of any of its keys
+	IndexJoin(ctx context.Context, in *IndexJoinReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 	HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc.CallOption) (*Pairs, error)
 	HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error)
@@ -183,6 +186,16 @@ func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...gr
 	return out, nil
 }
 
+func (c *kVClient) IndexJoin(ctx context.Context, in *IndexJoinReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IndexRangeReply)
+	err := c.cc.Invoke(ctx, KV_IndexJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kVClient) HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Pairs)
@@ -270,6 +283,8 @@ type KVServer interface {
 	GetLatest(context.Context, *GetLatestReq) (*GetLatestReply, error)
 	HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error)
 	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
+	// IndexJoin returns the timestamps that match every clause of the query; a clause matches the timestamps of any of its keys
+	IndexJoin(context.Context, *IndexJoinReq) (*IndexRangeReply, error)
 	HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error)
 	RangeAsOf(context.Context, *RangeAsOfReq) (*Pairs, error)
 	HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error)
@@ -312,6 +327,9 @@ func (UnimplementedKVServer) HistorySeek(context.Context, *HistorySeekReq) (*His
 }
 func (UnimplementedKVServer) IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method IndexRange not implemented")
+}
+func (UnimplementedKVServer) IndexJoin(context.Context, *IndexJoinReq) (*IndexRangeReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method IndexJoin not implemented")
 }
 func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error) {
 	return nil, status.Error(codes.Unimplemented, "method HistoryRange not implemented")
@@ -496,6 +514,24 @@ func _KV_IndexRange_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_IndexJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IndexJoinReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).IndexJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_IndexJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).IndexJoin(ctx, req.(*IndexJoinReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KV_HistoryRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HistoryRangeReq)
 	if err := dec(in); err != nil {
@@ -638,6 +674,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "IndexRange",
 			Handler:    _KV_IndexRange_Handler,
+		},
+		{
+			MethodName: "IndexJoin",
+			Handler:    _KV_IndexJoin_Handler,
 		},
 		{
 			MethodName: "HistoryRange",

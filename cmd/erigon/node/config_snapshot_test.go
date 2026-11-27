@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -126,6 +127,12 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.SnapProduceE3, "snap produce e3 should be on by default")
 	require.False(t, snap.NoDownloader, "downloader should be enabled by default")
 	require.False(t, snap.SnapKeepBlocks, "snap keep blocks should be off by default")
+}
+
+func TestConfigCommitmentV3StartsOnFreshDatadir(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	cfg := buildEthConfig(t, nil)
+	require.False(t, cfg.Snapshot.NoDownloader)
 }
 
 // TestConfigWithFlags verifies that specific flag combinations produce the

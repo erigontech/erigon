@@ -17,7 +17,6 @@
 package executiontests
 
 import (
-	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
@@ -26,10 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -80,24 +76,6 @@ func baseFeePaid(chainPack *blockgen.ChainPack, i int) uint256.Int {
 	return *uint256.NewInt(chainPack.Receipts[0][i].GasUsed * chainPack.TopBlock.BaseFee().Uint64())
 }
 
-// importSerially imports the block with serial execution and checks the resulting state.
-func importSerially(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, chainPack *blockgen.ChainPack, check func(t *testing.T, st *state.IntraBlockState)) {
-	t.Helper()
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-	t.Run("serial", func(t *testing.T) {
-		dbg.Exec3Parallel = false
-		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-		require.NoError(t, m.InsertChain(chainPack))
-		require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-			st := state.New(m.NewStateReader(tx))
-			defer st.Close()
-			check(t, st)
-			return nil
-		}))
-	})
-}
-
 // An empty burnt-fee recipient is touched by a zero-value CALL in a tx that pays
 // it a base fee. The fee is credited before the end-of-tx EIP-161 sweep, so the
 // account survives with its storage.
@@ -128,7 +106,6 @@ func TestBurntFeeKeepsTouchedEmptyRecipient(t *testing.T) {
 					require.Equal(t, *uint256.NewInt(1), storageAt(t, st, burntRecipient, 1))
 				}
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			importInParallel(t, gspec, keys[0], chainPack, check)
 		})
 	}
@@ -190,7 +167,6 @@ func TestBurntFeeBurnedWithDestroyedRecipient(t *testing.T) {
 				require.Equal(t, accounts.EmptyCodeHash, codeHash)
 				require.Equal(t, uint256.Int{}, storageAt(t, st, tc.recipient, 1))
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			importInParallel(t, gspec, keys[0], chainPack, check)
 		})
 	}
@@ -212,7 +188,6 @@ func TestZeroBaseFeeRemovesEmptyBurntRecipient(t *testing.T) {
 		require.False(t, exists)
 		require.Equal(t, uint256.Int{}, storageAt(t, st, burntRecipient, 1))
 	}
-	importSerially(t, gspec, keys[0], chainPack, check)
 	importInParallel(t, gspec, keys[0], chainPack, check)
 }
 
@@ -283,7 +258,6 @@ func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
 				}
 				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, recipient, 1))
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			for range importRepeats() {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
@@ -340,7 +314,6 @@ func TestBurntFeeIsVisibleToLaterBalanceReads(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, balance, final)
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			for range importRepeats() {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}

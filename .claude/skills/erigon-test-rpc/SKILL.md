@@ -19,7 +19,7 @@ The CI workflow:
 1. Backs up chaindata from the reference datadir
 2. Runs `integration run_migrations` to apply pending migrations
 3. Starts `rpcdaemon --datadir <reference-datadir>`
-4. Runs `run_rpc_tests.sh` which clones `erigontech/rpc-tests`, sets up a Python venv, and runs `run_tests.py` against port 8545
+4. Runs `run_rpc_tests.sh` which clones `erigontech/rpc-tests`, builds the Go runner with `make rpc_int`, and runs `build/bin/rpc_int` against port 8545
 5. Restores original chaindata from backup
 
 The backup/restore pattern exists because `run_migrations` writes to the DB.

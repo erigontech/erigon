@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -39,19 +38,17 @@ import (
 
 // Before Cancun, a contract stores a slot and self-destructs in one tx, and a
 // later tx of the same block re-creates it with the same slot value. A block
-// built in one execution mode must be accepted in the other.
+// must be accepted with one worker and with several.
 func TestRecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
 	for _, mode := range []struct {
-		name        string
-		parallelGen bool
+		name    string
+		workers int
 	}{
-		{"serial-gen/parallel-import", false},
-		{"parallel-gen/serial-import", true},
+		{"workers=1", 1},
+		{"workers=4", 4},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			dbg.Exec3Parallel = mode.parallelGen
+			setExecWorkers(t, mode.workers)
 
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
@@ -80,7 +77,6 @@ func TestRecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			dbg.Exec3Parallel = !mode.parallelGen
 			require.NoError(t, m.InsertChain(chainPack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				st := state.New(m.NewStateReader(tx))

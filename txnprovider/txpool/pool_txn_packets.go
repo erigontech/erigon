@@ -27,6 +27,12 @@ import (
 
 const maxTransactionsPerPacket = 5000
 
+// maxRemoteAuthorizations limits how many authorization tuples the txpool decodes per packet.
+// The pending remote queue uses the same limit across packets to bound signature
+// recovery. The limit allows for Erigon's send target plus one final full-size
+// SetCode transaction. Each EIP-7702 tuple takes at least 27 RLP bytes.
+const maxRemoteAuthorizations = (p2pTxPacketLimit + txnMaxSize) / 27
+
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
 func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err error) {
@@ -170,6 +176,11 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 	return encodeBuf
 }
 
+// ParseTransactions reads the transaction list at pos in wire order. After any
+// configured RLP check, it skips a SetCode transaction that exceeds the packet's
+// remaining authorization budget and continues with the next transaction.
+// Once a transaction reaches the decoder, its authorizations count against the
+// budget even if the transaction is later rejected.
 func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
 	pos, _, err = rlp.ParseList(payload, pos)
 	if err != nil {
@@ -180,27 +191,41 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 		if count == maxTransactionsPerPacket {
 			return 0, fmt.Errorf("%w: too many transactions (limit %d)", ErrParseTxn, maxTransactionsPerPacket)
 		}
-		dataPos, dataLen, _, err := rlp.Prefix(payload, p)
+		var dataPos, dataLen int
+		dataPos, dataLen, _, err = rlp.Prefix(payload, p)
 		if err != nil {
 			return 0, err
 		}
 		p = dataPos + dataLen
 	}
 
-	for i := 0; pos < len(payload); i++ {
-		txnSlots.Resize(uint(i + 1))
-		txnSlots.Txns[i] = &TxnSlot{}
-		pos, err = ctx.ParseTransaction(payload, pos, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
-		if err != nil {
-			if errors.Is(err, ErrRejected) {
-				txnSlots.Resize(uint(i))
-				i--
-				continue
-			}
+	remainingAuthorizations := maxRemoteAuthorizations
+	accepted := 0
+	for pos < len(payload) {
+		txnSlots.Resize(uint(accepted + 1))
+		txnSlots.Txns[accepted] = &TxnSlot{}
+		pos, err = ctx.parseTransaction(payload, pos, txnSlots.Txns[accepted], txnSlots.Senders.At(accepted),
+			true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash, &remainingAuthorizations)
+		switch {
+		case err == nil:
+			accepted++
+		case errors.Is(err, ErrRejected):
+			txnSlots.Resize(uint(accepted))
+		default:
 			return 0, err
 		}
 	}
 	return pos, nil
+}
+
+// pooledTransactions66RequestID reads a reply's request id without decoding its transactions.
+func pooledTransactions66RequestID(payload []byte) (uint64, error) {
+	p, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, requestID, err := rlp.ParseU64(payload, p)
+	return requestID, err
 }
 
 func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {

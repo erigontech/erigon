@@ -105,11 +105,11 @@ func BenchmarkEngineGetBlobsV4(b *testing.B) {
 	for _, blobs := range []int{6, maxBlobs} {
 		for _, cells := range []int{8, 64, int(params.CellsPerExtBlob)} {
 			b.Run(fmt.Sprintf("blobs=%d/cells=%d", blobs, cells), func(b *testing.B) {
-				cellIndices := make(hexutil.Bytes, params.CellsPerExtBlob/8)
+				cellMask := make(hexutil.Bytes, params.CellsPerExtBlob/8)
 				for i := range cells {
-					cellIndices[i/8] |= 1 << (i % 8)
+					cellMask[i/8] |= 1 << (i % 8)
 				}
-				resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes[:blobs], cellIndices)
+				resp, err := eat.EngineApiClient.GetBlobsV4(ctx, hashes[:blobs], cellMask)
 				require.NoError(b, err)
 				require.Len(b, resp, blobs)
 				for _, bundle := range resp {
@@ -118,7 +118,7 @@ func BenchmarkEngineGetBlobsV4(b *testing.B) {
 					require.Len(b, bundle.Proofs, cells)
 				}
 				minRespBytes := int64(blobs*cells) * (int64(params.BytesPerCell) + int64(len(goethkzg.KZGProof{}))) * 2
-				benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV4", []any{hashes[:blobs], cellIndices}, minRespBytes)
+				benchmarkGetBlobsHTTP(b, ctx, eat, "engine_getBlobsV4", []any{hashes[:blobs], cellMask}, minRespBytes)
 			})
 		}
 	}

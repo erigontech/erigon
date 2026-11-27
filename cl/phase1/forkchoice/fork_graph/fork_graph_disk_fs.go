@@ -121,6 +121,12 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+	slot := bs.Slot()
+	if blockRoot == f.lastDumpedRoot && slot == f.lastDumpedSlot {
+		return nil
+	}
+	f.lastDumpedRoot, f.lastDumpedSlot = common.Hash{}, 0
+	done := false
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -134,6 +140,10 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	}
 	defer func() {
 		err = errors.Join(err, dumpedFile.Close())
+		if done && err == nil {
+			f.lastDumpedRoot = blockRoot
+			f.lastDumpedSlot = slot
+		}
 	}()
 
 	sw := snappypool.Writer(dumpedFile)
@@ -175,16 +185,16 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return err
 	}
 
+	done = true
 	return
 }
 
-// HasEnvelope checks if an envelope exists for the given block root.
-// Only envelopes successfully persisted or validated by this process are reported.
+// HasEnvelope reports cached envelope availability for a retained root.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()
-	if !f.retainedBlock(blockRoot) {
+	if !f.retainedBlock(blockRoot) || f.IsEnvelopeRejected(blockRoot) {
 		return false
 	}
 	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
@@ -192,6 +202,26 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	}
 	_, ok := f.envelopeExists.Load(blockRoot)
 	return ok
+}
+
+func (f *forkGraphDisk) RejectEnvelope(blockRoot common.Hash) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return false
+	}
+	f.envelopeMu.Lock()
+	defer f.envelopeMu.Unlock()
+	f.rejectedEnvelopes.Store(blockRoot, struct{}{})
+	f.envelopeExists.Delete(blockRoot)
+	f.ClearPayloadAccepted(blockRoot)
+	f.MarkPayloadUnavailable(blockRoot)
+	return true
+}
+
+func (f *forkGraphDisk) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	_, rejected := f.rejectedEnvelopes.Load(blockRoot)
+	return rejected
 }
 
 // ReadEnvelopeFromDisk reads an execution payload envelope from disk.
@@ -210,6 +240,9 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
 	var corrupt bool
+	if f.IsEnvelopeRejected(blockRoot) {
+		return nil, fmt.Errorf("execution payload envelope rejected for root %x", blockRoot)
+	}
 	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
 		return nil, fmt.Errorf("cannot read known invalid envelope for root %x", blockRoot)
 	}
@@ -353,6 +386,10 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}
 	f.envelopeMu.Lock()
 	defer f.envelopeMu.Unlock()
+
+	if f.IsEnvelopeRejected(blockRoot) {
+		return fmt.Errorf("execution payload envelope rejected for root %x", blockRoot)
+	}
 
 	// Populate in-memory cache on successful write
 	defer func() {

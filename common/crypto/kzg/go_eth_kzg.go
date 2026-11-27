@@ -23,15 +23,22 @@ import (
 
 // VerifyCellProofBatch verifies the cellproofs in batch, corresponding to a set of blobs
 func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitment, cellProofs []goethkzg.KZGProof) error {
+	_, err := VerifyCellProofBatchWithCells(blobsBytes, commitments, cellProofs)
+	return err
+}
+
+// VerifyCellProofBatchWithCells is VerifyCellProofBatch that also returns the cells it computed, one set per blob.
+func VerifyCellProofBatchWithCells(blobsBytes [][]byte, commitments []goethkzg.KZGCommitment, cellProofs []goethkzg.KZGProof) ([]*[goethkzg.CellsPerExtBlob]*goethkzg.Cell, error) {
 	InitKZGCtx()
 
 	if len(commitments) != len(blobsBytes) {
-		return errors.New("mismatched commitments and blobs count")
+		return nil, errors.New("mismatched commitments and blobs count")
 	}
 	totalCells := len(blobsBytes) * goethkzg.CellsPerExtBlob
 	if len(cellProofs) != totalCells {
-		return errors.New("mismatched cellProofs count for given blobs")
+		return nil, errors.New("mismatched cellProofs count for given blobs")
 	}
+	perBlob := make([]*[goethkzg.CellsPerExtBlob]*goethkzg.Cell, len(blobsBytes))
 	commitsExt := make([]goethkzg.KZGCommitment, totalCells)
 	cellIndices := make([]uint64, totalCells)
 	cells := make([]*goethkzg.Cell, totalCells)
@@ -54,17 +61,21 @@ func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitm
 	// Compute cells and fill cellIndices per blob.
 	for i, blob := range blobsBytes {
 		if len(blob) != len(goethkzg.Blob{}) {
-			return errors.New("invalid blob length")
+			return nil, errors.New("invalid blob length")
 		}
 		cellsI, err := gokzgCtx.ComputeCells((*goethkzg.Blob)(blob), 2)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		perBlob[i] = &cellsI
 		base := i * goethkzg.CellsPerExtBlob
 		copy(cellIndices[base:], idxTemplate[:])
 		copy(cells[base:], cellsI[:])
 	}
-	return gokzgCtx.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells, cellProofs)
+	if err := gokzgCtx.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells, cellProofs); err != nil {
+		return nil, err
+	}
+	return perBlob, nil
 }
 
 // VerifyCells verifies a batch of proofs corresponding to the cells and blob commitments.

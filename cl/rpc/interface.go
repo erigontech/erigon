@@ -12,6 +12,7 @@ var _ BeaconRpc = (*BeaconRpcP2P)(nil)
 
 type BeaconRpc interface {
 	SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+	SendBeaconBlocksByRangeReqToPeer(ctx context.Context, pid string, start, count uint64) ([]*cltypes.SignedBeaconBlock, error)
 	SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error)
 	SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
 	SendBlobsSidecarByRangerReq(ctx context.Context, start, count uint64) ([]*cltypes.BlobSidecar, string, error)

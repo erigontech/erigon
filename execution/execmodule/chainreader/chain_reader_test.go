@@ -130,3 +130,19 @@ func TestGetAssembledBlockCarriesGloasPayloadFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, block.Hash(), derived)
 }
+
+type frozenBlocksStub struct {
+	execmodule.ExecutionModule
+	err error
+}
+
+func (s frozenBlocksStub) FrozenBlocks(context.Context) (uint64, bool, error) {
+	return 0, false, s.err
+}
+
+func TestFrozenBlocksDoesNotPanicOnACancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	c := ChainReaderWriterEth1{executionModule: frozenBlocksStub{err: context.Canceled}}
+	require.NotPanics(t, func() { c.FrozenBlocks(ctx) })
+}

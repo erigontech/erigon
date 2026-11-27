@@ -60,6 +60,15 @@ func (p *PayloadPreparationImports) ImportInProgress(slot uint64) bool {
 	return active
 }
 
+func (p *PayloadPreparationImports) HasPendingEnvelope(blockRoot common.Hash) bool {
+	held := false
+	p.pendingEnvelopes.Range(func(_, value any) bool {
+		held = value.(common.Hash) == blockRoot
+		return !held
+	})
+	return held
+}
+
 func (p *PayloadPreparationImports) BeginPendingEnvelope(blockRoot common.Hash) func() {
 	key := &blockRoot
 	p.pendingEnvelopes.Store(key, blockRoot)
@@ -140,7 +149,7 @@ func (f *ForkChoiceStore) TryBeginPayloadPreparation(ctx context.Context, firstS
 }
 
 func (f *ForkChoiceStore) payloadPreparationBlockSlot(root common.Hash) (uint64, bool) {
-	if f.forkGraph.HasEnvelope(root) {
+	if f.IsEnvelopeRejected(root) || f.forkGraph.HasEnvelope(root) {
 		return 0, false
 	}
 	block, ok := f.forkGraph.GetBlock(root)

@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -125,4 +126,42 @@ func TestFetchTxsWritesTheRestPastAFailure(t *testing.T) {
 	require.ErrorContains(t, err, "0xbad")
 	require.FileExists(t, filepath.Join(out, "0xgood.json"))
 	require.NoFileExists(t, filepath.Join(out, "0xbad.json"))
+}
+
+func TestProfileFilenameFitsTheFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("test_mixed_dependency_graph[fork_Amsterdam-blockchain_test_engine_x]", 5)
+	a, b := profileFilename(dir, "newpayload", long+"_0xaa", "pprof.cpu"), profileFilename(dir, "newpayload", long+"_0xbb", "pprof.cpu")
+	require.NotEqual(t, a, b)
+	for _, p := range []string{a, b} {
+		require.True(t, strings.HasSuffix(p, ".pprof.cpu"))
+		f, err := os.Create(p)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+}
+
+// A request shorter than one fgprof tick has no samples; stopping its wall profile must not panic.
+func TestRequestProfileHookSurvivesShortRequest(t *testing.T) {
+	stop := makeRequestProfileHook("", t.TempDir())("newpayload", "short")
+	require.NotPanics(t, stop)
+}
+
+func TestStopWallProfileRemovesOnlyAProfileWithoutSamples(t *testing.T) {
+	open := func() *os.File {
+		f, err := os.Create(filepath.Join(t.TempDir(), "wall.pprof"))
+		require.NoError(t, err)
+		return f
+	}
+	stopped := open()
+	stopWallProfile(func() error { return nil }, stopped)
+	require.FileExists(t, stopped.Name())
+
+	noSamples := open()
+	stopWallProfile(func() error { zero := 0; _ = 1 / zero; return nil }, noSamples)
+	require.NoFileExists(t, noSamples.Name())
+
+	other := open()
+	require.PanicsWithValue(t, "boom", func() { stopWallProfile(func() error { panic("boom") }, other) })
+	require.ErrorIs(t, other.Close(), os.ErrClosed)
 }

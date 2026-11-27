@@ -21,6 +21,7 @@ package gasprice
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync/atomic"
 
@@ -30,7 +31,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 )
@@ -158,19 +161,25 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 // NODE: if caller wants legacy txn SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
+	price, _, _, err := oracle.SuggestTipCapAtHead(ctx)
+	return price, err
+}
+
+// SuggestTipCapAtHead is SuggestTipCap that also returns the head the tip was sampled at.
+func (oracle *Oracle) SuggestTipCapAtHead(ctx context.Context) (*uint256.Int, uint64, common.Hash, error) {
 	latestHead, latestPrice := oracle.cache.GetLatest()
 	number, headHash, err := oracle.backend.LatestHead(ctx)
 	if err != nil {
-		return latestPrice, err
+		return latestPrice, 0, common.Hash{}, err
 	}
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
 	// check again, the last request could have populated the cache
 	latestHead, latestPrice = oracle.cache.GetLatest()
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
 	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
@@ -183,7 +192,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 	phase1, err := oracle.fetchBlockPricesParallel(ctx, number, count1)
 	if err != nil {
-		return latestPrice, err
+		return latestPrice, 0, common.Hash{}, err
 	}
 
 	// Post-process phase 1: apply the empty-block fallback (issue #17617) and
@@ -191,8 +200,8 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	sparseCount := 0
 	for _, prices := range phase1 {
 		added := len(prices)
-		// Empty block (or all transactions from coinbase): fall back to the
-		// last known price so the percentile estimate stays stable.
+		// If the block has no eligible tips, use the last known tip to keep
+		// the percentile estimate stable.
 		if added == 0 && latestPrice != nil {
 			txPrices = append(txPrices, new(uint256.Int).Set(latestPrice))
 			added = 1
@@ -215,7 +224,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 		if count2 > 0 {
 			phase2, err := oracle.fetchBlockPricesParallel(ctx, startBlock2, count2)
 			if err != nil {
-				return latestPrice, err
+				return latestPrice, 0, common.Hash{}, err
 			}
 			for _, prices := range phase2 {
 				if len(prices) == 0 && latestPrice != nil {
@@ -240,7 +249,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 
 	oracle.cache.SetLatest(headHash, price)
 
-	return price, nil
+	return price, number, headHash, nil
 }
 
 // fetchBlockPricesParallel fetches prices for count consecutive blocks, starting
@@ -300,15 +309,11 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 	return results, g.Wait()
 }
 
-// getBlockPricesFromBackend calculates the lowest transaction gas prices in a
-// given block using the supplied backend (which may be a Fork'd per-goroutine
-// backend). Empty blocks or blocks where all transactions come from the coinbase
-// contribute nothing to out; the caller applies its own fallback.
+// getBlockPricesFromBackend samples the lowest effective proposer tips per gas,
+// excluding transactions from the coinbase. A frame's tip depends on gas used,
+// so the sample skips frames whose receipt gas usage is unavailable.
 //
-// Effective tips are pre-computed once per transaction to avoid repeated
-// allocations that occurred when a heap's Less method called GetEffectiveGasTip
-// on every comparison (O(n log n) allocations). Now we allocate exactly once
-// per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
+// Compute each tip before sorting so comparisons do not repeat fee calculations.
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
 	ignoreUnder *uint256.Int, out *[]*uint256.Int,
 ) error {
@@ -324,14 +329,45 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	baseFee := block.BaseFee()
 	coinbase := block.Coinbase()
 
-	// Pre-compute effective tip for every transaction exactly once.
 	type txWithTip struct {
 		tx  types.Transaction
 		tip uint256.Int
 	}
-	items := make([]txWithTip, len(block.Transactions()))
+	items := make([]txWithTip, 0, len(block.Transactions()))
+	var receipts types.Receipts
+	var blobBaseFee *uint256.Int
+	receiptsLoaded := false
 	for i, tx := range block.Transactions() {
-		items[i] = txWithTip{tx: tx, tip: tx.GetEffectiveGasTip(baseFee)}
+		if tx.Type() != types.FrameTxType {
+			items = append(items, txWithTip{tx: tx, tip: tx.GetEffectiveGasTip(baseFee)})
+			continue
+		}
+		if !receiptsLoaded {
+			receipts, err = backend.GetReceiptsGasUsed(ctx, block)
+			if err != nil {
+				return err
+			}
+			receiptsLoaded = true
+		}
+		if i >= len(receipts) || receipts[i] == nil {
+			continue
+		}
+		if header := block.HeaderNoCopy(); tx.GetBlobGas() != 0 && blobBaseFee == nil && header.ExcessBlobGas != nil {
+			config := backend.ChainConfig()
+			if config == nil {
+				return fmt.Errorf("chain config unavailable for block %d", blockNum)
+			}
+			fee, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+			if err != nil {
+				return err
+			}
+			blobBaseFee = &fee
+		}
+		tip, err := ethutils.ReceiptGasTip(tx, receipts[i].GasUsed, baseFee, blobBaseFee)
+		if err != nil {
+			return err
+		}
+		items = append(items, txWithTip{tx: tx, tip: tip})
 	}
 
 	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).

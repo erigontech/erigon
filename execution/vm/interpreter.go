@@ -51,6 +51,17 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	// OverrideInitCode selects replacement initcode by deployment address during RPC replay.
+	// CREATE2 derives that address from the original initcode. A match can supply empty initcode.
+	// The VM clears the original code hash so the replacement bypasses the shared JUMPDEST cache.
+	OverrideInitCode func(address accounts.Address) (replacement []byte, matched bool)
+	// OriginalCreate2InitCode lets replay identify the target when a CREATE2 gas
+	// check fails before the VM derives the address.
+	OriginalCreate2InitCode *Create2InitCode
+	// OnInitCodeOverrideError reports gas or preparation errors that occur before a
+	// nested constructor frame opens. The receiver filters by deployment address.
+	OnInitCodeOverrideError func(address accounts.Address, err error)
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -73,6 +84,7 @@ type CallContext struct {
 	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
+	frameContext      *state.FrameContext
 	newAccountCharged bool
 	input             []byte
 	Memory            Memory
@@ -81,7 +93,7 @@ type CallContext struct {
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
 	// the generation at which the entry was populated. An entry is valid only
 	// when its gen equals cacheGen, giving the gas phase and execute phase of
-	// the same opcode a shared interned value without a second unique.Make call.
+	// the same opcode a shared interned value without a second intern lookup.
 	// Placed before Stack so these fields stay in L1D rather than being pushed
 	// out by Stack.data (32 KB).
 	cacheGen      uint64
@@ -89,6 +101,11 @@ type CallContext struct {
 	cachedAddrGen uint64
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
+
+	// mulmodModulus is the last full-width MULMOD modulus and mulmodReciprocal its
+	// reciprocal: a contract reduces many products by one modulus.
+	mulmodModulus    uint256.Int
+	mulmodReciprocal [5]uint64
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
@@ -212,6 +229,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.gas = gas.Execution
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
+	ctx.frameContext = evm.FrameContext
 	ctx.newAccountCharged = false
 	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
@@ -223,6 +241,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 // frame takes it without the pool; the spare is not tied to the depth that left
 // it. The outermost frame returns both contexts to the pool.
 func (evm *EVM) putCallContext(ctx *CallContext) {
+	ctx.frameContext = nil
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
 	ctx.cacheGen = 0
@@ -230,14 +249,13 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
-	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
+	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canon table entries
 	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
 	ctx.cachedAddrGen = ^uint64(0)
-	// Zero the handles to release their canonMap pins while the context is
-	// idle in the pool; unique.Handle values keep interned entries alive.
+	// A held handle keeps its canon table entry alive, so zero them while the context is idle in the pool.
 	ctx.cachedKey = accounts.NilKey
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
@@ -254,6 +272,18 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 }
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	if ctx.frameContext != nil && t == mdgas.StateGas {
+		// All EVM calls within a transaction frame share its state-gas budget.
+		// State charges cannot borrow execution gas or use a per-call reservoir.
+		old := ctx.Gas()
+		if !ctx.frameContext.ChargeStateGas(gas) {
+			return false
+		}
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return true
+	}
 	remaining, stateSpill, ok := useMdGas(ctx.Gas(), gas, t, tracer, reason)
 	if ok {
 		ctx.gas = remaining.Execution
@@ -266,6 +296,9 @@ func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.
 // mergeChildStateGas takes over the child's state-gas spill, then absorbs state
 // gas the child left in the reservoir, up to the spill available in this frame.
 func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	ctx.stateGasSpill += childSpill
 	misplaced := min(ctx.stateGas, ctx.stateGasSpill)
 	if misplaced == 0 {
@@ -284,6 +317,14 @@ func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Ho
 }
 
 func (ctx *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
+	if ctx.frameContext != nil {
+		old := ctx.Gas()
+		ctx.frameContext.RefillStateGas(amount)
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return
+	}
 	remaining := ctx.Gas()
 	gasTracing := reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook()
 	var old mdgas.MdGas
@@ -354,6 +395,9 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 }
 
 func (ctx *CallContext) Gas() mdgas.MdGas {
+	if ctx.frameContext != nil {
+		return mdgas.MdGas{Execution: ctx.gas, State: ctx.frameContext.StateGasLeft()}
+	}
 	return mdgas.MdGas{
 		Execution: ctx.gas,
 		State:     ctx.stateGas,
@@ -383,6 +427,9 @@ func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.H
 }
 
 func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	if ctx.stateGas == 0 {
 		return
 	}
@@ -400,7 +447,7 @@ func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
 func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 	return mdgas.MdGas{
 		Execution: evm.CallGasTemp(),
-		State:     ctx.stateGas,
+		State:     ctx.Gas().State,
 	}
 }
 
@@ -417,6 +464,8 @@ func LookupInstructionSet(rules *chain.Rules) JumpTable {
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
+	case chainRules.IsBogota:
+		jt = &bogotaInstructionSet
 	case chainRules.IsAmsterdam:
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:
@@ -537,6 +586,9 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
+		if err != nil && evm.config.OnInitCodeOverrideError != nil {
+			evm.reportCreateError(callContext, err)
+		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill
@@ -545,7 +597,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -664,13 +716,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 

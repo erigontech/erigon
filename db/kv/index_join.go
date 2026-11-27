@@ -50,7 +50,6 @@ func JoinIndexRanges(q IndexQuery, indexRange func(name InvertedIdx, k []byte, f
 			return nil, ErrEmptyIndexQuery
 		}
 	}
-	// Union and Intersect drop empty streams without closing them, so on error close every opened stream.
 	var opened []stream.U64
 	var res stream.U64
 	for _, clause := range q.Clauses {
@@ -72,5 +71,26 @@ func JoinIndexRanges(q IndexQuery, indexRange func(name InvertedIdx, k []byte, f
 		}
 		res = stream.Intersect[uint64](res, union, q.Asc, Unlim)
 	}
-	return res, nil
+	return &joinedIndexRanges{U64: res, opened: opened}, nil
+}
+
+// joinedIndexRanges closes every opened stream: Union and Intersect drop empty inputs without closing them.
+type joinedIndexRanges struct {
+	stream.U64
+	opened []stream.U64
+}
+
+func (j *joinedIndexRanges) CanSeek() bool {
+	s, ok := j.U64.(stream.Seeker[uint64])
+	return ok && s.CanSeek()
+}
+
+func (j *joinedIndexRanges) Seek(v uint64) error {
+	return j.U64.(stream.Seeker[uint64]).Seek(v)
+}
+
+func (j *joinedIndexRanges) Close() {
+	for _, o := range j.opened {
+		o.Close()
+	}
 }

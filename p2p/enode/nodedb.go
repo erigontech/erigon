@@ -21,6 +21,7 @@ package enode
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -435,13 +436,18 @@ func (db *DB) expirer() {
 	}
 }
 
-// expireNodes iterates over the database and deletes all nodes that have not
-// been seen (i.e. received a pong from) for some time.
+// expireNodes iterates over the database and deletes all nodes that have not been seen for some time:
+// by their youngest pong, or by their youngest ping if they have no pong row. A stale ping row goes on its own.
 func (db *DB) expireNodes() {
 	var (
 		threshold    = time.Now().Add(-dbNodeExpiration).Unix()
 		youngestPong int64
+		youngestPing int64
 	)
+	expired := func() bool {
+		youngest := cmp.Or(youngestPong, youngestPing)
+		return youngest > 0 && youngest < threshold
+	}
 	var toDelete [][]byte
 	if err := db.kv.View(db.ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Inodes)
@@ -457,6 +463,19 @@ func (db *DB) expireNodes() {
 				return err
 			}
 			id, ip, field := splitNodeItemKey(k)
+			if id != prevId {
+				if expired() {
+					toDelete = append(toDelete, nodeKey(prevId))
+				}
+				youngestPong, youngestPing = 0, 0
+			}
+			if field == dbNodePing {
+				time, _ := binary.Varint(v)
+				youngestPing = max(youngestPing, time)
+				if time < threshold {
+					toDelete = append(toDelete, nodeItemKey(id, ip, dbNodePing))
+				}
+			}
 			if field == dbNodePong {
 				time, _ := binary.Varint(v)
 				if time > youngestPong {
@@ -467,20 +486,14 @@ func (db *DB) expireNodes() {
 					toDelete = append(toDelete, nodeItemKey(id, ip, ""))
 				}
 			}
-			if id != prevId {
-				if youngestPong > 0 && youngestPong < threshold {
-					toDelete = append(toDelete, nodeKey(prevId))
-				}
-				youngestPong = 0
-			}
 			prevId = id
 			empty = false
 		}
 		if !empty {
-			if youngestPong > 0 && youngestPong < threshold {
+			if expired() {
 				toDelete = append(toDelete, nodeKey(prevId))
 			}
-			youngestPong = 0
+			youngestPong, youngestPing = 0, 0
 		}
 		return nil
 	}); err != nil {

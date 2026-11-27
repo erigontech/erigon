@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -68,7 +69,6 @@ func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
 		c:            c,
 		l:            l,
 		buffer:       make([]byte, l*validatorSize),
-		phase0Data:   make([]Phase0Data, l),
 		attesterBits: make([]byte, l),
 	}
 }
@@ -92,7 +92,6 @@ func (v *ValidatorSet) Append(val Validator) {
 	// we are overflowing the buffer? append.
 	// if offset+validatorSize >= len(v.buffer) {
 	v.expandBuffer(v.l + 1)
-	v.phase0Data = append(v.phase0Data, Phase0Data{})
 	//}
 
 	copy(v.buffer[offset:], val)
@@ -102,12 +101,9 @@ func (v *ValidatorSet) Append(val Validator) {
 	v.appendProgressiveLeaf(v.l)
 	v.zeroTreeHash(v.l)
 
-	if v.l >= len(v.phase0Data) {
-		for i := len(v.phase0Data); i < v.l+1; i++ {
-			v.phase0Data = append(v.phase0Data, Phase0Data{})
-		}
+	if v.phase0Data != nil {
+		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
-	v.phase0Data[v.l] = Phase0Data{} // initialize to empty.
 
 	if v.l >= len(v.attesterBits) {
 		for i := len(v.attesterBits); i < v.l+1; i++ {
@@ -132,9 +128,14 @@ func (v *ValidatorSet) Pop() Validator {
 
 func (v *ValidatorSet) Clear() {
 	v.l = 0
+	v.phase0Data = nil
 	v.attesterBits = v.attesterBits[:0]
 	v.MerkleTree = nil
 	v.progressiveTrees = nil
+}
+
+func (v *ValidatorSet) ClearPhase0Data() {
+	v.phase0Data = nil
 }
 
 func (v *ValidatorSet) Clone() clonable.Clonable {
@@ -186,11 +187,11 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.progressiveTrees = nil
 	}
 
-	if cap(t.phase0Data) <= len(v.phase0Data) {
-		t.phase0Data = make([]Phase0Data, len(v.phase0Data), len(v.phase0Data)*2)
+	if v.phase0Data == nil {
+		t.phase0Data = nil
+	} else {
+		t.phase0Data = append(t.phase0Data[:0], v.phase0Data...)
 	}
-	t.phase0Data = t.phase0Data[:len(v.phase0Data)]
-	copy(t.phase0Data, v.phase0Data)
 	copy(t.buffer, v.buffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.buffer = t.buffer[:v.l*validatorSize]
@@ -201,12 +202,15 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%validatorSize > 0 {
 		return ssz.ErrBufferNotRounded
 	}
+	if l := len(buf) / validatorSize; l > v.c {
+		return fmt.Errorf("validator set length exceeds limit: %d > %d", l, v.c)
+	}
 	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
 	v.MerkleTree = nil
 	v.progressiveTrees = nil
 	v.l = len(buf) / validatorSize
-	v.phase0Data = make([]Phase0Data, v.l)
+	v.phase0Data = nil
 	v.attesterBits = make([]byte, v.l)
 	return nil
 }
@@ -235,6 +239,9 @@ func (v *ValidatorSet) Get(idx int) Validator {
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
+	if v.l > v.c {
+		return [32]byte{}, fmt.Errorf("validator set length exceeds limit: %d > %d", v.l, v.c)
+	}
 	// generate root list
 	if v.MerkleTree == nil {
 		tree := &merkle_tree.MerkleTree{}
@@ -316,9 +323,22 @@ func (v *ValidatorSet) Set(idx int, val Validator) {
 	v.zeroTreeHash(idx)
 }
 
-func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {
+func (v *ValidatorSet) getPhase0(idx int) Phase0Data {
 	if idx < 0 || idx >= v.l {
 		panic("ValidatorSet -- getPhase0: out of bounds")
+	}
+	if v.phase0Data == nil {
+		return Phase0Data{}
+	}
+	return v.phase0Data[idx]
+}
+
+func (v *ValidatorSet) phase0ForWrite(idx int) *Phase0Data {
+	if idx < 0 || idx >= v.l {
+		panic("ValidatorSet -- phase0ForWrite: out of bounds")
+	}
+	if v.phase0Data == nil {
+		v.phase0Data = make([]Phase0Data, v.l)
 	}
 	return &v.phase0Data[idx]
 }
@@ -486,11 +506,11 @@ func (v *ValidatorSet) SetIsPreviousMatchingHeadAttester(idx int, val bool) {
 }
 
 func (v *ValidatorSet) SetMinCurrentInclusionDelayAttestation(idx int, val *PendingAttestation) {
-	v.getPhase0(idx).MinCurrentInclusionDelayAttestation = val
+	v.phase0ForWrite(idx).MinCurrentInclusionDelayAttestation = val
 }
 
 func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *PendingAttestation) {
-	v.getPhase0(idx).MinPreviousInclusionDelayAttestation = val
+	v.phase0ForWrite(idx).MinPreviousInclusionDelayAttestation = val
 }
 
 func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {

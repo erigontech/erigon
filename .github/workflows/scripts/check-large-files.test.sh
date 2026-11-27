@@ -88,6 +88,22 @@ head -c 3145728 /dev/zero >"$work/grow/big.bin"
 git -C "$work/grow" commit -qam grow
 run_case "growing a file already over the limit fails" 1 "$work/grow" base
 
+# Replacing a file with its compressed form (big.bin -> big.bin.zst) is a
+# shrink, though git sees a delete and an unrelated add.
+make_repo_with_big "$work/compress" 2097152
+git -C "$work/compress" rm -q big.bin
+head -c 1572864 /dev/urandom >"$work/compress/big.bin.zst"
+git -C "$work/compress" add -A
+git -C "$work/compress" commit -qm compress
+run_case "replacing a file with a smaller compressed one passes" 0 "$work/compress" base
+
+make_repo_with_big "$work/compressgrow" 1572864
+git -C "$work/compressgrow" rm -q big.bin
+head -c 2097152 /dev/urandom >"$work/compressgrow/big.bin.zst"
+git -C "$work/compressgrow" add -A
+git -C "$work/compressgrow" commit -qm compress
+run_case "replacing a file with a bigger compressed one fails" 1 "$work/compressgrow" base
+
 # A symlink swapped for an oversized regular file reaches HEAD as a type
 # change, which --diff-filter must not drop.
 mkdir -p "$work/typechange"

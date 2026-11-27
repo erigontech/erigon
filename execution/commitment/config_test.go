@@ -22,9 +22,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if !cfg.EnableTrieWarmup {
 		t.Error("EnableTrieWarmup should default to true")
 	}
-	if cfg.CsvMetricsFilePrefix != "" {
-		t.Errorf("CsvMetricsFilePrefix should default to empty, got %q", cfg.CsvMetricsFilePrefix)
-	}
 	if cfg.MemoizationOff {
 		t.Error("MemoizationOff should default to false")
 	}

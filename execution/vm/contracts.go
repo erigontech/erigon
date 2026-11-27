@@ -583,13 +583,14 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 
 	// Allocate the result buffer once, zero-filled.
 	result := make([]byte, modLen)
+	smallExp := len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1])
 	switch {
 	case !bitutil.TestBytes(mod[:len(mod)-1]) && mod[len(mod)-1] <= 1:
 		// Leave the result as zero for mod 0 (undefined) and 1
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
+	case modLen > 32 && smallExp:
 		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
 		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
 		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
@@ -597,9 +598,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
-	case modexpU256Applicable(base, mod):
-		// A fixed-width uint256 square-and-multiply avoids arbitrary-precision
-		// overhead and the cgo boundary.
+	case smallExp && modexpU256Applicable(base, mod):
+		// A fixed-width uint256 square-and-multiply avoids evmone's fixed cost (the cgo
+		// call and the Montgomery conversions) but costs more per exponent bit.
 		modexpU256(result, base, exp, mod)
 	default:
 		evmone.ModExp(result, base, exp, mod)

@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"testing"
@@ -31,8 +32,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -55,6 +58,8 @@ type testReceiptsServer struct {
 	received         chan *remoteproto.ReceiptsFilterRequest
 	receiveCompleted chan struct{}
 	sent             []*remoteproto.SubscribeReceiptsReply
+	recvs            int
+	ackedAfter       []int // the number of requests received when each ack was sent
 	ctx              context.Context
 	grpc.ServerStream
 }
@@ -75,6 +80,10 @@ func newTestReceiptsServer(ctx context.Context) *testReceiptsServer {
 }
 
 func (ts *testReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
+	if m.FilterApplied {
+		ts.ackedAfter = append(ts.ackedAfter, ts.recvs)
+		return nil
+	}
 	ts.sent = append(ts.sent, m)
 	return nil
 }
@@ -89,6 +98,7 @@ func (ts *testReceiptsServer) Recv() (*remoteproto.ReceiptsFilterRequest, error)
 	if !ok {
 		return nil, io.EOF
 	}
+	ts.recvs++
 	return request, nil
 }
 
@@ -137,6 +147,20 @@ func TestReceiptsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty for empty filter")
 	}
+}
+
+func TestReceiptsFilter_AcksOnlyARequestThatAsks(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	srv := newTestReceiptsServer(t.Context())
+	srv.received <- &remoteproto.ReceiptsFilterRequest{AllTransactions: true, Ack: true}
+	srv.received <- &remoteproto.ReceiptsFilterRequest{}
+	go func() {
+		if err := agg.subscribeReceipts(srv); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-srv.receiveCompleted
+	require.Equal(t, []int{1}, srv.ackedAfter, "only the first request asks for an ack")
 }
 
 func TestReceiptsFilter_AllTransactionsFilter_DistributesAllReceipts(t *testing.T) {
@@ -431,8 +455,29 @@ func TestReceiptsFilter_SendsEffectiveGasPrice(t *testing.T) {
 	}
 }
 
-// The blob fields are derived from the transaction, the chain config and the header, which the
-// RPC side does not have, and only a blob transaction reports them.
+func TestReceiptsFilter_SendsSettledBlobFrameGasPrice(t *testing.T) {
+	const gasUsed = 21_000
+	rn := createReceiptNotification(txHash1)
+	rn.Receipt.Type = types.FrameTxType
+	rn.Receipt.TransactionIndex = 1
+	rn.Receipt.GasUsed = gasUsed
+	rn.Receipt.CumulativeGasUsed = 2 * gasUsed
+	rn.Header = &types.Header{BaseFee: uint256.NewInt(1), ExcessBlobGas: common.NewUint64(0)}
+	rn.Tx = &types.FrameTransaction{
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 30_000}}},
+		BlobVersionedHashes: []common.Hash{{1}},
+		// At one wei per blob gas, the remaining budget pays four wei per unit of gas used.
+		Fees: types.FrameFees{MaxFee: uint256.Int{params.GasPerBlob + 4*gasUsed}, TipCap: uint256.Int{10}},
+	}
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	reply := agg.receiptNotificationToProto(rn)
+	require.NotNil(t, reply.EffectiveGasPrice)
+	require.Equal(t, uint256.NewInt(4), gointerfaces.ConvertH256ToUint256Int(reply.EffectiveGasPrice))
+}
+
+// Any transaction carrying blobs, including a frame transaction, reports blob gas
+// used and, when available, the blob gas price. The backend derives these fields
+// from the transaction, header and chain config before sending the notification.
 func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges
 	dynamicFee := func() types.DynamicFeeTransaction {
@@ -471,4 +516,47 @@ func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 			assert.Equal(t, tc.wantPrice, gointerfaces.ConvertH256ToUint256Int(reply.BlobGasPrice))
 		})
 	}
+}
+
+func TestFrameReceiptSubscription(t *testing.T) {
+	payer := common.Address{1}
+	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1}}}
+	aggregator := &ReceiptsFilterAggregator{}
+	notification := aggregator.receiptNotificationToProto(&notifications.ReceiptNotification{Receipt: receipt})
+	result := ethutils.MarshalSubscribeReceipt(notification)
+	require.Equal(t, &payer, result.Payer)
+	require.Len(t, result.FrameReceipts, 1)
+}
+
+type failingReceiptsServer struct{ *testReceiptsServer }
+
+func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
+	return errors.New("stream closed")
+}
+
+func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	req := &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}
+	failedID, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	require.NoError(t, agg.updateReceiptsFilter(failedID, req))
+	srv := newTestReceiptsServer(t.Context())
+	liveID, _ := agg.insertReceiptsFilter(srv)
+	require.NoError(t, agg.updateReceiptsFilter(liveID, req))
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	agg.removeReceiptsFilter(failedID)
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	require.Len(t, srv.sent, 2)
+}
+
+func TestReceiptsFilter_UpdateAfterFailedSendLeavesNoHashes(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	id, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	require.NoError(t, agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}))
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	require.NoError(t, agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash2H256}}))
+	agg.removeReceiptsFilter(id)
+
+	require.Empty(t, agg.aggReceiptsFilter.txHashes)
 }

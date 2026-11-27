@@ -27,6 +27,9 @@ import (
 
 var errBadChannel = errors.New("event: Subscribe argument does not have sendable channel type")
 
+// ErrSubscriberLagged is delivered on Err of a subscription that could not take a value sent with TrySendOrFail.
+var ErrSubscriberLagged = errors.New("event: subscriber channel is full, value dropped")
+
 // Feed implements one-to-many subscriptions where the carrier of events is a channel.
 // Values sent to a Feed are delivered to all subscribed channels simultaneously.
 //
@@ -195,17 +198,36 @@ func (f *Feed) Send(value any) (nsent int) {
 
 // TrySend delivers to subscribers that can receive immediately and drops the value for the rest.
 func (f *Feed) TrySend(value any) (nsent int) {
+	return f.trySend("TrySend", value, false)
+}
+
+// TrySendOrFail is TrySend for values a subscriber must not lose silently: a subscriber that cannot receive immediately
+// gets ErrSubscriberLagged on its Err channel. The subscription stays active; the subscriber decides whether to stop.
+func (f *Feed) TrySendOrFail(value any) (nsent int) {
+	return f.trySend("TrySendOrFail", value, true)
+}
+
+func (f *Feed) trySend(op string, value any, reportLag bool) (nsent int) {
 	rvalue := reflect.ValueOf(value)
 
 	f.once.Do(func() { f.init(rvalue.Type()) })
 	if f.etype != rvalue.Type() {
-		panic(feedTypeError{op: "TrySend", got: rvalue.Type(), want: f.etype})
+		panic(feedTypeError{op: op, got: rvalue.Type(), want: f.etype})
 	}
 	f.subscribersMu.RLock()
 	defer f.subscribersMu.RUnlock()
 	for sub := range f.subscribers {
 		if sub.channel.TrySend(rvalue) {
 			nsent++
+			continue
+		}
+		if !reportLag {
+			continue
+		}
+		// Unsubscribe removes sub from f.subscribers before closing sub.err, so sub.err is still open here.
+		select {
+		case sub.err <- ErrSubscriberLagged:
+		default:
 		}
 	}
 	return nsent

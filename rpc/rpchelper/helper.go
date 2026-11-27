@@ -36,12 +36,12 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// unable to decode supplied params, or an invalid number of parameters
-type nonCanonicalHashError struct{ hash common.Hash }
+// NonCanonicalHashError reports a known block hash that is not on the canonical chain.
+type NonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
+func (e NonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonicalHashError) Error() string {
+func (e NonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
@@ -95,20 +95,44 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 	return bn, bh, latest, nil
 }
 
-func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	var plainStateBlockNumber uint64
-	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return 0, common.Hash{}, false, false, fmt.Errorf("getting plain state block number: %w", err)
+// ResolveExecutedBlock resolves the block like GetCanonicalBlockNumber (or
+// GetBlockNumber without requireCanonical) and then checks it like
+// CheckBlockExecuted, both against a single read of the execution progress in tx.
+func ResolveExecutedBlock(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (uint64, common.Hash, bool, error) {
+	executed, err := GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return 0, common.Hash{}, false, err
 	}
+	bn, bh, latest, found, err := resolveBlockNumber(ctx, requireCanonical, blockNrOrHash, tx, br, executed)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
+	if !found {
+		return 0, common.Hash{}, false, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
+	if bn > executed {
+		return 0, common.Hash{}, false, &BlockNotExecutedError{Block: bn, LastExecuted: executed}
+	}
+	return bn, bh, latest, nil
+}
 
+func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
+	plainStateBlockNumber, err := GetLatestExecutedBlockNumber(tx)
+	if err != nil {
+		return 0, common.Hash{}, false, false, err
+	}
+	return resolveBlockNumber(ctx, requireCanonical, blockNrOrHash, tx, br, plainStateBlockNumber)
+}
+
+func resolveBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader, plainStateBlockNumber uint64) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
-				return 0, common.Hash{}, false, false, err
+			if blockNumber, ok = forkchoiceHeadNumber(tx); !ok {
+				blockNumber = plainStateBlockNumber
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
@@ -149,7 +173,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
+			return 0, common.Hash{}, false, false, NonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
@@ -190,6 +214,12 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	return CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, txNumsReader)
+}
+
+// CreateHistoryStateReaderAtTxNum checks history availability at an already resolved txNum.
+// blockNumber is used only in pruning errors.
+func CreateHistoryStateReaderAtTxNum(ctx context.Context, tx kv.TemporalTx, blockNumber, txNum uint64, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
 	if err != nil {
 		return nil, err

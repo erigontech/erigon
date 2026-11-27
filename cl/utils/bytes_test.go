@@ -49,7 +49,6 @@ func TestPlainSnappy(t *testing.T) {
 
 func TestLiteralConverters(t *testing.T) {
 	require.Equal(t, [4]byte{0x0, 0x0, 0x2, 0x58}, utils.Uint32ToBytes4(600))
-	require.Equal(t, [4]byte{10, 23, 56, 7}, utils.BytesToBytes4([]byte{10, 23, 56, 7, 8, 5}))
 	require.Equal(t, []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00}, utils.Uint64ToLE(600))
 }
 

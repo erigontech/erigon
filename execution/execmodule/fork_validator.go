@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -165,8 +164,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
+	fv.extendingForkNotifications.Accumulator.AppendAndReset(target.Accumulator)
+	fv.extendingForkNotifications.RecentReceipts.MoveEntriesTo(target.RecentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
@@ -184,8 +183,9 @@ type HasDiff interface {
 // payload when required chain data is unavailable. Before a fork unwind it
 // invokes ensureReadAheadSuspended, which must idempotently acquire a
 // caller-owned suspension lasting until validation stops reading staged state;
-// an acquisition error aborts validation before the unwind.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+// an acquisition error aborts validation before the unwind. With revalidate, a
+// payload that passed validation before is executed again, so sd holds its state.
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, revalidate bool, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.executor == nil {
@@ -196,7 +196,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(hash); ok {
+	if _, ok := fv.validHashes.Get(hash); ok && !revalidate {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -213,9 +213,15 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 	if foundCanonical {
-		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
-		return
+		var executedTo uint64
+		if executedTo, criticalError = stages.GetStageProgress(tx, stages.Execution); criticalError != nil {
+			return
+		}
+		if executedTo >= number {
+			status = engine_types.ValidStatus
+			latestValidHash = header.Hash()
+			return
+		}
 	}
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
@@ -227,7 +233,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 
 	logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
 
-	var bodiesChain []*types.RawBody
+	var bodiesChain []*types.Body
 	var headersChain []*types.Header
 	for !foundCanonical {
 		var (
@@ -253,7 +259,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		}
 
 		headersChain = append([]*types.Header{header}, headersChain...)
-		bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
+		bodiesChain = append([]*types.Body{body}, bodiesChain...)
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
@@ -281,7 +287,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Reset accumulator and receipts to match main's behaviour of creating
 	// a fresh Sync (and thus fresh notifications) per validation call.
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
-	fv.extendingForkNotifications.Accumulator.Reset(0)
+	fv.extendingForkNotifications.Accumulator.Reset()
 	fv.extendingForkNotifications.RecentReceipts.Clear()
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
@@ -314,7 +320,7 @@ func (fv *ForkValidator) ClearWithUnwind() {
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body,
 ) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
@@ -352,6 +358,19 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		if criticalError != nil {
 			return
 		}
+		// No latestValidHash can be proven: the run also covered unexecuted canonical ancestors.
+		// A header failure executed nothing and rejects the payload itself.
+		if latestValidNumber+1 < headersChain[0].Number.Uint64() {
+			latestValidHash = common.Hash{}
+			fv.extendingForkHeadHash = common.Hash{}
+			fv.extendingForkNumber = 0
+			if errors.Is(validationError, rules.ErrInvalidHeader) {
+				status = engine_types.InvalidStatus
+				return
+			}
+			status, validationError = engine_types.AcceptedStatus, nil
+			return
+		}
 		var ok bool
 		latestValidHash, ok, criticalError = fv.blockReader.CanonicalHash(fv.ctx, tx, latestValidNumber)
 		if criticalError != nil {
@@ -367,12 +386,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		return
 	}
 	fv.validHashes.Add(hash, true)
-
-	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
-	if criticalError != nil {
-		return //nolint:nilnesserr
-	}
-
 	status = engine_types.ValidStatus
 	return
 }
@@ -387,7 +400,7 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	return BlockTimings{}
 }
 
-func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int, validation, execStage time.Duration) {
+func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.Body, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int, validation, execStage time.Duration) {
 	if fv.blockMetricsCache == nil {
 		return
 	}

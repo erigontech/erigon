@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -94,6 +93,36 @@ func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	return ethapi.CheckCallData(args.Data, args.Input)
+}
+
+// TraceCallConfig is the override parameter of trace_call and trace_callMany. It accepts either
+// an eth_simulateV1 state override map, keyed by account address, or a TraceConfig object.
+type TraceCallConfig config.TraceConfig
+
+func (c *TraceCallConfig) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	addresses := 0
+	for key := range members {
+		if common.IsHexAddress(key) || hexutil.Has0xPrefix(key) {
+			addresses++
+		}
+	}
+	switch addresses {
+	case 0:
+		return json.Unmarshal(data, (*config.TraceConfig)(c))
+	case len(members):
+		var overrides ethapi.StateOverrides
+		if err := json.Unmarshal(data, &overrides); err != nil {
+			return err
+		}
+		*c = TraceCallConfig{StateOverrides: &overrides}
+		return nil
+	default:
+		return errors.New("override object mixes account addresses with configuration fields")
+	}
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -280,6 +309,8 @@ type OeTracer struct {
 	builtin      bool // Whether the last frame entered is a precompile; it has no subframes, so its exit comes next
 	compat       bool // Bug for bug compatibility mode
 	isAmsterdam  bool
+	frameTx      *types.FrameTransaction
+	frameHasCode bool
 	lastVmOp     *VmTraceOp
 	lastOp       vm.OpCode
 	lastMemOff   uint64
@@ -411,6 +442,7 @@ func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:  ot.OnTxStart,
+			OnTxEndV2:  ot.OnTxEndV2,
 			OnEnterV2:  ot.OnEnterV2,
 			OnExitV2:   ot.OnExitV2,
 			OnOpcodeV2: ot.OnOpcodeV2,
@@ -421,8 +453,39 @@ func (ot *OeTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (ot *OeTracer) OnTxStart(env *tracing.VMContext, _ types.Transaction, _ accounts.Address) {
+func (ot *OeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, _ accounts.Address) {
 	ot.isAmsterdam = env.Rules.IsAmsterdam
+	if tx != nil {
+		ot.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
+	}
+}
+
+func (ot *OeTracer) OnTxEndV2(receipt *types.Receipt, usage mdgas.TxnGasUsage, err error) {
+	if ot.frameTx == nil || err != nil {
+		return
+	}
+	// Frame exit hooks precede cross-frame refills and final fee settlement.
+	// Receipt gas is authoritative once all frames have finished.
+	for _, trace := range ot.r.Trace {
+		switch len(trace.TraceAddress) {
+		case 0:
+			trace.Action.(*CallTraceAction).Gas = hexutil.U256(*uint256.NewInt(ot.frameTx.GetGasLimit()))
+			stateGas := hexutil.Int64(usage.BlockStateGasUsed)
+			trace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), StateGasUsed: &stateGas}
+		case 1:
+			i := trace.TraceAddress[0]
+			if result, ok := trace.Result.(*TraceResult); ok {
+				result.GasUsed = (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[i].GasUsed.Execution))
+				stateGas := hexutil.Int64(receipt.FrameReceipts[i].GasUsed.State)
+				result.StateGasUsed = &stateGas
+			}
+		}
+	}
+	if ot.r.VmTrace != nil {
+		for _, op := range ot.r.VmTrace.Ops {
+			op.Ex.GasRemaining = op.Cost - int(receipt.FrameReceipts[op.Pc].GasUsed.Total())
+		}
+	}
 }
 
 func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas mdgas.MdGas, value *uint256.Int, code []byte) {
@@ -452,7 +515,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 	}
 	ot.builtin = precompile
-	if precompile && deep && (value == nil || value.IsZero()) {
+	if precompile && deep && (value == nil || value.IsZero()) && !(ot.frameTx != nil && len(ot.traceStack) == 1) {
 		ot.precompile = true
 		if !ot.config.IncludePrecompiles {
 			return
@@ -538,8 +601,27 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 }
 
 func (ot *OeTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	frameEntry := ot.frameTx != nil && depth == 1
+	if frameEntry {
+		ot.frameHasCode = len(code) > 0 || precompile
+	}
+	if frameEntry && ot.r.VmTrace != nil {
+		// Frames are siblings under the synthetic root. Do not attach a new frame
+		// to the preceding frame's last opcode or reuse its memory offsets.
+		ot.lastVmOp, ot.lastOffStack = nil, nil
+		ot.lastMemOff, ot.lastMemLen, ot.callMemOff, ot.callMemLen = 0, 0, 0, 0
+		if ot.frameHasCode {
+			// The root has no bytecode: Pc identifies a frame, and Op stays unset.
+			op := &VmTraceOp{Pc: ot.traceStack[0].Subtraces, Cost: int(gas.Total()), Ex: &VmTraceEx{Push: []string{}}}
+			ot.r.VmTrace.Ops = append(ot.r.VmTrace.Ops, op)
+			ot.lastVmOp = op
+		}
+	}
 	isCreate := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, &value, code)
+	if frameEntry {
+		ot.lastVmOp = nil
+	}
 }
 
 func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdGasUsage, err error) {
@@ -577,7 +659,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 	}
 	if err != nil && !ignoreError {
 		topTrace.Error = parityTraceError(err, builtin)
-		if errors.Is(err, vm.ErrExecutionReverted) {
+		// Frame checks can report a revert before execution, with no EVM result.
+		unexecutedFrame := ot.frameTx != nil && len(topTrace.TraceAddress) == 1 && !ot.frameHasCode
+		if errors.Is(err, vm.ErrExecutionReverted) && !unexecutedFrame {
 			// A reverted CREATE deploys nothing, so it reports its revert data as a call does,
 			// without the address it would have occupied.
 			topTrace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(gasUsed.Execution)), Output: bytes.Clone(output)}
@@ -690,7 +774,8 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				vm.ADD, vm.EXP, vm.CALLER, vm.KECCAK256, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL, vm.CLZ,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
-				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN:
+				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN,
+				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -701,7 +786,8 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			// Set the "mem" of the last operation
 			var setMem bool
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY, vm.MCOPY,
+				vm.FRAMEDATACOPY, vm.SIGDATACOPY, vm.EVENTDATACOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -773,12 +859,12 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = 1
 			}
-		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.MCOPY:
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.MCOPY, vm.FRAMEDATACOPY, vm.SIGDATACOPY:
 			if len(st) > 2 {
 				ot.lastMemOff = tracers.StackBack(st, 0).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 2).Uint64()
 			}
-		case vm.EXTCODECOPY:
+		case vm.EXTCODECOPY, vm.EVENTDATACOPY:
 			if len(st) > 3 {
 				ot.lastMemOff = tracers.StackBack(st, 1).Uint64()
 				ot.lastMemLen = tracers.StackBack(st, 3).Uint64()
@@ -1039,10 +1125,8 @@ func parseTraceTypes(traceTypes []string) (trace, stateDiff, vmTrace bool, err e
 	return trace, stateDiff, vmTrace, nil
 }
 
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
-	}
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (_ *TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1080,7 +1164,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1088,12 +1172,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	return trace, nil
 }
 
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) (_ []*TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return nil, err
-	}
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
 	}
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1129,7 +1211,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, wdiffs, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig, nil /* withSyscall */)
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, traceTypes, chainConfig, traceConfig, nil /* withSyscall */)
 	if err != nil {
 		return nil, err
 	}
@@ -1206,7 +1288,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ *TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1230,9 +1314,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *blockNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
@@ -1248,17 +1332,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
@@ -1269,7 +1348,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	transactions.VersionedCallState(ibs)
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
@@ -1338,7 +1416,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, callError(err)
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1349,7 +1427,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
@@ -1413,7 +1491,9 @@ func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, k
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ []*TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1477,9 +1557,9 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *parentNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
@@ -1514,11 +1594,6 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -1534,12 +1609,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
 	if err != nil {
 		return nil, callError(err)
 	}
@@ -1552,7 +1626,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
+	header *types.Header, requireCanonical, advanceTxNum, noBaseFee bool,
 	traceConfig *config.TraceConfig, overrides *ethapi.StateOverrides,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1667,7 +1741,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
 			tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
 		}
-		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
+		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil {
 				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
@@ -1676,7 +1750,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
-			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+			tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1699,7 +1773,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txn types.Transaction, callParam TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
+	header *types.Header, requireCanonical bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1798,10 +1872,12 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
+	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
+	vmConfig.Tracer.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if err := finalizeTraceTx(ibs, chainRules, cloneReader, sd, cachedWriter); err != nil {
@@ -1821,7 +1897,7 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	if sd == nil {
 		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	}
-	initialIbs := state.New(cloneReader)
+	initialIbs := state.NewVersionedCall(cloneReader)
 	defer initialIbs.Close()
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
@@ -1912,15 +1988,15 @@ func (b *bufferedWriter) CreateContract(address accounts.Address) error {
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
 	// Checked before decoding to bound its allocations: on every fork an authorization costs at
 	// least ExecutionPerAuthBaseCostEIP8038 of intrinsic gas, so a larger list cannot fit under the gas cap.
-	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
+	if n := types.SetCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
 		return nil, clientLimitExceededError(fmt.Sprintf("authorization list of %d entries exceeds the RPC gas cap %d", n, api.gasCap))
 	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return nil, &rpc.InvalidParamsError{Message: "invalid raw transaction: " + err.Error()}
 	}
-	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
-		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))
+	if err := checkTransactionGasCap(txn, api.gasCap); err != nil {
+		return nil, err
 	}
 
 	dbtx, err := api.kv.BeginTemporalRo(ctx)
@@ -1938,7 +2014,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1954,11 +2030,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, latest, 0, api._txNumReader)
@@ -1978,9 +2049,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -2020,15 +2090,15 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	// A signed transaction pays for its own gas, so no gas bailout: the sender
-	// is charged for value and gas as it would be in a block.
+	// Keep normal value transfers and fee accounting. Frame gas is charged to
+	// the approved payer, which may differ from the sender.
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
@@ -2040,7 +2110,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
@@ -2056,37 +2126,4 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	return traceResult, nil
-}
-
-// setCodeAuthorizationCount returns the authorization-list length of a canonical or
-// RLP-enveloped SetCode transaction without decoding it, or 0 for any other input.
-func setCodeAuthorizationCount(encoded []byte) int {
-	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
-		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
-		if err != nil || isList {
-			return 0
-		}
-		encoded = encoded[dataPos : dataPos+dataLen]
-	}
-	if len(encoded) == 0 || encoded[0] != types.SetCodeTxType {
-		return 0
-	}
-	payload := encoded[1:]
-	pos, _, err := rlp.ParseList(payload, 0)
-	if err != nil {
-		return 0
-	}
-	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
-	for range 9 {
-		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
-		if err != nil {
-			return 0
-		}
-		pos = dataPos + dataLen
-	}
-	dataPos, dataLen, err := rlp.ParseList(payload, pos)
-	if err != nil {
-		return 0
-	}
-	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
 }

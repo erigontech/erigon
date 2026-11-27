@@ -183,10 +183,10 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 func TestPayloadAttestationServiceSelectsSignatureVerifierByIngress(t *testing.T) {
 	saveSignatureGlobals(t)
 	var batchCalls atomic.Int32
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		batchCalls.Add(1)
 		return true, nil
-	}
+	})
 
 	setup := func(t *testing.T) (*payloadAttestationService, *signatureVerifierPayloadAttestationForkchoice, *cltypes.PayloadAttestationMessage, common.Hash) {
 		ctrl := gomock.NewController(t)
@@ -320,7 +320,7 @@ func TestPayloadAttestationServiceBatchSignatureOutcomes(t *testing.T) {
 	t.Run("raw fallback error enables immediate verification", func(t *testing.T) {
 		saveSignatureGlobals(t)
 		rawErr := errors.New("malformed signature")
-		blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return false, rawErr }
+		blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return false, rawErr })
 		service, msg, _, forkchoiceStore := setup(t, validSignature, true)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
@@ -1531,4 +1531,32 @@ func TestPayloadAttestationServiceDecodeGossipMessageStrict(t *testing.T) {
 	nonCanonicalBool[payloadPresentOffset] = 2
 	_, err = service.DecodeGossipMessage("peer123", nonCanonicalBool, clparams.GloasVersion)
 	require.Error(t, err)
+}
+
+func TestPayloadAttestationServiceRejectsInvalidBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+
+	err := service.ProcessMessage(t.Context(), nil, newTestPayloadAttestationMessage(100, 1, blockRoot))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	err = service.ProcessRESTMessage(t.Context(), newTestPayloadAttestationMessage(100, 2, blockRoot), func() error { return nil })
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, service.pending.count.Load())
+}
+
+func TestPayloadAttestationServiceDropsPendingAttestationWhenBlockIsInvalid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestPayloadAttestationMessage(100, 1, blockRoot)), ErrAttestationQueued)
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
 }

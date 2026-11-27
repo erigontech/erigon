@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -217,6 +219,43 @@ func TestSlowBlockMetricsSilentByDefault(t *testing.T) {
 	assert.Empty(t, collector.records(t), "metrics must stay off unless the threshold is set")
 }
 
+func TestRepeatedForkchoiceDoesNotRecordBlockDelays(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	metricNames := []string{
+		`update_fork_choice{type="arrival_delay"}`,
+		`block_consumer_delay{type="pre_execution"}`,
+		`block_consumer_delay{type="post_execution"}`,
+	}
+	counts := func() []uint64 {
+		values := make([]uint64, len(metricNames))
+		for i, name := range metricNames {
+			var metric dto.Metric
+			require.NoError(t, metrics.GetOrCreateSummary(name).Write(&metric))
+			values[i] = metric.GetSummary().GetSampleCount()
+		}
+		return values
+	}
+
+	before := counts()
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.Drain()
+	after := counts()
+	for i, name := range metricNames {
+		require.Greater(t, after[i], before[i], name)
+	}
+
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), chain.TopBlock.Hash(), common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.Drain()
+	for i, count := range counts() {
+		assert.Equal(t, after[i], count, metricNames[i])
+	}
+}
+
 func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 	send := func(value uint64) func(int, *blockgen.BlockGen) {
@@ -237,7 +276,7 @@ func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tip := sideFork.Blocks[len(sideFork.Blocks)-1].Header()
-	result, err := m.ValidateChain(t.Context(), tip)
+	result, err := m.ValidateChain(t.Context(), sideFork.Blocks[len(sideFork.Blocks)-1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	_, err = m.UpdateForkChoice(t.Context(), tip)
@@ -265,8 +304,8 @@ func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
-	tipA := siblingA.Blocks[len(siblingA.Blocks)-1].Header()
-	tipB := siblingB.Blocks[len(siblingB.Blocks)-1].Header()
+	tipA := siblingA.Blocks[len(siblingA.Blocks)-1]
+	tipB := siblingB.Blocks[len(siblingB.Blocks)-1]
 
 	// Both validate at the same height, so both leave a record; B validates
 	// last, so the extending fork head is B when the forkchoice picks A.
@@ -279,7 +318,7 @@ func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
 
 	collector := installCollector(t)
 
-	_, err = m.UpdateForkChoice(t.Context(), tipA)
+	_, err = m.UpdateForkChoice(t.Context(), tipA.Header())
 	require.NoError(t, err)
 
 	assert.Empty(t, collector.records(t),
@@ -306,7 +345,7 @@ func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tip := fork.Blocks[len(fork.Blocks)-1].Header()
-	result, err := m.ValidateChain(t.Context(), tip)
+	result, err := m.ValidateChain(t.Context(), fork.Blocks[len(fork.Blocks)-1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	_, err = m.UpdateForkChoice(t.Context(), tip)

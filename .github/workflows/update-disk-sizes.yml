@@ -4,9 +4,9 @@ name: Docs - Update disk sizes
 # Archive sizes are not handled here: they are read manually from the Grafana
 # dashboard and committed by hand in a dedicated monthly PR.
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
-# and opens (or updates) a draft PR against a pinned base branch (release/3.6).
+# and opens (or updates) a draft PR against the docs deploy branch (vars.DOCS_DEPLOY_BRANCH).
 on:
-  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.6 for workflow_run events
+  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH comes from vars.DOCS_DEPLOY_BRANCH for workflow_run events
   workflow_run:
     workflows:
       - "QA - Sync from scratch (minimal node)"
@@ -22,10 +22,8 @@ on:
         description: "Workflow run ID to pull disk-usage artifacts from"
         required: true
       base_branch:
-        description: "Base branch to update"
-        required: true
-        # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
-        default: "release/3.6"
+        description: "Base branch to update (empty = vars.DOCS_DEPLOY_BRANCH)"
+        required: false
       prune_mode:
         description: "Prune mode measured in that run"
         required: true
@@ -63,8 +61,10 @@ jobs:
           INPUT_BASE_BRANCH: ${{ github.event.inputs.base_branch }}
           WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          DOCS_DEPLOY_BRANCH: ${{ vars.DOCS_DEPLOY_BRANCH }}
         run: |
           set -euo pipefail
+          BASE_BRANCH="$DOCS_DEPLOY_BRANCH"
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             case "$INPUT_PRUNE_MODE" in
               full|minimal) ;;
@@ -77,13 +77,9 @@ jobs:
               echo "::error::Invalid run_id: must be numeric"
               exit 1
             fi
-            if ! [[ "$INPUT_BASE_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              echo "::error::Invalid base_branch: allowed chars are [A-Za-z0-9._/-]"
-              exit 1
-            fi
+            BASE_BRANCH="${INPUT_BASE_BRANCH:-$DOCS_DEPLOY_BRANCH}"
             printf 'prune_mode=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_OUTPUT"
           else
             # Map the producing workflow → the mode it measured:
             #   "QA - Sync from scratch (minimal node)" → minimal
@@ -98,9 +94,12 @@ jobs:
             fi
             printf 'prune_mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-            # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
-            printf 'base_branch=release/3.6\n' >> "$GITHUB_OUTPUT"
           fi
+          if ! [[ "$BASE_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid base_branch: set vars.DOCS_DEPLOY_BRANCH or pass base_branch; allowed chars are [A-Za-z0-9._/-]"
+            exit 1
+          fi
+          printf 'base_branch=%s\n' "$BASE_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Generate GitHub App token
         id: app_token
@@ -111,6 +110,7 @@ jobs:
           repositories: "erigon"
           permission-contents: write
           permission-pull-requests: write
+          permission-workflows: write
 
       - name: Checkout base branch
         uses: actions/checkout@v7
@@ -159,6 +159,29 @@ jobs:
             exit 1
           fi
           echo "Found $(ls ./artifacts | wc -l) artifact file(s)"
+
+      # Runs made before the sync workflows wrote a .method file next to the bytes carry no method. Take it from the
+      # workflow file the run itself used, so a seg du estimate of such a run is not taken for a whole-datadir size.
+      - name: Record the method of untagged seg du runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ steps.determine.outputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          # Assignments, not pipes into `if`: a failed lookup must fail the step, not publish the bytes untagged.
+          RUN_INFO=$(gh api "repos/$REPO/actions/runs/$SOURCE_RUN_ID" --jq '"\(.path) \(.head_sha)"')
+          read -r WORKFLOW_PATH HEAD_SHA <<<"$RUN_INFO"
+          WORKFLOW=$(gh api "repos/$REPO/contents/$WORKFLOW_PATH?ref=$HEAD_SHA" --jq .content | base64 -d)
+          if grep -Eq 'erigon"? seg du' <<<"$WORKFLOW"; then
+            for bytes in ./artifacts/disk-usage-*.txt; do
+              method="${bytes%.txt}.method"
+              if [ ! -e "$method" ]; then
+                echo "seg-du" > "$method"
+                echo "Recorded seg-du for $bytes from $WORKFLOW_PATH at $HEAD_SHA"
+              fi
+            done
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v7

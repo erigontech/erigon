@@ -369,3 +369,58 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 		})
 	}
 }
+
+func TestAssembleTracerStopsAJSConstructorAtTheTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "(function(){ while (true) {} })()", "50ms"
+	done := make(chan error, 1)
+	go func() {
+		_, _, cancel, err := AssembleTracer(t.Context(), &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout},
+			common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Minute)
+		cancel()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "execution timeout")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the JS tracer constructor outlived its timeout")
+	}
+}
+
+func TestTraceTimeoutCannotExceedTheServerTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		client string
+		want   time.Duration
+	}{
+		{"1h", 5 * time.Second},
+		{"1s", time.Second},
+		{"5s", 5 * time.Second},
+	} {
+		got, err := traceTimeout(5*time.Second, &tc.client)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.client)
+	}
+	got, err := traceTimeout(5*time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Second, got)
+	bad := "soon"
+	_, err = traceTimeout(5*time.Second, &bad)
+	require.Error(t, err)
+}
+
+func TestAssembleTracerCapsTheClientTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "{result: function() { return 1 }, fault: function() {}}", "1h"
+	config := &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout}
+
+	tracer, _, cancel, err := AssembleTracer(t.Context(), config, common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Second)
+	require.NoError(t, err)
+	defer cancel()
+
+	require.Eventually(t, func() bool {
+		_, err := tracer.GetResult()
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond, "the server timeout must stop the tracer")
+}

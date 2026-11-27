@@ -471,103 +471,6 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 	}
 }
 
-// non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte) (Node, Node, bool, uint64) {
-	nd := t.RootNode
-	var parent Node
-	pos := 0
-	var account bool
-	var incarnation uint64
-	for pos < len(hex) || account {
-		switch n := nd.(type) {
-		case nil:
-			return nil, nil, false, incarnation
-		case *ShortNode:
-			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-				parent = n
-				nd = n.Val
-				pos += matchlen
-				if _, ok := nd.(*AccountNode); ok {
-					account = true
-				}
-			} else {
-				return nil, nil, false, incarnation
-			}
-		case *DuoNode:
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				parent = n
-				nd = n.child1
-				pos++
-			case i2:
-				parent = n
-				nd = n.child2
-				pos++
-			default:
-				return nil, nil, false, incarnation
-			}
-		case *FullNode:
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return nil, nil, false, incarnation
-			}
-			parent = n
-			nd = child
-			pos++
-		case *AccountNode:
-			parent = n
-			nd = n.Storage
-			incarnation = n.Incarnation
-			account = false
-		case ValueNode:
-			return nd, parent, true, incarnation
-		case HashNode:
-			return nd, parent, true, incarnation
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
-	}
-	return nd, parent, true, incarnation
-}
-
-func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
-	switch n := n.(type) {
-	case *ShortNode:
-		if _, ok := n.Val.(ValueNode); !ok {
-			// Don't need to compute prefix for a leaf
-			h := n.Key
-			// Remove terminator
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			hexVal := concat(hex, h...)
-			t.touchAll(n.Val, hexVal, del, incarnation)
-		}
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		t.touchAll(n.child1, hex1, del, incarnation)
-		t.touchAll(n.child2, hex2, del, incarnation)
-	case *FullNode:
-		for i, child := range n.Children {
-			if child != nil {
-				t.touchAll(child, concat(hex, byte(i)), del, incarnation)
-			}
-		}
-	case *AccountNode:
-		if n.Storage != nil {
-			t.touchAll(n.Storage, hex, del, n.Incarnation)
-		}
-	}
-}
-
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
@@ -596,16 +499,13 @@ func (t *Trie) convertToShortNode(child Node, pos uint) Node {
 }
 
 func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (updated bool, newNode Node) {
-	return t.deleteRecursive(origNode, key, 0, preserveAccountNode, 0)
+	return t.deleteRecursive(origNode, key, 0, preserveAccountNode)
 }
 
-// delete returns the new root of the trie with key deleted.
-// It reduces the trie to minimal form by simplifying
-// nodes on the way up after deleting recursively.
-//
-// can pass incarnation=0 if start from root, method internally will
-// put incarnation from accountNode when pass it by traverse
-func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode Node) {
+// deleteRecursive removes the key or subtree and simplifies nodes on the way back
+// up. If preserveAccountNode is set, it clears a matching account's storage and
+// cached code but keeps the account node.
+func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
@@ -619,18 +519,9 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			if removeNodeEntirely {
 				updated = true
-				touchKey := key[:keyStart+matchlen]
-				if touchKey[len(touchKey)-1] == 16 {
-					touchKey = touchKey[:len(touchKey)-1]
-				}
-				t.touchAll(n.Val, touchKey, true, incarnation)
 				newNode = nil
 			} else {
-				// The key is longer than n.Key. Remove the remaining suffix
-				// from the subtrie. Child can never be nil here since the
-				// subtrie must contain at least two other values with keys
-				// longer than n.Key.
-				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
+				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
 				} else {
@@ -663,7 +554,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -676,7 +567,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 			}
 		case i2:
-			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -696,20 +587,13 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 	case *FullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode, incarnation)
+		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
 			newNode = n
 		} else {
 			n.Children[key[keyStart]] = nn
-			// Check how many non-nil entries are left after deleting and
-			// reduce the full node to a short node if only one entry is
-			// left. Since n must've contained at least two children
-			// before deletion (otherwise it would not be a full node) n
-			// can never be reduced to nil.
-			//
-			// When the loop is done, pos contains the index of the single
-			// value that is left in n or -2 if n contains at least two
-			// values.
+			// Collapse branches with one or two remaining children into a ShortNode
+			// or DuoNode. A FullNode cannot become empty after deleting one child.
 			var pos1, pos2 int
 			count := 0
 			for i, cld := range n.Children {
@@ -759,14 +643,6 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	case *AccountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
-			h := key[:keyStart]
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			if n.Storage != nil {
-				// Mark all the storage nodes as deleted
-				t.touchAll(n.Storage, h, true, n.Incarnation)
-			}
 			if preserveAccountNode {
 				n.Storage = nil
 				n.Code = nil
@@ -777,7 +653,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			return true, nil
 		}
-		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode)
 		if updated {
 			n.Storage = nn
 			n.RootCorrect = false
@@ -795,9 +671,8 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	}
 }
 
-// DeleteSubtree removes any existing value for key from the trie.
-// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+// DeleteSubtree removes the subtree at keyPrefix. When keyPrefix identifies an
+// account, it keeps the account node but clears its storage and cached code.
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 

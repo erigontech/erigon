@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -489,7 +488,7 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx kv.FinalityContext, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, irreversibleTxNum uint64, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
@@ -550,7 +549,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
 		domains.SetInMemHistoryReads(false)
-		domains.EnableParaTrieDB(rwDb)
+		if cfg.Variant != commitment.VariantCommitmentV3 {
+			domains.EnableParaTrieDB(rwDb)
+		}
 		return nil
 	}
 	if err := openDomains(); err != nil {
@@ -625,7 +626,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			toStep++
 		}
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, irreversibleTxNum, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -684,8 +685,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		select {
 		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+			alloc, sys := dbg.MemUsage()
 			now := time.Now()
 			blkPerSec := float64(blockNum-lastLogBlock) / now.Sub(lastLogTime).Seconds()
 			lastLogTime = now
@@ -696,7 +696,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 		default:
 		}
 		return nil
@@ -743,6 +743,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		curBlock := ^uint64(0) // sentinel: no block started yet
+		v3 := domains.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3
+		var prevKey []byte
 		if err := batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
 			if blockNum != curBlock {
 				// Finalize the previous keyed block (or, on first key, start from blockFrom).
@@ -763,18 +765,15 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
+			} else if v3 && bytes.Equal(rawKey, prevKey) {
+				return nil
 			}
-			var domain kv.Domain
-			switch len(rawKey) {
-			case 20:
-				domain = kv.AccountsDomain
-			case 52:
-				domain = kv.StorageDomain
-			default:
-				return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
-					blockNum, len(rawKey), hex.EncodeToString(rawKey))
+			if v3 {
+				prevKey = append(prevKey[:0], rawKey...)
 			}
-			domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
+			if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
+				return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
+			}
 			totalKeysProcessed++
 			return nil
 		}); err != nil {
@@ -824,12 +823,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	latestRoot = rh
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	logger.Info("[rebuild_commitment_history] done", "duration", time.Since(start),
 		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
 		"root", hex.EncodeToString(latestRoot),
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	if totalKeysProcessed == 0 {
 		return latestRoot, nil
@@ -963,9 +961,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 
 	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
-	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
+	// variant enables it explicitly. Variant is set once, before the loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
+	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
@@ -1039,26 +1038,22 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		trieVariant := commitment.VariantHexPatriciaTrie
-		if statecfg.ExperimentalParallelCommitment {
-			trieVariant = commitment.VariantParallelHexPatricia
-		}
-
 		for shardFrom < lastShard { // recreate this file range 1+ steps
-			nextKey := func() (ok bool, k []byte) {
+			// The stream reads the range's own file, so each value is the key's latest as of the range end.
+			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
-					return false, nil
+					return false, nil, nil
 				}
-				k, _, err := keyIter.Next()
+				k, v, err := keyIter.Next()
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
 					panic(err)
 				}
 				processed++
 				if processed%(keysPerStep*uint64(shardStepsSize)) == 0 && shardTo != lastShard {
-					return false, k
+					return false, k, v
 				}
-				return true, k
+				return true, k, v
 			}
 
 			rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -1067,9 +1062,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback() //nolint:gocritic
 
-			iterTrieCfg := rebuildTrieCfg
-			iterTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(rebuildTrieCfg))
 			if err != nil {
 				return nil, err
 			}
@@ -1077,9 +1070,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if statecfg.ExperimentalParallelCommitment {
+			switch rebuildTrieCfg.Variant {
+			case commitment.VariantParallelHexPatricia, commitment.VariantCommitmentV3:
 				domains.EnableParaTrieDB(rwDb)
 			}
+			// A top-level v3 storage fold worker measured ~0.35 GB of heap; 2 GB each in half the memory leaves room for the rest of the rebuild.
+			domains.SetStorageWorkersMax(estimate.EstimatedRamPerWorker(2 * datasize.GB).WorkersByRAMOnly())
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -1097,10 +1093,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			domains.Close()
 
-			// make new file visible for all aggregator transactions
-			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(nil)
-			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
 			for {
@@ -1132,10 +1124,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			latestRoot = rebuiltCommit.RootHash
 		}
 
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
+		alloc, sys := dbg.MemUsage()
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
-			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 		for {
 			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
@@ -1149,9 +1140,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	acRo.Close()
 
@@ -1187,7 +1177,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (ok bool, k, v []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1201,9 +1191,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
-	for ok, key := next(); ; ok, key = next() {
+	for ok, key, val := next(); ; ok, key, val = next() {
 		if len(key) != 0 {
-			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			if err := sd.GetCommitmentCtx().TouchKeyValue(key, val); err != nil {
+				return nil, err
+			}
 			processed++
 		}
 		if !ok {
@@ -1221,10 +1213,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
+	writer := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[kv.CommitmentDomain]
+	files, err := aggTx.d[kv.CommitmentDomain].d.dumpStepRangeToPath(ctx, cfg.StepFrom, cfg.StepTo, writer, "")
 	if err != nil {
 		return nil, err
 	}
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = files
+	aggTx.a.IntegrateDirtyFiles(static, aggTx.a.FirstTxNumOfStep(cfg.StepFrom), aggTx.a.FirstTxNumOfStep(cfg.StepTo))
 
 	logger.Info(cfg.LogPrefix+" finished", "block", cfg.BlockNumber, "txn", cfg.TxnNumber, "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
@@ -1256,7 +1252,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	d := a.d[kv.CommitmentDomain]
 	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
 	defer wal.Close()
-	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), "")
 	if err != nil {
 		return err
 	}
@@ -1269,10 +1265,9 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	if err != nil {
 		return err
 	}
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	d.integrateDirtyFiles(sf, uint64(step)*a.StepSize(), uint64(step+1)*a.StepSize())
-	a.recalcVisibleFiles(nil)
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = sf
+	a.IntegrateDirtyFiles(static, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
 	return nil
 }
 

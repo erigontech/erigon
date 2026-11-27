@@ -44,7 +44,7 @@ var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) *
 
 // EnableResidencyGate routes cold .kv page access through blocking async I/O so
 // the read does not hold the goroutine's P.
-func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
+func (g *Getter) EnableResidencyGate() { g.residencyGate, g.slowReset = true, true }
 
 // residencyRegion returns the page-aligned file extent covering the word at offset,
 // zero length when out of range. Works in file offsets, so a SequentialView reading

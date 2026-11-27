@@ -78,7 +78,7 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
 	// same keys the workers do, so aliasing them counts every key twice.
-	p.metrics = NewMetrics("")
+	p.metrics = &Metrics{}
 	return p
 }
 
@@ -202,12 +202,6 @@ func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
-	if p.template != nil {
-		p.template.EnableCsvMetrics(filePathPrefix)
-	}
-}
-
 func (p *ParallelPatriciaHashed) Variant() TrieVariant {
 	return VariantParallelHexPatricia
 }
@@ -251,7 +245,7 @@ func (p *ParallelPatriciaHashed) Process(
 	n := updates.Size()
 	p.metrics.AddRoundKeys(n)
 	roundStart := time.Now()
-	defer func() { observeRound(p.metrics, roundStart) }()
+	defer func() { ObserveRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
 	pu.Build()
@@ -360,7 +354,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		})
 	}
 	err := g.Wait()
-	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	PublishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
 	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}

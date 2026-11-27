@@ -488,7 +488,10 @@ func TestDynamicBuilderCallsShareBoundedAdmission(t *testing.T) {
 	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
 		current := active.Add(1)
 		defer active.Add(-1)
-		for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+		for previous := maximum.Load(); current > previous; previous = maximum.Load() {
+			if maximum.CompareAndSwap(previous, current) {
+				break
+			}
 		}
 		select {
 		case <-release:
@@ -584,6 +587,12 @@ func TestDynamicBuilderClientDoesNotRequireLegacyRelay(t *testing.T) {
 	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
 	require.NotNil(t, client)
 	require.Nil(t, client.url)
+	require.False(t, client.RelayConfigured())
+}
+
+func TestBuilderClientReportsConfiguredRelay(t *testing.T) {
+	client := newBlockBuilderClient("https://relay.example", mockBeaconConfig, BuilderTargetPolicy{}, false)
+	require.True(t, client.RelayConfigured())
 }
 
 func TestDynamicBuilderDialUsesValidatedAddress(t *testing.T) {

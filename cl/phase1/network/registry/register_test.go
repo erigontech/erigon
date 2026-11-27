@@ -19,6 +19,7 @@ package registry
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -104,7 +105,10 @@ func TestSyncCommitteeMessageRateLimiterAdmitsEachSubnetsSlotFromOnePeer(t *test
 		{name: "minimal", cfg: minimal, perSubnet: 8},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			condition := withSyncCommitteeMessageRateLimiter(&test.cfg)
+			limiter := newSyncCommitteeMessageRateLimiter(&test.cfg)
+			now := time.Unix(1_700_000_000, 0)
+			limiter.now = func() time.Time { return now }
+			condition := syncCommitteeMessageCondition(limiter)
 			pid := peer.ID("sync-committee-peer")
 			for subnet := range test.cfg.SyncCommitteeSubnetCount {
 				for i := range test.perSubnet {
@@ -114,4 +118,26 @@ func TestSyncCommitteeMessageRateLimiterAdmitsEachSubnetsSlotFromOnePeer(t *test
 			require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a subnet's next message in the same slot")
 		})
 	}
+}
+
+// A subnet's bucket refills one message per (slot / messages per subnet slot): its next message is rejected until then
+// and admitted after.
+func TestSyncCommitteeMessageRateLimiterRefillsOneMessageAtATime(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	perSubnet := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
+	refill := time.Duration(cfg.SecondsPerSlot) * time.Second / time.Duration(perSubnet)
+	limiter := newSyncCommitteeMessageRateLimiter(&cfg)
+	now := time.Unix(1_700_000_000, 0)
+	limiter.now = func() time.Time { return now }
+	condition := syncCommitteeMessageCondition(limiter)
+	pid := peer.ID("sync-committee-peer")
+	for range perSubnet {
+		require.True(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion))
+	}
+
+	now = now.Add(refill - time.Millisecond)
+	require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a message admitted before a token refilled")
+	now = now.Add(time.Millisecond)
+	require.True(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a refilled token was not admitted")
+	require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion))
 }

@@ -193,3 +193,23 @@ func TestJoinIndexRangesClosesOpenedStreamsOnError(t *testing.T) {
 	require.ErrorIs(t, err, errRange)
 	require.Equal(t, 2, closed)
 }
+
+func TestJoinIndexRangesCloseClosesEveryOpenedStreamOnce(t *testing.T) {
+	m := testIndexes()
+	var closes []*int
+	tracked := func(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+		it, err := m.indexRange(name, k, fromTs, toTs, asc, limit)
+		closes = append(closes, new(int))
+		return closeTracker{it, closes[len(closes)-1]}, err
+	}
+	q := kv.IndexQuery{Clauses: [][]kv.IndexKey{
+		{{kv.LogAddrIdx, addrA}, {kv.LogAddrIdx, []byte("missing")}},
+		{{kv.LogTopicIdx, []byte("missing")}, {kv.LogTopicIdx, topicX}},
+	}, FromTs: -1, ToTs: -1, Asc: order.Asc}
+	it, err := kv.JoinIndexRanges(q, tracked)
+	require.NoError(t, err)
+	it.Close()
+	for i, c := range closes {
+		require.Equal(t, 1, *c, "stream %d", i)
+	}
+}

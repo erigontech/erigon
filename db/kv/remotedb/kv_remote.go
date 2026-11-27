@@ -28,6 +28,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -986,7 +988,33 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 }
 
 func (tx *tx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
-	return kv.JoinIndexRanges(q, tx.IndexRange)
+	req := &remoteproto.IndexJoinReq{TxId: tx.id, Clauses: make([]*remoteproto.IndexJoinClause, len(q.Clauses)), FromTs: int64(q.FromTs), ToTs: int64(q.ToTs), OrderAscend: bool(q.Asc)}
+	for i, clause := range q.Clauses {
+		keys := make([]*remoteproto.IndexJoinKey, len(clause))
+		for j, k := range clause {
+			keys[j] = &remoteproto.IndexJoinKey{Table: k.Idx.String(), K: k.Key}
+		}
+		req.Clauses[i] = &remoteproto.IndexJoinClause{Keys: keys}
+	}
+	// The first page is fetched eagerly to detect servers older than IndexJoin before returning a stream.
+	first, err := tx.db.remoteKV.IndexJoin(tx.ctx, req)
+	if status.Code(err) == codes.Unimplemented {
+		return kv.JoinIndexRanges(q, tx.IndexRange)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+		reply := first
+		first = nil
+		if reply == nil {
+			req.PageToken = pageToken
+			if reply, err = tx.db.remoteKV.IndexJoin(tx.ctx, req); err != nil {
+				return nil, "", err
+			}
+		}
+		return reply.Timestamps, reply.NextPageToken, nil
+	}), nil
 }
 
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {

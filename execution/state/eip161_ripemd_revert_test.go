@@ -46,9 +46,9 @@ func (r *emptyAccountReader) ReadAccountDataForDebug(address accounts.Address) (
 
 // touchThenRevertRemoves touches an already-empty account on the versioned
 // (parallel) path, reverts the transaction, and reports whether the finalized
-// write set removes the account (SelfDestruct=true). RIPEMD's touch bumps its
-// journal dirty count so the touch outlives the revert (an ordinary account's
-// reverted touch leaves no write), and FinalizedWrites emits the EIP-161 removal.
+// write set removes the account (the balance-deleted removal verdict). RIPEMD's
+// touch bumps its journal dirty count so the touch outlives the revert (an ordinary
+// account's reverted touch leaves no write), and FinalizedWrites emits the EIP-161 removal.
 func touchThenRevertRemoves(t *testing.T, addr accounts.Address) bool {
 	t.Helper()
 
@@ -66,8 +66,8 @@ func touchThenRevertRemoves(t *testing.T, addr accounts.Address) bool {
 	ibs.RevertToSnapshot(snap, nil)
 
 	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
-	sd, ok := writes.GetSelfDestruct(addr)
-	return ok && sd.Val
+	bal, ok := writes.GetBalance(addr)
+	return ok && bal.Deletes()
 }
 
 // TestEIP161RipemdTouchSurvivesRevertOnVersionedPath pins RIPEMD-160's special
@@ -76,7 +76,7 @@ func touchThenRevertRemoves(t *testing.T, addr accounts.Address) bool {
 // touchAccount deliberately bumps ripemd's journal dirty count so a touch
 // outlives the reverting transaction, and serial therefore still sweeps the
 // account under EIP-161. The versioned path derives its write set from
-// versionedWrites, and reverting the touch's zero-balance write dropped that
+// writes, and reverting the touch's zero-balance write dropped that
 // sweep — so the account kept its trie leaf and mainnet's Spurious Dragon
 // clearing blocks re-executed to a wrong state root (first observed at block
 // 2,675,119).

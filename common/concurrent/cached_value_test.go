@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -111,22 +112,22 @@ func TestCachedValueKeepsAnUndecidedProducerOutOfTheValue(t *testing.T) {
 // transaction depends on: the caller that runs the pass does not return, or honour its own
 // cancellation, before the producer is done with what it borrowed.
 func TestCachedValueProduceRunsThePassToTheEnd(t *testing.T) {
-	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		cached := new(CachedValue[uint64])
+		cached.SetTTL(time.Hour)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
 
-	cached := new(CachedValue[uint64])
-	cached.SetTTL(time.Hour)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	var finished atomic.Bool
-	_, ran, err := cached.Produce(ctx, func() (uint64, bool, error) {
-		time.Sleep(10 * time.Millisecond)
-		finished.Store(true)
-		return 42, true, nil
+		var finished atomic.Bool
+		_, ran, err := cached.Produce(ctx, func() (uint64, bool, error) {
+			time.Sleep(10 * time.Millisecond)
+			finished.Store(true)
+			return 42, true, nil
+		})
+		require.NoError(t, err, "a cancelled context does not abandon a pass the caller runs itself")
+		require.True(t, ran)
+		require.True(t, finished.Load())
 	})
-	require.NoError(t, err, "a cancelled context does not abandon a pass the caller runs itself")
-	require.True(t, ran)
-	require.True(t, finished.Load())
 }
 
 // TestCachedValueReleasesAWaiterWithItsOwnContext pins the other half: a caller that only
@@ -157,42 +158,44 @@ func TestCachedValueReleasesAWaiterWithItsOwnContext(t *testing.T) {
 // TestCachedValueRunsOneProducerForConcurrentCallers pins the dedup: the pass exists to
 // keep one slow producer from being asked once per caller.
 func TestCachedValueRunsOneProducerForConcurrentCallers(t *testing.T) {
-	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const waiters = 8
+		cached := new(CachedValue[uint64])
+		cached.SetTTL(time.Hour)
+		entered := make(chan struct{}, waiters+1)
+		release := make(chan struct{})
 
-	const waiters = 8
-	cached := new(CachedValue[uint64])
-	cached.SetTTL(time.Hour)
-	entered := make(chan struct{}, waiters+1)
-	release := make(chan struct{})
+		var producers atomic.Int64
+		produce := func() (uint64, bool, error) {
+			producers.Add(1)
+			entered <- struct{}{}
+			<-release
+			return 42, true, nil
+		}
 
-	var producers atomic.Int64
-	produce := func() (uint64, bool, error) {
-		producers.Add(1)
-		entered <- struct{}{}
-		<-release
-		return 42, true, nil
-	}
-
-	answers := make(chan uint64, waiters+1)
-	for range waiters + 1 {
-		go func() {
-			value, _, _ := cached.Produce(t.Context(), produce)
-			answers <- value
-		}()
-	}
-	<-entered
-	select {
-	case <-entered:
+		answers := make(chan uint64, waiters+1)
+		for range waiters + 1 {
+			go func() {
+				value, _, _ := cached.Produce(t.Context(), produce)
+				answers <- value
+			}()
+		}
+		<-entered
+		synctest.Wait()
+		select {
+		case <-entered:
+			close(release)
+			t.Fatal("a caller arriving while the producer ran asked for one of its own")
+		default:
+		}
 		close(release)
-		t.Fatal("a caller arriving while the producer ran asked for one of its own")
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
+		synctest.Wait()
 
-	for range waiters + 1 {
-		require.Equal(t, uint64(42), <-answers, "the pass answers every caller waiting on it")
-	}
-	require.EqualValues(t, 1, producers.Load())
+		for range waiters + 1 {
+			require.Equal(t, uint64(42), <-answers, "the pass answers every caller waiting on it")
+		}
+		require.EqualValues(t, 1, producers.Load())
+	})
 }
 
 // TestCachedValueProducePropagatesAProducerPanic pins that a panic reaches the caller that

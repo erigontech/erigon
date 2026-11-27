@@ -307,6 +307,11 @@ func TestCheckConfigForkOrder(t *testing.T) {
 			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), TangerineWhistleBlock: u64(10), SpuriousDragonBlock: u64(5)},
 			wantErr: true,
 		},
+		{
+			name:    "shanghai without london",
+			cfg:     Config{ChainID: uint256.NewInt(1), ShanghaiTime: u64(0)},
+			wantErr: true,
+		},
 	}
 	for i := range cases {
 		tc := &cases[i]

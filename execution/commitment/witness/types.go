@@ -9,8 +9,3 @@ type AccountWithAddress struct {
 	Address common.Address
 	Account *accounts.Account
 }
-
-type CodeWithHash struct {
-	Code     []byte
-	CodeHash accounts.CodeHash
-}

@@ -215,7 +215,7 @@ func scanLog(filename string, max int, match string, caseInsensitive bool) ([]st
 	}
 	var result []string
 	scanner := newLogScanner(file)
-	for scanner.Scan() && len(result) < max {
+	for len(result) < max && scanner.Scan() {
 		line := scanner.Text()
 		hay := line
 		if caseInsensitive {

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 
@@ -42,16 +43,49 @@ import (
 // NewHTTPHandlerStack returns wrapped http-related handlers.
 // When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
 // (503 if inflight > limit) to prevent goroutine pile-up under load.
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression, compressLoopback bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
-		handler = newGzipHandler(handler)
+		if compressLoopback {
+			handler = newGzipHandler(handler)
+		} else {
+			handler = newSkipLoopbackCompressionHandler(handler, newGzipHandler(handler))
+		}
 	}
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
 	}
 	return handler
+}
+
+// newSkipLoopbackCompressionHandler decides per request, not per listener, so a
+// server bound to 0.0.0.0 still skips compression for local clients.
+func newSkipLoopbackCompressionHandler(plain, compressed http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLocalClient(r) {
+			plain.ServeHTTP(w, r)
+			return
+		}
+		compressed.ServeHTTP(w, r)
+	})
+}
+
+// isLocalClient treats a loopback request carrying a forwarding header as remote:
+// it comes from a reverse proxy on the same host. A faked header only turns
+// compression back on, so it needs no trust check.
+func isLocalClient(r *http.Request) bool {
+	return isLoopbackAddress(r.RemoteAddr) &&
+		r.Header.Get("X-Forwarded-For") == "" &&
+		r.Header.Get("Forwarded") == ""
+}
+
+func isLoopbackAddress(addr string) bool {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return false
+	}
+	return ap.Addr().Unmap().IsLoopback()
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
@@ -173,14 +207,14 @@ func fromOtherSite(r *http.Request) bool {
 // the service ip address (but without CORS headers). By verifying the targeted virtual host, we can
 // ensure that it's a destination that the node operator has defined.
 type virtualHostHandler struct {
-	vhosts map[string]struct{}
+	vhosts map[string]bool
 	next   http.Handler
 }
 
 func newVHostHandler(vhosts []string, next http.Handler) http.Handler {
-	vhostMap := make(map[string]struct{})
+	vhostMap := make(map[string]bool)
 	for _, allowedHost := range vhosts {
-		vhostMap[strings.ToLower(allowedHost)] = struct{}{}
+		vhostMap[strings.ToLower(allowedHost)] = true
 	}
 	return &virtualHostHandler{vhostMap, next}
 }
@@ -198,22 +232,9 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		host = r.Host
 	}
 	host = strings.ToLower(host)
-	if ipAddr := net.ParseIP(host); ipAddr != nil {
-		// It's an IP address, we can serve that
-		h.next.ServeHTTP(w, r)
-		return
-
-	}
-	// Not an IP address, but a hostname. Need to validate
-	if _, exist := h.vhosts["*"]; exist {
-		h.next.ServeHTTP(w, r)
-		return
-	}
-	if _, exist := h.vhosts["any"]; exist {
-		h.next.ServeHTTP(w, r)
-		return
-	}
-	if _, exist := h.vhosts[host]; exist {
+	// A host that parses as an IP address is served; it is parsed last because
+	// parsing a hostname allocates its error.
+	if h.vhosts["*"] || h.vhosts["any"] || h.vhosts[host] || net.ParseIP(host) != nil {
 		h.next.ServeHTTP(w, r)
 		return
 	}

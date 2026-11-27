@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
@@ -79,11 +78,15 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
-func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
+func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
+		type foldedSlot struct {
+			storageItem
+			prev []byte // see prevFromRecord
+		}
 		type addrState struct {
 			balance        g.Option[uint256.Int]
 			balanceDeleted bool
@@ -94,7 +97,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
-			storage        []storageItem
+			storage        []foldedSlot
 		}
 
 		perAddr := make(map[accounts.Address]*addrState)
@@ -133,22 +136,23 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, vw := range writes.CreateContracts() {
 			ensure(a).createContract = vw.Val
 		}
-		for a, byKey := range writes.StoragesChanged() {
+		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, storageItem{k, vw.Val})
+				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
 			}
 		}
 
-		// Drop a self-destructed address's own field/storage writes so it reaches
-		// the pure-delete branch below (a raw versionMap view still carries them).
-		// Balance is kept unless the destruct burned it (a later same-tx credit keeps
-		// the burn stamp): a kept non-zero balance is the EIP-8246 preserved account.
+		// A balance write stamped ValueDeleted is the removal verdict (a burning
+		// self-destruct or an EIP-161 empty): drop the address's other field/storage
+		// writes so it reaches the pure-delete branch below (a raw versionMap view
+		// still carries them). A self-destruct that preserves a non-zero balance
+		// (EIP-8246) is not balance-deleted and survives as an EOA.
 		for _, d := range perAddr {
-			if d.selfDestruct {
-				if d.balanceDeleted {
-					d.balance.SetNone()
-				}
+			if d.balanceDeleted {
+				d.balance.SetNone()
+			}
+			if d.selfDestruct || d.balanceDeleted {
 				d.nonce.SetNone()
 				d.incarnation.SetNone()
 				d.codeHash.SetNone()
@@ -164,49 +168,63 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for addr := range perAddr {
 			addrs = append(addrs, addr)
 		}
-		slices.SortFunc(addrs, func(a, b accounts.Address) int {
-			av, bv := a.Value(), b.Value()
-			return bytes.Compare(av[:], bv[:])
-		})
+		if dbg.TraceApply {
+			slices.SortFunc(addrs, func(a, b accounts.Address) int {
+				av, bv := a.Value(), b.Value()
+				return bytes.Compare(av[:], bv[:])
+			})
+		}
 
 		for _, addr := range addrs {
 			d := perAddr[addr]
 			address := addr.Value()
 
-			if d.selfDestruct {
-				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+			if d.selfDestruct || d.balanceDeleted {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
 				// survives only when a non-zero balance is left to preserve.
 				sdPreservedBalance := d.balance.Ok && !d.balance.Value.IsZero()
 				pureDelete := !sdPreservedBalance && !d.nonce.Ok && !d.incarnation.Ok && !d.codeHash.Ok
-				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
-					return err
-				}
-				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
-					return err
-				}
-				if pureDelete {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
-					}
-					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
-						return err
-					}
-					continue
-				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
-			}
-
-			// Contract creation: clear stale storage before writing new account.
-			if d.createContract {
-				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
+				committed, err := committedAccount(domains, roTx, address[:])
 				if err != nil {
 					return err
 				}
-				if !hasAcc {
+				if len(committed) == 0 {
+					// A system-contract predeploy can have code without an account record.
+					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+						return err
+					}
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "selfDestruct"); err != nil {
+						return err
+					}
+					if pureDelete {
+						continue
+					}
+				} else if pureDelete {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
+						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
+					}
+					// Deleting the account also deletes its code and storage prefix.
+					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, committed); err != nil {
+						return err
+					}
+					continue
+				} else if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+					return err
+				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+					return err
+				}
+			}
+
+			// Contract creation: clear stale storage before writing new account.
+			if d.createContract && !d.selfDestruct {
+				committed, err := committedAccount(domains, roTx, address[:])
+				if err != nil {
+					return err
+				}
+				if len(committed) == 0 {
 					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
@@ -215,20 +233,27 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
+			var prevCode []byte
 			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
+				var prev []byte
 				if !d.selfDestruct {
 					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 					if err != nil {
 						return err
 					}
+					prev = v
 					if len(v) > 0 {
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
 						}
+					}
+					// An EIP-7702 authority comes from a signature, so it is never a predeploy whose code has no account record.
+					if _, isDelegation := types.ParseDelegation(d.code); isDelegation && acc.IsEmptyCodeHash() {
+						prevCode = []byte{}
 					}
 				}
 				if d.balance.Ok {
@@ -245,17 +270,17 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
-				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, prev); err != nil {
 					return err
 				}
 			}
 
 			if d.codeWritten {
-				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
 					code := d.code
 					if len(code) > 40 {
 						code = code[:40]
@@ -266,7 +291,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}
@@ -281,17 +306,17 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				composite := storageKey
 				v := item.value.Bytes()
 				if len(v) == 0 {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
-					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, item.prev); err != nil {
 						return err
 					}
 				} else {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, item.prev); err != nil {
 						return err
 					}
 				}
@@ -299,31 +324,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 	}
 
-	var acc accounts.Account
-	for addr, increase := range balanceIncreases {
-		addrValue := addr.Value()
-		enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
-		if err != nil {
-			return err
-		}
-		acc.Reset()
-		if len(enc0) > 0 {
-			if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-				return err
-			}
-		}
-		acc.Balance.Add(&acc.Balance, &increase)
-		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
-				return err
-			}
-		} else {
-			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -334,22 +334,19 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	blockNum uint64,
 	txNum uint64,
 	writes WriteSetView,
-	balanceIncreases map[accounts.Address]uint256.Int,
-	rules *chain.Rules,
 ) error {
-	if (writes == nil || writes.IsEmpty()) && len(balanceIncreases) == 0 {
+	if writes == nil || writes.IsEmpty() {
 		return nil
 	}
-	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, rs.trace.Load()); err != nil {
+	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	return nil
 }
 
-// ApplyTxIndexes writes trace indices, log indices, and receipts. skipReceiptCache
-// skips the receipt-cache domain write for the parallel executor's block-finalize
-// txResult, which shares the system-tx-end txNum: a second DomainPut there would
-// overwrite the last regular tx's receipt history entry.
+// ApplyTxIndexes writes trace indices, log indices, and receipts.
+// A nil receipt clears the cached value when receipt caching is enabled.
+// skipReceiptCache leaves the receipt cache and its history unchanged.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -363,21 +360,6 @@ func (rs *StateV3) ApplyTxIndexes(
 	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
-	}
-	return nil
-}
-
-// CommitStepBoundary computes and persists a trie commitment when txNum falls
-// on an aggregation step boundary. This ensures commitment domain snapshots
-// contain a commitment state at each step end, even when the boundary falls
-// mid-block.
-func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() {
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
-		if err != nil {
-			return fmt.Errorf("StateV3.CommitStepBoundary: %w", err)
-		}
 	}
 	return nil
 }
@@ -618,7 +600,7 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return nil
 	}
 
-	latest := make(map[accounts.Address]accounts.Account)
+	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
 	account := func(addr accounts.Address) (accounts.Account, error) {
 		if acc, ok := latest[addr]; ok {
 			return acc, nil
@@ -638,7 +620,27 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return acc, nil
 	}
 
+	// Every call for an address carries its final state, so a repeat would change nothing.
+	changed := make(map[accounts.Address]struct{}, len(blockWrites))
+	changeAccount := func(addr accounts.Address) error {
+		if _, ok := changed[addr]; ok {
+			return nil
+		}
+		changed[addr] = struct{}{}
+		acc, err := account(addr)
+		if err != nil {
+			return err
+		}
+		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+		return nil
+	}
+
 	for _, writes := range blockWrites {
+		// Balance and nonce writes only name the account: range the keys, not the resolved values.
+		keys := writes
+		if v, ok := writes.(*versionMapWriteView); ok {
+			keys = v.keys
+		}
 		for addr, write := range writes.Codes() {
 			acc, err := account(addr)
 			if err != nil {
@@ -655,19 +657,15 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
 			}
 		}
-		for addr := range writes.Balances() {
-			acc, err := account(addr)
-			if err != nil {
+		for addr := range keys.Balances() {
+			if err := changeAccount(addr); err != nil {
 				return err
 			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
-		for addr := range writes.Nonces() {
-			acc, err := account(addr)
-			if err != nil {
+		for addr := range keys.Nonces() {
+			if err := changeAccount(addr); err != nil {
 				return err
 			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
 	}
 	return nil
@@ -692,27 +690,23 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 	}
 }
 
-func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
-func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
+func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
 }
 
-// hasCommittedAccount probes the account domain for addr. An address with no
+// committedAccount returns the encoded account of addr. An address with no
 // committed account holds no committed storage (storage is only written for an
 // existing account, and deleting one wipes its storage prefix), so this cheap
 // existence probe stands in for a full storage-prefix walk.
-func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
+func committedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) ([]byte, error) {
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
-	if err != nil {
-		return false, err
-	}
-	return len(enc) > 0, nil
+	return enc, err
 }
 
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, surfacing a violation of the hasCommittedAccount invariant.
+// committed account, surfacing a violation of the committedAccount invariant.
 // No-op unless asserts are enabled.
 func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
@@ -757,7 +751,8 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		}
 	}
 	value := accounts.SerialiseV3(account)
-	if w.accumulator != nil {
+	// Refresh an earlier notification even when the account returns to its original value.
+	if w.accumulator != nil && (!original.Equals(account) || w.accumulator.HasAccountChange(addressValue)) {
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
@@ -815,11 +810,11 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
-	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
-	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
+	}
+	if len(v) == 0 {
+		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
@@ -913,8 +908,12 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	return r.ReadAccountStorageByPlainKey(address, key.Value())
+}
+
+// ReadAccountStorageByPlainKey is ReadAccountStorage for a slot that is not interned.
+func (r *ReaderV3) ReadAccountStorageByPlainKey(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
 	addressValue := address.Value()
-	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
@@ -929,7 +928,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 
 	if r.trace {
-		r.traceReadAccountStorage(address, key, enc, res)
+		r.traceReadAccountStorage(address, keyValue, enc, res)
 	}
 
 	return res, ok, err
@@ -939,12 +938,25 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 // needs for %x formatting does not force res to the heap on every read.
 //
 //go:noinline
-func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key accounts.StorageKey, enc []byte, res uint256.Int) {
+func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.Hash, enc []byte, res uint256.Int) {
 	if enc == nil {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 	} else {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 	}
+}
+
+func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
+	segmentReader, ok := r.getter.(execctxapi.CodeSegmentGetter)
+	if !ok {
+		return false, nil
+	}
+	r.addr = address.Value()
+	copied, err := segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	if r.trace && err == nil && copied {
+		fmt.Printf("%sReadAccountCodeSegmentTo [%x] => from %d, %d bytes, txNum: %d, stack: %s\n", r.tracePrefix, address, from, len(dst), r.txNum, dbg.Stack())
+	}
+	return copied, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {

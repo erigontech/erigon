@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -536,4 +537,27 @@ func TestParseFileCompression(t *testing.T) {
 	}
 	_, err := ParseFileCompression("zstd")
 	require.Error(t, err)
+}
+
+func TestCompressWithPatternCandidatesStopsWorkersOnCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	raw, err := NewRawWordsFile(filepath.Join(tmpDir, "raw"))
+	require.NoError(t, err)
+	defer raw.CloseAndRemove()
+	for i := range 4096 {
+		require.NoError(t, raw.Append(fmt.Appendf(nil, "word %d", i)))
+	}
+	require.NoError(t, raw.Flush())
+	cf, err := os.Create(filepath.Join(tmpDir, "out"))
+	require.NoError(t, err)
+	defer cf.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cfg := DefaultCfg
+	cfg.Workers = 4
+	running := goleak.IgnoreCurrent()
+	err = compressWithPatternCandidates(ctx, false, cfg, t.Name(), filepath.Join(tmpDir, "seg"), cf, raw, &DictionaryBuilder{}, log.LvlDebug, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	goleak.VerifyNone(t, running)
 }

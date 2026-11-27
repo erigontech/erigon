@@ -20,9 +20,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/signal"
+	"slices"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/OffchainLabs/go-bitfield"
@@ -76,6 +75,7 @@ type Sentinel struct {
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
+	staticPeers        map[peer.ID]struct{} // never evicted as idle
 	pidToEnodeId       sync.Map
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
@@ -140,7 +140,6 @@ func New(
 		Bootnodes:  enodes,
 	}
 
-	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
 	s.p2p.SetDialPolicy(s.peers.Dialable)
 
@@ -175,7 +174,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.p2p.Host(),
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks, s.cfg.EnvelopeRebuilder,
 	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
@@ -189,10 +188,11 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 		},
 	})
+	s.staticPeers = staticPeerIDs(s.cfg.NetworkConfig.StaticPeers)
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
-	recordPeerMetrics(connected)
+	recordPeerMetrics(connected, s.peerCountsByDirection(""))
 	go s.updatePeerMetrics()
 	//go s.forkWatcher()
 
@@ -210,7 +210,7 @@ func (s *Sentinel) updatePeerMetrics() {
 			return
 		case <-ticker.C:
 			_, connected, _ := s.GetPeersCount()
-			recordPeerMetrics(connected)
+			recordPeerMetrics(connected, s.peerCountsByDirection(""))
 		}
 	}
 }
@@ -225,9 +225,53 @@ func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
 
-func (s *Sentinel) HasTooManyPeers() bool {
-	active, _, _ := s.GetPeersCount()
-	return active >= int(s.cfg.MaxPeerCount)
+type peerCounts struct {
+	inbound  int
+	outbound int
+}
+
+func (c peerCounts) total() int {
+	return c.inbound + c.outbound
+}
+
+func outboundReserve(maxPeers int) int {
+	return maxPeers/5 + min(maxPeers%5, 1)
+}
+
+func canAcceptInbound(c peerCounts, maxPeers int) bool {
+	return c.inbound < maxPeers-outboundReserve(maxPeers) && c.total() < maxPeers
+}
+
+func wantsOutbound(c peerCounts, maxPeers int) bool {
+	return c.total() < maxPeers || c.outbound < outboundReserve(maxPeers)
+}
+
+func peerIsInbound(conns []network.Conn) bool {
+	return len(conns) > 0 && conns[0].Stat().Direction != network.DirOutbound
+}
+
+// openConns leaves out connections that are closed but not yet removed from the network.
+func openConns(n network.Network, pid peer.ID) []network.Conn {
+	return slices.DeleteFunc(n.ConnsToPeer(pid), network.Conn.IsClosed)
+}
+
+func (s *Sentinel) peerCountsByDirection(exclude peer.ID) peerCounts {
+	var counts peerCounts
+	for _, pid := range s.p2p.Host().Network().Peers() {
+		if pid == exclude {
+			continue
+		}
+		conns := openConns(s.p2p.Host().Network(), pid)
+		if len(conns) == 0 {
+			continue
+		}
+		if peerIsInbound(conns) {
+			counts.inbound++
+		} else {
+			counts.outbound++
+		}
+	}
+	return counts
 }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
@@ -261,11 +305,10 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		if s.p2p.Host().Network().Connectedness(p) != network.Connected {
 			entry.State = "disconnected"
 		}
-		conns := s.p2p.Host().Network().ConnsToPeer(p)
-		if len(conns) == 0 || conns[0].Stat().Direction == network.DirOutbound {
-			entry.Direction = "outbound"
-		} else {
+		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(p)) {
 			entry.Direction = "inbound"
+		} else {
+			entry.Direction = "outbound"
 		}
 		if node, ok := s.pidToEnr.Load(p); ok {
 			entry.Enr = node.(*enode.Node).String()

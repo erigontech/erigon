@@ -63,6 +63,44 @@ class FormatBytesTests(unittest.TestCase):
         self.assertEqual(u.format_bytes(1_500_000), "2 MB")
 
 
+def _run_update(tmpdir: str, files: dict) -> dict:
+    """Runs update-disk-sizes.py for the full mode on the given artifact files and returns the JSON."""
+    artifacts_dir = Path(tmpdir) / "artifacts"
+    artifacts_dir.mkdir()
+    for name, text in files.items():
+        (artifacts_dir / name).write_text(text)
+    json_path = Path(tmpdir) / "disk-sizes.json"
+    json_path.write_text(json.dumps({"networks": {"mainnet": {"full": {"bytes": 0}}}}))
+    import sys
+    old_argv = sys.argv
+    try:
+        sys.argv = ["update-disk-sizes.py", str(artifacts_dir), str(json_path), "full"]
+        u.main()
+    finally:
+        sys.argv = old_argv
+    return json.loads(json_path.read_text())
+
+
+class MeasurementMethodTests(unittest.TestCase):
+    """The method comes from the run that measured the figure, next to its bytes."""
+
+    def test_method_file_is_copied(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _run_update(tmpdir, {"disk-usage-mainnet-full.txt": "1000", "disk-usage-mainnet-full.method": "seg-du\n"})
+        self.assertEqual(result["networks"]["mainnet"]["full"]["method"], "seg-du")
+
+    def test_no_method_file_is_a_whole_datadir_size(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _run_update(tmpdir, {"disk-usage-mainnet-full.txt": "1000"})
+        self.assertEqual(result["networks"]["mainnet"]["full"]["bytes"], 1000)
+        self.assertNotIn("method", result["networks"]["mainnet"]["full"])
+
+    def test_unknown_method_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(SystemExit):
+                _run_update(tmpdir, {"disk-usage-mainnet-full.txt": "1000", "disk-usage-mainnet-full.method": "du"})
+
+
 class ArtifactParsingTests(unittest.TestCase):
     """Test artifact filename parsing and JSON update logic."""
 
@@ -105,6 +143,7 @@ class ArtifactParsingTests(unittest.TestCase):
             self.assertEqual(result["networks"]["mainnet"]["full"]["bytes"], 1234567890123)
             self.assertEqual(result["networks"]["mainnet"]["full"]["display"], "1.23 TB")
             self.assertEqual(result["networks"]["mainnet"]["full"]["source"], "ci")
+            self.assertNotIn("method", result["networks"]["mainnet"]["full"], "no .method file: a whole-datadir size")
             self.assertIn("ci_last_updated", result)
 
     def test_gnosis_minimal_artifact(self):

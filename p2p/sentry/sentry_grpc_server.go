@@ -30,7 +30,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -391,10 +389,13 @@ const (
 	maxBlockHashesPerMsg = 4096
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
-	// Each peer gets independent limits for full blocks and block hashes.
-	// Short bursts are allowed; sustained announcement floods disconnect the peer.
+	// Each peer gets independent limits for full blocks, block hashes and block range updates.
+	// Short bursts are allowed; sustained block announcement floods disconnect the peer, excess range updates are dropped.
 	blockAnnouncementsBurst            = 30
 	blockAnnouncementsRate  rate.Limit = 10
+
+	headerRequestsBurst            = 30
+	headerRequestsRate  rate.Limit = 10
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -446,6 +447,8 @@ func runPeer(
 
 	newBlockHashesLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
 	newBlockLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	blockRangeUpdateLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	headerRequestsLimiter := rate.NewLimiter(headerRequestsRate, headerRequestsBurst)
 
 	for {
 		if !peerPrinted {
@@ -471,6 +474,11 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
+		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
+		}
+
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
@@ -478,6 +486,12 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
+			// Fast sequential downloads can exceed the rate limit.
+			// Waiting keeps the connection open but also delays later ETH messages on it.
+			if err := headerRequestsLimiter.Wait(ctx); err != nil {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, err, "sentry.runPeer: waiting for header request allowance")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -634,6 +648,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
+			if !blockRangeUpdateLimiter.Allow() {
+				msg.Discard() // a later update carries the newer range
+				continue
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -644,33 +662,15 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
-		}
-
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			msgType := eth.ToProto[protocol][msg.Code]
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), cap.String(), int(msg.Size))
+			if _, known := eth.ToProto[protocol][msg.Code]; known {
+				logger.Error("[p2p] Message code has no handler", "code", msg.Code, "protocol", protocol)
+			}
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
-	}
-}
-
-func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
-	if isDiagEnabled {
-		stats := diaglib.PeerStatisticMsgUpdate{
-			PeerName: peerName,
-			PeerID:   peerID,
-			Inbound:  inbound,
-			MsgType:  msgType,
-			MsgCap:   msgCap,
-			Bytes:    bytes,
-			PeerType: "Sentry",
-		}
-
-		diaglib.Send(stats)
 	}
 }
 
@@ -1001,7 +1001,7 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 	delete(store.peers, peerID)
 }
 
-func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sentryproto.MessageId, msgcode uint64, data []byte, ttl time.Duration) {
+func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
 		// Async enqueue can win the race against Remove closing pi.removed, so a
 		// queued task may be scheduled to run on a peer we have already asked
@@ -1013,10 +1013,6 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		case <-peerInfo.removed:
 			return
 		default:
-		}
-
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), eth.ProtocolName+"/"+strconv.FormatUint(uint64(peerInfo.EthProtocol()), 10), len(data))
 		}
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
@@ -1057,7 +1053,7 @@ func (ss *GrpcServer) PenalizePeer(_ context.Context, req *sentryproto.PenalizeP
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
-	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+	if ss.GetStatus() != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
 		ss.removePeer(peerID, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscRequested, nil, "penalized peer"))
 	}
 	return &emptypb.Empty{}, nil
@@ -1163,7 +1159,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	if inreq.MaxPeers == 1 {
 		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
 		if found {
-			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 30*time.Second)
+			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 			reply.Peers = []*typesproto.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 			return reply, nil
 		}
@@ -1171,7 +1167,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*typesproto.H512, len(peerInfos))
 	for i, peerInfo := range peerInfos {
-		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 15*time.Second)
+		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
 		reply.Peers[i] = gointerfaces.ConvertHashToH512(peerInfo.ID())
 	}
 	return reply, nil
@@ -1200,7 +1196,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 		return reply, nil
 	}
 
-	ss.writePeer("[sentry] sendMessageById", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 0)
+	ss.writePeer("[sentry] sendMessageById", peerInfo, msgcode, inreq.Data.Data, 0)
 	reply.Peers = []*typesproto.H512{inreq.PeerId}
 	return reply, nil
 }
@@ -1250,7 +1246,7 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *sentryp
 
 	// Send the block to a subset of our peers at random
 	for _, peerInfo := range peerInfos[:peersToSendCount] {
-		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, req.Data.Id, msgcode, req.Data.Data, 0)
+		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 	}
 	return reply, nil
@@ -1274,7 +1270,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if protocolVersions.Contains(peerInfo.EthProtocol()) {
-			ss.writePeer("[sentry] SendMessageToAll", peerInfo, req.Id, msgcode, req.Data, 0)
+			ss.writePeer("[sentry] SendMessageToAll", peerInfo, msgcode, req.Data, 0)
 			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 		}
 		return true

@@ -83,9 +83,5 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 }
 
 func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
-	h, err := s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
-	if h == nil && err == nil {
-		h = &types.Header{}
-	}
-	return h, err
+	return s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
 }

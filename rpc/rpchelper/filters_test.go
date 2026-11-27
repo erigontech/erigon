@@ -611,6 +611,7 @@ func createReceipt(txHash common.Hash) *remoteproto.SubscribeReceiptsReply {
 		ContractAddress:   nil,
 		Logs:              []*remoteproto.SubscribeLogsReply{},
 		LogsBloom:         make([]byte, 256),
+		LastInBlock:       true,
 		From:              gointerfaces.ConvertAddressToH160([20]byte{2}),
 		To:                gointerfaces.ConvertAddressToH160([20]byte{3}),
 	}
@@ -868,4 +869,39 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	if lastFilterRequest.TransactionHashes != nil {
 		t.Error("6: expected transaction hashes to be nil with no subscriptions")
 	}
+}
+
+func TestFilters_UnsubscribeRemovesAddressFilterFromIndex(t *testing.T) {
+	t.Parallel()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	criteria := filters.FilterCriteria{Addresses: []common.Address{address1}}
+	_, removed, _ := f.SubscribeLogs(256, criteria, "")
+	kept, keptID, _ := f.SubscribeLogs(256, criteria, "")
+
+	require.True(t, f.UnsubscribeLogs(removed))
+	require.Len(t, f.logsSubs.filtersByAddr[address1], 1)
+
+	lg := createLog()
+	lg.Address = address1H160
+	f.OnNewLogs(lg)
+	require.Len(t, kept, 1)
+
+	require.True(t, f.UnsubscribeLogs(keptID))
+	require.Empty(t, f.logsSubs.filtersByAddr)
+}
+
+func TestFilters_UnsubscribeRemovesNoAddressFilterFromIndex(t *testing.T) {
+	t.Parallel()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	_, removed, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
+	kept, keptID, _ := f.SubscribeLogs(256, filters.FilterCriteria{}, "")
+
+	require.True(t, f.UnsubscribeLogs(removed))
+	require.Len(t, f.logsSubs.anyAddrFilters, 1)
+
+	f.OnNewLogs(createLog())
+	require.Len(t, kept, 1)
+
+	require.True(t, f.UnsubscribeLogs(keptID))
+	require.Empty(t, f.logsSubs.anyAddrFilters)
 }

@@ -1,0 +1,30 @@
+{
+  "case": "phase0",
+  "mode": "catchup",
+  "blocks": [
+    {
+      "slot": 8288,
+      "block_root": "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed",
+      "snapshot_sha256": "e2a8f90e43327936c8cbb5f61bca5c8c0136f27715554a06060b7ded4a70948b",
+      "latest_message_count": 347,
+      "epoch_first": true,
+      "randao_vector_present": true,
+      "proposer_boost_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "head": "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed",
+      "head_slot": 8288,
+      "event_count": 1
+    },
+    {
+      "slot": 8322,
+      "block_root": "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660",
+      "snapshot_sha256": "50d9f86c32d3b2d7c76750b6822bf4ba862564772267e607d6c404e96fa7d776",
+      "latest_message_count": 416,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "head": "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660",
+      "head_slot": 8322,
+      "event_count": 1
+    }
+  ]
+}

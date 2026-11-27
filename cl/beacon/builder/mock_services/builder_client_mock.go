@@ -160,6 +160,44 @@ func (c *MockBuilderClientRegisterValidatorCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
+// RelayConfigured mocks base method.
+func (m *MockBuilderClient) RelayConfigured() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RelayConfigured")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// RelayConfigured indicates an expected call of RelayConfigured.
+func (mr *MockBuilderClientMockRecorder) RelayConfigured() *MockBuilderClientRelayConfiguredCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RelayConfigured", reflect.TypeOf((*MockBuilderClient)(nil).RelayConfigured))
+	return &MockBuilderClientRelayConfiguredCall{Call: call}
+}
+
+// MockBuilderClientRelayConfiguredCall wrap *gomock.Call
+type MockBuilderClientRelayConfiguredCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBuilderClientRelayConfiguredCall) Return(arg0 bool) *MockBuilderClientRelayConfiguredCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBuilderClientRelayConfiguredCall) Do(f func() bool) *MockBuilderClientRelayConfiguredCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBuilderClientRelayConfiguredCall) DoAndReturn(f func() bool) *MockBuilderClientRelayConfiguredCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // RequestExecutionPayloadBid mocks base method.
 func (m *MockBuilderClient) RequestExecutionPayloadBid(ctx context.Context, builderURL string, slot uint64, parentHash, parentRoot common.Hash, proposerPubkey common.Bytes48, auth *cltypes.SignedBuilderRequestAuth, timeout time.Duration) (*cltypes.SignedExecutionPayloadBid, error) {
 	m.ctrl.T.Helper()

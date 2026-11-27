@@ -82,6 +82,8 @@ func fastOps() []fastOp {
 		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
+		// PUSH0 (from Shanghai on) is one of the most frequent ops in compiled contracts.
+		{name: "PUSH0", execute: "opPush0", gas: "GasQuickStep", push: 1, fork: true},
 		// MCOPY is in the jump table only from Cancun on.
 		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2))", copyLen: "stack.back(2)"},
 	}
@@ -125,6 +127,7 @@ func coldOps() []fastOp {
 		op("ORIGIN", "opOrigin"),
 		op("CALLER", "opCaller"),
 		op("CALLDATASIZE", "opCallDataSize"),
+		alu("CALLDATALOAD", "opCallDataLoad", 1),
 		op("CODESIZE", "opCodeSize"),
 		op("GASPRICE", "opGasprice"),
 		forked(op("RETURNDATASIZE", "opReturnDataSize")),
@@ -136,7 +139,6 @@ func coldOps() []fastOp {
 		forked(op("CHAINID", "opChainID")),
 		forked(op("BASEFEE", "opBaseFee")),
 		forked(op("BLOBBASEFEE", "opBlobBaseFee")),
-		forked(op("PUSH0", "opPush0")),
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
@@ -144,6 +146,7 @@ func coldOps() []fastOp {
 		copyOp("CODECOPY", "opCodeCopy", "memoryCodeCopy", "gasCodeCopy"),
 		copyOp("RETURNDATACOPY", "opReturnDataCopy", "memoryReturnDataCopy", "gasReturnDataCopy"),
 		forked(alu("BLOBHASH", "opBlobHash", 1)),
+		forked(fastOp{name: "CLZ", execute: "opCLZ", gas: "GasFastStep", pop: 1, push: 1}),
 		forked(fastOp{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1}),
 		forked(fastOp{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep"}),
 		forked(fastOp{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep"}),

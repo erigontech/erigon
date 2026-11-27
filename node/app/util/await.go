@@ -75,21 +75,20 @@ func Await[T any](cres chan T, cerr chan error, handler ...AwaitHandler[T]) (res
 		case res, ok := <-cres:
 			awaitResult = false
 			if ok {
-				var err error
 				for _, h := range handler {
 					res, err = h.Handle(res, err)
 				}
 
 				return res, err
 			}
-		case err, ok := <-cerr:
+		case recvErr, ok := <-cerr:
 			awaitError = false
 			if ok {
 				for _, h := range handler {
-					_, err = h.Handle(result, err)
+					_, recvErr = h.Handle(result, recvErr)
 				}
 
-				return result, err
+				return result, recvErr
 			}
 		}
 	}

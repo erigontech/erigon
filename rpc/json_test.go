@@ -263,7 +263,7 @@ func TestParseMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, batch, err := parseMessage(json.RawMessage(tt.input))
+			got, batch, err := parseMessage(json.RawMessage(tt.input), 0)
 			require.NoError(t, err)
 			require.Equal(t, tt.batch, batch)
 			require.Len(t, got, len(tt.want))
@@ -330,10 +330,11 @@ func TestParsePositionalArgumentsScan(t *testing.T) {
 	t.Parallel()
 
 	var (
-		tInt  = reflect.TypeFor[int]()
-		tPtr  = reflect.TypeFor[*int]()
-		tStr  = reflect.TypeFor[string]()
-		tSelf = reflect.TypeFor[selfDecoding]()
+		tInt     = reflect.TypeFor[int]()
+		tPtr     = reflect.TypeFor[*int]()
+		tStr     = reflect.TypeFor[string]()
+		tSelf    = reflect.TypeFor[selfDecoding]()
+		tSelfPtr = reflect.TypeFor[*selfDecoding]()
 	)
 	tests := []struct {
 		name    string
@@ -348,6 +349,9 @@ func TestParsePositionalArgumentsScan(t *testing.T) {
 		{"missing optional", `[1]`, []reflect.Type{tInt, tPtr}, []any{1, (*int)(nil)}, ""},
 		{"string with structural bytes", `["},{"]`, []reflect.Type{tStr}, []any{"},{"}, ""},
 		{"self-decoding argument", `["abc"]`, []reflect.Type{tSelf}, []any{selfDecoding{Text: "abc"}}, ""},
+		{"optional self-decoding argument", `["abc"]`, []reflect.Type{tSelfPtr}, []any{&selfDecoding{Text: "abc"}}, ""},
+		{"null optional self-decoding argument", `[null]`, []reflect.Type{tSelfPtr}, []any{(*selfDecoding)(nil)}, ""},
+		{"bad optional self-decoding argument", `[1]`, []reflect.Type{tSelfPtr}, nil, "invalid argument 0: selfDecoding: not a string"},
 		{"empty params", ``, nil, nil, ""},
 		{"null params", `null`, nil, nil, ""},
 		{"too many arguments", `[1,2]`, []reflect.Type{tInt}, nil, "too many arguments"},

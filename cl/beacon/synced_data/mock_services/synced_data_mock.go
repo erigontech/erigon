@@ -467,6 +467,44 @@ func (c *MockSyncedDataSyncingCall) DoAndReturn(f func() bool) *MockSyncedDataSy
 	return c
 }
 
+// TakeSpareHeadState mocks base method.
+func (m *MockSyncedData) TakeSpareHeadState() *state.CachingBeaconState {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TakeSpareHeadState")
+	ret0, _ := ret[0].(*state.CachingBeaconState)
+	return ret0
+}
+
+// TakeSpareHeadState indicates an expected call of TakeSpareHeadState.
+func (mr *MockSyncedDataMockRecorder) TakeSpareHeadState() *MockSyncedDataTakeSpareHeadStateCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TakeSpareHeadState", reflect.TypeOf((*MockSyncedData)(nil).TakeSpareHeadState))
+	return &MockSyncedDataTakeSpareHeadStateCall{Call: call}
+}
+
+// MockSyncedDataTakeSpareHeadStateCall wrap *gomock.Call
+type MockSyncedDataTakeSpareHeadStateCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataTakeSpareHeadStateCall) Return(arg0 *state.CachingBeaconState) *MockSyncedDataTakeSpareHeadStateCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataTakeSpareHeadStateCall) Do(f func() *state.CachingBeaconState) *MockSyncedDataTakeSpareHeadStateCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataTakeSpareHeadStateCall) DoAndReturn(f func() *state.CachingBeaconState) *MockSyncedDataTakeSpareHeadStateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // UnsetHeadState mocks base method.
 func (m *MockSyncedData) UnsetHeadState() {
 	m.ctrl.T.Helper()

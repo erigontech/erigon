@@ -33,8 +33,12 @@ type Progress struct {
 }
 
 func (p *Progress) percent() int {
+	total := p.Total.Load()
+	if total == 0 {
+		return 0
+	}
 	return int(
-		(float64(p.Processed.Load()) / float64(p.Total.Load())) * 100,
+		(float64(p.Processed.Load()) / float64(total)) * 100,
 	)
 }
 
@@ -98,22 +102,4 @@ func (s *ProgressSet) String() string {
 		return true
 	})
 	return sb.String()
-}
-
-func (s *ProgressSet) DiagnosticsData() map[string]int {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	arr := make(map[string]int, s.list.Len())
-	s.list.Scan(func(_ int, p *Progress) bool {
-		if p == nil {
-			return true
-		}
-		namePtr := p.Name.Load()
-		if namePtr == nil {
-			return true
-		}
-		arr[*namePtr] = p.percent()
-		return true
-	})
-	return arr
 }

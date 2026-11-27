@@ -209,7 +209,7 @@ func (t *muxTracer) OnSystemCallStartV2(vm *tracing.VMContext) {
 }
 
 // OnSystemCallEnd fans out to children. None of the data-extracting leaf
-// tracers (StructLogger, JSONLogger, JsonStreamLogger, mdLogger, goja JS,
+// tracers (StructLogger, JSONLogger, JsonStreamLogger, goja JS,
 // prestate) wire this today — they let the next OnTxStart /
 // OnSystemCallStartV2 overwrite their env reference. The debug tracer
 // (tracers/debug) does register it, to record and forward the signal to

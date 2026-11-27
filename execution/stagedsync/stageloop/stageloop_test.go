@@ -18,6 +18,7 @@ package stageloop
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -158,10 +159,10 @@ func TestTwoHooksSharingNotificationsEmitOnce(t *testing.T) {
 	require.Len(t, drainSyncState(ch), 1, "the same synced state must be notified once across hooks")
 }
 
-// BeforeRun evaluates the sync state at cycle start, so a node that fell
+// NotifySyncState evaluates the sync state at cycle start, so a node that fell
 // behind notifies syncing=true when the catch-up cycle begins rather than
 // staying silent until (and if) a cycle ends while still behind.
-func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
+func TestHookNotifySyncStateEmitsWhenBehind(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -179,7 +180,7 @@ func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
 	require.Len(t, drainSyncState(ch), 1)
 
 	notifications.NewLastBlockSeen(500)
-	require.NoError(t, hook.BeforeRun(tx, false))
+	hook.NotifySyncState(tx)
 	emitted := drainSyncState(ch)
 	require.Len(t, emitted, 1, "cycle start with the node behind must notify")
 	require.True(t, emitted[0].Syncing)
@@ -221,4 +222,13 @@ func TestHookUpdateHeadNilSafe(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		return NewHook(t.Context(), nil, nil, nil, log.New(), nil, nil, nil, nil, nil).UpdateHead(tx, 0, false)
 	}))
+}
+
+func TestBlockRangeAnnouncedOncePerMinuteDuringSync(t *testing.T) {
+	h := &Hook{lastAnnouncedBlockRangeLatestNumber: 100, lastAnnouncedBlockRangeTime: time.Now()}
+	require.False(t, h.blockRangeAnnounceDue(100, 200, false), "catch-up progress alone waits for the minute")
+	require.True(t, h.blockRangeAnnounceDue(100, 200, true), "a synced node announces every 32 blocks")
+	h.lastAnnouncedBlockRangeTime = time.Now().Add(-time.Minute)
+	require.True(t, h.blockRangeAnnounceDue(100, 101, false))
+	require.False(t, h.blockRangeAnnounceDue(100, 101, true), "a synced node is not announced by time")
 }

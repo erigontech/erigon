@@ -35,7 +35,7 @@ func ExtractTopicName(topic string) string {
 // encoding a message on topicName can have, as the spec requires. Topics without a bound
 // here use the network limit alone.
 func MaxUncompressedSize(topicName string, beacon *clparams.BeaconChainConfig, network *clparams.NetworkConfig) uint64 {
-	return min(maxSSZSize(topicName, beacon), network.GossipMaxSize)
+	return min(MaxSSZSize(topicName, beacon), network.GossipMaxSize)
 }
 
 // DecompressMessage decodes the snappy data of a gossip message on topicName, rejecting
@@ -47,7 +47,7 @@ func DecompressMessage(topicName string, data []byte, beacon *clparams.BeaconCha
 	return utils.DecompressSnappyWithLimit(data, MaxUncompressedSize(topicName, beacon, network))
 }
 
-func maxSSZSize(topicName string, beacon *clparams.BeaconChainConfig) uint64 {
+func MaxSSZSize(topicName string, beacon *clparams.BeaconChainConfig) uint64 {
 	committees, validators := beacon.MaxCommitteesPerSlot, beacon.MaxValidatorsPerCommittee
 	switch {
 	case topicName == TopicNameBeaconAggregateAndProof:

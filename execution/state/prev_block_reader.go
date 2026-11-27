@@ -22,6 +22,22 @@ func NewPrevBlockReader(base StateReader, reg *PrevBlockList) *PrevBlockReader {
 	return &PrevBlockReader{base: base, reg: reg, chain: base}
 }
 
+// HistoryReader is a reader of history at a set txNum. ReadsHistory marks it, so a latest-state reader that has
+// SetTxNum and GetTxNum never matches.
+type HistoryReader interface {
+	HistoricalStateReader
+	ReadsHistory()
+}
+
+// HistoryReaderOf returns r, or the base under a PrevBlockReader, when it reads history at a set txNum.
+func HistoryReaderOf(r StateReader) (HistoryReader, bool) {
+	if pr, ok := r.(*PrevBlockReader); ok {
+		r = pr.base
+	}
+	h, ok := r.(HistoryReader)
+	return h, ok
+}
+
 // PrevBlockBase wraps raw with the prev-block layers for a block known at
 // construction — for readers built fresh per block rather than reused per worker.
 // Returns raw unchanged when there are no prior blocks to layer.
@@ -68,6 +84,14 @@ func (o *PrevBlockReader) ReadAccountDataForDebug(a accounts.Address) (*accounts
 
 func (o *PrevBlockReader) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
 	return o.chain.ReadAccountStorage(a, k)
+}
+
+// ReadAccountCodeSegmentTo reads a segment only when no prior block is layered over the base reader.
+func (o *PrevBlockReader) ReadAccountCodeSegmentTo(a accounts.Address, from uint64, dst []byte) (bool, error) {
+	if segmentReader, ok := o.chain.(codeSegmentReader); ok {
+		return segmentReader.ReadAccountCodeSegmentTo(a, from, dst)
+	}
+	return false, nil
 }
 
 func (o *PrevBlockReader) ReadAccountCode(a accounts.Address) ([]byte, error) {

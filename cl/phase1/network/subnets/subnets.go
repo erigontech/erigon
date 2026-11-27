@@ -30,14 +30,12 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-const epochsPerSubnetSubscription = 256
-
 // ComputeSubscribedSubnets implements compute_subscribed_subnets from the phase0 p2p spec.
 func ComputeSubscribedSubnets(beaconConfig *clparams.BeaconChainConfig, networkConfig *clparams.NetworkConfig, nodeID enode.ID, epoch uint64) ([]uint64, error) {
 	nodeIDInt := uint256.NewInt(0).SetBytes(nodeID.Bytes())
 	prefix := new(uint256.Int).Rsh(nodeIDInt, uint(256-networkConfig.AttestationSubnetPrefixBits)).Uint64()
 	offset := subnetSubscriptionOffset(nodeID)
-	period := (epoch + offset) / epochsPerSubnetSubscription
+	period := (epoch + offset) / clparams.EpochsPerSubnetSubscription
 	var periodBytes [8]byte
 	binary.LittleEndian.PutUint64(periodBytes[:], period)
 	seed := sha256.Sum256(periodBytes[:])
@@ -63,12 +61,12 @@ func ComputeSubscribedSubnets(beaconConfig *clparams.BeaconChainConfig, networkC
 // SubscribedSubnetsRotationEpoch returns the first epoch after epoch at which ComputeSubscribedSubnets uses a new shuffling seed.
 func SubscribedSubnetsRotationEpoch(nodeID enode.ID, epoch uint64) uint64 {
 	offset := subnetSubscriptionOffset(nodeID)
-	period := (epoch + offset) / epochsPerSubnetSubscription
-	return (period+1)*epochsPerSubnetSubscription - offset
+	period := (epoch + offset) / clparams.EpochsPerSubnetSubscription
+	return (period+1)*clparams.EpochsPerSubnetSubscription - offset
 }
 
 func subnetSubscriptionOffset(nodeID enode.ID) uint64 {
-	return binary.BigEndian.Uint64(nodeID[24:]) % epochsPerSubnetSubscription
+	return binary.BigEndian.Uint64(nodeID[24:]) % clparams.EpochsPerSubnetSubscription
 }
 
 // ComputeSubnetsForSyncCommittee returns the subnets of a validator in the sync committee that signs for slot
@@ -88,13 +86,12 @@ func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, slot, validator
 	// make sure we return each subnet id, exactly once.
 	alreadySeenSubnetIndex := make(map[uint64]struct{})
 
-	committee := syncCommittee.GetCommittee()
-	for index := uint64(0); index < uint64(len(committee)); index++ {
+	for index := uint64(0); index < uint64(syncCommittee.CommitteeSize()); index++ {
 		subnetIdx := index / (cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount)
 		if _, ok := alreadySeenSubnetIndex[subnetIdx]; ok {
 			continue
 		}
-		if targetPublicKey == committee[index] {
+		if targetPublicKey == syncCommittee.PublicKeyAt(int(index)) {
 			subnets = append(subnets, subnetIdx)
 			alreadySeenSubnetIndex[subnetIdx] = struct{}{}
 		}

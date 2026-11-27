@@ -110,7 +110,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	insRes, err = m.InsertBlocks(ctx, []*types.Block{block12})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	vr, err := m.ValidateChain(ctx, block12.Header())
+	vr, err := m.ValidateChain(ctx, block12)
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 		"newPayload-style validation of the untampered block 12 must succeed (status=%s validationErr=%q latestValid=%s)",
@@ -141,7 +141,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	insRes, err = m.InsertBlocks(ctx, []*types.Block{block13})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	vr, err = m.ValidateChain(ctx, block13.Header())
+	vr, err = m.ValidateChain(ctx, block13)
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 		"validation of the untampered block 13 must succeed (status=%s validationErr=%q)", vr.ValidationStatus, vr.ValidationError)
@@ -228,7 +228,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 	for _, b := range recovery {
-		vr, err := m.ValidateChain(ctx, b.Header())
+		vr, err := m.ValidateChain(ctx, b)
 		require.NoError(t, err)
 		require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 			"validation of recovery block %d must succeed (status=%s validationErr=%q)",

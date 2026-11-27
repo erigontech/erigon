@@ -72,13 +72,13 @@ type TxContext struct {
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
 	mdgas.TxnGasUsage
+	Payer                *common.Address
+	FrameReceipts        []types.FrameReceipt
 	ReceiptGasUsed       uint64 // Gas paid after refunds and the calldata floor
 	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance    uint256.Int
-	CoinbaseInitBalance  uint256.Int
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
@@ -92,6 +92,16 @@ func (result *ExecutionResult) Unwrap() error {
 
 // Failed returns the indicator whether the execution is successful or not
 func (result *ExecutionResult) Failed() bool { return result.Err != nil }
+
+// ReceiptForTracing supplies final gas and frame outcomes to transaction-end hooks
+// before a full receipt is built. Block metadata and combined logs are added later.
+func (result *ExecutionResult) ReceiptForTracing() *types.Receipt {
+	status := uint64(types.ReceiptStatusSuccessful)
+	if result.Failed() {
+		status = types.ReceiptStatusFailed
+	}
+	return &types.Receipt{GasUsed: result.ReceiptGasUsed, Status: status, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
+}
 
 // Return is a helper function to help caller distinguish between revert reason
 // and function return. Return returns the data after execution if no error occurs.

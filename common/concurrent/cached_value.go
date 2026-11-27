@@ -79,10 +79,28 @@ func (c *CachedValue[T]) Produce(ctx context.Context, produce func() (value T, s
 	}
 }
 
+// ProduceAsync starts or joins a background producer and waits for its result.
+// Canceling ctx stops only the wait; the producer must own its lifetime and resources.
+func (c *CachedValue[T]) ProduceAsync(ctx context.Context, produce func() (value T, store bool, err error)) (value T, started bool, err error) {
+	r, started := c.start(produce)
+	select {
+	case <-r.done:
+		return r.value, started, r.err
+	case <-ctx.Done():
+		var zero T
+		return zero, started, ctx.Err()
+	}
+}
+
 // Go runs produce on a goroutine of its own, or joins the pass already running, and
 // returns the channel closed when that pass ends. It is for a caller that must not pay
 // for the refresh it triggers; the value is read back with Load.
 func (c *CachedValue[T]) Go(produce func() (value T, store bool, err error)) <-chan struct{} {
+	r, _ := c.start(produce)
+	return r.done
+}
+
+func (c *CachedValue[T]) start(produce func() (value T, store bool, err error)) (*run[T], bool) {
 	r, mine := c.claim()
 	if mine {
 		go func() {
@@ -96,7 +114,7 @@ func (c *CachedValue[T]) Go(produce func() (value T, store bool, err error)) <-c
 			_, _ = c.run(r, produce)
 		}()
 	}
-	return r.done
+	return r, mine
 }
 
 func (c *CachedValue[T]) claim() (*run[T], bool) {

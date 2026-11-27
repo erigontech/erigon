@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -37,10 +36,6 @@ import (
 
 // A withdrawal-only credit must not reset the sender nonce the txpool sees.
 func TestWithdrawalCreditKeepsPoolSenderNonce(t *testing.T) {
-	prev := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-	dbg.Exec3Parallel = true
-
 	keyR, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	keyP, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -57,8 +52,8 @@ func TestWithdrawalCreditKeepsPoolSenderNonce(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keyR), execmoduletester.WithTxPool())
 
 	newTxn := func(k *ecdsa.PrivateKey, nonce uint64) types.Transaction {
-		txn, err := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, k)
-		require.NoError(t, err)
+		txn, signErr := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, k)
+		require.NoError(t, signErr)
 		return txn
 	}
 	rlp := func(k *ecdsa.PrivateKey, nonce uint64) []byte {

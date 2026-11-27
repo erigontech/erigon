@@ -59,8 +59,9 @@ Methods Naming:
  BuildFiles: write (and index) collated steps into new immutable files
  Merge: fold adjacent visible files into a bigger one - only produces a new file; the small inputs become garbage
  Retire: drop old visible files past the prune window; unlink deferred until no reader references them
-   Merge and Retire read/delete only visible files. Invisible garbage (subsumed/overlapping) is dropped by a
-   separate clean-up: RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
+   Merge reads and deletes only visible files. Retire also detaches invisible files that end at or before its
+   boundary. Other invisible garbage (subsumed/overlapping) is dropped by a separate clean-up:
+   RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
  Get: exact match of criteria
  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n
@@ -352,11 +353,6 @@ func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 }
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
-
-type StatelessRwTx interface {
-	Getter
-	Putter
-}
 
 type GetPut interface {
 	Getter
@@ -738,13 +734,6 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
-type FinalityContext interface {
-	PruneToBlockNum() uint64
-	RetireToBlockNum() uint64
-	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
-}
-
 type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
@@ -761,10 +750,11 @@ type TemporalRwDB interface {
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 	OpenStateSnapshots(ctx context.Context) error
-	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
-	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
+	// irreversibleTxNum is the last txnum no unwind can reach; only steps ending at or below it are collated.
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, irreversibleTxNum uint64, doMerge bool) error
+	BuildFilesInBackground(irreversibleTxNum uint64) chan struct{}
 	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
-	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (FinalityContext, error)) (bool, <-chan struct{}, error)
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (irreversibleTxNum uint64, err error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities
@@ -790,16 +780,6 @@ type BucketMigrator interface {
 	CreateTable(string) error
 	ExistsTable(string) (bool, error)
 	ClearTable(string) error
-}
-
-// PendingMutations in-memory storage of changes
-// Later they can either be flushed to the database or abandon
-type PendingMutations interface {
-	Putter
-	// Flush all in-memory data into `tx`
-	Flush(ctx context.Context, tx RwTx) error
-	Close()
-	BatchSize() int
 }
 
 type (
@@ -923,6 +903,9 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+// ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
+var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
 
 // ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
 // the latest value per key, so no historical answer exists in memory. Overlay read views treat it as

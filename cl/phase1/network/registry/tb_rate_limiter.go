@@ -55,6 +55,7 @@ type tokenBucketRateLimiter struct {
 	rate      rate.Limit
 	burst     int
 	lastSweep time.Time
+	now       func() time.Time
 }
 
 func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRateLimiter {
@@ -62,6 +63,7 @@ func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRat
 		limiter: make(map[string]*tokenBucketLimiter),
 		rate:    rate.Limit(ratePerSecond),
 		burst:   burst,
+		now:     time.Now,
 	}
 }
 
@@ -69,7 +71,7 @@ func (r *tokenBucketRateLimiter) acquire(key string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := time.Now()
+	now := r.now()
 	if now.Sub(r.lastSweep) > 10*time.Second {
 		r.lastSweep = now
 		maps.DeleteFunc(r.limiter, func(_ string, l *tokenBucketLimiter) bool {
@@ -84,5 +86,5 @@ func (r *tokenBucketRateLimiter) acquire(key string) bool {
 	}
 
 	limiter.lastAccess = now
-	return limiter.limiter.Allow()
+	return limiter.limiter.AllowN(now, 1)
 }

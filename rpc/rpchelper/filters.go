@@ -234,9 +234,12 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					if err := ff.sendReceiptsFilterUpdate(); err != nil {
-						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-					}
+					// The request lock can be held by an update that waits for an ack this stream reads only after onReady returns.
+					go func() {
+						if err := ff.sendReceiptsFilterUpdate(false); err != nil {
+							logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+						}
+					}()
 				}
 			})
 			ff.receiptsSubs.endStream()
@@ -762,7 +765,7 @@ func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCr
 	}
 	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
-	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(true); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
 		ff.releaseSubscription()
 		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
@@ -778,7 +781,7 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 		return false
 	}
 	ff.releaseSubscription()
-	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+	if err := ff.sendReceiptsFilterUpdate(false); err != nil {
 		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
 	return true
@@ -788,11 +791,12 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 // If the requestor is not yet available, it sets a flag so the onReady callback
 // will send the update once the receipts subscription goroutine connects.
 // The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
-// storing the requestor concurrently.
-func (ff *Filters) sendReceiptsFilterUpdate() error {
+// storing the requestor concurrently. ack makes the update wait until the server applies it.
+func (ff *Filters) sendReceiptsFilterUpdate(ack bool) error {
 	ff.receiptsRequestMu.Lock()
 	defer ff.receiptsRequestMu.Unlock()
 	rfr := ff.receiptsSubs.createFilterRequest()
+	rfr.Ack = ack
 	ff.mu.Lock()
 	loaded := ff.receiptsRequestor.Load()
 	if loaded == nil {
@@ -832,7 +836,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
-	if err := ff.pushRemoteLogsFilter(); err != nil {
+	if err := ff.pushRemoteLogsFilter(true); err != nil {
 		ff.removeLogsSubscription(id, false)
 		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
@@ -890,18 +894,19 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 
 // updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
 func (ff *Filters) updateRemoteLogsFilter() {
-	if err := ff.pushRemoteLogsFilter(); err != nil {
+	if err := ff.pushRemoteLogsFilter(false); err != nil {
 		ff.logger.Warn("Could not update remote logs filter", "err", err)
 	}
 }
 
 // pushRemoteLogsFilter sends the aggregated filter state to the remote log source.
 // If any filters in the aggregate need all addresses or all topics then the request
-// to the central log subscription needs to honour this.
-func (ff *Filters) pushRemoteLogsFilter() error {
+// to the central log subscription needs to honour this. ack makes the update wait until the server applies it.
+func (ff *Filters) pushRemoteLogsFilter(ack bool) error {
 	ff.logsRequestMu.Lock()
 	defer ff.logsRequestMu.Unlock()
 	lfr := ff.logsSubs.createFilterRequest()
+	lfr.Ack = ack
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
@@ -1234,32 +1239,46 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 // chain. The returned handle reads through the pinned view and its Rollback
 // releases the underlying tx.
 func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	return beginPinned(ff, ctx, db.BeginTemporalRo, PinToOverlay)
+}
+
+// BeginRoWithOverlay is BeginTemporalRoWithOverlay for a plain kv read tx, which
+// pins no state or block files: only db tables and the overlay are readable.
+func (ff *Filters) BeginRoWithOverlay(ctx context.Context, db kv.RoDB) (kv.Tx, error) {
+	if raw, ok := db.(interface{ InternalDB() kv.RwDB }); ok {
+		db = raw.InternalDB()
+	}
+	return beginPinned(ff, ctx, db.BeginRo, pinKvToOverlay)
+}
+
+func beginPinned[T kv.Tx, P any](ff *Filters, ctx context.Context, begin func(context.Context) (T, error), pin func(T, *membatchwithdb.MemoryMutation) P) (P, error) {
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
-		tx, stable, err := ff.beginPinnedTemporalRo(ctx, db, attempt == maxAttempts)
+		pinned, stable, err := beginPinnedOnce(ff, ctx, begin, pin, attempt == maxAttempts)
 		if err != nil || stable {
-			return tx, err
+			return pinned, err
 		}
 	}
 }
 
-// beginPinnedTemporalRo reports stable=false, with no tx, when the publish
+// beginPinnedOnce reports stable=false, with no tx, when the publish
 // sequence moved around the open and last is false.
-func (ff *Filters) beginPinnedTemporalRo(ctx context.Context, db kv.TemporalRoDB, last bool) (kv.TemporalTx, bool, error) {
+func beginPinnedOnce[T kv.Tx, P any](ff *Filters, ctx context.Context, begin func(context.Context) (T, error), pin func(T, *membatchwithdb.MemoryMutation) P, last bool) (P, bool, error) {
+	var none P
 	overlay, seq := ff.OverlaySnapshot()
-	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	tx, err := begin(ctx)
 	if err != nil {
-		return nil, false, err
+		return none, false, err
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
 	if _, current := ff.OverlaySnapshot(); current != seq {
 		if !last {
-			return nil, false, nil
+			return none, false, nil
 		}
 		overlay = nil
 	}
-	pinned := PinToOverlay(tx, overlay)
+	pinned := pin(tx, overlay)
 	ok = true
 	return pinned, true, nil
 }

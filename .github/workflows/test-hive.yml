@@ -31,27 +31,13 @@ jobs:
       # picture across every shard.
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        # Each (sim, sim-limit) pair is run twice — once with serial commitment
-        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
-        # engine-API / wire-protocol divergence between the two paths is caught
-        # on the PR. Execution is parallel in both legs (default). Matrix
-        # entries spawn separate `hive` group runners and run
-        # concurrently — wall-clock unchanged, runner-minutes doubled.
         # `sim` is the simulator path passed to `hive --sim`. Most simulators
         # live under simulators/ethereum/, but a few (e.g. devp2p) are top-level.
         include:
           - sim: ethereum/engine
             sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0
-            commitment_mode: serial
-          - sim: ethereum/engine
-            sim-limit: exchange-capabilities|auth
-            max-allowed-failures: 0
             commitment_mode: parallel
-          - sim: ethereum/engine
-            sim-limit: withdrawals
-            max-allowed-failures: 0
-            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: withdrawals
             max-allowed-failures: 0
@@ -59,15 +45,7 @@ jobs:
           - sim: ethereum/engine
             sim-limit: cancun
             max-allowed-failures: 0
-            commitment_mode: serial
-          - sim: ethereum/engine
-            sim-limit: cancun
-            max-allowed-failures: 0
             commitment_mode: parallel
-          - sim: ethereum/engine
-            sim-limit: api
-            max-allowed-failures: 0
-            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: api
             max-allowed-failures: 0
@@ -75,17 +53,7 @@ jobs:
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
             max-allowed-failures: 0
-            commitment_mode: serial
-          - sim: ethereum/rpc-compat
-            sim-limit: ".*"
-            max-allowed-failures: 0
             commitment_mode: parallel
-          - sim: devp2p
-            sim-limit: eth
-            max-allowed-failures: 0
-            commitment_mode: serial
-          # discv5 exercises peer discovery, not the EL exec path, so it runs in
-          # just one commitment mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
             sim-limit: eth|discv5
             max-allowed-failures: 0

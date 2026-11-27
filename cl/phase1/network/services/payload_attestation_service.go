@@ -117,7 +117,7 @@ func NewPayloadAttestationService(
 		seenAttestationsCache:  seenCache,
 		validationAdmission:    make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 		validatedREST:          make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
-		now:                    time.Now,
+		now:                    ethClock.Now,
 	}
 	s.pending = s.newPendingQueue(ctx)
 	return s
@@ -202,6 +202,9 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	// A client MAY queue attestation for processing once the block is retrieved.
 	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
 	if !ok {
+		if s.forkchoiceStore.IsBlockInvalid(blockRoot) {
+			return fmt.Errorf("payload attestation block %v failed validation", blockRoot)
+		}
 		if !fromGossip {
 			return fmt.Errorf("%w: block not available", ErrIgnore)
 		}
@@ -406,7 +409,7 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 	if _, loaded := s.pending.jobs.Load(key); loaded {
 		return nil
 	}
-	err = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) { return key, nil })
+	_, err = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) { return key, nil })
 	if errors.Is(err, errPendingJobQueueFull) {
 		if _, loaded := s.pending.jobs.Load(key); loaded {
 			return nil
@@ -436,6 +439,9 @@ func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Con
 	}
 
 	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
+		if s.forkchoiceStore.IsBlockInvalid(key.blockRoot) {
+			return pendingJobRemove
+		}
 		return pendingJobKeep
 	}
 

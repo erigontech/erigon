@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -42,7 +43,7 @@ var caplinDenseRootTables = []string{"BlockRoot", "StateRoot"}
 func CheckCaplinStateRoots(ctx context.Context, dirs datadir.Dirs, failFast bool, logger log.Logger) error {
 	var firstErr error
 	for _, table := range caplinDenseRootTables {
-		files, err := filepath.Glob(filepath.Join(dirs.SnapCaplin, "*-"+table+".seg"))
+		files, err := dir.Glob(filepath.Join(dirs.SnapCaplin, "*-"+table+".seg"))
 		if err != nil {
 			return err
 		}
@@ -73,7 +74,7 @@ func CheckCaplinStateRoots(ctx context.Context, dirs datadir.Dirs, failFast bool
 
 // CheckPtcWindowEpoch verifies that required epoch rows are present in snapshots.
 func CheckPtcWindowEpoch(ctx context.Context, dirs datadir.Dirs, cfg *clparams.BeaconChainConfig) error {
-	files, err := filepath.Glob(filepath.Join(dirs.SnapCaplin, "*-"+kv.PtcWindowEpochTable+".seg"))
+	files, err := dir.Glob(filepath.Join(dirs.SnapCaplin, "*-"+kv.PtcWindowEpochTable+".seg"))
 	if err != nil {
 		return err
 	}

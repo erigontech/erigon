@@ -263,6 +263,50 @@ func (c *MockKVClientHistoryStartFromCall) DoAndReturn(f func(context.Context, *
 	return c
 }
 
+// IndexJoin mocks base method.
+func (m *MockKVClient) IndexJoin(ctx context.Context, in *IndexJoinReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "IndexJoin", varargs...)
+	ret0, _ := ret[0].(*IndexRangeReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IndexJoin indicates an expected call of IndexJoin.
+func (mr *MockKVClientMockRecorder) IndexJoin(ctx, in any, opts ...any) *MockKVClientIndexJoinCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IndexJoin", reflect.TypeOf((*MockKVClient)(nil).IndexJoin), varargs...)
+	return &MockKVClientIndexJoinCall{Call: call}
+}
+
+// MockKVClientIndexJoinCall wrap *gomock.Call
+type MockKVClientIndexJoinCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientIndexJoinCall) Return(arg0 *IndexRangeReply, arg1 error) *MockKVClientIndexJoinCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientIndexJoinCall) Do(f func(context.Context, *IndexJoinReq, ...grpc.CallOption) (*IndexRangeReply, error)) *MockKVClientIndexJoinCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientIndexJoinCall) DoAndReturn(f func(context.Context, *IndexJoinReq, ...grpc.CallOption) (*IndexRangeReply, error)) *MockKVClientIndexJoinCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IndexRange mocks base method.
 func (m *MockKVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
 	m.ctrl.T.Helper()

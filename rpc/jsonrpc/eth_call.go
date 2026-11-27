@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -136,11 +138,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -210,11 +207,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	blockNum := header.Number
 
 	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNum.Uint64())
-	if err != nil {
-		return 0, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -492,21 +484,14 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
+	blockNumber, _, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
-		return nil, err
-	}
-
-	// A canonical hash exists for blocks the header stage has downloaded but
-	// execution has not reached; the commitment history getProof needs is only
-	// written by execution.
-	if err := rpchelper.CheckBlockExecuted(roTx, blockNumber); err != nil {
 		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
-		return nil, wrapPrunedProof(err)
+		return nil, wrapPrunedHistory(err)
 	}
 
 	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
@@ -516,22 +501,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	proof, err := api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
 	if err != nil {
-		return nil, wrapPrunedProof(err)
+		return nil, wrapPrunedHistory(err)
 	}
 	return proof, nil
-}
-
-type proofPrunedError struct{ err error }
-
-func (e *proofPrunedError) Error() string  { return "Pruned history unavailable: " + e.err.Error() }
-func (e *proofPrunedError) ErrorCode() int { return 4444 }
-func (e *proofPrunedError) Unwrap() error  { return e.err }
-
-func wrapPrunedProof(err error) error {
-	if errors.Is(err, state.ErrPruned) {
-		return &proofPrunedError{err: err}
-	}
-	return err
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
@@ -604,7 +576,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		StorageProof: make([]accounts.StorProofResult, len(storageKeys)),
 	}
 
-	accountProof, accountRLP, err := trie.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
+	accountProof, accountRLP, err := witnesstypes.ProofFromNodes(nodes, root, crypto.Keccak256(address[:]))
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +609,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, err
 		}
 		proof.StorageProof[i].Key = storageKey.EncodeKey()
-		storageProof, leaf, err := trie.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
+		storageProof, leaf, err := witnesstypes.ProofFromNodes(nodes, acc.Root[:], crypto.Keccak256(storageKey.Hash[:]))
 		if err != nil {
 			return nil, err
 		}
@@ -790,7 +762,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, errors.New("engine is not rules.Engine")
 	}
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, witnessModeLegacy)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, witnessModeLegacy, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -804,36 +776,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
 
-	// A self-destruct / empty-account delete never traverses the account's storage
-	// trie, so the recording reader saw none of its slots. The stateless verifier's
-	// DeleteSubtree clears that subtree structurally and needs it in the witness, so
-	// range the deleted account's parent-state storage and add its slots to the access
-	// set — they become proved keys, so the fold materializes the subtree and the lean
-	// prune keeps it.
-	for delAddr := range accessed.Deleted {
-		to, ok := kv.NextSubtree(delAddr[:])
-		if !ok {
-			to = nil
-		}
-		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNumInBlock, order.Asc, kv.Unlim)
-		if err != nil {
-			return nil, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				it.Close()
-				return nil, err
-			}
-			if len(v) == 0 {
-				continue
-			}
-			if accessed.Storage[delAddr] == nil {
-				accessed.Storage[delAddr] = make(map[common.Hash]struct{})
-			}
-			accessed.Storage[delAddr][common.BytesToHash(k[len(delAddr):])] = struct{}{}
-		}
-		it.Close()
+	if err := addDeletedAccountStorage(tx, firstTxNumInBlock, accessed); err != nil {
+		return nil, err
 	}
 
 	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
@@ -864,7 +808,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
+	leanNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -872,7 +816,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	witness, err := witnessTrie.ExtractWitness(false, nil)
+	witness, err := opstream.Encode(leanNodes, accessed.CodeReads)
 	if err != nil {
 		return nil, err
 	}
@@ -884,10 +828,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	if dbg.AssertEnabled {
 		// Gate on the serialized op-stream we actually return: decode it back and confirm it
-		// reconstructs the parent state root. Any lossy/malformed serialization yields a
-		// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
-		// pre-serialization witness-root check above cannot.
-		decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
+		// rebuilds the parent state root, so an Encode/WriteInto defect that drops or changes a
+		// trie node fails here; the pre-serialization witness-root check above cannot see it.
+		decodedWitness, err := opstream.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
 		if err != nil {
 			return nil, fmt.Errorf("decode produced witness: %w", err)
 		}
@@ -926,10 +869,36 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
+func addDeletedAccountStorage(tx kv.TemporalTx, firstTxNum uint64, accessed *accessedState) error {
+	for delAddr := range accessed.Deleted {
+		to, _ := kv.NextSubtree(delAddr[:])
+		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNum, order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				it.Close()
+				return err
+			}
+			if len(v) == 0 {
+				continue
+			}
+			if accessed.Storage[delAddr] == nil {
+				accessed.Storage[delAddr] = make(map[common.Hash]struct{})
+			}
+			accessed.Storage[delAddr][common.BytesToHash(k[len(delAddr):])] = struct{}{}
+		}
+		it.Close()
+	}
+	return nil
+}
+
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
 // empty-touch blocks.
 func emptyWitnessBytes() (hexutil.Bytes, error) {
-	w := trie.NewWitness(make([]trie.WitnessOperator, 0))
+	w := opstream.NewWitness(make([]opstream.WitnessOperator, 0))
 	var buf bytes.Buffer
 	if _, err := w.WriteInto(&buf); err != nil {
 		return nil, err
@@ -968,13 +937,12 @@ func excludeAuthorities(msg *types.Message, chainRules *chain.Rules, excl map[co
 	return nil
 }
 
-// checkIntrinsicGas rejects a message whose gas cannot cover the intrinsic cost of
-// its authorizations. It leaves out the access list, which the tracer strips of
-// excluded addresses before the executor prices it, so the figure stays at or below
-// what the executor charges and a call it would run is never refused here.
+// checkIntrinsicGas checks a lower bound on intrinsic gas before authority
+// recovery. It includes calldata and every authorization. The tracer filters
+// the access list before execution prices it, so this check leaves it out.
 //
-// The EIP-7825 cap the executor applies beside this comparison is gated on CheckGas,
-// which ToMessage leaves false, so enforcing it here would reject calls too.
+// ToMessage leaves CheckGas false, so these calls skip the EIP-7825 cap on
+// declared gas. Execution checks Amsterdam's cap on intrinsic gas separately.
 func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	contractCreation := msg.To().IsNil()
 	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
@@ -994,8 +962,8 @@ func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	if overflow {
 		return protocol.ErrGasUintOverflow
 	}
-	if required := max(intrinsic.ExecutionGas, intrinsic.FloorGasCost); msg.Gas() < required {
-		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), required)
+	if intrinsic.ExceedsGasLimit(msg.Gas()) {
+		return fmt.Errorf("%w: have %d, want %d", protocol.ErrIntrinsicGas, msg.Gas(), intrinsic.RequiredGas())
 	}
 	return nil
 }
@@ -1011,6 +979,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err := rejectPendingState(bNrOrHash); err != nil {
 		return nil, err
 	}
+	ctx, storeEVM, stopEVMTimeout := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer stopEVMTimeout()
 
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1046,11 +1016,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	} else {
 
 		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNumber+1)
-		if err != nil {
-			return nil, err
-		}
-
-		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
@@ -1146,10 +1111,14 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		evm.SetPrecompiles(activePrecompiles)
+		storeEVM(evm)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, nil, err
+		}
+		if evm.Cancelled() {
+			return nil, nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 		}
 		if !tracer.Equal(prevTracer) {
 			return nil, tracer, nil
@@ -1176,6 +1145,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	for {
 		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			}
 			return nil, err
 		}
 		result, tracer, err := step(prevTracer)

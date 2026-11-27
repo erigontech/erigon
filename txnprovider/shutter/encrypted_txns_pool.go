@@ -105,7 +105,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	txns := make([]EncryptedTxnSubmission, 0, count)
 
 	var totalGasLimit uint64
-	var idxOffset TxnIndex
+	nextTxnIndex := from
 	var err error
 	etp.mu.RLock()
 	defer etp.mu.RUnlock()
@@ -126,7 +126,6 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 		}
 
 		totalGasLimit = newTotalGasLimit
-		nextTxnIndex := from + idxOffset
 		if item.TxnIndex < nextTxnIndex {
 			// this should never happen - highlights bug in the logic somewhere
 			err = fmt.Errorf("unexpected item txn index lt next txn index: %d < %d", item.TxnIndex, nextTxnIndex)
@@ -143,11 +142,9 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"from", from,
 				"to", to,
 			)
-			idxOffset += item.TxnIndex - nextTxnIndex + 1
-			return true // continue
 		}
 
-		idxOffset++
+		nextTxnIndex = item.TxnIndex + 1
 		txns = append(txns, item)
 		return true // continue
 	})
@@ -305,7 +302,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new E
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done():

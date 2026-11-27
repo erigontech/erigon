@@ -558,6 +558,9 @@ func TestResetNextSaltAfterCollision(t *testing.T) {
 		require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
 	}
 	require.NoError(t, rs.Build(t.Context()))
+	leaked, err := filepath.Glob(indexFile + ".*.tmp")
+	require.NoError(t, err)
+	require.Empty(t, leaked, "a failed build must not leave its temp index file")
 
 	idx := MustOpen(indexFile)
 	defer idx.Close()

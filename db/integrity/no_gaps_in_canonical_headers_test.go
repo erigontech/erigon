@@ -23,11 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // everyMarkerMissing answers as a datadir whose canonical markers are all absent, which is the
@@ -68,4 +71,45 @@ func TestNoGapsInCanonicalHeadersFailFastStopsAtTheFirstGap(t *testing.T) {
 	err := NoGapsInCanonicalHeaders(ctx, db, everyMarkerMissing{}, true)
 
 	require.ErrorContains(t, err, "canonical marker not found: 1")
+}
+
+type cancelOnRead struct {
+	everyMarkerMissing
+	cancel context.CancelFunc
+}
+
+func (r cancelOnRead) CanonicalHash(ctx context.Context, tx kv.Getter, n uint64) (common.Hash, bool, error) {
+	r.cancel()
+	return r.everyMarkerMissing.CanonicalHash(ctx, tx, n)
+}
+
+type segmentsMax struct {
+	dbservices.BlockSnapshots
+	max uint64
+}
+
+func (s segmentsMax) SegmentsMax() uint64 { return s.max }
+
+func (r cancelOnRead) Snapshots() dbservices.BlockSnapshots { return segmentsMax{max: 30_000} }
+func (r cancelOnRead) BlockByNumber(context.Context, kv.Tx, uint64) (*types.Block, error) {
+	r.cancel()
+	return nil, nil
+}
+
+// A check stopped by its budget still has to return the problems it found before the deadline.
+func TestIntegrityChecksKeepProblemsOnCancel(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Headers, 5)
+	}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	err := NoGapsInCanonicalHeaders(ctx, db, cancelOnRead{cancel: cancel}, false)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, ErrIntegrity)
+
+	ctx, cancel = context.WithCancel(t.Context())
+	err = SnapBlocksRead(ctx, db, cancelOnRead{cancel: cancel}, 0, 0, false)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, ErrIntegrity)
 }

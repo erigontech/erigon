@@ -18,7 +18,12 @@ package services
 
 import (
 	"context"
+	"encoding/hex"
+	"runtime"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,24 +31,35 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/require"
+	blst "github.com/supranational/blst/bindings/go"
 	"go.uber.org/mock/gomock"
 )
 
 func newSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller, ethClock eth_clock.EthereumClock) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager) {
 	t.Helper()
+	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	syncContributionPool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	return newSyncCommitteesServiceWithPool(t, ethClock, syncContributionPool)
+}
+
+func newSyncCommitteesServiceWithPool(t *testing.T, ethClock eth_clock.EthereumClock, syncContributionPool sync_contribution_pool.SyncContributionPool) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager) {
+	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
-	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	batchSignatureVerifier := NewBatchSignatureVerifier(t.Context(), nil)
 	go batchSignatureVerifier.Start()
-	s := NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true)
-	syncContributionPool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	return s, syncedDataManager
+	return NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true), syncedDataManager
 }
 
 func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
@@ -76,7 +92,7 @@ func TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures // no expectation: any call fails the test
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures) // no expectation: any call fails the test
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	cfg := &clparams.MainnetBeaconConfig
@@ -129,7 +145,7 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -154,7 +170,7 @@ func TestSyncCommitteesIgnoresReplacementWithDifferentContent(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	// Exactly one verification call is ever expected: gomock fails the test
@@ -193,7 +209,7 @@ func TestSyncCommitteesRetryAfterFailedPublishStillSucceeds(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -216,7 +232,7 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -237,7 +253,7 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 // whatever slot the head is at.
 func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 	fixture, _ := getObjectsForSyncCommitteesServiceTest()
 	period := fixture.BeaconConfig().SlotsPerEpoch * fixture.BeaconConfig().EpochsPerSyncCommitteePeriod
 
@@ -315,7 +331,7 @@ func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T
 	ctrl := gomock.NewController(t)
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	msg.ImmediateVerification = false
@@ -326,16 +342,160 @@ func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T
 	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), msg), ErrInvalidBlsSignature)
 }
 
+// The pool does not group-check signatures, so a message signed correctly plus a component outside G2 must be rejected
+// before it reaches the pool, also when it is verified in a batch with a valid message, which must still be accepted.
+func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
+	t.Run("immediate", func(t *testing.T) {
+		f := newOutsideG2SyncCommitteeFixture(t)
+		f.forged.ImmediateVerification = true
+
+		// A rejected message is not recorded, so each submission is verified again.
+		for range 200 {
+			require.ErrorIs(t, f.service.ProcessMessage(t.Context(), new(uint64), f.forged), ErrInvalidBlsSignature)
+		}
+		require.Zero(t, utils.BitsOnCount(f.contribution().AggregationBits))
+	})
+
+	t.Run("batched", func(t *testing.T) {
+		f := newOutsideG2SyncCommitteeFixture(t)
+		saveSignatureGlobals(t)
+		realVerify := blsVerifyMultipleSignatures
+		firstBatch := make(chan [][]byte, 1)
+		var recordFirstBatch sync.Once
+		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, []bls.Signature, error) {
+			recordFirstBatch.Do(func() { firstBatch <- slices.Clone(signatures) })
+			return realVerify(signatures, signRoots, pks)
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		forgedResult, validResult := make(chan error, 1), make(chan error, 1)
+		go func() { forgedResult <- f.service.ProcessMessage(ctx, new(uint64), f.forged) }()
+		go func() { validResult <- f.service.ProcessMessage(ctx, new(uint64), f.valid) }()
+		waitForQueuedVerification(t, f.verifier.syncCommitteeMessage, 2)
+		batch := []*AggregateVerificationData{<-f.verifier.syncCommitteeMessage, <-f.verifier.syncCommitteeMessage}
+		callbacks, _ := f.verifier.processSignatureVerification(batch)
+		for _, callback := range callbacks {
+			callback()
+		}
+
+		require.ErrorIs(t, <-forgedResult, ErrInvalidBlsSignature)
+		require.NoError(t, <-validResult)
+		require.ElementsMatch(t, [][]byte{f.forged.SyncCommitteeMessage.Signature[:], f.valid.SyncCommitteeMessage.Signature[:]}, <-firstBatch)
+
+		contribution := f.contribution()
+		wantBits := make([]byte, len(contribution.AggregationBits))
+		for _, position := range f.validPositions {
+			utils.FlipBitOn(wantBits, position)
+		}
+		validSignature := f.valid.SyncCommitteeMessage.Signature[:]
+		wantSignature, err := bls.AggregateSignatures(slices.Repeat([][]byte{validSignature}, len(f.validPositions)))
+		require.NoError(t, err)
+		require.Equal(t, wantBits, []byte(contribution.AggregationBits))
+		require.Equal(t, wantSignature, contribution.Signature[:])
+	})
+}
+
+// outsideG2SyncCommitteeFixture has two members of subcommittee 0 whose keys the test knows. Both sign the same block
+// root; the signature of forged is its own valid signature plus a point of order 13.
+type outsideG2SyncCommitteeFixture struct {
+	service        SyncCommitteeMessagesService
+	verifier       *BatchSignatureVerifier
+	pool           sync_contribution_pool.SyncContributionPool
+	forged, valid  *SyncCommitteeMessageForGossip
+	validPositions []int
+}
+
+func (f *outsideG2SyncCommitteeFixture) contribution() *cltypes.Contribution {
+	msg := f.valid.SyncCommitteeMessage
+	return f.pool.GetSyncContribution(msg.Slot, 0, msg.BeaconBlockRoot)
+}
+
+func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixture {
+	t.Helper()
+	head, _ := getObjectsForSyncCommitteesServiceTest()
+	cfg := head.BeaconConfig()
+	slot := head.Slot()
+	blockRoot, err := head.BlockRoot()
+	require.NoError(t, err)
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, slot), head.GenesisValidatorsRoot())
+	require.NoError(t, err)
+	signingRoot := crypto.Sha256(blockRoot[:], domain)
+
+	committee := head.CurrentSyncCommittee().Copy()
+	committeeKeys := committee.GetCommittee()
+	positions := [][]int{{0}, {1, 2}}
+	messages := make([]*SyncCommitteeMessageForGossip, len(positions))
+	for index, memberPositions := range positions {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		publicKey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+		validator, err := head.ValidatorForValidatorIndex(index)
+		require.NoError(t, err)
+		validator.SetPublicKey(publicKey)
+		head.SetValidatorAtIndex(index, validator)
+		for _, position := range memberPositions {
+			committeeKeys[position] = publicKey
+		}
+		messages[index] = &SyncCommitteeMessageForGossip{SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot,
+			BeaconBlockRoot: blockRoot,
+			ValidatorIndex:  uint64(index),
+			Signature:       common.Bytes96(key.Sign(signingRoot[:]).Bytes()),
+		}}
+	}
+	valid, err := bls.Verify(messages[0].SyncCommitteeMessage.Signature[:], signingRoot[:], committeeKeys[positions[0][0]][:])
+	require.NoError(t, err)
+	require.True(t, valid, "the signature of validator 0 is not valid before the forgery")
+	committee.SetCommittee(committeeKeys)
+	require.NoError(t, head.SetCurrentSyncCommittee(committee))
+	forged := messages[0]
+	forged.SyncCommitteeMessage.Signature = common.Bytes96(addOrder13Point(t, forged.SyncCommitteeMessage.Signature[:]))
+
+	ctrl := gomock.NewController(t)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	synced := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, synced.OnHeadState(head))
+	pool := sync_contribution_pool.NewSyncContributionPool(cfg)
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+	return &outsideG2SyncCommitteeFixture{
+		service:        NewSyncCommitteeMessagesService(cfg, ethClock, synced, pool, verifier, false),
+		verifier:       verifier,
+		pool:           pool,
+		forged:         forged,
+		valid:          messages[1],
+		validPositions: positions[1],
+	}
+}
+
+// order13PointHex is a point of order 13 on the G2 curve; cl/utils/bls/bls_test.go explains why the tests use it.
+const order13PointHex = "816921c9b317c92cea639a5169a77dd05a86c582075c929f84d5a4364b10fa5e85d9c32cb918bb410a3f7b1779fe4d1b18cde05d1a0c83bf062e4c9b9c820bb89ee64874860ff8eedd7c1323ca86c1f449ba4845097301eaea81f0d992a06be6"
+
+func addOrder13Point(t *testing.T, signature []byte) []byte {
+	t.Helper()
+	raw, err := hex.DecodeString(order13PointHex)
+	require.NoError(t, err)
+	var point, sum blst.P2
+	point.FromAffine(new(blst.P2Affine).Uncompress(raw))
+	require.NotEqual(t, bls.InfiniteSignature[:], point.Compress())
+	require.Equal(t, bls.InfiniteSignature[:], point.Mult([]byte{13}).Compress())
+	sum.FromAffine(new(blst.P2Affine).Uncompress(signature))
+	return sum.AddAssign(&point).Compress()
+}
+
 // Waiting for the signature verdict holds no service or head-state lock, so a head-state publication is not blocked.
 func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
 	entered, release := make(chan struct{}), make(chan struct{})
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	releaseVerification := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseVerification)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		close(entered)
 		<-release
 		return true, nil
-	}
+	})
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	msg.ImmediateVerification = false
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
@@ -353,47 +513,519 @@ func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("head-state publication waited for a sync committee signature verification")
 	}
-	close(release)
+	releaseVerification()
 	require.NoError(t, <-done)
 }
 
-// Of two different valid messages for one validator and slot verified at the same time, only the first is accepted.
+// Of two different valid messages for one validator and slot verified at the same time, only the first is accepted
+// and added to the pool, whether both come through the API or one of them comes from gossip.
 func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidator(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		gossip bool
+	}{
+		{name: "api", gossip: false},
+		{name: "gossip and api", gossip: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			saveSignatureGlobals(t)
+			var entered sync.WaitGroup
+			entered.Add(2)
+			blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
+				entered.Done()
+				entered.Wait()
+				return true, nil
+			})
+			var poolAdds atomic.Int32
+			pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+			pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+				func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+					poolAdds.Add(1)
+					return nil
+				}).AnyTimes()
+			ethClock := eth_clock.NewMockEthereumClock(ctrl)
+			s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+			state, msg := getObjectsForSyncCommitteesServiceTest()
+			msg.ImmediateVerification = !tc.gossip
+			require.NoError(t, synced.OnHeadState(state))
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			other := &SyncCommitteeMessageForGossip{
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+					Slot:            msg.SyncCommitteeMessage.Slot,
+					BeaconBlockRoot: common.Hash{0xff},
+					ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
+				},
+				ImmediateVerification: true,
+			}
+
+			results := make(chan error, 2)
+			for _, m := range []*SyncCommitteeMessageForGossip{msg, other} {
+				go func() { results <- s.ProcessMessage(t.Context(), new(uint64), m) }()
+			}
+			var accepted, ignored int
+			for range 2 {
+				if err := <-results; err == nil {
+					accepted++
+				} else {
+					require.ErrorIs(t, err, ErrIgnore)
+					ignored++
+				}
+			}
+			require.Equal(t, 1, accepted)
+			require.Equal(t, 1, ignored)
+			require.Equal(t, int32(1), poolAdds.Load())
+		})
+	}
+}
+
+// Adding a verified message to the pool does not hold up the gossip checks: a duplicate of it, which returns from
+// checkMessage on the seen-map hit, is answered while the addition waits for the pool.
+func TestSyncCommitteesPoolAddDoesNotBlockDuplicateCheck(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	var entered sync.WaitGroup
-	entered.Add(2)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
-		entered.Done()
-		entered.Wait()
-		return true, nil
-	}
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
+	entered, release := make(chan struct{}), make(chan struct{})
+	releasePoolAdd := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePoolAdd)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			close(entered)
+			<-release
+			return nil
+		}).Times(1)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
 	state, msg := getObjectsForSyncCommitteesServiceTest()
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("message not added to the pool: %v", err)
+	}
+	duplicate := make(chan error, 1)
+	go func() { duplicate <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case err := <-duplicate:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a sync committee message waited for the pool add of another one")
+	}
+	releasePoolAdd()
+	require.NoError(t, <-done)
+}
+
+// One pool addition at a time holds a head-state view: an addition waiting for the pool must not hold a view, or a
+// pending head-state publication, and every reader behind it, would wait for that addition too.
+func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	verified := make(chan struct{}, 2)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
+		verified <- struct{}{}
+		return true, nil
+	})
+	entered := make(chan struct{}, 2)
+	firstRelease, secondRelease := make(chan struct{}), make(chan struct{})
+	releaseFirst := sync.OnceFunc(func() { close(firstRelease) })
+	releaseSecond := sync.OnceFunc(func() { close(secondRelease) })
+	t.Cleanup(releaseFirst)
+	t.Cleanup(releaseSecond)
+	var adds atomic.Int32
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			first := adds.Add(1) == 1
+			entered <- struct{}{}
+			if first {
+				<-firstRelease
+			} else {
+				<-secondRelease
+			}
+			return nil
+		}).Times(2)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	other := &SyncCommitteeMessageForGossip{
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
 			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	await := func(ch <-chan struct{}, done <-chan error, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case err := <-done:
+			t.Fatalf("%s: message processing ended early: %v", what, err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: timed out", what)
+		}
+	}
+
+	done := make(chan error, 2)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	await(verified, done, "first message verified")
+	await(entered, done, "first addition in the pool")
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), other) }()
+	await(verified, done, "second message verified")
+	waitForBlockedGoroutine(t, "sync.Mutex.Lock", "(*syncCommitteeMessagesService).storeVerifiedMessage")
+
+	published := make(chan error, 1)
+	go func() { published <- synced.OnHeadState(headState) }()
+	// A writer reported in this state has already turned away new readers and waits for the held view.
+	waitForBlockedGoroutine(t, "sync.RWMutex.Lock", "(*SyncedDataManager).publishHeadStateLocked")
+	releaseFirst()
+	select {
+	case err := <-published:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("head-state publication waited for a pool addition that was still waiting for the pool")
+	}
+	releaseSecond()
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+}
+
+// waitForBlockedGoroutine waits until a goroutine that has frame in its stack is blocked in state, as runtime.Stack
+// reports it.
+func waitForBlockedGoroutine(t *testing.T, state, frame string) {
+	t.Helper()
+	buf := make([]byte, 1<<22)
+	require.Eventually(t, func() bool {
+		n := runtime.Stack(buf, true)
+		for goroutine := range strings.SplitSeq(string(buf[:n]), "\n\n") {
+			if strings.Contains(goroutine, "["+state) && strings.Contains(goroutine, frame) {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Millisecond, "no goroutine blocked in %s at %s", state, frame)
+}
+
+func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, subnet uint64, except ...uint64) uint64 {
+	t.Helper()
+	for index := range uint64(s.ValidatorLength()) {
+		if slices.Contains(except, index) {
+			continue
+		}
+		validatorSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, slot, index)
+		require.NoError(t, err)
+		if slices.Contains(validatorSubnets, subnet) {
+			return index
+		}
+	}
+	t.Fatalf("no other validator on sync subnet %d", subnet)
+	return 0
+}
+
+// Entries go stale only when the head slot advances, so the seen map is cleaned once per head slot, and again after
+// the head moves.
+func TestSyncCommitteesCleansStaleMessagesOncePerHeadSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	seen := &s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages
+	staleKey := func(validatorIndex uint64) seenSyncCommitteeMessage {
+		return seenSyncCommitteeMessage{slot: headState.Slot() - 2, validatorIndex: validatorIndex}
+	}
+	seen.Store(staleKey(1), verifiedSyncCommitteeMessage{})
+
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), msg))
+	_, kept := seen.Load(staleKey(1))
+	require.False(t, kept, "a stale entry outlived the first cleanup at this head slot")
+
+	seen.Store(staleKey(2), verifiedSyncCommitteeMessage{})
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), other))
+	_, kept = seen.Load(staleKey(2))
+	require.True(t, kept, "the seen map was scanned again at the same head slot")
+
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(headState.Slot()+2))
+	require.NoError(t, synced.OnHeadState(nextHead))
+	staleForNextHead := seenSyncCommitteeMessage{slot: nextHead.Slot() - 2, validatorIndex: 3}
+	seen.Store(staleForNextHead, verifiedSyncCommitteeMessage{})
+	third := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            nextHead.Slot(),
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex: otherValidatorOnSubnet(t, nextHead, nextHead.Slot(), 0,
+				msg.SyncCommitteeMessage.ValidatorIndex, other.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), third))
+	_, kept = seen.Load(staleForNextHead)
+	require.False(t, kept, "a stale entry outlived the first cleanup after the head moved")
+	_, kept = seen.Load(staleKey(2))
+	require.False(t, kept, "an entry stale since the earlier head outlived the cleanup after the head moved")
+}
+
+// A message whose verification ends after the head has moved two slots past it is outside the slot window the gossip
+// checks admitted it for. It is ignored, not recorded and not added to the pool: a recorded stale entry would outlive
+// this head slot's cleanup, and a record removed by that cleanup would let another message from the validator in.
+func TestSyncCommitteesIgnoresMessageVerifiedAfterTheHeadMovedPastIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseVerification := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseVerification)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
+		close(entered)
+		<-release
+		return true, nil
+	})
+	var poolAdds atomic.Int32
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			poolAdds.Add(1)
+			return nil
+		}).AnyTimes()
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("message processing ended before verification: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("verification did not start")
+	}
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(msg.SyncCommitteeMessage.Slot+2))
+	require.NoError(t, synced.OnHeadState(nextHead))
+	releaseVerification()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("message processing did not finish")
+	}
+	require.Zero(t, poolAdds.Load())
+	key := seenSyncCommitteeMessage{slot: msg.SyncCommitteeMessage.Slot, validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex}
+	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, recorded)
+}
+
+// Of two identical API submissions verified at the same time, the one that finishes after the first was published is
+// ignored, as checkMessage ignores a published duplicate, so the message is not queued for publishing twice.
+func TestSyncCommitteesIgnoresDuplicateVerifiedAfterTheFirstWasPublished(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	entered := make(chan chan struct{}, 2)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
+		release := make(chan struct{})
+		entered <- release
+		<-release
+		return true, nil
+	})
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	duplicate := *msg
+
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	releaseFirst := <-entered
+	go func() { second <- s.ProcessMessage(t.Context(), new(uint64), &duplicate) }()
+	releaseSecond := <-entered
+	close(releaseFirst)
+	require.NoError(t, <-first)
+	m := msg.SyncCommitteeMessage
+	s.MarkPublished(0, m.Slot, m.ValidatorIndex, m.BeaconBlockRoot, m.Signature)
+	close(releaseSecond)
+
+	require.ErrorIs(t, <-second, ErrIgnore)
+}
+
+// A message that goes stale while it waits for the pool, because the head moved two slots past it, is not added to the
+// pool and not forwarded.
+func TestSyncCommitteesMessageStaleAfterWaitingForThePoolIsIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	releasePool := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePool)
+	var poolAdds atomic.Int32
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			poolAdds.Add(1)
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).AnyTimes()
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	<-entered
+	go func() { second <- s.ProcessMessage(t.Context(), new(uint64), other) }()
+	waitForBlockedGoroutine(t, "sync.Mutex.Lock", "(*syncCommitteeMessagesService).storeVerifiedMessage")
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(msg.SyncCommitteeMessage.Slot+2))
+	published := make(chan error, 1)
+	go func() { published <- synced.OnHeadState(nextHead) }()
+	waitForBlockedGoroutine(t, "sync.RWMutex.Lock", "(*SyncedDataManager).publishHeadStateLocked")
+	releasePool()
+
+	require.NoError(t, <-first)
+	require.NoError(t, <-published)
+	select {
+	case err := <-second:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second message did not finish")
+	}
+	require.Equal(t, int32(1), poolAdds.Load(), "a stale message was added to the pool")
+}
+
+// A slot whose records were evicted stays evicted when the head rolls back: otherwise a different message from a
+// validator whose record was removed could claim the freed key and be accepted as well.
+func TestSyncCommitteesEvictedSlotStaysEvictedAfterHeadRollback(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	slot := msg.SyncCommitteeMessage.Slot
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), msg))
+
+	headAt := func(headSlot uint64) {
+		t.Helper()
+		head, err := headState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, head.SetSlot(headSlot))
+		require.NoError(t, synced.OnHeadState(head))
+	}
+	// The head moves two slots ahead and another message runs the cleanup, which evicts the first record.
+	headAt(slot + 2)
+	evicting := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot + 2,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), evicting))
+	key := seenSyncCommitteeMessage{slot: slot, validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex}
+	_, kept := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, kept, "the first record was not evicted")
+
+	// The head rolls back one slot, where the evicted slot would count as fresh again, and a message from a third
+	// validator runs the cleanup at that head.
+	headAt(slot + 1)
+	third := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot + 1,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex: otherValidatorOnSubnet(t, headState, slot, 0,
+				msg.SyncCommitteeMessage.ValidatorIndex, evicting.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), third))
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot,
 			BeaconBlockRoot: common.Hash{0xff},
 			ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
 		},
 		ImmediateVerification: true,
 	}
+	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), other), ErrIgnore)
+	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, recorded, "a different message claimed an evicted slot after the head rolled back")
+}
 
-	results := make(chan error, 2)
-	for _, m := range []*SyncCommitteeMessageForGossip{msg, other} {
-		go func() { results <- s.ProcessMessage(t.Context(), new(uint64), m) }()
+// While the first copy of a message waits in its pool add, an identical submission is answered from the seen map and
+// published. The first copy then reports the message as already published instead of queuing it for publishing again.
+func TestSyncCommitteesClaimantIgnoresMessagePublishedWhileItWaitedForThePool(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	releasePool := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePool)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).Times(1)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	claimant := make(chan error, 1)
+	go func() { claimant <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-claimant:
+		t.Fatalf("the first copy finished before its pool add: %v", err)
 	}
-	var accepted, ignored int
-	for range 2 {
-		if err := <-results; err == nil {
-			accepted++
-		} else {
-			require.ErrorIs(t, err, ErrIgnore)
-			ignored++
-		}
+	duplicate := *msg
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), &duplicate), "the identical submission is not answered from the seen map")
+	m := msg.SyncCommitteeMessage
+	s.MarkPublished(0, m.Slot, m.ValidatorIndex, m.BeaconBlockRoot, m.Signature)
+	releasePool()
+
+	select {
+	case err := <-claimant:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first copy did not finish")
 	}
-	require.Equal(t, 1, accepted)
-	require.Equal(t, 1, ignored)
 }

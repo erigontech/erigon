@@ -3,8 +3,8 @@
 ## Release branches
 
 - `release/3.6` — Stable 3.6.x
-- `release/3.7` — Stable 3.7.x (previous stable line — v3.7.1 is the Latest release)
-- `release/3.8` — Stable 3.8.x (current — freshly forked from `main`, no tagged release yet)
+- `release/3.7` — Stable 3.7.x (previous stable line)
+- `release/3.8` — Stable 3.8.x (current stable line — v3.8.2 is the Latest release)
 - `main` — Next feature release (3.9)
 
 The "current" marker goes stale: before choosing a backport base, verify against `gh release list --repo erigontech/erigon --limit 5` (the Latest tag) and the recent `[rX.Y]`-prefixed PR stream, and update this file if it disagrees.

@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -39,11 +38,9 @@ import (
 
 // Before Cancun, a contract deployed and destroyed in the block is revived as a
 // new account by a credit that writes neither its nonce nor its code hash.
-// Parallel execution must accept the block built by the serial generator.
+// A redeploy keeps the nonce and code it wrote. Parallel execution must accept the
+// block built by the serial generator.
 func TestCreditRevivesDestroyedContract(t *testing.T) {
-	prev := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -57,31 +54,48 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 	signer := types.LatestSignerForChainID(config.ChainID)
 
 	for _, tc := range []struct {
-		name string
-		fill func(b *blockgen.BlockGen, send func(to common.Address))
+		name       string
+		burnt      bool
+		redeployed bool
+		observed   bool
+		fill       func(b *blockgen.BlockGen, send func(to common.Address))
 	}{
-		{"withdrawal", func(b *blockgen.BlockGen, send func(common.Address)) {
+		{name: "withdrawal", fill: func(b *blockgen.BlockGen, send func(common.Address)) {
 			send(factory)
 			send(contract)
 			b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: contract, Amount: 7})
 		}},
-		{"coinbase-tip", func(b *blockgen.BlockGen, send func(common.Address)) {
+		{name: "coinbase-tip", fill: func(b *blockgen.BlockGen, send func(common.Address)) {
 			b.SetCoinbase(contract)
 			send(factory)
 			send(contract)
 			send(common.HexToAddress("0xbbbb"))
 		}},
-		{"coinbase-tip-extcodehash", func(b *blockgen.BlockGen, send func(common.Address)) {
+		{name: "coinbase-tip-extcodehash", observed: true, fill: func(b *blockgen.BlockGen, send func(common.Address)) {
 			b.SetCoinbase(contract)
 			send(factory)
 			send(contract)
 			send(common.HexToAddress("0xbbbb"))
 			send(observer)
 		}},
+		{name: "burnt-fee", burnt: true, fill: func(b *blockgen.BlockGen, send func(common.Address)) {
+			send(factory)
+			send(contract)
+			send(common.HexToAddress("0xbbbb"))
+		}},
+		{name: "burnt-fee-redeploy", burnt: true, redeployed: true, fill: func(b *blockgen.BlockGen, send func(common.Address)) {
+			send(factory)
+			send(contract)
+			send(factory)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dbg.Exec3Parallel = false
-			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+			cfg := config
+			if tc.burnt {
+				cfg = config.Copy()
+				cfg.BurntContract = map[string]common.Address{"0": contract}
+			}
+			gspec := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
 				sender:   {Balance: big.NewInt(1_000_000_000_000_000_000)},
 				factory:  {Code: program.New().Create2(initCode, 1).Op(vm.POP).Bytes()},
 				observer: {Code: program.New().Push(contract).Op(vm.EXTCODEHASH).Push(0).Op(vm.SSTORE).Bytes()},
@@ -95,19 +109,25 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 				})
 			})
 			require.NoError(t, err)
-
-			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				st := state.New(m.NewStateReader(tx))
 				defer st.Close()
 				addr := accounts.InternAddress(contract)
+				wantNonce, wantHash := uint64(0), accounts.EmptyCodeHash
+				if tc.redeployed {
+					wantNonce, wantHash = 1, accounts.InternCodeHash(crypto.Keccak256Hash(runtime))
+				}
 				nonce, err := st.GetNonce(addr)
 				require.NoError(t, err)
-				require.Zero(t, nonce)
+				require.Equal(t, wantNonce, nonce)
 				hash, err := st.GetCodeHash(addr)
 				require.NoError(t, err)
-				require.Equal(t, accounts.EmptyCodeHash, hash)
+				require.Equal(t, wantHash, hash)
+				if tc.observed {
+					emptyCodeHash := crypto.Keccak256Hash(nil)
+					require.Equal(t, *new(uint256.Int).SetBytes(emptyCodeHash[:]), storageAt(t, st, observer, 0))
+				}
 				return nil
 			}))
 		})

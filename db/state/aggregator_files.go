@@ -96,24 +96,17 @@ type MergeResult struct {
 }
 
 func (mf MergeResult) FilePaths(relative string) (fPaths []string) {
-	for id, d := range mf.d {
-		if d == nil {
-			continue
-		}
-		fPaths = append(fPaths, d.FilePaths(relative)...)
-		if mf.dHist[id] != nil {
-			fPaths = append(fPaths, mf.dHist[id].FilePaths(relative)...)
-		}
-		if mf.dIdx[id] != nil {
-			fPaths = append(fPaths, mf.dIdx[id].FilePaths(relative)...)
+	for id := range mf.d {
+		for _, item := range []*FilesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
+			if item != nil {
+				fPaths = append(fPaths, item.FilePaths(relative)...)
+			}
 		}
 	}
-
 	for _, ii := range mf.iis {
-		if ii == nil {
-			continue
+		if ii != nil {
+			fPaths = append(fPaths, ii.FilePaths(relative)...)
 		}
-		fPaths = append(fPaths, ii.FilePaths(relative)...)
 	}
 	return fPaths
 }

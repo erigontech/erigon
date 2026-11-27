@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snaptype"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -32,14 +33,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 			for i := range 24 {
 				RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 			}
-			merger.FindMergeRanges(RangesOld)
+			merger.FindMergeRanges(RangesOld, snaptype.Unknown)
 
 			var RangesNew []Range
 			start := uint64(19_000_000)
 			for i := range uint64(24) {
 				RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 			}
-			merger.FindMergeRanges(RangesNew)
+			merger.FindMergeRanges(RangesNew, snaptype.Unknown)
 		}
 	})
 
@@ -49,14 +50,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 			for i := range uint64(240) {
 				RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 			}
-			merger.FindMergeRanges(RangesOld)
+			merger.FindMergeRanges(RangesOld, snaptype.Unknown)
 
 			var RangesNew Ranges
 			start := uint64(19_000_000)
 			for i := range uint64(240) {
 				RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 			}
-			merger.FindMergeRanges(RangesNew)
+			merger.FindMergeRanges(RangesNew, snaptype.Unknown)
 		}
 	})
 }

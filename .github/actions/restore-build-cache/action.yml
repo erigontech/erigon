@@ -1,5 +1,5 @@
 name: Restore Go build cache
-description: Restore Go build cache keyed by workflow, job, and run
+description: Restore Go build cache keyed by workflow, job, and cache class
 
 inputs:
   gocache-path:
@@ -18,24 +18,31 @@ inputs:
 
 outputs:
   restored-key:
-    description: "The cache key that was restored (empty if miss)"
+    description: "The key that was restored (empty if miss)"
     value: ${{ steps.restore.outputs.cache-matched-key }}
   primary-key:
-    # run_id|run_attempt is unique across all runs in this workflow file, so
-    # the primary key never collides with a prior run's cache entry.
+    # The key names one cache class (workflow|job|matrix|goversion|os|arch) per
+    # ISO week, not a run: the first successful save of the week wins and every
+    # later run restores it. GOCACHE is content-addressed, so a week-old entry
+    # only costs a rebuild of newer objects, never wrong results.
     description: "The primary cache key (for use by save-build-cache)"
-    value: gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|${{ github.run_attempt }}
+    value: gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ steps.rotation.outputs.segment }}
 
 runs:
   using: composite
   steps:
+    - id: rotation
+      shell: bash
+      run: echo "segment=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
     - id: restore
       uses: actions/cache/restore@v5
       with:
         path: ${{ inputs.gocache-path }}
-        key: gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|${{ github.run_attempt }}
+        key: gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ steps.rotation.outputs.segment }}
+        # Prefix match falls back to the previous week's entry, and also picks
+        # up legacy entries that carried a run_id suffix.
         restore-keys: |
-          gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|
           gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|
 
     - name: Warn on build cache miss

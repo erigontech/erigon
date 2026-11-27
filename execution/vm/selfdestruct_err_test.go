@@ -47,7 +47,7 @@ func TestOpSelfdestruct_PropagatesBalanceError(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(self, *uint256.NewInt(1000), 0))
 
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
-	scope := &CallContext{Contract: *NewContract(self, self, self, uint256.Int{})}
+	scope := &CallContext{Contract: *NewContract(self, self, uint256.Int{})}
 	// The interpreter bumps cacheGen before each dispatch; without it the
 	// zero-valued gen collides with cachedAddrGen and peekAddress returns a
 	// stale address instead of reading the stack.

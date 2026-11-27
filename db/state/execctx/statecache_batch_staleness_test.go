@@ -19,6 +19,7 @@ package execctx_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -255,4 +256,98 @@ func TestStateCache_ColdReadStillFillsCodeAndSizeByHash(t *testing.T) {
 	cv, ok := sc.View(nil).GetCodeByHash(h1)
 	require.True(t, ok, "code not filled by hash on a committed address")
 	require.Equal(t, code1, cv)
+}
+
+func TestCodeReadBetweenAccountAndCodeWritesDoesNotPoisonCodeCache(t *testing.T) {
+	oldCode := []byte{0x60, 0x01}
+	newCode := []byte{0x60, 0x02, 0x00}
+	oldHash := crypto.Keccak256Hash(oldCode)
+	newHash := crypto.Keccak256Hash(newCode)
+
+	tests := []struct {
+		name                string
+		accountFirst        bool
+		readSize            bool
+		cachesCommittedCode bool
+	}{
+		{name: "account_first/GetCode", accountFirst: true, cachesCommittedCode: true},
+		{name: "account_first/GetCodeSize", accountFirst: true, readSize: true},
+		{name: "code_first_guard/GetCodeSize", readSize: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			var addr common.Address
+			addr[0] = 0xea
+			newAcc := accWithCode(2, newCode)
+			db, sc := coldCacheOverCommittedCode(t, oldCode, addr)
+			roTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+
+			read := func(getter execctxapi.StateGetter) any {
+				if tt.readSize {
+					size, ok, err := getter.GetCodeSize(addr[:], 21)
+					require.NoError(t, err)
+					require.True(t, ok)
+					return size
+				}
+				code, ok, err := getter.GetCode(addr[:], 21)
+				require.NoError(t, err)
+				require.True(t, ok)
+				return code
+			}
+			runBatch := func(readBetween bool) any {
+				sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+				require.NoError(t, err)
+				defer sd.Close()
+				sd.BindStateCache(sc)
+				getter := sd.AsStateGetter(roTx, execctxapi.StateGetterOptions{})
+
+				if tt.accountFirst {
+					require.NoError(t, sd.DomainPut(kv.AccountsDomain, roTx, addr[:], newAcc, 20, nil))
+					if readBetween {
+						read(getter)
+					}
+					require.NoError(t, sd.DomainPut(kv.CodeDomain, roTx, addr[:], newCode, 20, oldCode))
+				} else {
+					require.NoError(t, sd.DomainPut(kv.CodeDomain, roTx, addr[:], newCode, 20, oldCode))
+					if readBetween {
+						read(getter)
+					}
+					require.NoError(t, sd.DomainPut(kv.AccountsDomain, roTx, addr[:], newAcc, 20, nil))
+				}
+
+				return read(getter)
+			}
+			readCommitted := func() any {
+				sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+				require.NoError(t, err)
+				defer sd.Close()
+				sd.BindStateCache(sc)
+				return read(sd.AsStateGetter(roTx, execctxapi.StateGetterOptions{}))
+			}
+
+			var oldValue, newValue any = oldCode, newCode
+			if tt.readSize {
+				oldValue, newValue = len(oldCode), len(newCode)
+			}
+
+			assert.Equal(t, newValue, runBatch(true), "read after both writes")
+			cached, ok := sc.View(nil).GetCodeByHash(oldHash[:])
+			assert.Equal(t, tt.cachesCommittedCode, ok, "content cache entry for committed code")
+			if ok {
+				assert.Equal(t, oldCode, cached, "content cache bytes for committed code")
+			}
+			_, ok = sc.View(nil).GetCodeByHash(newHash[:])
+			assert.False(t, ok, "content cache entry for uncommitted code")
+			_, ok = sc.View(nil).GetCodeSizeByHash(newHash[:])
+			assert.False(t, ok, "size cache entry for uncommitted code")
+			assert.Equal(t, oldValue, readCommitted(), "fresh reader of committed state")
+			assert.Equal(t, newValue, runBatch(false), "re-executed batch, no read between writes")
+		})
+	}
 }

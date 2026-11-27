@@ -63,6 +63,27 @@ func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remotepr
 	return s.server.ClientVersion(ctx, in)
 }
 
+// sendOrDone delivers v to a server stream, or returns ctx.Err() once the caller's context ended.
+func sendOrDone[T any](ctx context.Context, ch chan<- T, v T) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case ch <- v:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// endOf is the error a client stream's Recv returns once the server closed the channel.
+func endOf(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return io.EOF
+}
+
 // -- start Subscribe
 
 func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remoteproto.SubscribeRequest, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeClient, error) {
@@ -86,15 +107,14 @@ type SubscribeStreamS struct {
 }
 
 func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
-	s.ch <- &subscribeReply{r: m}
-	return nil
+	return sendOrDone(s.ctx, s.ch, &subscribeReply{r: m})
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
 func (s *SubscribeStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &subscribeReply{err: err}
+	_ = sendOrDone(s.ctx, s.ch, &subscribeReply{err: err})
 }
 
 type SubscribeStreamC struct {
@@ -107,7 +127,7 @@ func (c *SubscribeStreamC) Recv() (*remoteproto.SubscribeReply, error) {
 	select {
 	case m, ok := <-c.ch:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -129,14 +149,16 @@ func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc
 		chRecv: subscribeLogsRequestChan,
 		ctx:    ctx,
 	}
+	done := make(chan struct{})
 	go func() {
-		defer close(subscribeLogsRequestChan)
+		defer close(done)
 		defer close(subscribeLogsReplyChan)
 		srv.Err(s.server.SubscribeLogs(srv))
 	}()
 	cli := &SubscribeLogsStreamC{
 		chSend: subscribeLogsRequestChan,
 		chRecv: subscribeLogsReplyChan,
+		done:   done,
 		ctx:    ctx,
 	}
 	return cli, nil
@@ -160,16 +182,17 @@ type subscribeLogsRequest struct {
 }
 
 func (s *SubscribeLogsStreamS) Send(m *remoteproto.SubscribeLogsReply) error {
-	s.chSend <- &subscribeLogsReply{r: m}
-	return nil
+	select {
+	case s.chSend <- &subscribeLogsReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 func (s *SubscribeLogsStreamS) Recv() (*remoteproto.LogsFilterRequest, error) {
 	select {
-	case m, ok := <-s.chRecv:
-		if !ok || m == nil {
-			return nil, io.EOF
-		}
+	case m := <-s.chRecv:
 		return m.r, m.err
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
@@ -180,26 +203,43 @@ func (s *SubscribeLogsStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.chSend <- &subscribeLogsReply{err: err}
+	select {
+	case s.chSend <- &subscribeLogsReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 type SubscribeLogsStreamC struct {
 	chSend chan *subscribeLogsRequest
 	chRecv chan *subscribeLogsReply
+	done   <-chan struct{} // closed when the server handler has returned
 	ctx    context.Context
 	grpc.ClientStream
 }
 
 func (c *SubscribeLogsStreamC) Send(m *remoteproto.LogsFilterRequest) error {
-	c.chSend <- &subscribeLogsRequest{r: m}
-	return nil
+	select {
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+	select {
+	case c.chSend <- &subscribeLogsRequest{r: m}:
+		return nil
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -219,14 +259,16 @@ func (s *EthBackendClientDirect) SubscribeReceipts(ctx context.Context, opts ...
 		chRecv: subscribeReceiptsRequestChan,
 		ctx:    ctx,
 	}
+	done := make(chan struct{})
 	go func() {
-		defer close(subscribeReceiptsRequestChan)
+		defer close(done)
 		defer close(subscribeReceiptsReplyChan)
 		srv.Err(s.server.SubscribeReceipts(srv))
 	}()
 	cli := &SubscribeReceiptsStreamC{
 		chSend: subscribeReceiptsRequestChan,
 		chRecv: subscribeReceiptsReplyChan,
+		done:   done,
 		ctx:    ctx,
 	}
 	return cli, nil
@@ -250,16 +292,17 @@ type subscribeReceiptsRequest struct {
 }
 
 func (s *SubscribeReceiptsStreamS) Send(m *remoteproto.SubscribeReceiptsReply) error {
-	s.chSend <- &subscribeReceiptsReply{r: m}
-	return nil
+	select {
+	case s.chSend <- &subscribeReceiptsReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 func (s *SubscribeReceiptsStreamS) Recv() (*remoteproto.ReceiptsFilterRequest, error) {
 	select {
-	case m, ok := <-s.chRecv:
-		if !ok || m == nil {
-			return nil, io.EOF
-		}
+	case m := <-s.chRecv:
 		return m.r, m.err
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
@@ -270,26 +313,43 @@ func (s *SubscribeReceiptsStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.chSend <- &subscribeReceiptsReply{err: err}
+	select {
+	case s.chSend <- &subscribeReceiptsReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 type SubscribeReceiptsStreamC struct {
 	chSend chan *subscribeReceiptsRequest
 	chRecv chan *subscribeReceiptsReply
+	done   <-chan struct{} // closed when the server handler has returned
 	ctx    context.Context
 	grpc.ClientStream
 }
 
 func (c *SubscribeReceiptsStreamC) Send(m *remoteproto.ReceiptsFilterRequest) error {
-	c.chSend <- &subscribeReceiptsRequest{r: m}
-	return nil
+	select {
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+	select {
+	case c.chSend <- &subscribeReceiptsRequest{r: m}:
+		return nil
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *SubscribeReceiptsStreamC) Recv() (*remoteproto.SubscribeReceiptsReply, error) {
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
-			return nil, io.EOF
+			return nil, endOf(c.ctx)
 		}
 		return m.r, m.err
 	case <-c.ctx.Done():
@@ -355,8 +415,8 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remoteproto.AAValidationRequest, opts ...grpc.CallOption) (*remoteproto.AAValidationReply, error) {
-	return s.server.AAValidation(ctx, in)
+func (s *EthBackendClientDirect) FrameValidation(ctx context.Context, in *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
+	return s.server.FrameValidation(ctx, in)
 }
 
 func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remoteproto.BlockForTxNumRequest, opts ...grpc.CallOption) (*remoteproto.BlockForTxNumResponse, error) {

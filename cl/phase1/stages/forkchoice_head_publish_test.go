@@ -71,7 +71,7 @@ func receiveWithin[T any](t *testing.T, ch <-chan T, what string) T {
 func TestForkchoiceRoutinePublishesValidatedHeadWhileExecutionAppliesIt(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	engine := &testExecutionEngine{forkChoiceFn: blockingForkChoice(entered, release)}
-	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false, nil)
 	fixture.cfg.forkChoice.MarkPayloadStatus(fixture.headRoot, common.Hash{0xee}, execution_client.PayloadStatusValidated)
 	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
 	done := make(chan error, 1)
@@ -88,7 +88,7 @@ func TestForkchoiceRoutinePublishesValidatedHeadWhileExecutionAppliesIt(t *testi
 func TestForkchoiceRoutineWaitsForExecutionOnHeadWithoutValidation(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	engine := &testExecutionEngine{forkChoiceFn: blockingForkChoice(entered, release)}
-	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false, nil)
 	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
 	done := make(chan error, 1)
 	go func() { done <- doForkchoiceRoutine(t.Context(), log.New(), fixture.cfg, Args{}) }()
@@ -107,7 +107,7 @@ func TestForkchoiceRoutineWaitsForExecutionOnHeadWithoutValidation(t *testing.T)
 func TestForkchoiceRoutineReturnsExecutionErrorAfterPublishingValidatedHead(t *testing.T) {
 	wantErr := errors.New("execution layer rejected the head")
 	engine := &testExecutionEngine{forkChoiceErr: wantErr}
-	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false)
+	fixture := newLockOrderFixtureWithConfig(t, 1, engine, common.Hash{0xee}, false, nil)
 	fixture.cfg.forkChoice.MarkPayloadStatus(fixture.headRoot, common.Hash{0xee}, execution_client.PayloadStatusValidated)
 	published := withForkchoiceRoutineDeps(t, fixture.cfg, fixture.syncedData)
 

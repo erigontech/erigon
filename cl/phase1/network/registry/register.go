@@ -126,8 +126,16 @@ func withProposerPreferencesRateLimiter(beaconCfg *clparams.BeaconChainConfig) g
 // withSyncCommitteeMessageRateLimiter lets one peer forward a whole slot of each sync subnet it serves in one burst,
 // refilled over the slot. Members sign at the same point in the slot.
 func withSyncCommitteeMessageRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
+	return syncCommitteeMessageCondition(newSyncCommitteeMessageRateLimiter(beaconCfg))
+}
+
+// newSyncCommitteeMessageRateLimiter lets a peer relay a slot's messages of each sync subnet in one burst.
+func newSyncCommitteeMessageRateLimiter(beaconCfg *clparams.BeaconChainConfig) *tokenBucketRateLimiter {
 	perSubnetSlot := beaconCfg.SyncCommitteeSize / beaconCfg.SyncCommitteeSubnetCount
-	limiter := newTokenBucketRateLimiter(float64(perSubnetSlot)/float64(beaconCfg.SecondsPerSlot), int(perSubnetSlot))
+	return newTokenBucketRateLimiter(float64(perSubnetSlot)/float64(beaconCfg.SecondsPerSlot), int(perSubnetSlot))
+}
+
+func syncCommitteeMessageCondition(limiter *tokenBucketRateLimiter) gossip.ConditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.acquire(pid.String() + msg.GetTopic())
 	}

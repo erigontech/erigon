@@ -6,7 +6,7 @@ lines for the narration the project keeps having to strip (scope/limitation,
 incident/reproduction, task references) and, if any are found, returns
 additionalContext so the model can self-correct in a follow-up edit.
 
-See .claude/rules/comments.md for the policy this enforces.
+See the Comments section of AGENTS.md for the policy this enforces.
 """
 import json
 import re
@@ -69,7 +69,7 @@ def main():
     if not flagged:
         sys.exit(0)
 
-    msg = ["Comment-policy check (.claude/rules/comments.md) — review these added comment lines; "
+    msg = ["Comment-policy check (AGENTS.md, Comments) — review these added comment lines; "
            "scope/incident/task narration belongs in the commit message or PR body, not the code:"]
     for label, line in flagged[:12]:
         snippet = line if len(line) <= 100 else line[:97] + "..."

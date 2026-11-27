@@ -373,7 +373,18 @@ func stAddmod(_ uint64, scope *CallContext) string {
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y, z := scope.Stack.pop2Peek1()
-	z.MulMod(x, y, z)
+	if z[3] == 0 {
+		z.MulMod(x, y, z)
+		return pc, nil, nil
+	}
+	if *z != scope.mulmodModulus {
+		if x.IsZero() || y.IsZero() {
+			z.Clear()
+			return pc, nil, nil
+		}
+		scope.mulmodModulus, scope.mulmodReciprocal = *z, uint256.Reciprocal(z)
+	}
+	z.MulModWithReciprocal(x, y, z, &scope.mulmodReciprocal)
 	return pc, nil, nil
 }
 
@@ -491,12 +502,24 @@ func opCallValue(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 
 func opCallDataLoad(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
-	if offset, overflow := x.Uint64WithOverflow(); !overflow {
-		data := getData(scope.input, offset, 32)
-		x.SetBytes(data)
-	} else {
+	offset, overflow := x.Uint64WithOverflow()
+	if overflow {
 		x.Clear()
+		return pc, nil, nil
 	}
+	// Common case: 32 bytes are in range, so skip getData's bounds checks and
+	// RightPadBytes' allocation.
+	if end := offset + 32; end >= offset && end <= uint64(len(scope.input)) {
+		x.SetBytes32(scope.input[offset:end])
+		return pc, nil, nil
+	}
+	// Past the end of calldata the word is all zeros; Clear avoids the 32-byte
+	// allocation RightPadBytes would make on every op.
+	if offset >= uint64(len(scope.input)) {
+		x.Clear()
+		return pc, nil, nil
+	}
+	x.SetBytes(getData(scope.input, offset, 32))
 	return pc, nil, nil
 }
 
@@ -636,16 +659,13 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	code, err := evm.IntraBlockState().GetCode(addr)
-	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-
 	codeOffset64, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		codeOffset64 = math.MaxUint64
 	}
-	scope.Memory.SetFromData(memOffset.Uint64(), len64, codeOffset64, code)
+	if err := evm.IntraBlockState().ReadCodeSegmentTo(addr, codeOffset64, scope.Memory.GetPtr(memOffset.Uint64(), len64)); err != nil {
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 	return pc, nil, nil
 }
 
@@ -736,6 +756,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	if arg64 >= lower && arg64 < upper {
 		hash, err := evm.Context.GetHash(arg64)
 		if err != nil {
+			evm.IntraBlockState().RecordStateReadError(err)
 			arg.Clear()
 			return pc, nil, err
 		}
@@ -1036,6 +1057,9 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetPtr(offset, size)
 	)
+	if scope.create.overridden {
+		input = scope.create.initCode
+	}
 	return execCreate(pc, evm, scope, value, input, nil)
 }
 
@@ -1059,8 +1083,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		salt         = scope.Stack.popCopy()
 		input        = scope.create.initCode
 	)
-	scope.create.initCode = nil
-	if !evm.chainRules.IsAmsterdam {
+	if !scope.create.ready {
 		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
@@ -1077,11 +1100,15 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var preparation createPreparation
 	var suberr error
 	switch {
-	case evm.chainRules.IsAmsterdam:
+	case scope.create.ready:
 		address = scope.create.address
 		codeAndHash.hash = scope.create.codeHash
 		preparation = scope.create.preparation
 		suberr = scope.create.err
+		if suberr != nil && evm.config.OnInitCodeOverrideError != nil {
+			evm.config.OnInitCodeOverrideError(address, suberr)
+		}
+		scope.create = createGasPreparation{}
 		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}
@@ -1354,6 +1381,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
+	if evm.FrameContext != nil {
+		// APPROVE can debit the payer even inside a static call.
+		scope.Contract.selfBalanceCached = false
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1435,8 +1466,9 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1452,58 +1484,43 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if err != nil {
 		return pc, nil, err
 	}
-	newContract, err := ibs.IsNewContract(self)
-	if err != nil {
-		return pc, nil, err
-	}
 	rules := evm.ChainRules()
-	eip8246 := rules.IsAmsterdam
-	switch {
-	case eip8246:
-		// EIP-8246: SELFDESTRUCT no longer burns. The balance moves to the
-		// beneficiary (a no-op when it is self); a same-tx-created contract is
-		// still cleared at finalization but keeps any residual balance.
-		if self != beneficiaryAddr {
-			if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-		}
-		if newContract {
-			_, err = ibs.Selfdestruct(self, true)
-			if err != nil {
-				return pc, nil, err
-			}
-		}
-	case newContract: // Contract is new and will actually be deleted.
-		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
-			return pc, nil, err
-		}
-		if self != beneficiaryAddr {
-			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
-				return pc, nil, err
-			}
-		}
-		_, err = ibs.Selfdestruct(self, false)
+	var clearContract bool
+	// Bogota's SENDALL preserves code, storage, and nonce even for a contract
+	// created in the current transaction.
+	if !rules.IsBogota {
+		clearContract, err = ibs.IsNewContract(self)
 		if err != nil {
 			return pc, nil, err
 		}
-	case self != beneficiaryAddr: // Contract already exists, only do transfer if beneficiary is not self.
+	}
+	toOtherAccount := self != beneficiaryAddr
+	// Before Amsterdam, a contract created in this transaction burns its balance
+	// when it names itself as the beneficiary.
+	if toOtherAccount || (clearContract && !rules.IsAmsterdam) {
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
+	}
+	if toOtherAccount {
 		if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
 	}
-	if rules.IsEIPEnabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
+	if clearContract {
+		// Amsterdam preserves any balance left in the account when the contract
+		// is cleared at transaction end.
+		if _, err := ibs.Selfdestruct(self, rules.IsAmsterdam); err != nil {
+			return pc, nil, err
+		}
+	}
+	if rules.IsEIPEnabled(7708) && !balance.IsZero() && toOtherAccount { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 

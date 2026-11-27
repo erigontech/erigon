@@ -39,6 +39,13 @@ while IFS=$'\t' read -r status path dest; do
   # Compare against the predecessor, not the limit alone: a file already over
   # the limit before this range is not this range's doing, so a rename or a
   # shrinking edit must pass.
+  # An added file whose name minus its last extension was deleted in the range
+  # (big.bin -> big.bin.zst) replaces it, so compare against that file.
+  if [ -z "$before" ] && [ "${file%.*}" != "$file" ] &&
+    git cat-file -e "$merge_base:${file%.*}" 2>/dev/null &&
+    ! git cat-file -e "HEAD:${file%.*}" 2>/dev/null; then
+    before=${file%.*}
+  fi
   prev=0
   if [ -n "$before" ]; then
     prev=$(git cat-file -s "$merge_base:$before" 2>/dev/null || echo 0)

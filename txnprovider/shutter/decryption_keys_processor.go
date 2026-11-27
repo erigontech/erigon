@@ -164,14 +164,14 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
-			txn, err := dkp.decryptTxn(ipToKey, encryptedTxn)
-			if err != nil {
+			txn, decryptErr := dkp.decryptTxn(ipToKey, encryptedTxn)
+			if decryptErr != nil {
 				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
 					"slot", slot,
 					"eonIndex", eonIndex,
 					"txnIndex", encryptedTxn.TxnIndex,
-					"err", err,
+					"err", decryptErr,
 				)
 				// we do not return err here since as per protocol we skip bad decryption
 				// we also do not want to interrupt other decryption goroutines
@@ -258,7 +258,7 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[IdentityPreimage]*proto.
 		return nil, fmt.Errorf("failed to decode transaction: %w", err)
 	}
 
-	if txn.Type() == types.BlobTxType {
+	if txn.Type() == types.BlobTxType || txn.GetBlobGas() != 0 {
 		return nil, errors.New("blob txns not allowed in shutter")
 	}
 
@@ -287,7 +287,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 
 func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
 		case <-ctx.Done():
@@ -312,6 +312,9 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 
 func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
 	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
+	if errors.Is(err, ErrTimestampBeforeGenesis) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

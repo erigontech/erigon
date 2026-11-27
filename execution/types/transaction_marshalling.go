@@ -232,6 +232,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
 	switch byte(txType) {
+	case FrameTxType:
+		tx := &FrameTransaction{}
+		if err := tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
 	case LegacyTxType:
 		tx := &LegacyTx{}
 		if err := tx.UnmarshalJSON(input); err != nil {

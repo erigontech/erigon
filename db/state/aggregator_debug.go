@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -122,22 +123,36 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 }
 
 func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
-	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors) {
+	ac.agg.dirtyFilesLock.Lock() // the dependency checker reads live dirty files
+	defer ac.agg.dirtyFilesLock.Unlock()
+	// a smaller file covers only if it can become visible: its dependents are present
+	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors, dependentsPresent func(startTxNum, endTxNum uint64) bool) {
+		if missed.IsEmpty() {
+			return
+		}
+		if dependentsPresent != nil {
+			all = slices.DeleteFunc(slices.Clone(all), func(f *FilesItem) bool { return !dependentsPresent(f.startTxNum, f.endTxNum) })
+		}
 		for acc := range missed {
 			missed[acc] = dropCoveredAccessors(missed[acc], all, l)
 		}
 	}
 	for _, d := range ac.domain {
 		df := mf.domain[d.d.Name]
-		drop(df.files, d.files, d.d.Accessors)
-		drop(df.history.files, d.history.files, d.history.h.Accessors)
-		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors)
+		drop(df.files, d.files, d.d.Accessors, d.d.dependentsPresent())
+		// a .v file's accessor is addressed by the key ordinals of the .ef file of the same range
+		efs := d.history.ii.ii
+		drop(df.history.files, d.history.files, d.history.h.Accessors, func(startTxNum, endTxNum uint64) bool {
+			ef, ok := efs.dirtyFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+			return ok && checkForVisibility(ef, efs.Accessors, false)
+		})
+		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors, d.history.ii.ii.dependentsPresent())
 	}
 	for _, ii := range ac.ii {
 		if ii == nil {
 			continue
 		}
-		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors)
+		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors, ii.ii.dependentsPresent())
 	}
 }
 
@@ -293,10 +308,6 @@ func (m MissedFilesMap) IsEmpty() bool {
 		}
 	}
 	return true
-}
-
-func (m MissedFilesMap) Get(accessor statecfg.Accessors) []*FilesItem {
-	return m[accessor]
 }
 
 func (m *MissedAccessorAggFiles) IsEmpty() bool {

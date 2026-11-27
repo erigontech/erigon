@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
-	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
@@ -81,7 +80,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
-		err = machine.TransitionState(c.Machine, testState, block)
+		err = transitionStateWithPrecomputedCheck(t, c.Machine, testState, block)
 		if err != nil {
 			break
 		}

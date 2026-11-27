@@ -292,3 +292,47 @@ func TestTxNums2BlockNumsPastLastBlock(t *testing.T) {
 	_, _, _, _, _, _, err = it.Next()
 	require.ErrorContains(t, err, "can't find blockNumber")
 }
+
+// TestTxNums2BlockNumsFrom pins that a first txNum in or near the start block needs no search over
+// the whole chain, that one in the start block reads only the start block's bounds, and that any
+// first txNum is still mapped right.
+func TestTxNums2BlockNumsFrom(t *testing.T) {
+	db, spans := newTxNumsDB(t, 2000)
+	index := &countingTxBlockIndex{TxBlockIndex: DefaultTxBlockIndexInstance}
+	reader := TxNums.WithCustomReadTxNumFunc(index)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, tc := range []struct {
+		name         string
+		start        uint64
+		first        int
+		wantSearches int
+		wantReads    int // MaxTxNum reads of the first Next, -1 when not pinned
+	}{
+		{"same block", 500, 500, 0, 2},
+		{"near block", 500, 503, 0, -1},
+		{"far block", 500, 1500, 1, -1},
+		{"start past last block", 5000, 500, 1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := []uint64{spans[tc.first].min + 1, spans[tc.first].max, spans[tc.first+1].min}
+			index.blockNumberCalls, index.maxTxNumCalls = 0, 0
+			it := TxNums2BlockNumsFrom(t.Context(), tx, reader, stream.Array(in), order.Asc, tc.start)
+			defer it.Close()
+			for k, want := range []int{tc.first, tc.first, tc.first + 1} {
+				txNum, blockNum, txIndex, isFinal, _, changed, err := it.Next()
+				require.NoError(t, err)
+				if k == 0 && tc.wantReads >= 0 {
+					require.Equal(t, tc.wantReads, index.maxTxNumCalls)
+				}
+				require.Equal(t, in[k], txNum)
+				require.Equal(t, uint64(want), blockNum)
+				require.Equal(t, int(in[k])-int(spans[want].min)-1, txIndex)
+				require.Equal(t, in[k] == spans[want].max, isFinal)
+				require.Equal(t, k != 1, changed)
+			}
+			require.Equal(t, tc.wantSearches, index.blockNumberCalls)
+		})
+	}
+}

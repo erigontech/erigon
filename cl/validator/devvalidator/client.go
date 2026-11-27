@@ -30,8 +30,7 @@ func NewBeaconClient(baseURL string) *BeaconClient {
 
 // beaconResponse is the standard Beacon API wrapper.
 type beaconResponse struct {
-	Data                     json.RawMessage `json:"data"`
-	ExecutionPayloadEnvelope json.RawMessage `json:"execution_payload_envelope"`
+	Data json.RawMessage `json:"data"`
 }
 
 // get performs a GET request and unmarshals the `data` field into dst.
@@ -44,29 +43,55 @@ func (c *BeaconClient) get(ctx context.Context, path string, dst any) error {
 }
 
 func (c *BeaconClient) getResponse(ctx context.Context, path string) (*beaconResponse, error) {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	return c.doResponse(req, path)
+}
 
+// postResponse performs a POST request with a JSON body and returns the decoded response.
+func (c *BeaconClient) postResponse(ctx context.Context, path, body string, headers http.Header) (*beaconResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	maps.Copy(req.Header, headers)
+	return c.doResponse(req, path)
+}
+
+func (c *BeaconClient) doResponse(req *http.Request, path string) (*beaconResponse, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("beacon GET %s: %w", path, err)
+		return nil, fmt.Errorf("beacon %s %s: %w", req.Method, path, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("beacon GET %s: status %d: %s", path, resp.StatusCode, string(body))
+		return nil, &statusError{method: req.Method, path: path, code: resp.StatusCode, body: string(body)}
 	}
 
 	var wrapper beaconResponse
 	if err := json.NewDecoder(resp.Body).Decode(&wrapper); err != nil {
-		return nil, fmt.Errorf("beacon GET %s: decode: %w", path, err)
+		return nil, fmt.Errorf("beacon %s %s: decode: %w", req.Method, path, err)
 	}
 	return &wrapper, nil
+}
+
+// statusError is a non-200 response to a Beacon API request.
+type statusError struct {
+	method string
+	path   string
+	code   int
+	body   string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("beacon %s %s: status %d: %s", e.method, e.path, e.code, e.body)
 }
 
 // post performs a POST request with a JSON body.

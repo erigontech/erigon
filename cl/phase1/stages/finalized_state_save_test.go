@@ -17,6 +17,7 @@
 package stages
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/spf13/afero"
 )
@@ -154,8 +156,9 @@ func TestSaveFinalizedStateOnDisk(t *testing.T) {
 		fc := mock_services.NewForkChoiceStorageMock(t)
 		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
 		fc.StateAtBlockRootVal[finalizedRoot] = st
+		var savedRoot common.Hash
 
-		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0))
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
 
 		got, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 		require.NoError(t, err)
@@ -171,9 +174,10 @@ func TestSaveFinalizedStateOnDisk(t *testing.T) {
 		fc := mock_services.NewForkChoiceStorageMock(t)
 		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
 		fc.StateAtBlockRootVal[finalizedRoot] = st
+		var savedRoot common.Hash
 
 		onCadence := beaconCfg.SlotsPerEpoch * 5
-		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, onCadence))
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, onCadence, &savedRoot))
 
 		_, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 		require.NoError(t, err)
@@ -184,9 +188,10 @@ func TestSaveFinalizedStateOnDisk(t *testing.T) {
 		fc := mock_services.NewForkChoiceStorageMock(t)
 		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
 		fc.StateAtBlockRootVal[finalizedRoot] = st
+		var savedRoot common.Hash
 
 		offCadence := beaconCfg.SlotsPerEpoch*5 + 1
-		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, offCadence))
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, offCadence, &savedRoot))
 
 		_, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 		require.Error(t, err)
@@ -196,10 +201,165 @@ func TestSaveFinalizedStateOnDisk(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		fc := mock_services.NewForkChoiceStorageMock(t)
 		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: common.Hash{0xbb}}
+		var savedRoot common.Hash
 
-		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0))
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
 
 		_, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 		require.Error(t, err)
 	})
+}
+
+func finalizedStateFilePath(dirs datadir.Dirs) string {
+	return filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+}
+
+func savedFinalizedStateSlot(t *testing.T, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) uint64 {
+	t.Helper()
+	got, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
+	require.NoError(t, err)
+	return got.Slot()
+}
+
+func requireNoFinalizedStateFile(t *testing.T, dirs datadir.Dirs) {
+	t.Helper()
+	_, err := os.Stat(finalizedStateFilePath(dirs))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func newDistinctPhase0States(t *testing.T) (first, second *state.CachingBeaconState) {
+	t.Helper()
+	_, first, _ = tests.GetPhase0Random()
+	second, err := first.Copy()
+	require.NoError(t, err)
+	require.NoError(t, second.SetSlot(first.Slot()+1))
+	return first, second
+}
+
+type finalizedCheckpointSequence struct {
+	*mock_services.ForkChoiceStorageMock
+	roots []common.Hash
+	reads int
+}
+
+func (f *finalizedCheckpointSequence) FinalizedCheckpoint() solid.Checkpoint {
+	root := f.roots[min(f.reads, len(f.roots)-1)]
+	f.reads++
+	return solid.Checkpoint{Root: root}
+}
+
+func TestSaveFinalizedStateSkipsUnchangedFinalizedRoot(t *testing.T) {
+	_, st, _ := tests.GetPhase0Random()
+	beaconCfg := &clparams.MainnetBeaconConfig
+	dirs := datadir.New(t.TempDir())
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: common.Hash{0xfa}}
+	fetches := 0
+	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		fetches++
+		return st.Copy()
+	}
+	var savedRoot common.Hash
+
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.NoError(t, dir.RemoveFile(finalizedStateFilePath(dirs)))
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+
+	require.Equal(t, 1, fetches)
+	requireNoFinalizedStateFile(t, dirs)
+}
+
+func TestSaveFinalizedStateSavesWhenFinalizedRootChanges(t *testing.T) {
+	first, second := newDistinctPhase0States(t)
+	beaconCfg := &clparams.MainnetBeaconConfig
+	root1, root2 := common.Hash{0x01}, common.Hash{0x02}
+	dirs := datadir.New(t.TempDir())
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.StateAtBlockRootVal[root1] = first
+	fc.StateAtBlockRootVal[root2] = second
+	var savedRoot common.Hash
+
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: root1}
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, first.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+	require.NoError(t, dir.RemoveFile(finalizedStateFilePath(dirs)))
+
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4, Root: root2}
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, second.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+}
+
+func TestSaveFinalizedStateRetriesAfterWriteError(t *testing.T) {
+	_, st, _ := tests.GetPhase0Random()
+	beaconCfg := &clparams.MainnetBeaconConfig
+	finalizedRoot := common.Hash{0xfa}
+	dirs := datadir.New(t.TempDir())
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
+	fc.StateAtBlockRootVal[finalizedRoot] = st
+	var savedRoot common.Hash
+
+	require.NoError(t, dir.RemoveAll(dirs.CaplinLatest))
+	require.NoError(t, os.WriteFile(dirs.CaplinLatest, nil, 0o644))
+	require.Error(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, common.Hash{}, savedRoot)
+
+	require.NoError(t, dir.RemoveFile(dirs.CaplinLatest))
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, st.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+	require.Equal(t, finalizedRoot, savedRoot)
+}
+
+func TestSaveFinalizedStateRetriesAfterFailedLookup(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		lookupErr error
+	}{
+		{name: "missing state"},
+		{name: "lookup error", lookupErr: errors.New("lookup failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, st, _ := tests.GetPhase0Random()
+			beaconCfg := &clparams.MainnetBeaconConfig
+			finalizedRoot := common.Hash{0xfa}
+			dirs := datadir.New(t.TempDir())
+			fc := mock_services.NewForkChoiceStorageMock(t)
+			fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
+			fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+				return nil, test.lookupErr
+			}
+			var savedRoot common.Hash
+
+			require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+			requireNoFinalizedStateFile(t, dirs)
+			require.Equal(t, common.Hash{}, savedRoot)
+
+			fc.GetStateAtBlockRootFn = nil
+			fc.StateAtBlockRootVal[finalizedRoot] = st
+			require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+			require.Equal(t, st.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+		})
+	}
+}
+
+func TestSaveFinalizedStateReadsFinalizedRootOnce(t *testing.T) {
+	first, second := newDistinctPhase0States(t)
+	beaconCfg := &clparams.MainnetBeaconConfig
+	root1, root2 := common.Hash{0x01}, common.Hash{0x02}
+	dirs := datadir.New(t.TempDir())
+	mock := mock_services.NewForkChoiceStorageMock(t)
+	mock.StateAtBlockRootVal[root1] = first
+	mock.StateAtBlockRootVal[root2] = second
+	fc := &finalizedCheckpointSequence{ForkChoiceStorageMock: mock, roots: []common.Hash{root1, root2}}
+	var savedRoot common.Hash
+
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, 1, fc.reads)
+	require.Equal(t, first.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+	require.Equal(t, root1, savedRoot)
+
+	require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 0, &savedRoot))
+	require.Equal(t, 2, fc.reads)
+	require.Equal(t, second.Slot(), savedFinalizedStateSlot(t, dirs, beaconCfg))
+	require.Equal(t, root2, savedRoot)
 }

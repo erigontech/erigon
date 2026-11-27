@@ -42,6 +42,8 @@ var mainnetPreverifiedFixture []byte
 // dependency was removed (erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd).
 // Production code populates the registry at startup via LoadRemotePreverified.
 func TestMain(m *testing.M) {
-	snapcfg.SetToml(networkname.Mainnet, mainnetPreverifiedFixture, false)
+	if err := snapcfg.SetToml(networkname.Mainnet, mainnetPreverifiedFixture, false); err != nil {
+		panic(err)
+	}
 	m.Run()
 }

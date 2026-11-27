@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"runtime"
 	"sync/atomic"
@@ -26,13 +27,157 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
+
+func TestMessageListenerIgnoresUnsolicitedBlockAccessLists(t *testing.T) {
+	test := newMessageListenerTest(t)
+	test.mockSentryStreams()
+	test.run(func(_ context.Context, t *testing.T) {
+		test.sendBlockAccessLists(t, PeerIdFromUint64(1), 1, []rlp.RawValue{{0xc1}})
+	})
+}
+
+func TestBALFetcherMatchesPeerAndRequest(t *testing.T) {
+	peerId := PeerIdFromUint64(1)
+	want := types.BlockAccessList{{Address: common.Address{1}}}
+	raw, err := types.EncodeBlockAccessListBytes(want)
+	require.NoError(t, err)
+	req := BALRequest{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: crypto.Keccak256Hash(raw)}
+	malformed := rlp.RawValue{0xc1}
+	for _, tc := range []struct {
+		name            string
+		responsePeerId  *PeerId
+		requestIdOffset uint64
+		entry           rlp.RawValue
+		wantErr         error
+	}{
+		{"matching reply", peerId, 0, raw, nil},
+		{"reply from another peer", PeerIdFromUint64(2), 0, malformed, context.DeadlineExceeded},
+		{"reply to another request", peerId, 1, malformed, context.DeadlineExceeded},
+	} {
+		runBALFetcherCase(t, tc.name, func(t *testing.T, test *messageListenerTest) {
+			fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+				test.sendBlockAccessLists(t, tc.responsePeerId, requestId+tc.requestIdOffset, []rlp.RawValue{tc.entry})
+			})
+			out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, 100*time.Millisecond)
+			require.ErrorIs(t, err, tc.wantErr)
+			if tc.wantErr == nil {
+				require.Equal(t, want, out[req.Hash].BlockAccessList())
+			}
+		})
+	}
+}
+
+func TestBALFetcherResponse(t *testing.T) {
+	malformed := rlp.RawValue{0xc2, 0x01, 0x02}
+	invalid := encodeBALWithOverlappingStorageSlot(t)
+
+	for _, tc := range []struct {
+		name         string
+		response     []rlp.RawValue
+		expectedHash common.Hash
+		missing      bool
+		wantErr      error
+	}{
+		{"malformed committed BAL", []rlp.RawValue{malformed}, crypto.Keccak256Hash(malformed), false, nil},
+		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false, nil},
+		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true, nil},
+		{"commitment mismatch", []rlp.RawValue{{0xc0}}, common.Hash{1}, false, ErrBadBALResponse},
+		{"empty reply leaves availability unknown", nil, empty.BlockAccessListHash, false, nil},
+		{"malformed entry", []rlp.RawValue{{0xc1}}, empty.BlockAccessListHash, false, rlp.ErrValueTooLarge},
+		{"excess entry is never read", []rlp.RawValue{{0x80}, {0xc1}}, empty.BlockAccessListHash, false, ErrBadBALResponse},
+	} {
+		runBALFetcherCase(t, tc.name, func(t *testing.T, test *messageListenerTest) {
+			peerId := PeerIdFromUint64(1)
+			var logs bytes.Buffer
+			if tc.wantErr != nil {
+				test.logger = log.New()
+				test.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+				mockExpectPenalizePeer(t, test.sentryClient, peerId)
+			}
+			req := BALRequest{Hash: common.Hash{1}, Number: 100, GasLimit: 3 * types.BalItemCost, ExpectedHash: tc.expectedHash}
+			fetcher := test.mockBALRequest(t, peerId, req.Hash, func(requestId uint64) {
+				test.sendBlockAccessLists(t, peerId, requestId, tc.response)
+			})
+			out, err := fetcher.fetchFromPeer(test.ctx, []BALRequest{req}, peerId, time.Second)
+			require.ErrorIs(t, err, tc.wantErr)
+			if tc.wantErr != nil {
+				require.Contains(t, logs.String(), err.Error())
+			}
+			require.Empty(t, out)
+			require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 100))
+			require.Equal(t, !tc.missing, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 99))
+			require.True(t, fetcher.peerTracker.PeerMayHaveBALNum(peerId, 101))
+		})
+	}
+}
+
+func runBALFetcherCase(t *testing.T, name string, run func(*testing.T, *messageListenerTest)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			test := newMessageListenerTest(t)
+			defer test.ctxCancel()
+			test.mockSentryStreams()
+			go test.messageListener.listenInboundMessages(test.ctx)
+			run(t, test)
+		})
+	})
+}
+
+func (mlt *messageListenerTest) mockBALRequest(t *testing.T, peerId *PeerId, hash common.Hash, reply func(uint64)) *balFetcher {
+	t.Helper()
+	mlt.sentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+			require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req.Data.Id)
+			require.Equal(t, peerId.H512(), req.PeerId)
+			var packet eth.GetBlockAccessListsPacket66
+			require.NoError(t, rlp.DecodeBytes(req.Data.Data, &packet))
+			require.Equal(t, eth.GetBlockAccessListsPacket{hash}, packet.GetBlockAccessListsPacket)
+			reply(packet.RequestId)
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{req.PeerId}}, nil
+		})
+	tracker := NewPeerTracker(mlt.logger, mlt.messageListener)
+	tracker.PeerConnected(peerId)
+	return NewBALFetcher(
+		mlt.logger,
+		mlt.messageListener,
+		NewMessageSender(mlt.sentryClient),
+		mlt.messageListener.peerPenalizer,
+		tracker,
+	).(*balFetcher)
+}
+
+func (mlt *messageListenerTest) sendBlockAccessLists(t *testing.T, peerId *PeerId, requestId uint64, entries []rlp.RawValue) {
+	t.Helper()
+	data, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{RequestId: requestId, BlockAccessListsPacket: entries})
+	require.NoError(t, err)
+	mlt.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+		message: &sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, PeerId: peerId.H512(), Data: data},
+	}
+}
+
+func TestDecodeEmptyBlockAccessListsResponseWithStalePooledStream(t *testing.T) {
+	// sync.Pool does not always hand back the stream just returned, so repeat.
+	for range 100 {
+		rlp.PutStream(rlp.NewBytesStream([]byte{0x80}))
+		_, err := decodeBlockAccessListsResponse(nil, 1)
+		require.NoError(t, err)
+	}
+}
 
 func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	reads := make([]uint64, 100_000)
@@ -47,18 +192,18 @@ func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: hash}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
-	require.ErrorContains(t, err, "block access list too large")
-	require.True(t, bad)
+	require.NoError(t, err)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
-	slots := make([]rlp.RawValue, 100_000)
+	// Duplicate slots would let the ordering check hide a missing empty slot check.
+	slots := make([][]any, 100_000)
 	for i := range slots {
-		slots[i] = rlp.RawValue{0xc2, 0x80, 0xc0}
+		slots[i] = []any{uint64(i), []any{}}
 	}
 	raw, err := rlp.EncodeToBytes([]any{[]any{
 		common.Address{}, slots, []any{}, []any{}, []any{}, []any{},
@@ -67,10 +212,9 @@ func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 1_000_000_000, ExpectedHash: crypto.Keccak256Hash(raw)}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
-	require.ErrorContains(t, err, "empty slot changes")
-	require.True(t, bad)
+	require.NoError(t, err)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -87,10 +231,10 @@ func TestValidateBALResponseChecksHashBeforeDecoding(t *testing.T) {
 	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 60_000_000, ExpectedHash: common.Hash{0xff}}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	out, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
 	require.ErrorContains(t, err, "wanted")
-	require.True(t, bad)
+	require.ErrorIs(t, err, ErrBadBALResponse)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -109,53 +253,63 @@ func TestValidateBALResponse(t *testing.T) {
 
 	t.Run("valid populated BAL is returned", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.Equal(t, wantBAL, out[h0].BlockAccessList())
 		gotRaw, err := out[h0].Bytes()
 		require.NoError(t, err)
 		require.Equal(t, bal, gotRaw)
 	})
 
-	t.Run("BAL exceeding the block gas bound penalises the peer", func(t *testing.T) {
+	t.Run("hash-matching BAL exceeding the block gas bound is discarded without a penalty", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: types.BalItemCost - 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
-		require.ErrorContains(t, err, "block access list too large")
-		require.True(t, bad)
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+		require.NoError(t, err)
 		require.NotContains(t, out, h0)
 	})
 
-	t.Run("hash-matching malformed BAL penalises the peer", func(t *testing.T) {
+	t.Run("hash-matching malformed BAL is discarded without a penalty", func(t *testing.T) {
 		malformed := []byte{0xc2, 0x01, 0x02}
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: crypto.Keccak256Hash(malformed)}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{malformed})
-		require.Error(t, err)
-		require.True(t, bad)
+		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: crypto.Keccak256Hash(malformed)}}
+		out, err := validateBALResponse(reqs, []rlp.RawValue{malformed})
+		require.NoError(t, err)
 		require.NotContains(t, out, h0)
 	})
 
 	t.Run("0x80 sentinel is a miss not an error", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0x80}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0x80}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
+	})
+
+	t.Run("hash-matching invalid BAL is discarded while valid entries are kept", func(t *testing.T) {
+		invalid := encodeBALWithOverlappingStorageSlot(t)
+		gasLimit := uint64(3 * types.BalItemCost)
+		decoded, err := types.DecodeBlockAccessListSidecarForHeader(invalid, gasLimit)
+		require.NoError(t, err)
+		require.ErrorContains(t, decoded.ValidateForHeader(gasLimit), "in both changes and reads")
+		reqs := []BALRequest{
+			{Hash: h0, Number: 1, GasLimit: gasLimit, ExpectedHash: crypto.Keccak256Hash(invalid)},
+			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
+		}
+		out, err := validateBALResponse(reqs, []rlp.RawValue{invalid, bal})
+		require.NoError(t, err)
+		require.NotContains(t, out, h0)
+		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
 
 	t.Run("empty entry is a miss", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
 	t.Run("0xc0 accepted only for the empty-BAL hash", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: empty.BlockAccessListHash}}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}})
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}})
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.NotNil(t, out[h0])
 		require.Empty(t, out[h0].BlockAccessList())
 	})
@@ -166,9 +320,8 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
 		reqs[0].ExpectedHash = balHash
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
-		require.Error(t, err)
-		require.True(t, bad)
+		out, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
+		require.ErrorIs(t, err, ErrBadBALResponse)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
@@ -178,18 +331,10 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h0, Number: 1, ExpectedHash: common.BytesToHash([]byte{0xff})},
 			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
-		require.Error(t, err)
-		require.True(t, bad)
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
+		require.ErrorIs(t, err, ErrBadBALResponse)
 		require.NotContains(t, out, h0)
 		require.Equal(t, wantBAL, out[h1].BlockAccessList())
-	})
-
-	t.Run("over-long response penalises the peer", func(t *testing.T) {
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		_, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
-		require.Error(t, err)
-		require.True(t, bad)
 	})
 
 	t.Run("short response leaves trailing requests absent", func(t *testing.T) {
@@ -197,9 +342,8 @@ func TestValidateBALResponse(t *testing.T) {
 			{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash},
 			{Hash: h1, Number: 2, ExpectedHash: balHash},
 		}
-		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal}) // only first answered
+		out, err := validateBALResponse(reqs, []rlp.RawValue{bal}) // only first answered
 		require.NoError(t, err)
-		require.False(t, bad)
 		require.Equal(t, wantBAL, out[h0].BlockAccessList())
 		require.NotContains(t, out, h1)
 	})
@@ -405,4 +549,18 @@ func TestFetchAcrossPeers(t *testing.T) {
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *PeerIdFromUint64(3), *PeerIdFromUint64(4)}, 2, fetch)
 		require.LessOrEqual(t, peak.Load(), int32(2)) // limit 2 enforced (would reach 4 unbounded)
 	})
+}
+
+func encodeBALWithOverlappingStorageSlot(t *testing.T) rlp.RawValue {
+	t.Helper()
+	raw, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+		Address: common.Address{1},
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{1}),
+			Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+		}},
+		StorageReads: []common.Hash{{1}},
+	}})
+	require.NoError(t, err)
+	return raw
 }

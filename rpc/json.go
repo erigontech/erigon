@@ -312,7 +312,7 @@ func NewCodec(conn Conn) ServerCodec {
 
 // newJSONEncoder returns the writer side every JSON transport shares.
 func newJSONEncoder(conn Conn) func(v any) error {
-	enc := json.NewEncoder(conn)
+	var enc *json.Encoder
 	return func(v any) error {
 		switch r := v.(type) {
 		case rawResponse:
@@ -325,6 +325,9 @@ func newJSONEncoder(conn Conn) func(v any) error {
 			s.WriteRaw("\n")
 			return s.Flush()
 		default:
+			if enc == nil {
+				enc = json.NewEncoder(conn)
+			}
 			return enc.Encode(v)
 		}
 	}
@@ -339,14 +342,18 @@ func (c *jsonCodec) peerInfo() PeerInfo {
 	return PeerInfo{Transport: "ipc", RemoteAddr: c.remote}
 }
 
-func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err error) {
+func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch bool, err error) {
 	rawmsg, err := c.readMessage()
 	if err != nil {
 		return nil, false, err
 	}
-	messages, batch, err = parseMessage(rawmsg)
+	messages, batch, err = parseMessage(rawmsg, batchLimit)
 	if err != nil {
-		c.releaseFrame()
+		// A batch over the limit keeps its frame until its error, which holds the frame's
+		// id, is written.
+		if _, tooLarge := errors.AsType[*batchTooLargeError](err); !tooLarge {
+			c.releaseFrame()
+		}
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -452,7 +459,7 @@ func (c *jsonCodec) closed() <-chan any {
 // checks in this function because the raw message has already been syntax-checked when it
 // is called. Any non-JSON-RPC messages in the input return the zero value of
 // jsonrpcMessage.
-func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
+func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool, error) {
 	if !isBatch(raw) {
 		// ReadBatch turns a nil message into a zero one, which is how null is rejected.
 		if isJSONNull(raw) {
@@ -461,6 +468,16 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		msg := new(jsonrpcMessage)
 		fillMessage(raw, msg)
 		return []*jsonrpcMessage{msg}, false, nil
+	}
+	if batchLimit > 0 {
+		size := 0
+		forEachJSONElement(raw, func([]byte) bool {
+			size++
+			return true
+		})
+		if size > batchLimit {
+			return nil, true, &batchTooLargeError{limit: batchLimit, size: size, id: firstCallID(raw)}
+		}
 	}
 	var msgs []*jsonrpcMessage
 	forEachJSONElement(raw, func(elem []byte) bool {
@@ -474,6 +491,43 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		return true
 	})
 	return msgs, true, nil
+}
+
+// batchTooLargeError rejects a batch with more elements than the server's limit.
+type batchTooLargeError struct {
+	limit int
+	size  int
+	id    json.RawMessage // of the first call, nil when the batch has none
+}
+
+func (e *batchTooLargeError) Error() string {
+	return fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", e.limit, e.size)
+}
+
+// firstCallID returns the id of the first element of the batch raw that fillMessage would
+// make a call, nil when there is none. It reads only the id and method fields, so it
+// allocates nothing.
+func firstCallID(raw []byte) json.RawMessage {
+	var id json.RawMessage
+	forEachJSONElement(raw, func(elem []byte) bool {
+		var msg jsonrpcMessage
+		hasMethod := false
+		forEachJSONField(elem, func(key, value []byte) {
+			switch {
+			case jsonKeyIs(key, "id"):
+				msg.ID = value
+			case jsonKeyIs(key, "method") && !isJSONNull(value):
+				// As in decodeStringField: null keeps the name, a non-empty string sets one.
+				hasMethod = len(value) > 2 && value[0] == '"'
+			}
+		})
+		if hasMethod && msg.hasValidID() {
+			id = msg.ID
+			return false
+		}
+		return true
+	})
+	return id
 }
 
 // fillMessage picks a message apart into msg. Input that does not hold an object
@@ -590,7 +644,7 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 			return false
 		}
 		argval := reflect.New(types[i])
-		if err := decodeArgument(elem, argval.Interface()); err != nil {
+		if err := decodeArgument(elem, argval); err != nil {
 			scanErr = fmt.Errorf("invalid argument %d: %w", i, err)
 			return false
 		}
@@ -600,14 +654,24 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 	return args, scanErr
 }
 
-// decodeArgument decodes one already syntax-checked argument value.
-func decodeArgument(elem []byte, arg any) error {
+// decodeArgument decodes one already syntax-checked argument value into arg,
+// a pointer to the argument.
+func decodeArgument(elem []byte, arg reflect.Value) error {
+	if isJSONNull(elem) {
+		return json.Unmarshal(elem, arg.Interface())
+	}
+	// An optional argument is a pointer: allocate its value here, so that a
+	// value type which unmarshals itself also takes the direct call below.
+	if ptr := arg.Elem(); ptr.Kind() == reflect.Pointer {
+		ptr.Set(reflect.New(ptr.Type().Elem()))
+		arg = ptr
+	}
 	// A type that unmarshals itself is called directly, which skips the
 	// validation pass json.Unmarshal runs first.
-	if u, ok := arg.(json.Unmarshaler); ok && !isJSONNull(elem) {
+	if u, ok := reflect.TypeAssert[json.Unmarshaler](arg); ok {
 		return u.UnmarshalJSON(elem)
 	}
-	return json.Unmarshal(elem, arg)
+	return json.Unmarshal(elem, arg.Interface())
 }
 
 func isJSONNull(raw json.RawMessage) bool {

@@ -207,11 +207,11 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
-	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	g := newGrowLRUEntries[uint64](128*1024, 16, nil)
 	defer g.Close()
 	startCap := g.curCap.Load()
 
-	const warmup = genericCacheStartCapacity / 2
+	const warmup = growLRUStartCapacity / 2
 	for i := range uint64(warmup) {
 		g.Add(key(i), i)
 	}
@@ -222,7 +222,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	var oldKeys, oldVals []uint64
 	var trigger uint64
 	grew := false
-	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+	for i := uint64(warmup); i < 8*growLRUStartCapacity && !grew; i++ {
 		old := g.cur.Load()
 		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
 			oldKeys = old.Keys() // snapshot the generation this add is about to retire

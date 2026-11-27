@@ -216,7 +216,7 @@ func (imp *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit
 	}
 }
 
-func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) uint64 {
+func GetPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) uint64 {
 	ws := s.GetPendingPartialWithdrawals()
 	balance := uint64(0)
 	ws.Range(func(index int, withdrawal *solid.PendingPartialWithdrawal, length int) bool {
@@ -261,7 +261,7 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 	}
 	if s.Version() >= clparams.ElectraVersion {
 		// Only exit validator if it has no pending withdrawals in the queue
-		if b := getPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
+		if b := GetPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
 			return fmt.Errorf("ProcessVoluntaryExit: validator has pending balance to withdraw: %d", b)
 		}
 	}
@@ -884,11 +884,11 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if expectedWithdrawals == nil {
 		return errors.New("ProcessExecutionPayloadEnvelope: state has nil expected withdrawals")
 	}
-	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZ()
+	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZProgressive(nil)
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash payload withdrawals: %w", err)
 	}
-	expectedWithdrawalsRoot, err := expectedWithdrawals.HashSSZ()
+	expectedWithdrawalsRoot, err := expectedWithdrawals.HashSSZProgressive(nil)
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash expected withdrawals: %w", err)
 	}
@@ -1731,7 +1731,7 @@ func (imp *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Wit
 	if state.Epoch(s) < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return nil
 	}
-	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
+	pendingBalanceToWithdraw := GetPendingBalanceToWithdraw(s, vindex)
 	if isFullExitRequest {
 		// Only exit validator if it has no pending withdrawals in the queue
 		if pendingBalanceToWithdraw == 0 {
@@ -1883,7 +1883,7 @@ func (imp *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidati
 		return nil
 	}
 	// Verify the source has no pending withdrawals in the queue
-	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+	if GetPendingBalanceToWithdraw(s, sourceIndex) > 0 {
 		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}

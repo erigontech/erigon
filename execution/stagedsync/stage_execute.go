@@ -237,7 +237,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err != nil {
 		return err
 	}
-	if err := stateChangesStreamAtUnwind(ctx, rwTx, u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
+	if err := stateChangesStreamAtUnwind(ctx, doms.AsSnapshotGetter(rwTx), u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("stateChangesStreamAtUnwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, dropStateFromBlockNum); err != nil {
@@ -250,34 +250,43 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
 // stateChangesStreamAtUnwind sending state changes to `accumulator`
 func stateChangesStreamAtUnwind(ctx context.Context,
-	tx kv.TemporalRwTx,
+	state kv.TemporalGetter,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
 ) error {
 	var currentInc uint64
+	codeChanged := make(map[common.Address]struct{})
 
-	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// Value changes from previous steps arrive with nil values, which are
-		// indistinguishable from a delete here.
+	handle := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
+			if accumulator == nil {
+				return nil
+			}
+			// Diffs carry values from individual database steps, not necessarily the
+			// unwind target. Read the restored account and code, including the uncommitted unwind.
+			var err error
+			v, _, err = state.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
+			if err != nil {
+				return err
+			}
+			address := common.Address(k)
 			if len(v) > 0 {
 				var account accounts.Account
 				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
-				var address common.Address
-				copy(address[:], k)
 				newV := accounts.SerialiseV3(&account)
-				if accumulator != nil {
-					accumulator.ChangeAccount(address, account.Incarnation, newV)
+				accumulator.ChangeAccount(address, account.Incarnation, newV)
+				if _, changed := codeChanged[address]; changed {
+					code, _, err := state.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
+					if err != nil {
+						return err
+					}
+					accumulator.ChangeCode(address, account.Incarnation, bytes.Clone(code))
 				}
 			} else {
-				var address common.Address
-				copy(address[:], k)
-				if accumulator != nil {
-					accumulator.DeleteAccount(address)
-				}
+				accumulator.DeleteAccount(address)
 			}
 			return nil
 		}
@@ -304,6 +313,18 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	stateChanges.SortAndFlushInBackground(true)
 
 	if changeset != nil {
+		if accumulator != nil {
+			for _, entry := range changeset[kv.CodeDomain] {
+				address := common.Address([]byte(entry.Key)[:length.Addr])
+				if _, seen := codeChanged[address]; seen {
+					continue
+				}
+				codeChanged[address] = struct{}{}
+				if err := stateChanges.Collect(address[:], nil); err != nil {
+					return err
+				}
+			}
+		}
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
@@ -347,7 +368,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			}
 		}
 
-		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err := stateChanges.Load(nil, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 
@@ -412,16 +433,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if to < s.BlockNumber {
 		return nil
 	}
-	from := s.BlockNumber + 1
-	defer func() {
-		// A loop-exhausted batch still advanced progress past these blocks.
-		if err == nil || IsOnlyLoopExhausted(err) {
-			if werr := writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber); werr != nil {
-				err = werr
-			}
-		}
-	}()
-
 	// Stage coordination hoisted out of the exec core: resolve the start point
 	// and exec window from committed domains + the txNum index before handing a
 	// resolved execRange to ExecV3.
@@ -466,10 +477,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		inputTxNum:               inputTxNum,
 		offsetFromBlockBeginning: offsetFromBlockBeginning,
 		maxBlockNum:              to,
-	}
-
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
 	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
@@ -573,9 +580,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	}
 
 	var accumulator *shards.Accumulator
-	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-		accumulator = cfg.notifications.Accumulator
-
+	// Fork choice announces the canonical unwind if the validated fork is adopted.
+	notify := s.SyncMode() != stages.ModeForkValidation
+	if notify && cfg.notifications != nil && cfg.notifications.Accumulator != nil {
 		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
@@ -590,11 +597,19 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if header == nil {
 			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
 		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
-		if err != nil {
-			return err
+		var txs [][]byte
+		if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+			accumulator = cfg.notifications.Accumulator
+			// Transactions in the unwind target remain canonical.
+			txs, err = cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint+1, s.BlockNumber)
+			if err != nil {
+				return err
+			}
+		} else {
+			cfg.notifications.Accumulator.MarkIncomplete()
 		}
-		accumulator.StartChange(header, txs, true)
+		// An omitted change set must still identify the final unwind target.
+		cfg.notifications.Accumulator.StartChange(header, txs, true)
 	}
 
 	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
@@ -615,6 +630,17 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
+		// The prune is off, but blocks in state files can not be unwound, and a step goes into files only after its
+		// blocks' changesets are gone.
+		if cfg.blockReader != nil {
+			end, err := keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+			if err != nil {
+				return err
+			}
+			if err := rawdb.PruneTable(tx, kv.ChangeSets3, end, ctx, 200_000, noPruneChangesetsTimeout, logger, s.LogPrefix()); err != nil {
+				return err
+			}
+		}
 		return s.Done(tx)
 	}
 	// on chain-tip:
@@ -658,37 +684,44 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
-	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
-	// AlwaysGenerateChangesets disables this prune so the node retains
-	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag).
-	// Without the guard, the flag still controls *generation* but every
-	// generated changeset is pruned 96 blocks later, defeating the point.
-	if !cfg.syncCfg.AlwaysGenerateChangesets {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some chains produce blocks with 400 chunks of diff = 3mb
-		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
-			pruneChangeSetsStartTime := time.Now()
-			if err := rawdb.PruneTable(
-				tx,
-				kv.ChangeSets3,
-				blockPruneTo,
-				ctx,
-				pruneDiffsLimit,
-				pruneChangeSetsTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
-			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
-				logger.Debug(
-					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-					"duration", duration,
-					"timeout", pruneChangeSetsTimeout,
-					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				)
-			}
+	blockPruneTo := s.IrreversibleBlock + 1 // the prune is exclusive
+	// Blocks in state files can not be unwound, so their changesets go in every mode, also those an older build
+	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
+	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
+	// collated lose theirs.
+	var changesetsPruneTo uint64
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		changesetsPruneTo, err = keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+	} else {
+		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
+		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
+	}
+	if err != nil {
+		return err
+	}
+	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+	// Some chains produce blocks with 400 chunks of diff = 3mb
+	if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+		pruneChangeSetsStartTime := time.Now()
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			changesetsPruneTo,
+			ctx,
+			pruneDiffsLimit,
+			pruneChangeSetsTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"timeout", pruneChangeSetsTimeout,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			)
 		}
 	}
 
@@ -740,6 +773,59 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	}
 	return nil
 }
+
+func producesStateFiles(blockReader dbservices.FullBlockReader) bool {
+	return blockReader.FreezingCfg().ProduceE3 && !dbg.NoBackgroundMaintenance()
+}
+
+// blocksInFilesEnd is the block after the last block in the visible state files.
+func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader) (uint64, error) {
+	filesEnd := tx.Debug().TxNumsInFiles(kv.StateDomains...)
+	if filesEnd == 0 {
+		return 0, nil
+	}
+	lastBlock, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, filesEnd-1)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return lastBlock + 1, nil
+}
+
+// keptChangesetsFrom is the first block that keeps its changeset when changesets are kept for deep unwinds: the
+// blocks in state files, and in the steps about to be collated, lose theirs.
+func keptChangesetsFrom(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+	if !producesStateFiles(blockReader) {
+		return blocksInFilesEnd(ctx, tx, blockReader)
+	}
+	return collatableStepsEnd(ctx, tx, blockReader, irreversibleBlock)
+}
+
+// collatableStepsEnd is the block after the visible state files and after the steps not yet in them whose
+// blocks all reach no higher than irreversibleBlock.
+func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+	end, err := blocksInFilesEnd(ctx, tx, blockReader)
+	if err != nil {
+		return 0, err
+	}
+	txNumsReader := blockReader.TxnumReader()
+	irreversibleTxNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, irreversibleBlock)
+	if err != nil || !ok {
+		return end, err
+	}
+	stepSize := tx.Debug().StepSize()
+	stepsEnd := (irreversibleTxNum + 1) / stepSize * stepSize
+	if stepsEnd <= tx.Debug().TxNumsInFiles(kv.StateDomains...) {
+		return end, nil
+	}
+	lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, stepsEnd-1)
+	if err != nil || !ok {
+		return end, err
+	}
+	return lastBlock + 1, nil
+}
+
+// noPruneChangesetsTimeout bounds the changeset delete that collation still needs with the prune off.
+const noPruneChangesetsTimeout = 100 * time.Millisecond
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
 // txNum — the aggregator floors each to its file step. CommitmentDomain uses its

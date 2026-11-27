@@ -77,7 +77,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			AuthorizationsLen:  authorizationsLen,
 			AccessListLen:      uint64(len(msg.AccessList())),
 			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
-			IsContractCreation: msg.To().IsNil(),
+			IsContractCreation: tx.IsContractDeploy(),
 			IsSelfTransfer:     !msg.To().IsNil() && msg.To() == sender,
 			HasValue:           !msg.Value().IsZero(),
 			IsEIP2:             rules.IsHomestead,
@@ -88,6 +88,10 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			IsEIP7981:          rules.IsAmsterdam,
 			IsEIP2780:          rules.IsAmsterdam,
 		})
+		if frame, ok := tx.(*types.FrameTransaction); ok {
+			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, _, err = frame.GasLimits()
+			overflow = err != nil
+		}
 		requiredGas := intrinsicGasResult.ExecutionGas
 		if overflow {
 			return nil, nil, 0, protocol.ErrGasUintOverflow
@@ -96,13 +100,13 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 		if minimumGas > msg.Gas() {
 			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), minimumGas)
 		}
-		if msg.To().IsNil() {
+		if tx.IsContractDeploy() {
 			if err := vm.CheckMaxInitCodeSize(uint64(len(msg.Data())), rules.IsShanghai, rules.IsAmsterdam); err != nil {
 				return nil, nil, requiredGas, err
 			}
 		}
 
-		if rules.IsLondon {
+		if rules.IsLondon && tx.Type() != types.FrameTxType {
 			// EIP-1559 gas fee cap
 			err = protocol.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
 			if err != nil {
@@ -115,7 +119,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 		}
 
 		// EIP-2681: Limit account nonce to 2^64-1
-		if msg.Nonce()+1 < msg.Nonce() {
+		if msg.Nonce()+1 < msg.Nonce() && tx.Type() != types.FrameTxType {
 			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", protocol.ErrNonceMax, msg.Nonce())
 		}
 		h := tx.Hash()

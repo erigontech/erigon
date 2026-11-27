@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -442,70 +441,60 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// TestApplyLoopDrainsBlockedProducerOnNonCleanExit reproduces chfast's hang: a
-// non-clean apply-loop exit (a panic through the BAL sink, or an early error
-// return such as a failed roTx open) unwinds the loop while the exec loop is
-// blocked on a mustDeliver send into a full applyResults. mustDeliver ignores
-// ctx, so the deferred cancel+drain must empty applyResults to EOF to release
-// the producer; without the drain pe.wait() hangs forever. Both exit kinds must
-// drain — an early error return is not special-cased to the panic path.
+// After a non-clean apply-loop exit, the exec loop is blocked publishing into
+// commitResults while the calculator, its consumer, is blocked on a full
+// rootResults. Only a concurrent drain of applyResults and rootResults releases both.
 func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		panic bool
-	}{
-		{"panic", true},
-		{"error return", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			const buf = 4
-			applyResults := make(chan applyResult, buf)
-			consumers := newResultStream()
-			consumers.register("applyResults", applyResults)
+	applyResults := make(chan applyResult, 4)
+	commitResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult, 1)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	consumers.register("commitResults", commitResults)
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	execDone, calcDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(execDone)
+		for i := range 16 {
+			_ = consumers.publish(context.Background(), i, true)
+		}
+		consumers.close()
+	}()
+	go func() {
+		defer close(calcDone)
+		for range commitResults {
+			rootResults <- commitmentResult{}
+		}
+		close(rootResults)
+	}()
 
-			producerDone := make(chan struct{})
-			go func() {
-				defer close(producerDone)
-				for i := range buf * 4 {
-					_ = consumers.publish(ctx, i, true) // mustDeliver: blocks once the buffer fills
-				}
-				consumers.close()
-			}()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, rootResults)
+	}()
+	for name, done := range map[string]chan struct{}{"exec loop": execDone, "calculator": calcDone, "drain": drained} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s stranded: drainToClose did not empty both channels to close", name)
+		}
+	}
+}
 
-			loopErr := func() (err error) {
-				defer func() {
-					rec := recover()
-					if rec != nil {
-						err = fmt.Errorf("apply loop panic: %v", rec)
-					}
-					if rec != nil || err != nil {
-						cancel()
-						for range applyResults {
-						}
-					}
-				}()
-				if !tc.panic {
-					return fmt.Errorf("apply loop: open roTx")
-				}
-				n := 0
-				for range applyResults {
-					if n++; n == 2 {
-						panic("bal sink: injected fault")
-					}
-				}
-				return nil
-			}()
-
-			require.Error(t, loopErr)
-			select {
-			case <-producerDone:
-			case <-time.After(5 * time.Second):
-				t.Fatal("producer stranded on a mustDeliver send: apply loop did not drain applyResults")
-			}
-		})
+func TestApplyLoopDrainToCloseWithoutCalculator(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	applyResults <- 0
+	close(applyResults)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, nil)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drainToClose blocked on a nil rootResults")
 	}
 }
 
@@ -692,7 +681,7 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 // execLoopShouldExit doesn't honor that signal the exec loop parks on
 // its main select forever waiting for work the dispatcher will never
 // produce. Symptom in production: chiado
-// `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
+// `--sync.loop.block.limit=10_000` parallel
 // exec from block 0 silently hangs at the first step boundary
 // (block 150662 in chiado's case) — a hang masking the wrong-trie-root
 // failure that issue erigon#20711 reported as the visible symptom.
@@ -992,7 +981,7 @@ func sameSet(a, b []uint64) bool {
 //     cascading through the tx queue.
 //
 // The dep-order validation path flushes each tx with complete = its own
-// validity (FlushVersionedWrites(writeSet, valid, ...)), so an invalidated tx
+// validity (FlushWrites(writeSet, valid, ...)), so an invalidated tx
 // flushes with complete=false. This test asserts the downstream effect: a tx
 // that later reads the slot must see MVReadResultDependency (the validator
 // treats this as VersionInvalid and forces re-execution), not MVReadResultDone.
@@ -1013,7 +1002,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// The dep-order path flushes an invalidated tx with complete = its validity,
 	// i.e. false (writes stored as Estimate, not Done).
 	const complete = false
-	vm.FlushVersionedWrites(invalidTxWrites, complete)
+	vm.FlushWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.
@@ -1171,23 +1160,16 @@ func TestStopCausePropagation(t *testing.T) {
 
 // custom_trace commits on the same commitment trie the rest of the process selects.
 func TestCustomTraceSharedDomainsUseTheSelectedTrie(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
-	for _, parallel := range []bool{false, true} {
-		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
-			statecfg.ExperimentalParallelCommitment = parallel
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			tx, err := db.BeginTemporalRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+	doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
 
-			doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
-			require.NoError(t, err)
-			defer doms.Close()
-
-			require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
-		})
-	}
+	require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
 }
 
 // A send on a closed result channel is a channel-ownership bug: it must panic

@@ -888,3 +888,34 @@ func TestOpenBtreeIndexInMem(t *testing.T) {
 	require.False(t, inMem.InMem(), "Close must release the in-memory buffer")
 	require.Equal(t, 11, closed, "every OnClose callback runs once")
 }
+
+func Test_BtreeIndex_OrdinalLookupAfterNext(t *testing.T) {
+	tmp := t.TempDir()
+	logger := log.New()
+	dataPath := generateKV(t, tmp, 52, 180, 16, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, 0, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, 0)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	getter := seg.NewReader(kv.MakeGetter(), 0)
+	c, err := bt.Seek(getter, nil)
+	require.NoError(t, err)
+	require.True(t, c.Next())
+	c.Close()
+	require.Nil(t, c.Key())
+	require.Nil(t, c.Value())
+
+	k, v, _, err := bt.dataLookup(0, getter)
+	require.NoError(t, err)
+	k, v = bytes.Clone(k), bytes.Clone(v)
+
+	cur := bt.OrdinalLookup(getter, 0)
+	require.NotNil(t, cur)
+	require.Equal(t, k, cur.Key())
+	require.Equal(t, v, cur.Value())
+	cur.Close()
+}

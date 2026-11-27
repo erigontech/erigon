@@ -43,6 +43,8 @@ const (
 	minPeerCount     = "min_peer_count"
 	checkBlock       = "check_block"
 	maxSecondsBehind = "max_seconds_behind"
+
+	maxBodySize = 4 << 10
 )
 
 var (
@@ -121,7 +123,7 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 }
 
 func processFromBody(w http.ResponseWriter, r *http.Request, netAPI NetAPI, ethAPI EthAPI) {
-	body, errParse := parseHealthCheckBody(r.Body)
+	body, errParse := parseHealthCheckBody(http.MaxBytesReader(w, r.Body, maxBodySize))
 	defer r.Body.Close()
 
 	errMinPeerCount := errCheckDisabled

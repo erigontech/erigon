@@ -22,14 +22,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -235,22 +232,11 @@ func NextSubtree(in []byte) ([]byte, bool) {
 	return nil, false
 }
 
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
-}
-
 type DomainEntryDiff struct {
-	Key   string
-	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
+	Key string
+	// Previous value to restore; a non-nil empty slice means absent.
+	// A nil value is a legacy delete-only entry.
+	Value []byte
 }
 
 // DomainDiff represents a domain of state changes.
@@ -262,10 +248,6 @@ type DomainDiff struct {
 	currentStepBuf, keyBuf []byte
 }
 
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
-}
-
 func (d *DomainDiff) Len() int {
 	if d == nil {
 		return 0
@@ -273,10 +255,8 @@ func (d *DomainDiff) Len() int {
 	return len(d.prevValues)
 }
 
-// RecordDelta records a state change.
-// prevValue is the previous value at the key. If prevStep != step, the previous value lives
-// at a different step position in the DB and doesn't need restoring on unwind (just delete current).
-// We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
+// DomainUpdate keeps the first previous value recorded for each (key, step)
+// pair within this diff.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)

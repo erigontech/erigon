@@ -56,7 +56,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number
 // erigon_blockNumber will return latest executed block number or any block number requested
 func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
@@ -69,24 +69,22 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		rpcBlockNum = *rpcBlockNumPtr
 	}
 
-	overlayTx := api.filters.WithOverlay(tx)
-
 	var blockNum uint64
 	switch rpcBlockNum {
 	case rpc.LatestBlockNumber:
-		blockNum, err = rpchelper.GetLatestBlockNumber(overlayTx)
+		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
 	case rpc.EarliestBlockNumber:
 		blockNum = 0
 	case rpc.SafeBlockNumber:
-		blockNum, err = rpchelper.GetSafeBlockNumber(overlayTx)
+		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
-		blockNum, err = rpchelper.GetFinalizedBlockNumber(overlayTx)
+		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}

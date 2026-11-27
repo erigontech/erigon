@@ -63,8 +63,10 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 
 	buildResponse := func(s *state.CachingBeaconState, epoch uint64) ([]*committeeResponse, error) {
-		if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync committees duties: epoch %d is too far in the future", epoch))
+		cfg := s.BeaconConfig()
+		stateEpoch := state.Epoch(s)
+		if !randaoMixAvailable(stateEpoch+cfg.MinSeedLookahead+1, epoch, cfg.EpochsPerHistoricalVector) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("committees for epoch %d require a RANDAO mix unavailable in state epoch %d", epoch, stateEpoch))
 		}
 		resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 		committeeCount := s.CommitteeCount(epoch)
@@ -170,7 +172,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, randaoReadError(err)
 	}
 
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)

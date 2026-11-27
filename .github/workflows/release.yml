@@ -8,7 +8,7 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.27-bookworm"
+  BUILDER_IMAGE: "golang:1.27-trixie"
   TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
@@ -245,6 +245,25 @@ jobs:
             --tag ${DOCKER_URL}:${RELEASE_VERSION} \
             --push \
             .
+
+      - name: Check that the binaries need at most the glibc, libstdc++ and libgcc_s of RHEL 9
+        run: |
+          # RHEL 9 ships glibc 2.34, and libstdc++ 6.0.29 and libgcc_s of GCC 11. The trixie builder ships
+          # newer ones, so without this check a call that binds to a newer symbol version would raise the
+          # minimum unnoticed.
+          docker run --rm -v "${GITHUB_WORKSPACE}/docker-build-output:/out:ro" "${BUILDER_IMAGE}" bash -c '
+            fail=0
+            for f in /out/*/usr/local/bin/*; do
+              versions=$(readelf -V "$f") || { echo "readelf failed on $f"; fail=1; continue; }
+              for max in GLIBC_2.34 GLIBCXX_3.4.29 CXXABI_1.3.13 GCC_7.0.0; do
+                need=$(printf "%s\n" "$versions" | grep -o "${max%%_*}_[0-9.]*" | sort -uV | tail -1)
+                if [ -n "$need" ] && [ "$(printf "%s\n" "$max" "$need" | sort -V | tail -1)" != "$max" ]; then
+                  echo "$f needs $need, newer than $max"
+                  fail=1
+                fi
+              done
+            done
+            exit $fail'
 
       - name: Create archives and checksums
         env:

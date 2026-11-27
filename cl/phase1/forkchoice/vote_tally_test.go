@@ -91,6 +91,29 @@ func TestVoteTallyMatchesFullRecount(t *testing.T) {
 	require.Greater(t, compared, 500)
 }
 
+// Once the tally has a baseline, every recorded vote or equivocation must already be counted,
+// so get_head has no per-validator work left.
+func TestVoteTallyAppliesVotesWhenRecorded(t *testing.T) {
+	const validators = 400
+	rng := rand.New(rand.NewSource(2))
+	roots := make([]common.Hash, 6)
+	for i := range roots {
+		roots[i][0] = byte(i + 1)
+	}
+	f := &ForkChoiceStore{latestMessages: newLatestMessagesStore(validators)}
+	cs := newVoteTallyTestState(rng, validators)
+	f.voteTally.votes(f, solid.Checkpoint{Epoch: 1}, cs)
+	for step := range 2000 {
+		vi := uint64(rng.Intn(validators + 40))
+		if rng.Intn(10) == 0 {
+			f.setUnequivocating(vi)
+		} else {
+			f.setLatestMessage(vi, LatestMessage{Epoch: uint64(step), Root: roots[rng.Intn(len(roots))]})
+		}
+		require.Equal(t, recountVotes(f, cs), f.voteTally.weightsByRoot(), "step %d", step)
+	}
+}
+
 func TestVoteTallyReusesSlotsAndOmitsZeroWeightRoots(t *testing.T) {
 	const validators = 4
 	cs := &checkpointState{

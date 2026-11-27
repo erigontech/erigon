@@ -245,7 +245,7 @@ test-filtered:
 			echo "ramdisk: $$_rd"; \
 		fi; \
 	fi; \
-	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
+	(set -o pipefail && $(GOTEST) 2>&1 | ./tools/filter-test-output | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
@@ -316,13 +316,15 @@ $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 endif
 
-## check-eest-shards:                  verify stable/devnet EEST fork partitions
+## check-eest-shards:                  verify EEST shard coverage
 .PHONY: check-eest-shards
 check-eest-shards:
-	@bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache eest_stable eest_devnet
-	@mkdir -p test-fixtures-cache/eest_stable/fixtures/.meta test-fixtures-cache/eest_devnet/fixtures/.meta
-	@tar -xzf test-fixtures-cache/eest_stable.tar.gz -C test-fixtures-cache/eest_stable fixtures/.meta/index.json
-	@tar -xzf test-fixtures-cache/eest_devnet.tar.gz -C test-fixtures-cache/eest_devnet fixtures/.meta/index.json
+	@set -e; for corpus in eest_stable eest_devnet eest_zkevm; do \
+		bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache "$$corpus"; \
+		dir="test-fixtures-cache/$$corpus"; \
+		mkdir -p "$$dir/fixtures/.meta"; \
+		tar -xzf "$$dir.tar.gz" -C "$$dir" fixtures/.meta/index.json; \
+	done
 	@bash tools/check-eest-shard-coverage.sh
 
 ## test-bench:                         check the benchmarks compile and run
@@ -404,7 +406,6 @@ eest-devnet:
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
-		echo "ENV ERIGON_EXEC3_PARALLEL=true" >> clients/erigon/Dockerfile && \
 		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_GLAMSTERDAM_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
@@ -506,7 +507,7 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
+## lintci:                            run golangci-lint linters (full run, used in CI; skips the fast-only pass)
 lintci:
 	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated

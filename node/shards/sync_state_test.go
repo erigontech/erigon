@@ -341,7 +341,7 @@ func TestBuildSyncingReplyHandoffSurvivesProgressBelowCommitmentBlock(t *testing
 	require.NotNil(t, n.snapDownload.Load(), "handoff still pinned")
 }
 
-// The pipeline publishes with its rw tx (Hook.BeforeRun), which carries the
+// The pipeline publishes with its rw tx (Hook.NotifySyncState), which carries the
 // snapshots stage's uncommitted Execution bump. That observation must not end
 // the handoff for readers of the committed view: until the pipeline's first
 // commit, a poller still reads the pre-download position.

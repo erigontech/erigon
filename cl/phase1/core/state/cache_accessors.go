@@ -748,7 +748,7 @@ func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cl
 	slices.Sort(indices)
 
 	return &cltypes.IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(len(indices), indices),
+		AttestingIndices: solid.NewRawUint64List(int(b.BeaconConfig().PtcSize), indices),
 		Data:             payloadAttestation.Data,
 		Signature:        payloadAttestation.Signature,
 	}, nil

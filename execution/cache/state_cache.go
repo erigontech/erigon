@@ -37,12 +37,6 @@ import (
 const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
-
-	// Per-domain avg bytes held outside freelru's element, translating the byte
-	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
-	// inside the element, which the slot charge already covers.
-	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
-	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -89,8 +83,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
+	sc.caches[kv.AccountsDomain] = NewDomainCacheMode(accountBytes, mode)
+	sc.caches[kv.StorageDomain] = NewDomainCacheMode(storageBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -112,16 +106,6 @@ func stateCacheModeFromEnv() Mode {
 	default:
 		log.Warn("[cache] unrecognised STATE_CACHE_MODE; defaulting to evict", "value", v)
 		return ModeEvictLRU
-	}
-}
-
-// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
-// from the byte budget using the supplied per-domain avg. It jump-grows from a
-// small start into the shared envelope on demand, so a domain with a small
-// working set (a test fixture) never pre-commits the full budget.
-func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
-	return &DomainCache{
-		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
@@ -163,7 +147,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 	return cache.GetWithTxNum(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
 // when the code domain cache is not a CodeCache (defensive fallback).
 //
@@ -171,7 +155,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
 // patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false
@@ -243,7 +227,7 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	cc.PutAddrCodeHash(addr, h, txNum)
+	cc.PutAddrCodeHash(addr, h, readFillStamp(txNum, visibleEnd))
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
@@ -254,9 +238,15 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 	cc.DeleteAddrCodeHash(addr)
 }
 
+func readFillStamp(readTxNum, visibleEnd uint64) uint64 {
+	if visibleEnd > 0 {
+		return max(readTxNum, visibleEnd-1)
+	}
+	return readTxNum
+}
+
 // fillIfFresh conditionally inserts an accounts or storage value read from a
-// read view without replacing an authoritative entry. Negatives use the view's
-// last included txNum. Code goes through fillCodeIfFresh.
+// read view without replacing an authoritative entry. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd,
 	viewEpoch uint64,
 ) {
@@ -266,9 +256,6 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	if len(value) == 0 {
 		readTxNum = 0
-		if visibleEnd > 0 {
-			readTxNum = visibleEnd - 1
-		}
 	}
 	value = bytes.Clone(value)
 	c.admissionMu.RLock()
@@ -278,7 +265,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, value, readTxNum)
+	cache.PutIfAbsent(key, value, readFillStamp(readTxNum, visibleEnd))
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -315,7 +302,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
+	// The accounts frontier gates admission, but code read fills use the code frontier.
+	// A binding derived from an account already carries its bound in readTxNum.
+	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readFillStamp(readTxNum, visibleEnd))
 }
 
 // deleteKey removes the data for the given domain and key. The authoritative

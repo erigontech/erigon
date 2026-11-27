@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -151,6 +153,17 @@ func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
 	r := NewHistoryRanges(*NewMergeRange("accounts", true, 0, 3), MergeRange{})
 	_, _, err := hc.staticFilesInRange(r)
 	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
+
+	_, _, err = hc.staticFilesInRange(NewHistoryRanges(*NewMergeRange("accounts", true, 1, 3), MergeRange{}))
+	require.Error(t, err, "staticFilesInRange must reject a merge range whose source files start late")
+
+	hc.files = hc.files[:1]
+	_, _, err = hc.staticFilesInRange(r)
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range beyond its source files")
+
+	hc.files = nil
+	_, _, err = hc.staticFilesInRange(r)
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range with no source files")
 }
 
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
@@ -185,7 +198,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
-				accessors: d.History.Accessors,
+				accessors: &d.History.Accessors,
 			})
 			d.History.InvertedIndex.SetChecker(checker)
 		}
@@ -866,6 +879,16 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		assert.False(t, mr.needMerge)
 	})
 
+	t.Run("window_start_clamped_to_first_file", func(t *testing.T) {
+		// [1036, 1038), [1038, 1039), [1039, 1040) ->
+		// [1036, 1040)   (older files were retired; 1040's window would start at 1024)
+		files := visibleFiles{f(1036, 1038), f(1038, 1039), f(1039, 1040)}
+		mr := findMergeRangeInFiles(files, stepSize, 1040, bigSpan, true)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(1036), mr.from)
+		assert.Equal(t, uint64(1040), mr.to)
+	})
+
 	// --- Hand-traced scenarios ---
 
 	t.Run("non_canonical_all_self_aligned_no_merge", func(t *testing.T) {
@@ -1143,6 +1166,84 @@ func TestMergeFiles(t *testing.T) {
 	dc.Close()
 }
 
+func TestMergeReplacementClosesAfterReaders(t *testing.T) {
+	t.Parallel()
+	const domain = kv.CodeDomain
+	for _, tc := range []struct {
+		name            string
+		afterValueMerge bool
+		files           func(*AggregatorRoTx) visibleFiles
+	}{
+		{"values", false, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].files }},
+		{"history", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.files }},
+		{"history_index", true, func(at *AggregatorRoTx) visibleFiles { return at.d[domain].ht.iit.files }},
+		{"logaddrs", true, func(at *AggregatorRoTx) visibleFiles { return at.searchII(kv.LogAddrIdx).files }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const stepSize = uint64(10)
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			for step := range kv.Step(2) {
+				require.NoError(t, agg.buildFiles(ctx, db, step, allIrreversible, nil))
+			}
+			// Each domain merges its values before its own history and history index.
+			// Standalone indexes wait for a pass with no domain value merges.
+			if tc.afterValueMerge {
+				progressed, err := agg.mergeLoopStep(ctx, 2*stepSize)
+				require.NoError(t, err)
+				require.True(t, progressed, "expected a merge of the value files")
+			}
+			source := agg.BeginFilesRo()
+			defer source.Close()
+			require.Len(t, tc.files(source), 2)
+			ranges := source.findMergeRange(2*stepSize, stepSize, agg.StepsInFrozenFile())
+			inputs, err := source.filesInRange(ranges)
+			require.NoError(t, err)
+			merged, err := source.mergeFiles(ctx, inputs, ranges)
+			require.NoError(t, err)
+			t.Cleanup(merged.Close)
+			source.Close()
+
+			fileIn := func(view *AggregatorRoTx) *FilesItem {
+				t.Helper()
+				files := tc.files(view)
+				require.Len(t, files, 1)
+				return files[0].src
+			}
+			// OpenFolder publishes the mappings it opens from disk. Pin that view
+			// before the merge publishes its own mappings of the same files.
+			require.NoError(t, agg.OpenFolder(db))
+			oldView := agg.BeginFilesRo()
+			defer oldView.Close()
+			original := fileIn(oldView)
+			t.Cleanup(original.closeFiles)
+			originalMapping := original.decompressor
+			paths := original.FilePaths(agg.dirs.Snap)
+			require.Greater(t, len(paths), 1, "expected a data file and its accessors")
+
+			agg.integrateMergedDirtyFiles(merged)
+			newView := agg.BeginFilesRo()
+			defer newView.Close()
+			replacement := fileIn(newView)
+			replacementMapping := replacement.decompressor
+			require.NotSame(t, originalMapping, replacementMapping)
+			require.Equal(t, paths, replacement.FilePaths(agg.dirs.Snap))
+			require.True(t, originalMapping.IsOpen(), "the old reader still holds this mapping")
+
+			oldView.Close()
+			require.False(t, originalMapping.IsOpen(), "the last reader must release the old mapping")
+			require.Empty(t, original.FilePaths(agg.dirs.Snap), "the old accessor handles must close too")
+			require.True(t, replacementMapping.IsOpen())
+			for _, path := range paths {
+				require.FileExists(t, filepath.Join(agg.dirs.Snap, path))
+			}
+			newView.Close()
+			agg.Close()
+			require.False(t, replacementMapping.IsOpen())
+		})
+	}
+}
+
 func TestDomainMergeCancellationClosesOutput(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(32)
@@ -1318,7 +1419,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
-			accessors: commitment.Accessors,
+			accessors: &commitment.Accessors,
 		}
 		checker.AddDependency(FromDomain(account.Name), info)
 		checker.AddDependency(FromDomain(storage.Name), info)
@@ -1669,4 +1770,15 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 		want = append(want, txNum)
 	}
 	require.Equal(t, want, got)
+}
+
+func TestMergeResultFilePathsIncludesHistory(t *testing.T) {
+	t.Parallel()
+	item := func(path string) *FilesItem {
+		return &FilesItem{existence: &existence.Filter{FilePath: path}}
+	}
+	var mf MergeResult
+	mf.dHist[kv.AccountsDomain] = item("/snap/history/v1.0-accounts.0-2.v")
+	mf.dIdx[kv.AccountsDomain] = item("/snap/idx/v1.0-accounts.0-2.ef")
+	require.Equal(t, []string{"history/v1.0-accounts.0-2.v", "idx/v1.0-accounts.0-2.ef"}, mf.FilePaths("/snap"))
 }

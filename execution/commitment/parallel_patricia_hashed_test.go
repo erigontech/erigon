@@ -54,6 +54,7 @@ func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
+	assert.Equal(t, VariantCommitmentV3, ParseTrieVariant("v3"))
 }
 
 func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
@@ -116,11 +117,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		p.SetTraceWriter(nil)
 		assert.Nil(t, p.template.traceW, "nil writer disables tracing on template")
 	})
-
-	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
-		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-		require.NotPanics(t, func() { p.EnableCsvMetrics("") })
-	})
 }
 
 func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
@@ -163,7 +159,6 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 		var buf bytes.Buffer
 		p.SetTraceWriter(&buf)
 		p.SetTraceWriter(nil)
-		p.EnableCsvMetrics("")
 		p.ResetContext(nil)
 	})
 

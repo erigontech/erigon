@@ -61,7 +61,7 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 
 // A value-transfer revival writes no Nonce or CodeHash, so the account record
 // still floors on the pre-destruct cells. Both have to be wiped, or the record
-// contradicts the code and nonce versionedReadCore serves the EVM.
+// contradicts the code and nonce readCore serves the EVM.
 func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(105)
@@ -356,9 +356,13 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 
 			writes, fwErr := ibs.FinalizedWrites(&chain.Rules{})
 			require.NoError(t, fwErr)
-			for _, path := range []AccountPath{AddressPath, NoncePath, CodePath, CodeHashPath, CodeSizePath} {
+			for _, path := range []AccountPath{AddressPath, CodePath, CodeSizePath} {
 				require.False(t, writes.Has(WriteHeader{Address: addr, Path: path}), "%s must not survive the destruct", path)
 			}
+			_, hasNonce := writes.GetNonce(addr)
+			_, hasCodeHash := writes.GetCodeHash(addr)
+			require.False(t, hasNonce, "Nonce must not survive the destruct")
+			require.False(t, hasCodeHash, "CodeHash must not survive the destruct")
 
 			bal, hasBalance := writes.GetBalance(addr)
 			require.True(t, hasBalance, "the destruct writes a balance cell in both the burn and EIP-8246 cases")
@@ -438,7 +442,10 @@ func TestVersionedStateReader_RecordedZeroWithoutDestructStands(t *testing.T) {
 
 // A BAL-preloaded zero balance is a value like any other, not evidence that the
 // account exists. An overlay that leaves the record EIP-161-empty is no record.
-func TestVersionedStateReader_ZeroCellsSynthesizeNoRecord(t *testing.T) {
+// A 0-value write with no self-destruct is a live (if empty) account: the finalized
+// reader composes it present and leaves the EIP-161 empty-account removal to the
+// write side (a ValueDeleted balance), rather than synthesizing the removal here.
+func TestVersionedStateReader_ZeroBalanceCellReadsPresentEmpty(t *testing.T) {
 	vm := NewVersionMap(nil)
 	addr := getAddress(1)
 	vm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
@@ -446,7 +453,8 @@ func TestVersionedStateReader_ZeroCellsSynthesizeNoRecord(t *testing.T) {
 	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.Nil(t, acc)
+	require.NotNil(t, acc)
+	require.True(t, acc.Empty())
 }
 
 // An in-flight write above a committed destruct must not narrow the destruct
@@ -516,7 +524,7 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 
 			fw, fwErr := ibs.FinalizedWrites(&chain.Rules{})
 			require.NoError(t, fwErr)
-			vm.FlushVersionedWrites(fw, true)
+			vm.FlushWrites(fw, true)
 
 			// The destruct's wipe is confirmed by the write-side signals ReadAccountData
 			// reconstructs from, not by read-side field synthesis: both a burn
@@ -551,4 +559,46 @@ func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
 	// A destroyed account's code hash is empty; applySubFieldWrites keeps no destroy-tx
 	// cell — the wipe is resolved by the lifecycle, not by field synthesis.
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "a destroyed account has an empty code hash")
+}
+
+// A wiped read after a destruct and a revival records the SelfDestruct memo it
+// reads through, which must hold the revival's false, not the destruct's true.
+func TestWipedReadAfterRevivalKeepsSelfDestructFalse(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(120)
+	staleKey := accounts.InternKey(common.Hash{31: 1})
+	freshKey := accounts.InternKey(common.Hash{31: 2})
+	for _, tc := range []struct {
+		name string
+		read func(ibs *IntraBlockState) error
+	}{
+		{"stale storage cell", func(ibs *IntraBlockState) error { _, err := ibs.GetState(addr, staleKey); return err }},
+		{"storage with no cell", func(ibs *IntraBlockState) error { _, err := ibs.GetState(addr, freshKey); return err }},
+		{"code", func(ibs *IntraBlockState) error { _, err := ibs.GetCode(addr); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, StoragePath, staleKey, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+			writeFor(vm, addr, CodePath, accounts.NilKey, Version{TxIndex: 0}, accounts.NewCode([]byte{0x60, 0x00}), true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+			fresh := accounts.NewAccount()
+			fresh.Balance = *uint256.NewInt(1)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+			writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 2}, &fresh, true)
+
+			ibs := NewWithVersionMap(newAccountStateReader(addr), vm)
+			ibs.SetTxContext(1, 3)
+			ibs.SetVersion(0)
+			require.NoError(t, tc.read(ibs))
+			// Before HasSelfdestructed, which records the cell itself and ignores a
+			// value read from the version map.
+			recorded, ok := ibs.reads.GetSelfDestruct(addr)
+			require.True(t, ok)
+			require.False(t, recorded.Val, "the recorded read must hold the revival")
+			destructed, err := ibs.HasSelfdestructed(addr)
+			require.NoError(t, err)
+			require.False(t, destructed, "the account was revived by tx 2, so it is not self-destructed")
+		})
+	}
 }

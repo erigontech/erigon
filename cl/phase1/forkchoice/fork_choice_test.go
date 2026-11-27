@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -117,6 +118,34 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 	}
 }
 
+func TestOnBlockSeedsEpochBoundaryCopyWithRescannedTotal(t *testing.T) {
+	blocks, anchor, post := tests.GetCapellaRandom()
+	anchorTotal := anchor.GetTotalActiveBalance()
+	store := newBellatrixForkChoiceStore(t, anchor, nil)
+
+	for i, block := range blocks {
+		store.OnTick((anchor.GenesisTime() + block.Block.Slot*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+		require.NoError(t, store.OnBlock(t.Context(), block, false, false, false))
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		copied, err := store.GetStateAtBlockRoot(root)
+		require.NoError(t, err)
+		rescanned, err := copied.Copy()
+		require.NoError(t, err)
+		recorded, ok := store.TotalActiveBalance(root)
+		require.True(t, ok)
+
+		require.Equal(t, rescanned.GetTotalActiveBalance(), recorded)
+		require.Equal(t, rescanned.GetTotalActiveBalance(), copied.GetTotalActiveBalance())
+		require.Equal(t, rescanned.BaseRewardPerIncrement(), copied.BaseRewardPerIncrement())
+
+		if i == len(blocks)-1 {
+			require.Equal(t, post.GetTotalActiveBalance(), rescanned.GetTotalActiveBalance())
+			require.NotEqual(t, anchorTotal, rescanned.GetTotalActiveBalance())
+		}
+	}
+}
+
 func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	block := blocks[0]
@@ -171,7 +200,58 @@ func TestOnBlockKnownInvalidRetryClearsOptimisticCandidate(t *testing.T) {
 	require.False(t, store.IsRootOptimistic(blockRoot))
 }
 
+func TestOnBlockInvalidPayloadWithLatestValidHashRevertsHeadToValidBranch(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	roots := make([]common.Hash, 4)
+	for i := range roots {
+		root, err := blocks[i].Block.HashSSZ()
+		require.NoError(t, err)
+		roots[i] = root
+	}
+	invalidResponse := &execution_client.InvalidPayloadError{
+		LatestValidHash: blocks[0].Block.Body.ExecutionPayload.BlockHash,
+		Err:             errors.New("injected invalid payload"),
+	}
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	gomock.InOrder(
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, invalidResponse),
+	)
+	store := newUntickedBellatrixForkChoiceStore(t, anchorState, engine)
+
+	for i, block := range blocks[:3] {
+		store.OnTick((anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
+		require.NoError(t, store.OnBlock(t.Context(), block, true, true, false), i)
+	}
+	head, _, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, roots[2], head)
+
+	store.OnTick((anchorState.GenesisTime() + blocks[3].Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
+	require.ErrorIs(t, store.OnBlock(t.Context(), blocks[3], true, true, false), forkchoice.ErrBlockInvalid)
+
+	head, _, err = store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, roots[0], head)
+	require.False(t, store.IsRootOptimistic(roots[1]))
+	require.False(t, store.IsRootOptimistic(roots[2]))
+}
+
 func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	store := newUntickedBellatrixForkChoiceStore(t, anchorState, engine)
+	store.OnTick(2000 * 1000)
+	return store
+}
+
+func newUntickedBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	return newUntickedForkChoiceStoreWithSyncedData(t, anchorState, engine, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true))
+}
+
+func newUntickedForkChoiceStoreWithSyncedData(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine, syncedData *synced_data.SyncedDataManager) *forkchoice.ForkChoiceStore {
 	t.Helper()
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
 	require.NoError(t, err)
@@ -185,7 +265,7 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		forkGraphDisk,
 		beaconevents.NewEventEmitter(),
-		synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+		syncedData,
 		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		validator_params.NewValidatorParams(),
@@ -193,7 +273,6 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2000 * 1000)
 	return store
 }
 
@@ -526,4 +605,16 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	bsRoot, err := bs.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
+}
+
+func TestOnBlockWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
+	blocks, pre, _ := tests.GetPhase0Random()
+	block := blocks[0]
+	require.Positive(t, block.Block.Body.ProposerSlashings.Len())
+	block.Block.Body.ProposerSlashings.Get(0).Header1.Signature = common.Bytes96(bls.InfiniteSignature)
+	store := newBellatrixForkChoiceStore(t, pre, nil)
+	store.OnTick((pre.GenesisTime() + block.Block.Slot*pre.BeaconConfig().SecondsPerSlot) * 1000)
+	err := store.OnBlock(t.Context(), block, false, false, false)
+	require.Error(t, err, "OnBlock imported a new block with an invalid proposer-slashing signature")
+	require.ErrorContains(t, err, "signature")
 }

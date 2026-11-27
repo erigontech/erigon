@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"math/big"
+	"math/bits"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
@@ -64,9 +66,7 @@ func DecodeUint64(input string) (uint64, error) {
 
 // EncodeUint64 encodes i as a hex string with 0x prefix.
 func EncodeUint64(i uint64) string {
-	enc := make([]byte, 2, 10)
-	copy(enc, "0x")
-	return string(strconv.AppendUint(enc, i, 16))
+	return string(AppendUint64(make([]byte, 0, 18), i))
 }
 
 var bigWordNibbles int
@@ -323,4 +323,18 @@ func IsHex(str string) bool {
 // isHexCharacter returns bool of c being a valid hexadecimal.
 func isHexCharacter(c byte) bool {
 	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+// AppendUint64 appends v as a 0x-prefixed hex quantity. It is faster than strconv.AppendUint with
+// base 16, which formats into a scratch array and copies it.
+func AppendUint64(dst []byte, v uint64) []byte {
+	n := max((bits.Len64(v)+3)/4, 1)
+	l := len(dst)
+	dst = slices.Grow(dst, n+2)[:l+n+2]
+	dst[l], dst[l+1] = '0', 'x'
+	for i := l + n + 1; i > l+1; i-- {
+		dst[i] = "0123456789abcdef"[v&0xf]
+		v >>= 4
+	}
+	return dst
 }

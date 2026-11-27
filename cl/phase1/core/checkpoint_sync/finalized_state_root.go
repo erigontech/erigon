@@ -26,7 +26,7 @@ func FinalizedStateRootFileName(snappyState []byte) string {
 }
 
 func RemoveObsoleteFinalizedStateRoots(directory, keepPath string) error {
-	rootFiles, err := filepath.Glob(filepath.Join(directory, finalizedStateRootPrefix+"*"))
+	rootFiles, err := dir.Glob(filepath.Join(directory, finalizedStateRootPrefix+"*"))
 	if err != nil {
 		return err
 	}

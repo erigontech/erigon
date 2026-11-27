@@ -57,8 +57,12 @@ func transactionTestCmd(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	files, err := collectFiles(path)
+	if err != nil {
+		return err
+	}
 	results, err := runTestFilesParallel(
-		filter.filterFiles(collectFiles(path)),
+		filter.filterFiles(files),
 		workers,
 		func(path string) ([]testResult, error) {
 			return runTransactionTest(path, filter)

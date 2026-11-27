@@ -78,6 +78,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		fcu.NewestLCUpdate.SyncAggregate = blocks[len(blocks)-1].Block.Body.SyncAggregate
 		fcu.NewestLCUpdate.AttestedHeader, err = lightclient_utils.BlockToLightClientHeader(blocks[len(blocks)-1])
 		require.NoError(c.t, err)
+		fcu.NewestLCFinalityUpdate = fcu.NewestLCUpdate
 		fcu.NewestLCUpdate.FinalizedHeader = fcu.NewestLCUpdate.AttestedHeader
 		fcu.LCUpdates[1] = fcu.NewestLCUpdate
 		fcu.LCUpdates[2] = fcu.NewestLCUpdate

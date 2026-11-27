@@ -111,6 +111,19 @@ const (
 	SLOTNUM     OpCode = 0x4b
 )
 
+const APPROVE OpCode = 0xaa
+
+const (
+	TXPARAM OpCode = 0xb0 + iota
+	FRAMEDATALOAD
+	FRAMEDATACOPY
+	FRAMEPARAM
+	SIGPARAM
+	SIGDATACOPY
+	TXTRACE
+	EVENTDATACOPY
+)
+
 // 0x50 range - 'storage' and execution.
 const (
 	POP      OpCode = 0x50
@@ -227,6 +240,9 @@ const (
 	REVERT       OpCode = 0xfd
 	INVALID      OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
+	// SENDALL is Bogota's name for SELFDESTRUCT. The assembler accepts both
+	// names, and OpCode.String returns "SELFDESTRUCT" for trace compatibility.
+	SENDALL OpCode = SELFDESTRUCT
 )
 
 // Since the opcodes aren't all in order we can't use a regular slice.
@@ -284,18 +300,27 @@ var opCodeToString = map[OpCode]string{
 	EXTCODEHASH:    "EXTCODEHASH",
 
 	// 0x40 range - block operations.
-	BLOCKHASH:   "BLOCKHASH",
-	COINBASE:    "COINBASE",
-	TIMESTAMP:   "TIMESTAMP",
-	NUMBER:      "NUMBER",
-	DIFFICULTY:  "DIFFICULTY",
-	GASLIMIT:    "GASLIMIT",
-	CHAINID:     "CHAINID",
-	SELFBALANCE: "SELFBALANCE",
-	BASEFEE:     "BASEFEE",
-	BLOBHASH:    "BLOBHASH",
-	BLOBBASEFEE: "BLOBBASEFEE",
-	SLOTNUM:     "SLOTNUM",
+	BLOCKHASH:     "BLOCKHASH",
+	COINBASE:      "COINBASE",
+	TIMESTAMP:     "TIMESTAMP",
+	NUMBER:        "NUMBER",
+	DIFFICULTY:    "DIFFICULTY",
+	GASLIMIT:      "GASLIMIT",
+	CHAINID:       "CHAINID",
+	SELFBALANCE:   "SELFBALANCE",
+	BASEFEE:       "BASEFEE",
+	BLOBHASH:      "BLOBHASH",
+	BLOBBASEFEE:   "BLOBBASEFEE",
+	SLOTNUM:       "SLOTNUM",
+	APPROVE:       "APPROVE",
+	TXPARAM:       "TXPARAM",
+	FRAMEDATALOAD: "FRAMEDATALOAD",
+	FRAMEDATACOPY: "FRAMEDATACOPY",
+	FRAMEPARAM:    "FRAMEPARAM",
+	SIGPARAM:      "SIGPARAM",
+	SIGDATACOPY:   "SIGDATACOPY",
+	TXTRACE:       "TXTRACE",
+	EVENTDATACOPY: "EVENTDATACOPY",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -459,6 +484,15 @@ var stringToOp = map[string]OpCode{
 	"BLOBHASH":       BLOBHASH,
 	"BLOBBASEFEE":    BLOBBASEFEE,
 	"SLOTNUM":        SLOTNUM,
+	"APPROVE":        APPROVE,
+	"TXPARAM":        TXPARAM,
+	"FRAMEDATALOAD":  FRAMEDATALOAD,
+	"FRAMEDATACOPY":  FRAMEDATACOPY,
+	"FRAMEPARAM":     FRAMEPARAM,
+	"SIGPARAM":       SIGPARAM,
+	"SIGDATACOPY":    SIGDATACOPY,
+	"TXTRACE":        TXTRACE,
+	"EVENTDATACOPY":  EVENTDATACOPY,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -572,6 +606,7 @@ var stringToOp = map[string]OpCode{
 	"REVERT":         REVERT,
 	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
+	"SENDALL":        SENDALL,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.

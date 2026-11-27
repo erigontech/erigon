@@ -268,6 +268,13 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 		return fmt.Errorf("opening data file %s: %w", dataPath, err)
 	}
 	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat data file %s: %w", dataPath, err)
+	}
+	if st.Size() != info.TotalLength() {
+		return fmt.Errorf("size mismatch, file: %s, size %d, torrent length %d", filepath.Base(dataPath), st.Size(), info.TotalLength())
+	}
 
 	hasher := sha1.New()
 	pieceLen := info.PieceLength

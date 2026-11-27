@@ -495,3 +495,62 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 	}
 	t.Logf("survivors=%d", len(got))
 }
+
+type cancelOnDelete struct {
+	kv.RwCursorDupSort
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnDelete) DeleteCurrent() error {
+	defer c.cancel()
+	return c.RwCursorDupSort.DeleteCurrent()
+}
+
+func TestDupSortPrune_WalkCancelResumesAtTheCutKey(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    prune.StorageMode
+		encode  func(i uint64) []byte
+		deleted uint64
+	}{
+		{"PrefixVal", prune.PrefixValStorageMode, func(i uint64) []byte {
+			return append(binary.BigEndian.AppendUint64(nil, i*10), byte(i))
+		}, 4},
+		{"StepValue", prune.StepValueStorageMode, func(i uint64) []byte {
+			return encodeStepVal(i, []byte{byte(i)})
+		}, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDupSortDB(t)
+			defer db.Close()
+
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			for k := uint64(1); k <= 64; k++ {
+				for i := range uint64(5) {
+					require.NoError(t, tx.Put(testDupSortTable, userKey(k), tc.encode(i)))
+				}
+			}
+
+			logEvery := time.NewTicker(time.Hour)
+			defer logEvery.Stop()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			raw, err := tx.RwCursorDupSort(testDupSortTable)
+			require.NoError(t, err)
+			defer raw.Close()
+
+			stat, err := prune.TableScanningPrune(
+				ctx, "test", "dup",
+				0, 35, 16, logEvery, log.New(),
+				nil, &cancelOnDelete{RwCursorDupSort: raw, cancel: cancel}, &prune.Stat{}, tc.mode,
+			)
+			require.NoError(t, err)
+			require.EqualValues(t, tc.deleted, stat.PruneCountValues)
+			require.Equal(t, prune.InProgress, stat.ValueProgress)
+			require.Equal(t, userKey(1), stat.LastPrunedValue)
+		})
+	}
+}

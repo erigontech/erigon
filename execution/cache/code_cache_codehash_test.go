@@ -145,6 +145,7 @@ func TestCodeCache_PutWithCodeHash_EvictsWhenFull(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeEntryBytes+8), 1*datasize.MB))
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
+	c.codeHashToCode.c.CleanUp()
 
 	_, first := c.GetByCodeHash(makeCodeHash(1))
 	_, second := c.GetByCodeHash(makeCodeHash(2))

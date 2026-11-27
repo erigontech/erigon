@@ -20,10 +20,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 type AttestationDataProducer interface {
-	ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error)
-	CachedAttestationData(slot uint64) (solid.AttestationData, bool, error)
+	ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error)
+	CachedAttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool)
 }

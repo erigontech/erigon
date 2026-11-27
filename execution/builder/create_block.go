@@ -31,15 +31,12 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -87,7 +84,7 @@ func StageBuilderCreateBlockCfg(
 // createBlock constructs the block header and selects uncles.
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func createBlock(sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg, logger log.Logger) (err error) {
+func createBlock(tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg, logger log.Logger) (err error) {
 	const logPrefix = "BuilderCreateBlock"
 
 	current := cfg.builder.BuiltBlock
@@ -183,10 +180,7 @@ func createBlock(sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	defer ibs.Close()
-
-	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
+	if err = cfg.engine.Prepare(chain, header); err != nil {
 		logger.Error("Failed to prepare header for building",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),

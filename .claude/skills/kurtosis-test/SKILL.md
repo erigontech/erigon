@@ -332,8 +332,7 @@ Auto-iterates by default (`auto=true`), capped at `max-attempts=5`. Per attempt:
 6. **Record**: per attempt — symptom, hypothesis, fix applied, outcome.
 
 After `max-attempts` consecutive failures, halt and print the per-attempt history. Do
-not auto-apply more fixes once the cap is hit. Reference: `/autoresearch` follows the
-same iterate-and-record pattern.
+not auto-apply more fixes once the cap is hit.
 
 If `auto=false`, pause for user approval before steps 2–4 of every attempt.
 

@@ -188,6 +188,42 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 	}
 }
 
+func TestCheckCompatibleZeroNonceStorageAccounts(t *testing.T) {
+	a, b := common.Address{1}, common.Address{2}
+	for _, tc := range []struct {
+		name         string
+		stored, next []common.Address
+		headTime     uint64
+		wantConflict bool
+	}{
+		{name: "before activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 99},
+		{name: "at activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 100, wantConflict: true},
+		{name: "after activation", stored: []common.Address{a}, next: []common.Address{b}, headTime: 150, wantConflict: true},
+		{name: "added after activation", next: []common.Address{a}, headTime: 150, wantConflict: true},
+		{name: "removed after activation", stored: []common.Address{a}, headTime: 150, wantConflict: true},
+		{name: "unchanged", stored: []common.Address{a}, next: []common.Address{a}, headTime: 150},
+		{name: "reordered", stored: []common.Address{a, b}, next: []common.Address{b, a}, headTime: 150},
+		{name: "nil and empty", next: []common.Address{}, headTime: 150},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := &chain.Config{BogotaTime: common.NewUint64(100), ZeroNonceStorageAccounts: tc.stored}
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = tc.next
+			err := stored.CheckCompatible(next, 1, tc.headTime)
+			if !tc.wantConflict {
+				require.Nil(t, err)
+				return
+			}
+			require.NotNil(t, err)
+			require.Equal(t, "EIP-8253 account list", err.WhatTime)
+			require.True(t, err.HasTimestampConflict())
+			require.False(t, err.HasBlockConflict())
+			require.Equal(t, uint64(99), err.RewindToTime)
+			require.EqualError(t, err, "mismatching EIP-8253 account list in database (activation timestamp 100, rewindto timestamp 99)")
+		})
+	}
+}
+
 func TestCheckCompatibleBpoAndBalancerTimestamps(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -274,27 +310,98 @@ func TestCheckCompatibleBlockConflictDoesNotMaskTimestamp(t *testing.T) {
 	}
 }
 
-// CheckConfigForkOrder walked the block forks only, so a schedule that runs backwards
-// in time was accepted and committed.
+// A valid block-fork schedule must not let missing or out-of-order timestamp forks
+// pass configuration validation.
 func TestCheckConfigForkOrderTimestamps(t *testing.T) {
-	require.NoError(t, (&chain.Config{
-		ShanghaiTime: common.NewUint64(100),
-		CancunTime:   common.NewUint64(200),
-		PragueTime:   common.NewUint64(200),
-	}).CheckConfigForkOrder(), "equal and ascending timestamps are both fine")
+	cfg := chain.TestChainBerlinConfig.Copy()
+	cfg.LondonBlock = common.NewUint64(0)
+	forks := []struct {
+		name string
+		time **uint64
+	}{
+		{"shanghaiTime", &cfg.ShanghaiTime},
+		{"cancunTime", &cfg.CancunTime},
+		{"pragueTime", &cfg.PragueTime},
+		{"osakaTime", &cfg.OsakaTime},
+		{"amsterdamTime", &cfg.AmsterdamTime},
+		{"bogotaTime", &cfg.BogotaTime},
+	}
+	for i, fork := range forks {
+		*fork.time = common.NewUint64(0)
+		t.Run(fork.name, func(t *testing.T) {
+			require.NoError(t, cfg.CheckConfigForkOrder(), "later forks may remain unscheduled")
+			if i == 0 {
+				return
+			}
+			previous := forks[i-1]
+			for _, tc := range []struct {
+				name string
+				time *uint64
+			}{
+				{"missing predecessor", nil},
+				{"later predecessor", common.NewUint64(1)},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					*previous.time = tc.time
+					t.Cleanup(func() { *previous.time = common.NewUint64(0) })
+					err := cfg.CheckConfigForkOrder()
+					require.Error(t, err)
+					require.Contains(t, err.Error(), previous.name)
+					require.Contains(t, err.Error(), fork.name)
+				})
+			}
+		})
+	}
+}
 
-	require.NoError(t, (&chain.Config{
-		ShanghaiTime: common.NewUint64(100),
-		PragueTime:   common.NewUint64(200),
-	}).CheckConfigForkOrder(), "an unscheduled fork in the middle is not a gap")
+func TestCheckConfigForkOrderIndependentTimestamps(t *testing.T) {
+	for _, bpoTime := range []uint64{50, 100, 150} {
+		cfg := chain.AllProtocolChanges.Copy()
+		cfg.AmsterdamTime = common.NewUint64(100)
+		cfg.Bpo1Time = common.NewUint64(bpoTime)
+		require.NoError(t, cfg.CheckConfigForkOrder(), "BPO forks may precede or follow Amsterdam")
+	}
 
-	err := (&chain.Config{
-		ShanghaiTime: common.NewUint64(200),
-		CancunTime:   common.NewUint64(100),
-	}).CheckConfigForkOrder()
-	require.Error(t, err, "cancun cannot activate before shanghai")
-	require.Contains(t, err.Error(), "shanghaiTime")
-	require.Contains(t, err.Error(), "cancunTime")
+	for _, pragueTime := range []*uint64{nil, common.NewUint64(1)} {
+		cfg := chain.TestChainOsakaConfig.Copy()
+		cfg.OsakaTime = nil
+		cfg.PragueTime = pragueTime
+		cfg.BalancerTime = common.NewUint64(0)
+		err := cfg.CheckConfigForkOrder()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "pragueTime")
+		require.Contains(t, err.Error(), "balancerTime")
+	}
+}
+
+func TestCheckConfigForkOrderBPOPredecessors(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	forks := []struct {
+		name string
+		time **uint64
+	}{
+		{"osakaTime", &cfg.OsakaTime},
+		{"bpo1Time", &cfg.Bpo1Time},
+		{"bpo2Time", &cfg.Bpo2Time},
+		{"bpo3Time", &cfg.Bpo3Time},
+		{"bpo4Time", &cfg.Bpo4Time},
+		{"bpo5Time", &cfg.Bpo5Time},
+	}
+	for i, fork := range forks[1:] {
+		*fork.time = common.NewUint64(0)
+		t.Run(fork.name, func(t *testing.T) {
+			require.NoError(t, cfg.CheckConfigForkOrder())
+			previous := forks[i]
+			for _, time := range []*uint64{nil, common.NewUint64(1)} {
+				*previous.time = time
+				err := cfg.CheckConfigForkOrder()
+				*previous.time = common.NewUint64(0)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), previous.name)
+				require.Contains(t, err.Error(), fork.name)
+			}
+		})
+	}
 }
 
 // Copy must not turn a nil slice into an empty one: newValidatorSetFromJson tests

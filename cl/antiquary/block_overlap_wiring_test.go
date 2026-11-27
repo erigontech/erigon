@@ -1,0 +1,469 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package antiquary
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
+)
+
+func TestLoopRemovesCoveredBlockSegmentsAtStartup(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, 20_000, logger)
+	subSeg := writeStateFixture(t, dirs.Snap, "beaconblocks", 0, 10_000, logger)
+	subIdx := strings.TrimSuffix(subSeg, ".seg") + ".idx"
+
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	// A cursor past the visible tip keeps the startup reindex from reading the fixture as blocks.
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 20_000)
+	}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	d := &recordingDownloader{}
+	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, d, db, nil, sn, nil, nil, logger, false, true, false, false, nil)
+	a.NotifyBackfilled()
+
+	done := make(chan error, 1)
+	go func() { done <- a.Loop() }()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(subSeg)
+		return errors.Is(err, os.ErrNotExist)
+	}, 10*time.Second, 10*time.Millisecond, "the covered segment must be unlinked at startup")
+	cancel()
+	if err := <-done; err != nil {
+		require.ErrorIs(t, err, context.Canceled)
+	}
+
+	require.ElementsMatch(t, []string{filepath.Base(subSeg), filepath.Base(subIdx)}, d.deletedNames())
+	require.NoFileExists(t, subIdx)
+}
+
+func TestMergeBlocksMergesDumpedSegmentsIntoTheNextTier(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	var blobSegs []string
+	for from := uint64(0); from < tier; from += snaptype.CaplinMergeLimit {
+		f, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BlobSidecars.FileName(version.ZeroVersion, from, from+snaptype.CaplinMergeLimit))
+		require.True(t, ok)
+		c, err := seg.NewCompressor(t.Context(), "test", f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		require.NoError(t, c.AddWord(nil))
+		require.NoError(t, c.Compress())
+		c.Close()
+		require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 0, dirs.Tmp, &background.Progress{}, log.LvlDebug, logger))
+		blobSegs = append(blobSegs, f.Path)
+	}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(0); slot <= tier; slot += 500 {
+			var root common.Hash
+			binary.BigEndian.PutUint64(root[:], slot+1)
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+				return err
+			}
+			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, tier+safetyMargin)
+	}))
+
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	d := &recordingDownloader{}
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, d, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+	require.NoError(t, a.antiquate())
+	require.NoError(t, a.mergeBlocks())
+
+	subFiles := blockSegmentFiles(0, tier)
+	require.ElementsMatch(t, subFiles, d.deletedNames())
+	for _, f := range subFiles {
+		require.NoFileExists(t, filepath.Join(dirs.Snap, f))
+	}
+	for _, f := range blobSegs {
+		require.FileExists(t, f)
+	}
+	require.Contains(t, d.seededNames(), snaptype.BeaconBlocks.FileInfo(dirs.Snap, 0, tier).Name())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BlobSidecars(), len(blobSegs))
+	blocks := view.BeaconBlocks()
+	require.Len(t, blocks, 1)
+	require.Equal(t, uint64(0), blocks[0].From())
+	require.Equal(t, uint64(tier), blocks[0].To())
+	word, err := blocks[0].Get(54_500)
+	require.NoError(t, err)
+	require.Equal(t, uint64(54_501), binary.BigEndian.Uint64(word))
+}
+
+func antiquaryWithBlockSegments(t *testing.T, from, to uint64) (*Antiquary, *recordingDownloader) {
+	t.Helper()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	for ; from < to; from += snaptype.CaplinMergeLimit {
+		writeStateFixture(t, dirs.Snap, "beaconblocks", from, from+snaptype.CaplinMergeLimit, logger)
+	}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, to+safetyMargin)
+	}))
+
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	d := &recordingDownloader{}
+	return NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, d, db, nil, sn, nil, nil, logger, false, true, false, true, nil), d
+}
+
+func blockSegmentFiles(from, to uint64) []string {
+	var files []string
+	for ; from < to; from += snaptype.CaplinMergeLimit {
+		segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, from+snaptype.CaplinMergeLimit)
+		files = append(files, segName, strings.TrimSuffix(segName, ".seg")+".idx")
+	}
+	return files
+}
+
+func TestMergeBlocksMergesSegmentsOnDisk(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 0, tier)
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	subFiles := blockSegmentFiles(0, tier)
+	require.ElementsMatch(t, subFiles, d.deletedNames())
+	for _, f := range subFiles {
+		require.NoFileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}
+
+func TestMergeBlocksMergesOneTierPerCall(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 0, 2*tier)
+	lowerSubFiles, upperSubFiles := blockSegmentFiles(0, tier), blockSegmentFiles(tier, 2*tier)
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	require.NoFileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, tier, 2*tier).Path)
+	require.ElementsMatch(t, lowerSubFiles, d.deletedNames())
+	for _, f := range upperSubFiles {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, tier, 2*tier).Path)
+	require.ElementsMatch(t, append(lowerSubFiles, upperSubFiles...), d.deletedNames())
+	for _, f := range upperSubFiles {
+		require.NoFileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}
+
+func TestMergeBlocksRollsBackAMergeItCouldNotSeed(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 0, tier)
+	injected := errors.New("injected")
+	d.seedErr = injected
+	merged := snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path
+
+	require.ErrorIs(t, a.mergeBlocks(), injected)
+	require.NoFileExists(t, merged)
+	require.NoFileExists(t, strings.TrimSuffix(merged, ".seg")+".idx")
+
+	require.NoError(t, a.sn.OpenFolder())
+	a.removeBlockOverlaps()
+	for _, f := range blockSegmentFiles(0, tier) {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+
+	d.seedErr = nil
+	require.NoError(t, a.mergeBlocks())
+	require.FileExists(t, merged)
+	require.Contains(t, d.seededNames(), filepath.Base(merged))
+}
+
+func TestMergeBlocksNeedsSnapgen(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 0, tier)
+	a.snapgen = false
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.NoFileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	require.Empty(t, d.deletedNames())
+}
+
+func TestMergeBlocksSkipsARangeMissingItsLowestSegment(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, snaptype.CaplinMergeLimit, tier)
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.NoFileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	require.Empty(t, d.deletedNames())
+	for _, f := range blockSegmentFiles(snaptype.CaplinMergeLimit, tier) {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}
+
+func TestMergeBlocksKeepsTheSegmentsBelowTheMergedRange(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, snaptype.CaplinMergeLimit, 2*tier)
+
+	require.NoError(t, a.mergeBlocks())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, tier, 2*tier).Path)
+	require.ElementsMatch(t, blockSegmentFiles(tier, 2*tier), d.deletedNames())
+	for _, f := range blockSegmentFiles(snaptype.CaplinMergeLimit, tier) {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}
+
+func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	var logs bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	dirs := datadir.New(t.TempDir())
+	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+	above := writeStateFixture(t, dirs.Snap, "beaconblocks", 2*limit, 3*limit, logger)
+	before, err := os.Stat(above)
+	require.NoError(t, err)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(limit); slot <= 3*limit; slot += 500 {
+			var root common.Hash
+			binary.BigEndian.PutUint64(root[:], slot+1)
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+				return err
+			}
+			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, 3*limit+safetyMargin)
+	}))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+	require.NoError(t, a.antiquate())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(dirs.Snap, limit, 2*limit).Path)
+	after, err := os.Stat(above)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after), "the indexed segment above the hole must not be dumped again")
+	require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the segment above, not the canonical head, holds the bound")
+}
+
+func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const head, tail = limit - 2, limit - 1
+	for _, finalized := range []uint64{limit + safetyMargin, limit + safetyMargin + 1} {
+		t.Run(fmt.Sprintf("finalized %d", finalized), func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+			dirs := datadir.New(t.TempDir())
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			var slots []uint64
+			for slot := uint64(0); slot < head; slot += 500 {
+				slots = append(slots, slot)
+			}
+			slots = append(slots, head, tail, limit)
+			roots := make(map[uint64]common.Hash)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				var prevRoot common.Hash
+				for _, slot := range slots {
+					block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+					block.Block.Slot = slot
+					block.Block.ParentRoot = prevRoot
+					if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, slot <= head); err != nil {
+						return err
+					}
+					root, err := block.Block.HashSSZ()
+					if err != nil {
+						return err
+					}
+					roots[slot], prevRoot = root, root
+				}
+				return beacon_indicies.WriteHighestFinalized(tx, finalized)
+			}))
+			sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+			a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+			require.NoError(t, a.antiquate())
+			require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
+			require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead=9998 freezeBound=10000"), "the wait for the canonical index must be reported")
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
+				if err != nil {
+					return err
+				}
+				require.NotEmpty(t, body, "the block at slot %d must stay in the database", tail)
+				return nil
+			}))
+
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, tail, roots[tail])
+			}))
+			a.lastCanonicalHeadCapLog = time.Time{}
+			require.NoError(t, a.antiquate())
+			require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+			require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead="), "a canonical index that reaches the bound is not reported")
+			view := sn.View()
+			defer view.Close()
+			segment, ok := view.BeaconBlocksSegment(tail)
+			require.True(t, ok)
+			word, err := segment.Get(tail)
+			require.NoError(t, err)
+			require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
+		})
+	}
+}
+
+func TestAntiquateReportsTheCanonicalHeadOnlyWhenItHoldsBackASegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	t.Run("the margin holds the next segment", func(t *testing.T) {
+		a, _ := antiquaryWithBlockSegments(t, 0, limit)
+		var logs bytes.Buffer
+		a.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := beacon_indicies.MarkRootCanonical(tx, limit-1_000, common.Hash{1}); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin+5_000)
+		}))
+
+		require.NoError(t, a.antiquate())
+		require.Equal(t, uint64(limit-1), a.sn.BlocksAvailable())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the margin, not the canonical head, holds the next segment")
+	})
+	t.Run("the gap below the next indexed segment is shorter than a segment", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		dirs := datadir.New(t.TempDir())
+		writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+		writeStateFixture(t, dirs.Snap, "beaconblocks", limit+limit/2, 2*limit+limit/2, logger)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := beacon_indicies.MarkRootCanonical(tx, limit-1, common.Hash{1}); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, 2*limit+safetyMargin)
+		}))
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+		require.NoError(t, a.antiquate())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "no complete segment fits below the next indexed segment")
+	})
+}
+
+func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	a, _ := antiquaryWithBlockSegments(t, 0, 0)
+	a.downloader = nil
+	require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(0); slot <= limit; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = prevRoot
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return nil
+	}))
+	for _, tc := range []struct{ finalized, available uint64 }{
+		{safetyMargin - 1, 0},
+		{limit + safetyMargin - 1, 0},
+		{limit + safetyMargin, limit - 1},
+	} {
+		require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteHighestFinalized(tx, tc.finalized)
+		}))
+		require.NoError(t, a.antiquate())
+		require.Equal(t, tc.available, a.sn.BlocksAvailable(), "finalized %d", tc.finalized)
+	}
+}

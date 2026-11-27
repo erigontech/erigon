@@ -259,8 +259,10 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// Account Abstraction
-	AllowAA bool
+	// GenesisFromFile marks a genesis supplied through --override.genesis.
+	// On restart, its block hash after fork overrides must match the stored genesis hash.
+	// The chain config may differ, subject to the writer's compatibility checks.
+	GenesisFromFile bool
 
 	// fork choice update timeout
 	FcuTimeout         time.Duration
@@ -315,4 +317,18 @@ type Sync struct {
 	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
 
 	SlowBlockThreshold *time.Duration
+
+	// ExecutionPathReporter, when set, is told how each executed block runs.
+	ExecutionPathReporter func(BlockExecutionPath) `toml:"-"`
+}
+
+// BlockExecutionPath is the executor a block runs on. Reason says why a block
+// runs sequentially, and AccessList whether its access list seeds the parallel
+// scheduler.
+type BlockExecutionPath struct {
+	Number     uint64
+	Hash       common.Hash
+	Path       string // "parallel" or "sequential"
+	Reason     string
+	AccessList bool
 }

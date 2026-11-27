@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -337,6 +338,48 @@ func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
 	// The error is latched, so leaving the entry in place would keep serving it to every retry.
 	require.NotContains(t, module.builders, result.PayloadID)
 	require.NotContains(t, module.buildersByTimestamp, timestamp)
+}
+
+func TestAssembleBlockDiscardsExplicitBuildOnRequestDeadline(t *testing.T) {
+	for _, timeout := range []time.Duration{time.Second, 12 * time.Second} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				stopped := make(chan time.Time, 1)
+				module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+					<-ctx.Done()
+					stopped <- time.Now()
+					return nil, ctx.Err()
+				})
+				ctx, cancel := context.WithTimeout(t.Context(), timeout)
+				defer cancel()
+				deadline, _ := ctx.Deadline()
+				const timestamp = 1
+				result, err := module.AssembleBlock(ctx, &builder.Parameters{
+					Timestamp: timestamp, ParentHash: common.Hash{1},
+					CustomTxnProvider: &mutableTxnProvider{}, RequireAllTransactions: true,
+				})
+				require.NoError(t, err)
+				b := module.builders[result.PayloadID].builder
+				defer b.Discard()
+
+				<-ctx.Done()
+				synctest.Wait()
+
+				require.True(t, b.Discarded(), "an explicit build belongs to its request even before retrieval")
+				select {
+				case stoppedAt := <-stopped:
+					require.Equal(t, deadline, stoppedAt, "the payload watchdog must not shorten the request deadline")
+				default:
+					t.Fatal("expired explicit build is still running")
+				}
+				assembled, err := module.GetAssembledBlock(t.Context(), result.PayloadID)
+				require.NoError(t, err)
+				require.True(t, assembled.Unknown)
+				require.NotContains(t, module.builders, result.PayloadID)
+				require.NotContains(t, module.buildersByTimestamp, timestamp)
+			})
+		})
+	}
 }
 
 func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) {

@@ -47,6 +47,9 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 
 	// compute the sync committee period
 	period := epoch / a.beaconChainCfg.EpochsPerSyncCommitteePeriod
+	if period > a.ethClock.GetCurrentEpoch()/a.beaconChainCfg.EpochsPerSyncCommitteePeriod+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync duties: epoch %d is too far in the future", epoch))
+	}
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
@@ -77,8 +80,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	defer tx.Rollback()
 
-	// Try to find a slot in the epoch or close to it
-	startSlotAtEpoch := (epoch * a.beaconChainCfg.SlotsPerEpoch) - (a.beaconChainCfg.SlotsPerEpoch - 1)
+	periodStartSlot := period * a.beaconChainCfg.SlotsPerEpoch * a.beaconChainCfg.EpochsPerSyncCommitteePeriod
 
 	// Now try reading the sync committee
 	syncCommittee, _, ok := a.forkchoiceStore.GetSyncCommittees(period)
@@ -91,7 +93,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	if !ok {
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
 			state_accessors.GetValFnTxAndSnapshot(tx, snRoTx),
-			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch),
+			periodStartSlot,
 		)
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)

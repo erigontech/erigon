@@ -22,6 +22,7 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -60,48 +61,58 @@ func TestRetryConnectsNonRecoverableErrorNotRetried(t *testing.T) {
 
 func TestRetryConnectsDialErrorRetriedUntilSuccess(t *testing.T) {
 	t.Parallel()
-	var attempts atomic.Int64
-	start := time.Now()
-	err := retryConnects(t.Context(), sequenceOp(&attempts, newDialError(), nil))
-	require.NoError(t, err)
-	require.EqualValues(t, 2, attempts.Load())
-	require.GreaterOrEqual(t, time.Since(start), 900*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int64
+		start := time.Now()
+		err := retryConnects(t.Context(), sequenceOp(&attempts, newDialError(), nil))
+		require.NoError(t, err)
+		require.EqualValues(t, 2, attempts.Load())
+		require.GreaterOrEqual(t, time.Since(start), 900*time.Millisecond)
+	})
 }
 
 func TestRetryConnectsTimeoutAfterDialErrorReturnsDialError(t *testing.T) {
 	t.Parallel()
-	dialErr := newDialError()
-	var attempts atomic.Int64
-	err := retryConnects(t.Context(), sequenceOp(&attempts, dialErr, context.DeadlineExceeded))
-	require.ErrorIs(t, err, dialErr)
-	require.EqualValues(t, 2, attempts.Load())
+	synctest.Test(t, func(t *testing.T) {
+		dialErr := newDialError()
+		var attempts atomic.Int64
+		err := retryConnects(t.Context(), sequenceOp(&attempts, dialErr, context.DeadlineExceeded))
+		require.ErrorIs(t, err, dialErr)
+		require.EqualValues(t, 2, attempts.Load())
+	})
 }
 
 func TestRetryConnectsTimeoutRetriedUntilSuccess(t *testing.T) {
 	t.Parallel()
-	var attempts atomic.Int64
-	err := retryConnects(t.Context(), sequenceOp(&attempts, context.DeadlineExceeded, nil))
-	require.NoError(t, err)
-	require.EqualValues(t, 2, attempts.Load())
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int64
+		err := retryConnects(t.Context(), sequenceOp(&attempts, context.DeadlineExceeded, nil))
+		require.NoError(t, err)
+		require.EqualValues(t, 2, attempts.Load())
+	})
 }
 
 func TestRetryConnectsParentDeadlineReturnsLastDialError(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
-	defer cancel()
-	dialErr := newDialError()
-	var attempts atomic.Int64
-	err := retryConnects(ctx, sequenceOp(&attempts, dialErr))
-	require.ErrorIs(t, err, dialErr)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
+		defer cancel()
+		dialErr := newDialError()
+		var attempts atomic.Int64
+		err := retryConnects(ctx, sequenceOp(&attempts, dialErr))
+		require.ErrorIs(t, err, dialErr)
+	})
 }
 
 func TestRetryConnectsParentDeadlineAfterOnlyTimeoutsReturnsDeadlineExceeded(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
-	defer cancel()
-	var attempts atomic.Int64
-	err := retryConnects(ctx, sequenceOp(&attempts, context.DeadlineExceeded))
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
+		defer cancel()
+		var attempts atomic.Int64
+		err := retryConnects(ctx, sequenceOp(&attempts, context.DeadlineExceeded))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
 }
 
 func TestRetryConnectsPermanentErrorWrappingDeadlineExceededNotSwallowed(t *testing.T) {
@@ -115,14 +126,16 @@ func TestRetryConnectsPermanentErrorWrappingDeadlineExceededNotSwallowed(t *test
 
 func TestRetryConnectsParentCancel(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-	var attempts atomic.Int64
-	err := retryConnects(ctx, sequenceOp(&attempts, newDialError()))
-	require.ErrorIs(t, err, context.Canceled)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+		var attempts atomic.Int64
+		err := retryConnects(ctx, sequenceOp(&attempts, newDialError()))
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 // TestRetryConnectsOverallDeadlineDoesNotClobberPermanentError pins that on
@@ -130,25 +143,27 @@ func TestRetryConnectsParentCancel(t *testing.T) {
 // deadline error, never a permanent error that merely wraps DeadlineExceeded.
 func TestRetryConnectsOverallDeadlineDoesNotClobberPermanentError(t *testing.T) {
 	t.Parallel()
-	// Deadline lands after the first 1s backoff (so a second attempt runs) but
-	// within the per-attempt window (so the second op observes it via its ctx).
-	ctx, cancel := context.WithTimeout(t.Context(), 1400*time.Millisecond)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		// Deadline lands after the first 1s backoff (so a second attempt runs) but
+		// within the per-attempt window (so the second op observes it via its ctx).
+		ctx, cancel := context.WithTimeout(t.Context(), 1400*time.Millisecond)
+		defer cancel()
 
-	dialErr := newDialError()
-	readErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}
-	permanentErr := errors.Join(readErr, context.DeadlineExceeded)
-	var attempts atomic.Int64
-	op := func(opctx context.Context) error {
-		if attempts.Add(1) == 1 {
-			return dialErr // recoverable → recorded as lastDialErr
+		dialErr := newDialError()
+		readErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}
+		permanentErr := errors.Join(readErr, context.DeadlineExceeded)
+		var attempts atomic.Int64
+		op := func(opctx context.Context) error {
+			if attempts.Add(1) == 1 {
+				return dialErr // recoverable → recorded as lastDialErr
+			}
+			<-opctx.Done() // let the overall deadline expire before returning
+			return permanentErr
 		}
-		<-opctx.Done() // let the overall deadline expire before returning
-		return permanentErr
-	}
 
-	err := retryConnects(ctx, op)
-	require.EqualValues(t, 2, attempts.Load())
-	require.ErrorIs(t, err, readErr)
-	require.NotErrorIs(t, err, dialErr)
+		err := retryConnects(ctx, op)
+		require.EqualValues(t, 2, attempts.Load())
+		require.ErrorIs(t, err, readErr)
+		require.NotErrorIs(t, err, dialErr)
+	})
 }

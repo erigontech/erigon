@@ -225,7 +225,7 @@ func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte,
 // [New in Gloas:EIP7732]
 func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedExecutionPayloadBid) error {
 	if msg == nil || msg.Message == nil {
-		return fmt.Errorf("nil execution payload bid message")
+		return errors.New("nil execution payload bid message")
 	}
 
 	bid := msg.Message
@@ -449,7 +449,7 @@ func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Conte
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, validationStateEntry.parentSlot)
 	}
 	if bid.PrevRandao != validationStateEntry.parentRandao {
-		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
+		return errors.New("bid prev_randao does not match parent state randao mix")
 	}
 	builder, err := validationStateEntry.view.builderForBid(bid, s.beaconCfg)
 	if err != nil {
@@ -814,7 +814,7 @@ func validateBuilderBidSignature(msg *cltypes.SignedExecutionPayloadBid, domain 
 		return fmt.Errorf("signature verification error: %w", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid builder signature")
+		return errors.New("invalid builder signature")
 	}
 	return nil
 }
@@ -870,7 +870,7 @@ func newBidValidationView(s *state.CachingBeaconState, cfg *clparams.BeaconChain
 func (v *bidValidationView) builderForBid(bid *cltypes.ExecutionPayloadBid, cfg *clparams.BeaconChainConfig) (bidBuilder, error) {
 	builderIndex := bid.BuilderIndex
 	if v.builders == nil {
-		return bidBuilder{}, fmt.Errorf("builders list not available")
+		return bidBuilder{}, errors.New("builders list not available")
 	}
 	if builderIndex >= uint64(len(v.builders)) {
 		return bidBuilder{}, fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, len(v.builders))
