@@ -1992,44 +1992,62 @@ func TestMergeKeepsAnInputThatIsItsOwnOutput(t *testing.T) {
 }
 
 func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	var small []Range
-	for from := uint64(0); from < 100_000; from += 10_000 {
-		small = append(small, NewRange(from, from+10_000))
-		for _, typ := range snaptype2.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
-		}
+	for _, tc := range []struct {
+		name  string
+		typ   snaptype.Type
+		index int // -1 for the segment
+	}{
+		{"segment", snaptype2.Headers, -1},
+		{"index", snaptype2.Headers, 0},
+		{"second transactions index", snaptype2.Transactions, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dir := t.TempDir()
+			var small []Range
+			for from := uint64(0); from < 100_000; from += 10_000 {
+				small = append(small, NewRange(from, from+10_000))
+				for _, typ := range snaptype2.BlockSnapshotTypes {
+					createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+				}
+			}
+			createTestSegmentFile(t, 0, 100_000, tc.typ.Enum(), dir, tc.typ.Versions().Current, logger)
+			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+			defer s.Close()
+			require.NoError(t, s.OpenFolder())
+
+			missing := tc.typ.FileInfo(dir, 0, 100_000).Name()
+			if tc.index >= 0 { // createTestSegmentFile names the indexes with the segment version
+				missing = snaptype.IdxFileName(tc.typ.Versions().Current, 0, 100_000, tc.typ.Indexes()[tc.index].Name)
+			}
+			require.FileExists(t, filepath.Join(dir, missing))
+			exist := fileExist
+			defer func() { fileExist = exist }()
+			fileExist = func(path string) (bool, error) {
+				if path == filepath.Join(dir, missing) {
+					return false, nil
+				}
+				return exist(path)
+			}
+			before := fileNames(t, dir)
+
+			merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+			merger.DisableFsync()
+			ranges := merger.FindMergeRanges(s.Ranges(true))
+			require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
+			var deleted []string
+			onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
+			err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
+			require.ErrorContains(t, err, missing)
+			for _, f := range deleted {
+				require.NotContains(t, before, filepath.Base(f), "only outputs of the failed range are deleted")
+			}
+
+			require.Subset(t, fileNames(t, dir), before, "every input file stays on disk")
+			require.NoError(t, s.OpenFolder())
+			requireOneVisibleLayout(t, s, small)
+		})
 	}
-	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, snaptype2.Headers.Versions().Current, logger)
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-
-	merged := snaptype2.Headers.FileInfo(dir, 0, 100_000)
-	exist := fileExist
-	defer func() { fileExist = exist }()
-	fileExist = func(path string) (bool, error) {
-		if path == merged.Path {
-			return false, nil
-		}
-		return exist(path)
-	}
-	before := fileNames(t, dir)
-
-	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
-	merger.DisableFsync()
-	ranges := merger.FindMergeRanges(s.Ranges(true))
-	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
-	var deleted []string
-	onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
-	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
-	require.ErrorContains(t, err, merged.Name())
-	require.Empty(t, deleted)
-
-	require.Equal(t, before, fileNames(t, dir), "every input file stays on disk")
-	require.NoError(t, s.OpenFolder())
-	requireOneVisibleLayout(t, s, small)
 }
 
 func fileNames(t *testing.T, dir string) []string {
