@@ -19,7 +19,9 @@ package forkchoice
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -66,6 +68,144 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
 	require.Equal(t, common.Hash(blockRoot), store.ProposerBoostRoot())
+}
+
+// update_proposer_boost_root compares the block with the head right before the block is added. The
+// import releases f.mu during the EL call, so a head taken before that call can be stale.
+func TestProposerBoostUsesTheHeadWhenTheBlockIsApplied(t *testing.T) {
+	const blockIndex = 84
+	for _, test := range []struct {
+		name      string
+		duringEL  func(f *ForkChoiceStore)
+		wantBoost bool
+	}{
+		{name: "head unchanged", duringEL: func(*ForkChoiceStore) {}, wantBoost: true},
+		{name: "head moved to another dependent root", duringEL: func(f *ForkChoiceStore) {
+			// A justified root the store does not hold makes the anchor the head.
+			f.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch, Root: common.Hash{0xee}})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blocks, anchor, _ := tests.GetBellatrixRandom()
+			f := newBlockTestStore(t, anchor)
+			slotMs := func(slot uint64) uint64 { return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000 }
+			for _, block := range blocks[:blockIndex] {
+				f.OnTick(slotMs(block.Block.Slot) + 1)
+				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+			}
+			block := blocks[blockIndex]
+			f.OnTick(slotMs(block.Block.Slot) + 100)
+			engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+			f.engine = engine
+
+			onBlockDone := make(chan error, 1)
+			go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+			awaitSignal(t, elEntered, "NewPayload to start")
+			test.duringEL(f)
+			close(releaseEL)
+			require.NoError(t, awaitOnBlock(t, onBlockDone))
+
+			if test.wantBoost {
+				require.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
+			} else {
+				require.Zero(t, f.ProposerBoostRoot())
+			}
+		})
+	}
+}
+
+// Before each block, the head that decides the boost must have the shuffling dependent root of the head
+// GetHead returns, whether the justified block stands in or the votes are counted.
+func TestHeadBeforeBlockMatchesGetHead(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		load func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+	}{
+		{name: "bellatrix", load: tests.GetBellatrixRandom},
+		{name: "capella", load: tests.GetCapellaRandom},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			blocks, anchor, _ := fixture.load()
+			f := newBlockTestStore(t, anchor)
+			votesCounted := 0
+			for i, block := range blocks {
+				slot := block.Block.Slot
+				f.OnTick((f.genesisTime+slot*f.beaconCfg.SecondsPerSlot)*1000 + 1)
+				head, _, err := f.GetHead(nil)
+				require.NoError(t, err)
+				func() {
+					f.mu.Lock()
+					defer f.mu.Unlock()
+					if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), slot); !standsIn {
+						votesCounted++
+					}
+					before, err := f.headBeforeBlockPreGloasLocked(slot)
+					require.NoError(t, err)
+					require.Equal(t, f.getDependentRoot(head, slot), f.getDependentRoot(before, slot), "block %d", i)
+				}()
+				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+			}
+			require.NotZero(t, votesCounted, "the fixture must count the votes before some blocks")
+			t.Log("votes counted before", votesCounted, "of", len(blocks), "blocks")
+		})
+	}
+}
+
+// When the head before a block needs the votes, the import builds the justified checkpoint state while
+// f.mu is released for the EL call, not under f.mu.
+func TestImportBuildsJustifiedStateWhileLockIsReleased(t *testing.T) {
+	f, block := importUntilHeadCountsVotes(t)
+	justified := f.JustifiedCheckpoint()
+	f.checkpointStates.Delete(justified)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	f.engine = engine
+
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	// A reader holding f.mu keeps the import from taking it back after the EL call.
+	f.mu.RLock()
+	close(releaseEL)
+	built := assert.Eventually(t, func() bool {
+		_, ok := f.checkpointStates.Load(justified)
+		return ok
+	}, lockScopeTimeout, time.Millisecond, "the justified state must be built before the import takes f.mu")
+	f.mu.RUnlock()
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
+	require.True(t, built)
+	require.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
+}
+
+// importUntilHeadCountsVotes imports the Bellatrix fixture up to the first block whose head before it needs
+// the votes, and moves the time 100 ms into that block's slot.
+func importUntilHeadCountsVotes(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	f := newBlockTestStore(t, anchor)
+	for _, candidate := range blocks {
+		f.OnTick(slotStartTimeMs(f, candidate.Block.Slot) + 100)
+		if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), candidate.Block.Slot); !standsIn {
+			return f, candidate
+		}
+		require.NoError(t, f.OnBlock(t.Context(), candidate, false, true, false))
+	}
+	t.Fatal("the fixture must count the votes before some block")
+	return nil, nil
+}
+
+// A block already past the attestation deadline gets no head before it, so its import does not build the
+// justified state for one.
+func TestLateBlockDoesNotWarmTheJustifiedState(t *testing.T) {
+	f, block := importUntilHeadCountsVotes(t)
+	f.checkpointStates.Delete(f.JustifiedCheckpoint())
+	slot := block.Block.Slot
+	deadlineMs := slotStartTimeMs(f, slot) + f.getAttestationDueMs(f.computeEpochAtSlot(slot))
+
+	_, warm := f.headCheckpointToWarmLocked(slot)
+	require.True(t, warm)
+	f.timeMs.Store(deadlineMs)
+	_, warm = f.headCheckpointToWarmLocked(slot)
+	require.False(t, warm)
 }
 
 // epochStartBlock returns the anchor and a block of the epoch's first slot that advances the
