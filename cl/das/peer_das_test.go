@@ -3181,7 +3181,7 @@ func TestBlobRecoveryRemovesMalformedStoredColumnAndRecovers(t *testing.T) {
 			t.Run(fmt.Sprintf("gloas=%t/%s", gloas, tc.name), func(t *testing.T) {
 				var removals *removalRecordingColumnStorage
 				r := startRecoveryWithPublisher(t, recoveryOptions{
-					caplinConfig: &clparams.CaplinConfig{},
+					caplinConfig: &clparams.CaplinConfig{BlobPruningDisabled: true},
 					supernode:    true,
 					instrument: func(r *recoveryRun) {
 						r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
@@ -3538,6 +3538,19 @@ func forkToGloasAt(t *testing.T, r *recoveryRun, gloasForkEpoch uint64) {
 	require.NoError(t, err)
 	gloasData.Add(r.root, &gloasBlockData{BlobKzgCommitments: r.columns[0].KzgCommitments, SignedBeaconBlockHeader: r.columns[0].SignedBlockHeader})
 	r.d.gloasDataCache = gloasData
+	r.d.columnStorage = namedGloasColumns{r.d.columnStorage}
+}
+
+// namedGloasColumns reads the stored columns as Gloas columns do, with the root of their block. The fixture stores them in
+// the Fulu schema, which has no such field.
+type namedGloasColumns struct{ blob_storage.DataColumnStorage }
+
+func (s namedGloasColumns) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	sidecar, err := s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+	if err == nil {
+		sidecar.BeaconBlockRoot = blockRoot
+	}
+	return sidecar, err
 }
 
 // scheduleCall is the interval in which a TryScheduleRecover call ran. The call takes its waitFrom time inside it.
@@ -3573,6 +3586,15 @@ func (g *gossipRecovery) storeColumnsUpTo(t *testing.T, count int, afterEach fun
 			afterEach()
 		}
 	}
+}
+
+func (g *gossipRecovery) awaitClaim(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		g.d.recoveringMutex.Lock()
+		defer g.d.recoveringMutex.Unlock()
+		return g.d.isRecovering[g.root]
+	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
 }
 
 func (g *gossipRecovery) awaitFirstRead(t *testing.T) time.Time {
@@ -3630,11 +3652,7 @@ func TestBlobRecoveryWaitIsNotRestartedByAColumnStoredAfterTheClaim(t *testing.T
 		g := startGossipRecovery(t, true)
 
 		first := g.schedule(t)
-		require.Eventually(t, func() bool {
-			g.d.recoveringMutex.Lock()
-			defer g.d.recoveringMutex.Unlock()
-			return g.d.isRecovering[g.root]
-		}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+		g.awaitClaim(t)
 		time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
 		second := g.schedule(t)
 		g.releaseClock()
@@ -3772,11 +3790,7 @@ func TestBlobRecoveryWithMetadataDoesNotWait(t *testing.T) {
 func TestBlobRecoveryWithMetadataArrivingBeforeTheDecisionIsRecovered(t *testing.T) {
 	g := startGossipRecovery(t, true)
 	g.schedule(t)
-	require.Eventually(t, func() bool {
-		g.d.recoveringMutex.Lock()
-		defer g.d.recoveringMutex.Unlock()
-		return g.d.isRecovering[g.root]
-	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+	g.awaitClaim(t)
 
 	require.NoError(t, g.d.tryScheduleRecover(recoveryTestSlot, g.root, g.metadata))
 	g.releaseClock()
@@ -3952,6 +3966,349 @@ func TestParkedBlobRecoveryIsDroppedByPruneAndShutdown(t *testing.T) {
 
 			require.Empty(t, d.isRecovering)
 			require.Empty(t, d.recoverBlobsQueue)
+		})
+	}
+}
+
+func (r *recoveryRun) scheduleWithoutMetadata(t *testing.T) {
+	t.Helper()
+	require.NoError(t, r.d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: r.root}))
+}
+
+func (r *recoveryRun) requireAllColumnsStored(t *testing.T) {
+	t.Helper()
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(r.d.beaconConfig.NumberOfColumns))
+}
+
+func (r *recoveryRun) requireNoCachedRecoveryResult(t *testing.T) {
+	t.Helper()
+	r.d.recoveringMutex.Lock()
+	defer r.d.recoveringMutex.Unlock()
+	require.Empty(t, r.d.recoveryResults)
+	require.Zero(t, r.d.recoveryResultBytes)
+}
+
+// atFuluFromGenesis sets the fork epochs of every fork before Fulu in the chain config of the recovery to zero.
+func atFuluFromGenesis(r *recoveryRun) {
+	cfg := *r.d.beaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch = 0, 0, 0, 0, 0
+	cfg.InitializeForkSchedule()
+	r.d.beaconConfig = &cfg
+}
+
+func TestLazyBlobRecoveryStoresColumnsWithoutBlobSidecars(t *testing.T) {
+	g := startGossipRecovery(t, false, atFuluFromGenesis)
+
+	g.schedule(t)
+	requireBlobRecoveryReleased(t, g.d, g.root)
+
+	g.requireNoBlobSidecars(t)
+	count, err := g.d.blobStorage.KzgCommitmentsCount(t.Context(), g.root)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	g.requireAllColumnsStored(t)
+	require.NoError(t, g.d.TryScheduleRecover(recoveryTestSlot, g.root))
+	g.d.recoveringMutex.Lock()
+	defer g.d.recoveringMutex.Unlock()
+	require.NotContains(t, g.d.isRecovering, g.root)
+	require.Empty(t, g.d.recoverBlobsQueue)
+}
+
+// TestLazyBlobRecoverySkipsABlockWithAllColumnsStored checks that a request without metadata for a block whose columns
+// are all stored needs no recovery, so the worker reads no column.
+func TestLazyBlobRecoverySkipsABlockWithAllColumnsStored(t *testing.T) {
+	g := startGossipRecovery(t, false, atFuluFromGenesis)
+	g.schedule(t)
+	requireBlobRecoveryReleased(t, g.d, g.root)
+	g.requireAllColumnsStored(t)
+	firstRecoveryReads := g.columnReads.reads.Load()
+	require.Positive(t, firstRecoveryReads)
+
+	g.scheduleWithoutMetadata(t)
+	requireBlobRecoveryReleased(t, g.d, g.root)
+
+	require.Equal(t, firstRecoveryReads, g.columnReads.reads.Load(), "column reads of the second request")
+	g.requireNoBlobSidecars(t)
+}
+
+// TestLazyBlobRecoveryRepairsAMalformedGloasColumnWithoutBlobSidecars checks that a malformed stored column is removed
+// and rebuilt from the others, and that the lazy recovery still writes no blob sidecars.
+func TestLazyBlobRecoveryRepairsAMalformedGloasColumnWithoutBlobSidecars(t *testing.T) {
+	const malformed = 1
+	var removals *removalRecordingColumnStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			r.storeColumn(t, r.d.beaconConfig.NumberOfColumns/2)
+			damaged := &damagedColumnReadStorage{
+				DataColumnStorage: r.d.columnStorage,
+				columns:           map[int64]bool{malformed: true},
+				damage:            func(s *cltypes.DataColumnSidecar) { s.KzgProofs.Truncate(s.KzgProofs.Len() - 1) },
+			}
+			removals = &removalRecordingColumnStorage{DataColumnStorage: damaged}
+			r.d.columnStorage = removals
+			forkToGloasAt(t, r, recoveryTestSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch)
+		},
+	})
+	require.True(t, r.d.lazyBlobSidecars(recoveryTestSlot))
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+
+	require.Equal(t, []int64{malformed}, slices.Concat(removals.removed...))
+	call := receiveRecoveredColumnsPublish(t, r.published)
+	require.ElementsMatch(t, append(publishedColumnIndices(r.unstoredColumns()), malformed), publishedColumnIndices(call.sidecars))
+	r.requireAllColumnsStored(t)
+	r.requireNoBlobSidecars(t)
+	r.requireNoCachedRecoveryResult(t)
+}
+
+func TestLazyImportColumnsFromBlobsSchedulesNoRecovery(t *testing.T) {
+	cfg := elBlobsTestConfig(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	d := newELBlobsTestPeerDas(t, cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+	require.True(t, d.state.IsSupernode())
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, cfg, 2)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+	require.Empty(t, d.recoverBlobsQueue)
+	require.NotContains(t, d.isRecovering, root)
+	_, found, err := d.blobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+// dropColumnStorage never stores one column. A batch write stores the other columns and reports errColumnBatchFailed,
+// or success with silent; a single write of the column fails.
+type dropColumnStorage struct {
+	blob_storage.DataColumnStorage
+	column  uint64
+	silent  bool
+	batches atomic.Int32
+}
+
+func (s *dropColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	s.batches.Add(1)
+	others := slices.DeleteFunc(slices.Clone(sidecars), func(sidecar *cltypes.DataColumnSidecar) bool { return sidecar.Index == s.column })
+	if err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, others); err != nil || s.silent {
+		return err
+	}
+	return errColumnBatchFailed
+}
+
+func (s *dropColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	if uint64(columnIndex) == s.column {
+		return errColumnSingleFailed
+	}
+	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+}
+
+// TestLazyBlobRecoveryEndsAfterOneStoreAttempt checks that a column that the write did not store, also when the write
+// reported success, does not make the worker retry the recovery.
+func TestLazyBlobRecoveryEndsAfterOneStoreAttempt(t *testing.T) {
+	for _, silent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("silent=%t", silent), func(t *testing.T) {
+			var columns *dropColumnStorage
+			r := startRecoveryWithPublisher(t, recoveryOptions{
+				caplinConfig: &clparams.CaplinConfig{},
+				supernode:    true,
+				unscheduled:  true,
+				instrument: func(r *recoveryRun) {
+					atFuluFromGenesis(r)
+					columns = &dropColumnStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1, silent: silent}
+					r.d.columnStorage = columns
+				},
+			})
+			r.scheduleWithoutMetadata(t)
+
+			requireBlobRecoveryReleased(t, r.d, r.root)
+
+			require.Never(t, func() bool { return columns.batches.Load() != 1 }, 2*blobRecoveryValidationRetryInterval+100*time.Millisecond, 10*time.Millisecond, "column batch writes by the worker")
+			saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+			require.NoError(t, err)
+			require.Len(t, saved, int(r.d.beaconConfig.NumberOfColumns)-1)
+			require.NotContains(t, saved, columns.column)
+			r.requireNoBlobSidecars(t)
+			r.requireNoCachedRecoveryResult(t)
+		})
+	}
+}
+
+// useBlobFiles gives the run a blob store on a file system of its own, and returns a function that removes the file of a
+// blob sidecar, so a test can lose a file and keep the count row.
+func useBlobFiles(t *testing.T, r *recoveryRun) (removeFile func(index uint64) error) {
+	t.Helper()
+	files := afero.NewMemMapFs()
+	r.d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), files)
+	return func(index uint64) error {
+		return files.Remove(fmt.Sprintf("%d/%s_%d", recoveryTestSlot/10_000, r.root.String(), index))
+	}
+}
+
+// Outside lazy mode the count row is no proof that the blob files exist, so a retry of a failed blob write goes on
+// when a file is missing under a positive row.
+func TestBlobRecoveryRetriesAFailedBlobWriteThatLeftACountRowWithAMissingFile(t *testing.T) {
+	var damageErr error
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{BlobPruningDisabled: true},
+		supernode:    true,
+		unscheduled:  true,
+		instrument: func(r *recoveryRun) {
+			atFuluFromGenesis(r)
+			removeFile := useBlobFiles(t, r)
+			store := r.d.blobStorage
+			r.d.blobStorage = &failFirstBlobWriteStorage{BlobStorage: store, onFail: func() {
+				damageErr = store.WriteBlobSidecars(t.Context(), r.root, r.blobs)
+				if damageErr == nil {
+					damageErr = removeFile(1)
+				}
+			}}
+		},
+	})
+	r.scheduleWithoutMetadata(t)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+
+	require.NoError(t, damageErr)
+	r.requireBlobsRecovered(t)
+}
+
+func TestRecoveryDone(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		caplinConfig clparams.CaplinConfig
+		supernode    bool
+		prepare      func(t *testing.T, r *recoveryRun, removeFile func(index uint64) error)
+		want         bool
+	}{
+		{name: "lazy with some columns", supernode: true},
+		{name: "lazy with every column", supernode: true, want: true, prepare: func(t *testing.T, r *recoveryRun, _ func(uint64) error) {
+			for _, sidecar := range r.unstoredColumns() {
+				r.storeColumn(t, sidecar.Index)
+			}
+		}},
+		{
+			name: "supernode outside lazy mode with every blob file", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true, want: true,
+			prepare: func(t *testing.T, r *recoveryRun, _ func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+			},
+		},
+		{
+			name: "supernode outside lazy mode with a blob file missing", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true,
+			prepare: func(t *testing.T, r *recoveryRun, removeFile func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+				require.NoError(t, removeFile(1))
+			},
+		},
+		{name: "supernode outside lazy mode with no count row", caplinConfig: clparams.CaplinConfig{BlobPruningDisabled: true}, supernode: true},
+		{
+			name: "archive custody node with a blob file missing", caplinConfig: clparams.CaplinConfig{ArchiveBlobs: true}, want: true,
+			prepare: func(t *testing.T, r *recoveryRun, removeFile func(uint64) error) {
+				require.NoError(t, r.d.blobStorage.WriteBlobSidecars(t.Context(), r.root, r.blobs))
+				require.NoError(t, removeFile(1))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var removeFile func(index uint64) error
+			r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &tc.caplinConfig, supernode: tc.supernode, unscheduled: true, instrument: func(r *recoveryRun) {
+				atFuluFromGenesis(r)
+				removeFile = useBlobFiles(t, r)
+			}})
+			if tc.prepare != nil {
+				tc.prepare(t, r, removeFile)
+			}
+
+			done, err := r.d.recoveryDone(t.Context(), recoveryTestSlot, r.root)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, done)
+		})
+	}
+}
+
+func TestBlobRecoveryWritesBlobSidecarsOutsideLazyMode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		caplinConfig clparams.CaplinConfig
+		supernode    bool
+	}{
+		"archive supernode":           {clparams.CaplinConfig{ArchiveBlobs: true}, true},
+		"archive custody node":        {clparams.CaplinConfig{ArchiveBlobs: true}, false},
+		"immediate blobs backfilling": {clparams.CaplinConfig{ImmediateBlobsBackfilling: true}, true},
+		"column keep slots":           {clparams.CaplinConfig{ColumnKeepSlots: 1}, true},
+		"blob pruning disabled":       {clparams.CaplinConfig{BlobPruningDisabled: true}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &tc.caplinConfig, supernode: tc.supernode, unscheduled: true, instrument: atFuluFromGenesis})
+			r.scheduleWithoutMetadata(t)
+
+			requireBlobRecoveryReleased(t, r.d, r.root)
+
+			r.requireBlobsRecovered(t)
+		})
+	}
+}
+
+func TestLazyBlobSidecars(t *testing.T) {
+	const fuluEpoch, gloasEpoch = 10, 20
+	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
+	fuluSlot, gloasSlot, electraSlot := fuluEpoch*slotsPerEpoch, gloasEpoch*slotsPerEpoch, (fuluEpoch-1)*slotsPerEpoch
+
+	for _, tc := range []struct {
+		name        string
+		slot        uint64
+		custodyNode bool
+		raiseSlot   uint64
+		mutate      func(cfg *clparams.BeaconChainConfig, caplinConfig *clparams.CaplinConfig)
+		want        bool
+	}{
+		{name: "fulu supernode", slot: fuluSlot, want: true},
+		{name: "gloas supernode", slot: gloasSlot, want: true},
+		{name: "slot before fulu", slot: electraSlot},
+		{name: "archive blobs", slot: fuluSlot, mutate: func(_ *clparams.BeaconChainConfig, c *clparams.CaplinConfig) { c.ArchiveBlobs = true }},
+		{name: "immediate blobs backfilling", slot: fuluSlot, mutate: func(_ *clparams.BeaconChainConfig, c *clparams.CaplinConfig) { c.ImmediateBlobsBackfilling = true }},
+		{name: "not a supernode", slot: fuluSlot, custodyNode: true},
+		{name: "custody raised after the slot", slot: fuluSlot, raiseSlot: fuluSlot + 1},
+		{name: "custody raised at the slot", slot: fuluSlot, raiseSlot: fuluSlot, want: true},
+		{name: "column keep slots", slot: fuluSlot, mutate: func(_ *clparams.BeaconChainConfig, c *clparams.CaplinConfig) { c.ColumnKeepSlots = 1 }},
+		{name: "blob pruning disabled", slot: fuluSlot, mutate: func(_ *clparams.BeaconChainConfig, c *clparams.CaplinConfig) { c.BlobPruningDisabled = true }},
+		{name: "column window shorter than blob window", slot: fuluSlot, mutate: func(cfg *clparams.BeaconChainConfig, _ *clparams.CaplinConfig) {
+			cfg.MinEpochsForDataColumnSidecarsRequests = cfg.MinEpochsForBlobSidecarsRequests - 1
+		}},
+		{name: "column window longer than blob window", slot: fuluSlot, want: true, mutate: func(cfg *clparams.BeaconChainConfig, _ *clparams.CaplinConfig) {
+			cfg.MinEpochsForDataColumnSidecarsRequests = cfg.MinEpochsForBlobSidecarsRequests + 1
+		}},
+		{name: "block window shorter than blob window", slot: fuluSlot, mutate: func(cfg *clparams.BeaconChainConfig, _ *clparams.CaplinConfig) {
+			cfg.MinEpochsForBlockRequestsConfig = cfg.MinEpochsForBlobSidecarsRequests - 1
+		}},
+		{name: "block window as long as blob window", slot: fuluSlot, want: true, mutate: func(cfg *clparams.BeaconChainConfig, _ *clparams.CaplinConfig) {
+			cfg.MinEpochsForBlockRequestsConfig = cfg.MinEpochsForBlobSidecarsRequests
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := elBlobsTestConfig(gloasEpoch)
+			cfg.FuluForkEpoch = fuluEpoch
+			caplinConfig := &clparams.CaplinConfig{}
+			if tc.mutate != nil {
+				tc.mutate(cfg, caplinConfig)
+			}
+			d := newELBlobsTestPeerDas(t, cfg, caplinConfig)
+			if !tc.custodyNode {
+				d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+			}
+			require.Equal(t, !tc.custodyNode, d.state.IsSupernode())
+			d.state.SetCustodyRaiseSlot(tc.raiseSlot)
+
+			require.Equal(t, tc.want, d.lazyBlobSidecars(tc.slot))
 		})
 	}
 }
