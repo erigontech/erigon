@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -159,8 +160,8 @@ func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 	}
 }
 
-// Cached prior receipts are used only when their index matches their position; a receipt whose index
-// is its txNum is re-executed instead.
+// Cached prior receipts are used when their index is their position, or their txNum (then the position is
+// served); a receipt with any other index is re-executed instead.
 func TestDerivePriorReceiptsChecksCachedIndex(t *testing.T) {
 	t.Parallel()
 	cfg, txns, header, reader := counterCalls(t)
@@ -171,7 +172,8 @@ func TestDerivePriorReceiptsChecksCachedIndex(t *testing.T) {
 		cached      bool
 	}{
 		{"matching index", 1, true},
-		{"txNum as index", blockStartTxNum + 1, false},
+		{"txNum as index", blockStartTxNum + 1, true},
+		{"another index", 5, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -204,4 +206,23 @@ func TestDerivePriorReceiptsChecksCachedIndex(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A cached prior receipt that cannot be read is an error, not a reason to re-execute.
+func TestDerivePriorReceiptsReturnsCacheReadError(t *testing.T) {
+	t.Parallel()
+	cfg, txns, header, reader := counterCalls(t)
+	const blockStartTxNum = 1
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EnableDomain(kv.RCacheDomain)
+	tx, sd := temporaltest.NewTestTxSD(t, db)
+	require.NoError(t, sd.AsPutDel(tx).DomainPut(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, []byte{0xff}, blockStartTxNum, nil))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, blockStartTxNum+1))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	defer ibs.Close()
+	gp := new(protocol.GasPool).AddGas(header.GasLimit)
+	_, err := DerivePriorReceipts(t.Context(), cfg, ethash.NewFaker(), header, txns, 1, blockStartTxNum, tx, ibs, gp, nil)
+	require.Error(t, err)
 }

@@ -74,12 +74,18 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 	t.Run("metadata only", func(t *testing.T) { check(t, 0, 0) })
 	t.Run("persisted receipt", func(t *testing.T) {
 		receipt := &types.Receipt{Type: types.FrameTxType, Payer: &common.Address{1}, GasUsed: 100, CumulativeGasUsed: 100}
-		second := &types.Receipt{Type: types.FrameTxType, Payer: &common.Address{1}, GasUsed: 200, CumulativeGasUsed: 300, TransactionIndex: 1}
-		require.NoError(t, rawdb.WriteReceiptCacheV2(put, receipt, 3))
-		require.NoError(t, rawdb.WriteReceiptCacheV2(put, second, 4))
-		require.NoError(t, rawdb.WriteReceiptCacheV2(put, nil, 5))
-		require.NoError(t, doms.Flush(t.Context(), tx))
-		check(t, 100, 200)
+		// The second receipt is stored at txNum 4: an index of 4 is its txNum and is served as its position, 5 is not.
+		for _, second := range []struct {
+			index   uint
+			gasUsed uint64
+		}{{1, 200}, {4, 200}, {5, 0}} {
+			require.NoError(t, tx.ClearTable(kv.TblRCacheHistoryVals))
+			require.NoError(t, rawdb.WriteReceiptCacheV2(put, receipt, 3))
+			require.NoError(t, rawdb.WriteReceiptCacheV2(put, &types.Receipt{Type: types.FrameTxType, Payer: &common.Address{1}, GasUsed: 200, CumulativeGasUsed: 300, TransactionIndex: second.index}, 4))
+			require.NoError(t, rawdb.WriteReceiptCacheV2(put, nil, 5))
+			require.NoError(t, doms.Flush(t.Context(), tx))
+			check(t, 100, second.gasUsed)
+		}
 
 		// A later block also has a receipt at index zero. Its row cannot
 		// supply this block's receipt once the older values are pruned.

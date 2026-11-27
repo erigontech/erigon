@@ -221,7 +221,10 @@ func DerivePriorReceipts(
 			TxNum:         txNum,
 			DontCalcBloom: true,
 		}, i)
-		if err != nil || !ok {
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			allCached = false
 			break
 		}

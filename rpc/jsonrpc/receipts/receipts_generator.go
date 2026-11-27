@@ -183,7 +183,7 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 }
 
 func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64, txIndex int) (*types.Receipt, bool, error) {
-	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+	return rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
 		TxNum:     txNum,
 		BlockNum:  blockNum,
 		BlockHash: blockHash,
@@ -191,7 +191,6 @@ func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash 
 		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
 		DontCalcBloom: true,
 	}, txIndex)
-	return receipt, ok && receipt != nil, err
 }
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
@@ -704,9 +703,6 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 	generated := fromExecution.Copy()
 	// Blob gas is derived from the transaction and is not stored in the receipt cache.
 	fromDB.BlobGasUsed = txn.GetBlobGas()
-	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
-	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
 		panic(fmt.Sprintf("assert: first log index mismatch: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
 	}
@@ -877,11 +873,8 @@ func (g *Generator) readRetainedReceipt(tx kv.TemporalTx, header *types.Header, 
 	if err != nil || next != afterTx {
 		return nil, err
 	}
-	receipt, ok, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum, index)
-	if err != nil || !ok {
-		return nil, err
-	}
-	return receipt, nil
+	receipt, _, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum, index)
+	return receipt, err
 }
 
 type loaderMutex[K comparable] struct {
