@@ -21,6 +21,9 @@ on:
 
 env:
   ROLLUP0_REF: bf80de50fff74a549f1c34e07dbf66a9d27a28d3
+  # The quorum harness needs a signer serving prove.v1.Prover/ProveStream,
+  # which bf80de5's does not.
+  QUORUM_ROLLUP0_REF: 4e806552a2abe1f8eca50e3a0ce5a0c32ddda5af
   KURTOSIS_VERSION: 1.22.1
   FOUNDRY_VERSION: v1.7.1
   KURTOSIS_ENCLAVE: eez-erigon
@@ -45,11 +48,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Wait for the images of ROLLUP0_REF
+      - name: Wait for the images of ROLLUP0_REF and QUORUM_ROLLUP0_REF
         run: |
           deadline=$((SECONDS + 190 * 60))
-          for image in eez-node eez-proof-signer eez-deploy; do
-            ref="ghcr.io/erigontech/$image:$ROLLUP0_REF"
+          for image in {eez-node,eez-proof-signer,eez-deploy}:{$ROLLUP0_REF,$QUORUM_ROLLUP0_REF}; do
+            ref="ghcr.io/erigontech/$image"
             until err=$(docker manifest inspect "$ref" 2>&1 > /dev/null); do
               case $err in
                 *unauthorized* | *denied*) echo "::error::$ref: $err"; exit 1 ;;
@@ -187,7 +190,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: eez-association/eez-rollup0
-          ref: ${{ env.ROLLUP0_REF }}
+          ref: ${{ env.QUORUM_ROLLUP0_REF }}
           path: rollup0
           persist-credentials: false
 
@@ -213,8 +216,8 @@ jobs:
       - name: Pull the reference images
         run: |
           for image in eez-node eez-proof-signer eez-deploy; do
-            docker pull "ghcr.io/erigontech/$image:$ROLLUP0_REF"
-            docker tag "ghcr.io/erigontech/$image:$ROLLUP0_REF" "$image:ci"
+            docker pull "ghcr.io/erigontech/$image:$QUORUM_ROLLUP0_REF"
+            docker tag "ghcr.io/erigontech/$image:$QUORUM_ROLLUP0_REF" "$image:ci"
           done
 
       - name: Quorum run
