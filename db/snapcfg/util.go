@@ -247,6 +247,10 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
 			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
+			if caplinFile.Type == nil && caplinFile.TypeString != "" {
+				drops.unreadable++
+				continue
+			}
 			if !known || caplinFile.Type == nil {
 				drops.unparsedItem(p.Name)
 				continue
