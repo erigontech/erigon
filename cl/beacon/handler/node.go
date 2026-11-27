@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -35,12 +36,12 @@ import (
 "direction": "inbound"
 */
 type peer struct {
-	PeerID             string `json:"peer_id"`
-	State              string `json:"state"`
-	Enr                string `json:"enr"`
-	LastSeenP2PAddress string `json:"last_seen_p2p_address"`
-	Direction          string `json:"direction"`
-	AgentVersion       string `json:"agent_version"`
+	PeerID             string  `json:"peer_id"`
+	State              string  `json:"state"`
+	Enr                *string `json:"enr"`
+	LastSeenP2PAddress string  `json:"last_seen_p2p_address"`
+	Direction          string  `json:"direction"`
+	AgentVersion       string  `json:"agent_version"`
 }
 
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
@@ -86,38 +87,63 @@ func (a *ApiHandler) GetEthV1NodePeerCount(w http.ResponseWriter, r *http.Reques
 	}), nil
 }
 
+var (
+	peerStates     = []string{"disconnected", "connecting", "connected", "disconnecting"}
+	peerDirections = []string{"inbound", "outbound"}
+)
+
+// peerFilter reads a repeated query parameter. An empty filter matches every value.
+func peerFilter(r *http.Request, name string, allowed []string) (map[string]struct{}, error) {
+	values := r.URL.Query()[name]
+	filter := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !slices.Contains(allowed, value) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid %s: %q", name, value))
+		}
+		filter[value] = struct{}{}
+	}
+	return filter, nil
+}
+
+func matchesPeerFilter(filter map[string]struct{}, value string) bool {
+	_, ok := filter[value]
+	return len(filter) == 0 || ok
+}
+
+func newPeer(p *sentinelproto.Peer) peer {
+	var enr *string
+	if p.Enr != "" {
+		enr = &p.Enr
+	}
+	return peer{
+		PeerID:             p.Pid,
+		State:              p.State,
+		Enr:                enr,
+		LastSeenP2PAddress: p.Address,
+		Direction:          p.Direction,
+		AgentVersion:       p.AgentVersion,
+	}
+}
+
 func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	state := r.URL.Query().Get("state")
-	direction := r.URL.Query().Get("direction")
-
-	var directionIn, stateIn *string
-	if state != "" {
-		stateIn = &state
+	states, err := peerFilter(r, "state", peerStates)
+	if err != nil {
+		return nil, err
 	}
-	if direction != "" {
-		directionIn = &direction
+	directions, err := peerFilter(r, "direction", peerDirections)
+	if err != nil {
+		return nil, err
 	}
 
-	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{
-		Direction: directionIn,
-		State:     stateIn,
-	})
+	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	peers := make([]peer, 0, len(ret.Peers))
-	for i := range ret.Peers {
-		if ret.Peers[i].Enr == "" {
-			continue
+	for _, p := range ret.Peers {
+		if matchesPeerFilter(states, p.State) && matchesPeerFilter(directions, p.Direction) {
+			peers = append(peers, newPeer(p))
 		}
-		peers = append(peers, peer{
-			PeerID:             ret.Peers[i].Pid,
-			State:              ret.Peers[i].State,
-			Enr:                ret.Peers[i].Enr,
-			LastSeenP2PAddress: ret.Peers[i].Address,
-			Direction:          ret.Peers[i].Direction,
-			AgentVersion:       ret.Peers[i].AgentVersion,
-		})
 	}
 
 	return newBeaconResponse(peers), nil
@@ -132,20 +158,9 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	// find the peer with matching enr
 	for _, p := range ret.Peers {
 		if p.Pid == pid {
-			if p.Enr == "" {
-				continue
-			}
-			return newBeaconResponse(peer{
-				PeerID:             p.Pid,
-				State:              p.State,
-				Enr:                p.Enr,
-				LastSeenP2PAddress: p.Address,
-				Direction:          p.Direction,
-				AgentVersion:       p.AgentVersion,
-			}), nil
+			return newBeaconResponse(newPeer(p)), nil
 		}
 	}
 

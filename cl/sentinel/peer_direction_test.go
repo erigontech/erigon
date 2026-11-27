@@ -458,3 +458,35 @@ func TestPeersInfoKeepsTheDirectionOfAPeerWithoutAnOpenConnection(t *testing.T) 
 
 	require.Equal(t, "inbound", peersInfoDirection(t, s, pid))
 }
+
+// emptiedNetwork removes a peer's connections after the first ConnsToPeer call, as libp2p does when
+// the last closed connection goes away.
+type emptiedNetwork struct {
+	network.Network
+	pid   peer.ID
+	calls *int
+}
+
+func (n emptiedNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
+	if pid != n.pid {
+		return n.Network.ConnsToPeer(pid)
+	}
+	*n.calls++
+	if *n.calls > 1 {
+		return nil
+	}
+	conns := n.Network.ConnsToPeer(pid)
+	for i, c := range conns {
+		conns[i] = closedConn{c}
+	}
+	return conns
+}
+
+func TestPeersInfoReadsTheConnectionsOnce(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectInbound(t, local).ID()
+	s.p2p = stubP2P{host: closingHost{Host: local, net: emptiedNetwork{Network: local.Network(), pid: pid, calls: new(int)}}}
+
+	require.Equal(t, "inbound", peersInfoDirection(t, s, pid))
+}

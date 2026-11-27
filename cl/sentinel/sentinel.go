@@ -305,9 +305,9 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		if s.p2p.Host().Network().Connectedness(p) != network.Connected {
 			entry.State = "disconnected"
 		}
-		conns := openConns(s.p2p.Host().Network(), p)
-		if len(conns) == 0 {
-			conns = s.p2p.Host().Network().ConnsToPeer(p)
+		conns := s.p2p.Host().Network().ConnsToPeer(p)
+		if open := slices.DeleteFunc(slices.Clone(conns), network.Conn.IsClosed); len(open) > 0 {
+			conns = open
 		}
 		if peerIsInbound(conns) {
 			entry.Direction = "inbound"
