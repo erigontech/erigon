@@ -19,7 +19,6 @@ package shutter_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	rpccontracts "github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -45,42 +45,21 @@ import (
 
 func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		logger := log.New()
-		backend := NewMockContractBackend(gomock.NewController(t), logger)
-		backend.PrepareMocks()
-		config := shuttercfg.ConfigByChainName(networkname.Chiado)
-		config.ReorgDepthAwareness = 5
-		batches := make(chan *remoteproto.StateChangeBatch)
-		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
-		tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
-		eg, runCtx := errgroup.WithContext(ctx)
-		eg.Go(func() error { return listener.Run(runCtx) })
-		eg.Go(func() error { return tracker.Run(runCtx) })
-		defer func() {
-			cancel()
-			require.ErrorIs(t, eg.Wait(), context.Canceled)
-		}()
-		synctest.Wait()
-
-		handle := PoolTestHandle{config: config, contractBackend: backend}
+		tracker, handle, notify := startEonTracker(t, context.Canceled, func(handle *PoolTestHandle) {
+			handle.config.ReorgDepthAwareness = 5
+		})
 		initial, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 1)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, initial)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 100}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: 100})
 		eon, ok := tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, initial.Eon(), eon)
 
-		manager := common.HexToAddress(config.KeyperSetManagerContractAddress)
+		manager := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
 		handle.SimulateCallResult(manager, nil)
-		backend.EXPECT().CodeAt(gomock.Any(), manager, uint256.NewInt(0)).Return(nil, nil)
-		batches <- &remoteproto.StateChangeBatch{
-			StateChangesIncomplete: true,
-			ChangeBatch:            []*remoteproto.StateChange{{}},
-		}
-		synctest.Wait()
+		handle.contractBackend.EXPECT().CodeAt(gomock.Any(), manager, uint256.NewInt(0)).Return(nil, nil)
+		notify(&remoteproto.StateChange{})
 		_, ok = tracker.CurrentEon()
 		require.False(t, ok, "a reset before deployment must clear the current eon")
 		_, ok = tracker.RecentEon(initial.EonIndex)
@@ -89,8 +68,7 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 		redeployed, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 2)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, redeployed)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 2}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: 2})
 		eon, ok = tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, redeployed.Eon(), eon)
@@ -98,11 +76,9 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 		next, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 3)
 		require.NoError(t, err)
 		handle.SimulateNewEonRead(t, next)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 10}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: 10})
 		handle.SimulateCachedEonRead(t, next)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 16}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: 16})
 		_, ok = tracker.RecentEon(redeployed.EonIndex)
 		require.False(t, ok, "cleanup must resume without reaching the height of the old deployment")
 		_, ok = tracker.RecentEon(next.EonIndex)
@@ -112,49 +88,20 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 
 func TestEonTrackerRecoversBeforeFirstKeyperSetActivation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		logger := log.New()
-		backend := NewMockContractBackend(gomock.NewController(t), logger)
-		config := shuttercfg.ConfigByChainName(networkname.Chiado)
-		manager := common.HexToAddress(config.KeyperSetManagerContractAddress)
+		tracker, handle, notify := startEonTracker(t, context.Canceled, nil)
 		const activationBlock = 10
-		managerABI, err := abi.JSON(strings.NewReader(contracts.KeyperSetManagerABI))
-		require.NoError(t, err)
-		indexCall, err := managerABI.Pack("getKeyperSetIndexByBlock", uint64(activationBlock-1))
-		require.NoError(t, err)
-		backend.EXPECT().CallContract(gomock.Any(), gomock.Cond(func(msg bind.CallMsg) bool {
-			return msg.To != nil && *msg.To == manager && bytes.Equal(msg.Data, indexCall)
-		}), uint256.NewInt(activationBlock-1)).Return(nil, errors.New("execution reverted")).AnyTimes()
-		backend.PrepareMocks()
-		batches := make(chan *remoteproto.StateChangeBatch)
-		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
-		tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
-		eg, runCtx := errgroup.WithContext(ctx)
-		eg.Go(func() error { return listener.Run(runCtx) })
-		eg.Go(func() error { return tracker.Run(runCtx) })
-		defer func() {
-			cancel()
-			require.ErrorIs(t, eg.Wait(), context.Canceled)
-		}()
-		synctest.Wait()
-
-		handle := PoolTestHandle{config: config, contractBackend: backend}
 		initial, err := testhelpers.MockEonKeyGeneration(0, 1, 2, activationBlock)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, initial)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: activationBlock}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: activationBlock})
 		eon, ok := tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, initial.Eon(), eon)
 
+		manager := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
 		handle.SimulateCallResult(manager, uint256.NewInt(1).PaddedBytes(32))
 		handle.SimulateCallResult(manager, uint256.NewInt(activationBlock).PaddedBytes(32))
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
-			BlockHeight: activationBlock - 1,
-			Direction:   remoteproto.Direction_UNWIND,
-		}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: activationBlock - 1, Direction: remoteproto.Direction_UNWIND})
 		_, ok = tracker.CurrentEon()
 		require.False(t, ok, "the first keyper set is no longer active")
 		_, ok = tracker.RecentEon(initial.EonIndex)
@@ -163,176 +110,229 @@ func TestEonTrackerRecoversBeforeFirstKeyperSetActivation(t *testing.T) {
 		replacement, err := testhelpers.MockEonKeyGeneration(0, 1, 2, activationBlock)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, replacement)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: activationBlock}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: activationBlock})
 		eon, ok = tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, replacement.Eon(), eon)
 	})
 }
 
-func TestEonTrackerKeyperSetIndexRevert(t *testing.T) {
+func TestEonTrackerRecoversFromNoActiveKeyperSetRevert(t *testing.T) {
 	unwind := &remoteproto.StateChange{BlockHeight: 9, Direction: remoteproto.Direction_UNWIND}
 	for _, tc := range []struct {
 		name            string
 		activationBlock uint64
 		changes         []*remoteproto.StateChange
-		extraRevertData []byte
 	}{
-		{
-			name:            "unwind removes first registration with backdated activation",
-			activationBlock: 5,
-			changes:         []*remoteproto.StateChange{unwind},
-		},
-		{
-			name:            "replacement head has no active set",
-			activationBlock: 10,
-			changes:         []*remoteproto.StateChange{unwind, {BlockHeight: 10}},
-		},
-		{
-			name:            "revert payload has trailing data",
-			activationBlock: 5,
-			changes:         []*remoteproto.StateChange{unwind},
-			extraRevertData: []byte{0},
-		},
+		{"unwind removes first registration with earlier activation block", 5, []*remoteproto.StateChange{unwind}},
+		{"replacement head has no active set", 10, []*remoteproto.StateChange{unwind, {BlockHeight: 11}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				ctx, cancel := context.WithCancel(t.Context())
-				logger := log.New()
-				backend := NewMockContractBackend(gomock.NewController(t), logger)
-				config := shuttercfg.ConfigByChainName(networkname.Chiado)
-				manager := common.HexToAddress(config.KeyperSetManagerContractAddress)
 				managerABI, err := abi.JSON(strings.NewReader(contracts.KeyperSetManagerABI))
 				require.NoError(t, err)
 				noActiveSet, ok := managerABI.Errors["NoActiveKeyperSet"]
 				require.True(t, ok)
-				revertErr := ethapi.NewRevertError(&evmtypes.ExecutionResult{
-					Reverted:   true,
-					ReturnData: append(noActiveSet.ID[:4:4], tc.extraRevertData...),
-				})
 				head := tc.changes[len(tc.changes)-1].BlockHeight
-				indexCall, err := managerABI.Pack("getKeyperSetIndexByBlock", head)
-				require.NoError(t, err)
-				var reorgStarted bool
-				indexMsg := gomock.Cond(func(msg bind.CallMsg) bool {
-					return reorgStarted && msg.To != nil && *msg.To == manager && bytes.Equal(msg.Data, indexCall)
+				tracker, handle, notify := startEonTracker(t, context.Canceled, func(handle *PoolTestHandle) {
+					expectTrackerCall(t, handle, common.HexToAddress(handle.config.KeyperSetManagerContractAddress),
+						managerABI, "getKeyperSetIndexByBlock", head, head).Return(nil, newKeyperSetRevert(noActiveSet.ID[:4]))
 				})
-				backend.EXPECT().CallContract(gomock.Any(), indexMsg, uint256.NewInt(head)).Return(nil, revertErr)
-				backend.PrepareMocks()
-				batches := make(chan *remoteproto.StateChangeBatch)
-				listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
-				tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
-				eg, runCtx := errgroup.WithContext(ctx)
-				eg.Go(func() error { return listener.Run(runCtx) })
-				eg.Go(func() error { return tracker.Run(runCtx) })
-				defer func() {
-					cancel()
-					_ = eg.Wait()
-				}()
-				synctest.Wait()
-
-				handle := PoolTestHandle{config: config, contractBackend: backend}
 				initial, err := testhelpers.MockEonKeyGeneration(0, 1, 2, tc.activationBlock)
 				require.NoError(t, err)
 				handle.SimulateInitialEonRead(t, initial)
-				batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 10}}}
-				synctest.Wait()
+				notify(&remoteproto.StateChange{BlockHeight: 10})
 				eon, ok := tracker.CurrentEon()
 				require.True(t, ok)
 				require.Equal(t, initial.Eon(), eon)
 
-				reorgStarted = true
-				batches <- &remoteproto.StateChangeBatch{ChangeBatch: tc.changes}
-				synctest.Wait()
-				if len(tc.extraRevertData) != 0 {
-					cancel()
-					require.ErrorIs(t, eg.Wait(), revertErr)
-					return
-				}
+				notify(tc.changes...)
 				_, ok = tracker.CurrentEon()
 				require.False(t, ok, "the first keyper set is no longer active")
 				_, ok = tracker.RecentEon(initial.EonIndex)
 				require.False(t, ok, "the old eon must not remain cached")
 
-				replacement, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 11)
+				replacement, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 12)
 				require.NoError(t, err)
 				handle.SimulateInitialEonRead(t, replacement)
-				batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 11}}}
-				synctest.Wait()
+				notify(&remoteproto.StateChange{BlockHeight: 12})
 				eon, ok = tracker.CurrentEon()
 				require.True(t, ok)
 				require.Equal(t, replacement.Eon(), eon)
-
-				cancel()
-				require.ErrorIs(t, eg.Wait(), context.Canceled)
 			})
 		})
 	}
 }
 
+func TestEonTrackerKeyperSetIndexRevertRemainsFatal(t *testing.T) {
+	managerABI, err := abi.JSON(strings.NewReader(contracts.KeyperSetManagerABI))
+	require.NoError(t, err)
+	noActiveSet, ok := managerABI.Errors["NoActiveKeyperSet"]
+	require.True(t, ok)
+	stringType, err := abi.NewType("string", "", nil)
+	require.NoError(t, err)
+	errorMessage, err := (abi.Arguments{{Type: stringType}}).Pack("unexpected keyper set error")
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"trailing data", append(noActiveSet.ID[:4:4], 0)},
+		{"Error(string)", append(common.FromHex("0x08c379a0"), errorMessage...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				revertErr := newKeyperSetRevert(tc.data)
+				tracker, handle, notify := startEonTracker(t, revertErr, func(handle *PoolTestHandle) {
+					expectTrackerCall(t, handle, common.HexToAddress(handle.config.KeyperSetManagerContractAddress),
+						managerABI, "getKeyperSetIndexByBlock", 9, uint64(9)).Return(nil, revertErr)
+				})
+				initial, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 5)
+				require.NoError(t, err)
+				handle.SimulateInitialEonRead(t, initial)
+				notify(&remoteproto.StateChange{BlockHeight: 10})
+				_, ok := tracker.CurrentEon()
+				require.True(t, ok)
+
+				notify(&remoteproto.StateChange{BlockHeight: 9, Direction: remoteproto.Direction_UNWIND})
+			})
+		})
+	}
+}
+
+func TestEonTrackerDropsKeyAfterUnwindBeforeItsBroadcast(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tracker, handle, notify := startEonTracker(t, context.Canceled, func(handle *PoolTestHandle) {
+			broadcastABI, err := abi.JSON(strings.NewReader(contracts.KeyBroadcastContractABI))
+			require.NoError(t, err)
+			emptyKey, err := broadcastABI.Methods["getEonKey"].Outputs.Pack([]byte(nil))
+			require.NoError(t, err)
+			expectTrackerCall(t, handle, common.HexToAddress(handle.config.KeyBroadcastContractAddress),
+				broadcastABI, "getEonKey", 21, uint64(1)).Return(emptyKey, nil).AnyTimes()
+		})
+		older, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 10)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, older)
+		notify(&remoteproto.StateChange{BlockHeight: 10})
+
+		published, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 20)
+		require.NoError(t, err)
+		handle.SimulateNewEonRead(t, published)
+		notify(&remoteproto.StateChange{BlockHeight: 22})
+
+		handle.SimulateCachedEonRead(t, published)
+		manager := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
+		handle.SimulateCallResult(manager, uint256.NewInt(published.ActivationBlock).PaddedBytes(32))
+		handle.simulateEonState(t, older)
+		notify(&remoteproto.StateChange{BlockHeight: 21, Direction: remoteproto.Direction_UNWIND})
+
+		_, ok := tracker.CurrentEon()
+		require.False(t, ok, "the active set has no key on the canonical chain")
+		_, ok = tracker.RecentEon(published.EonIndex)
+		require.False(t, ok, "the rolled-back key must not remain cached")
+		_, ok = tracker.EonByBlockNum(21)
+		require.False(t, ok, "the older key is not valid for the active set")
+		old, ok := tracker.EonByBlockNum(19)
+		require.True(t, ok)
+		require.Equal(t, older.Eon(), old)
+
+		replacement, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 20)
+		require.NoError(t, err)
+		handle.SimulateNewEonRead(t, replacement)
+		notify(&remoteproto.StateChange{BlockHeight: 22})
+		active, ok := tracker.CurrentEon()
+		require.True(t, ok)
+		require.Equal(t, replacement.Eon(), active)
+	})
+}
+
 func TestEonTrackerReloadsKeyAfterReorgAcrossActivation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		logger := log.New()
-		backend := NewMockContractBackend(gomock.NewController(t), logger)
-		backend.PrepareMocks()
-		config := shuttercfg.ConfigByChainName(networkname.Chiado)
-		batches := make(chan *remoteproto.StateChangeBatch)
-		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
-		tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
-		eg, runCtx := errgroup.WithContext(ctx)
-		eg.Go(func() error { return listener.Run(runCtx) })
-		eg.Go(func() error { return tracker.Run(runCtx) })
-		defer func() {
-			cancel()
-			require.ErrorIs(t, eg.Wait(), context.Canceled)
-		}()
-		synctest.Wait()
-
-		handle := PoolTestHandle{config: config, contractBackend: backend}
-		manager := common.HexToAddress(config.KeyperSetManagerContractAddress)
+		tracker, handle, notify := startEonTracker(t, context.Canceled, nil)
+		older, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 5)
+		require.NoError(t, err)
 		earlier, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 10)
 		require.NoError(t, err)
-		handle.SimulateCallResult(manager, uint256.NewInt(3).PaddedBytes(32))
-		handle.SimulateCallResult(manager, uint256.NewInt(5).PaddedBytes(32))
-		handle.SimulateNewEonRead(t, earlier)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 10}}}
-		synctest.Wait()
-		eon, ok := tracker.CurrentEon()
-		require.True(t, ok)
-		require.Equal(t, earlier.Eon(), eon)
-
 		initial, err := testhelpers.MockEonKeyGeneration(2, 1, 2, 20)
 		require.NoError(t, err)
+
+		handle.SimulateInitialEonRead(t, older)
+		notify(&remoteproto.StateChange{BlockHeight: 5})
+		handle.SimulateNewEonRead(t, earlier)
+		notify(&remoteproto.StateChange{BlockHeight: 10})
 		handle.SimulateNewEonRead(t, initial)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 20}}}
-		synctest.Wait()
-		eon, ok = tracker.CurrentEon()
+		notify(&remoteproto.StateChange{BlockHeight: 20})
+		eon, ok := tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, initial.Eon(), eon)
+		_, ok = tracker.RecentEon(older.EonIndex)
+		require.True(t, ok)
 
-		handle.SimulateCallResult(manager, uint256.NewInt(3).PaddedBytes(32))
+		manager := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
+		handle.SimulateCallResult(manager, uint256.NewInt(2).PaddedBytes(32))
 		handle.SimulateCallResult(manager, uint256.NewInt(5).PaddedBytes(32))
 		handle.SimulateNewEonRead(t, earlier)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
-			BlockHeight: 19,
-			Direction:   remoteproto.Direction_UNWIND,
-		}}}
-		synctest.Wait()
+		handle.simulateEonState(t, older)
+		notify(&remoteproto.StateChange{BlockHeight: 19, Direction: remoteproto.Direction_UNWIND})
+
 		eon, ok = tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, earlier.Eon(), eon)
+		preserved, ok := tracker.RecentEon(older.EonIndex)
+		require.True(t, ok, "the older key still exists on the canonical chain")
+		require.Equal(t, older.Eon(), preserved)
 		_, ok = tracker.RecentEon(initial.EonIndex)
-		require.False(t, ok, "the future eon must not remain cached after a reorg")
+		require.False(t, ok, "the rolled-back active eon must be reloaded")
 
 		replacement, err := testhelpers.MockEonKeyGeneration(2, 1, 2, 20)
 		require.NoError(t, err)
 		handle.SimulateNewEonRead(t, replacement)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 20}}}
-		synctest.Wait()
+		notify(&remoteproto.StateChange{BlockHeight: 20})
 		eon, ok = tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, replacement.Eon(), eon)
 	})
+}
+
+func startEonTracker(t *testing.T, wantErr error, prepare func(*PoolTestHandle)) (*shutter.KsmEonTracker, *PoolTestHandle, func(...*remoteproto.StateChange)) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	logger := log.New()
+	handle := &PoolTestHandle{
+		config:          shuttercfg.ConfigByChainName(networkname.Chiado),
+		contractBackend: NewMockContractBackend(gomock.NewController(t), logger),
+	}
+	if prepare != nil {
+		prepare(handle)
+	}
+	handle.contractBackend.PrepareMocks()
+	batches := make(chan *remoteproto.StateChangeBatch)
+	listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
+	tracker := shutter.NewKsmEonTracker(logger, handle.config, listener, handle.contractBackend)
+	eg, runCtx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return listener.Run(runCtx) })
+	eg.Go(func() error { return tracker.Run(runCtx) })
+	t.Cleanup(func() {
+		cancel()
+		require.ErrorIs(t, eg.Wait(), wantErr)
+	})
+	synctest.Wait()
+	return tracker, handle, func(changes ...*remoteproto.StateChange) {
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: changes}
+		synctest.Wait()
+	}
+}
+
+func newKeyperSetRevert(data []byte) error {
+	return ethapi.NewRevertError(&evmtypes.ExecutionResult{Reverted: true, ReturnData: data})
+}
+
+func expectTrackerCall(t *testing.T, handle *PoolTestHandle, address common.Address, contractABI abi.ABI, method string, block uint64, args ...any) *rpccontracts.MockBackendCallContractCall {
+	t.Helper()
+	input, err := contractABI.Pack(method, args...)
+	require.NoError(t, err)
+	return handle.contractBackend.EXPECT().CallContract(gomock.Any(), gomock.Cond(func(msg bind.CallMsg) bool {
+		return msg.To != nil && *msg.To == address && bytes.Equal(msg.Data, input)
+	}), uint256.NewInt(block))
 }
