@@ -38,32 +38,17 @@ var segFormatExts = map[string]bool{".kv": true, ".v": true, ".ef": true, ".seg"
 //
 //	erigon snapshots upgrade-seg-headers --datadir=<path>
 func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
-	for _, d := range []string{
-		dirs.Snap,
-		dirs.SnapDomain,
-		dirs.SnapHistory,
-		dirs.SnapIdx,
-		dirs.SnapAccessors,
-		dirs.SnapCaplin,
-	} {
-		if err := walkSegDir(d, func(path string) error {
-			if !segFormatExts[filepath.Ext(path)] {
-				return nil
-			}
-			return upgradeSegFileToV2(path, logger)
-		}); err != nil {
-			return err
+	return walkSegDir(dirs.Snap, func(path string) error { // recurses into domain, history, idx, accessor and caplin
+		if !segFormatExts[filepath.Ext(path)] {
+			return nil
 		}
-	}
-	return nil
+		return upgradeSegFileToV2(path, logger)
+	})
 }
 
 // walkSegDir invokes fn for each file under root, treating a missing directory
 // and transient not-exist errors as a no-op.
 func walkSegDir(root string, fn func(path string) error) error {
-	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -99,7 +84,6 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 		logger.Warn("[seg_header_v2] keeping V1 header: compression sample has only empty words", "file", filepath.Base(path))
 		return nil
 	}
-	pageCnt := d.CompressedPageValuesCount()
 	fc := seg.DetectCompressType(d.MakeGetter())
 	if err := checkReadable(d, fc); err != nil {
 		d.Close()
@@ -107,7 +91,7 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 	}
 	d.Close() // release mmap before writing
 
-	if err := setV2Header(path, v2Bitmask(pageCnt, fc)); err != nil {
+	if err := setV2Header(path, fc); err != nil {
 		return err
 	}
 	removeStaleTorrents(path)
@@ -157,22 +141,6 @@ func checkReadable(d *seg.Decompressor, fc seg.FileCompression) (err error) {
 	return nil
 }
 
-// v2Bitmask builds the V2 header bitmask from the page-value count and the file's
-// word-level key/val compression.
-func v2Bitmask(pageCnt int, fc seg.FileCompression) seg.FeatureFlagBitmask {
-	var b seg.FeatureFlagBitmask
-	if pageCnt > 0 {
-		b.Set(seg.PageLevelCompressionEnabled)
-	}
-	if fc.Has(seg.CompressKeys) {
-		b.Set(seg.WordLevelKeyCompressionEnabled)
-	}
-	if fc.Has(seg.CompressVals) {
-		b.Set(seg.WordLevelValCompressionEnabled)
-	}
-	return b
-}
-
 // removeStaleTorrents removes the .torrent and any partial torrent artifacts
 // (.torrent<suffix>) of a snapshot file whose bytes were just patched, so the
 // downloader regenerates correct ones.
@@ -180,11 +148,22 @@ func removeStaleTorrents(path string) {
 	_ = dir.RemoveFilesByMask(path + ".torrent*")
 }
 
-// setV2Header writes the V2 version byte and bitmask at offset 0. Snapshot files
-// are read-only (0444), so it temporarily adds the owner-write bit and restores
-// the original permissions afterwards.
-func setV2Header(path string, bitmask seg.FeatureFlagBitmask) error {
+// setV2Header writes the V2 version byte at offset 0 and adds the word-level bits of fc
+// to the existing bitmask. Snapshot files are read-only (0444), so it temporarily adds
+// the owner-write bit and restores the original permissions afterwards.
+func setV2Header(path string, fc seg.FileCompression) error {
 	return withWritePerm(path, func(f *os.File) error {
+		header := make([]byte, 2)
+		if _, err := f.ReadAt(header, 0); err != nil {
+			return err
+		}
+		bitmask := seg.FeatureFlagBitmask(header[1])
+		if fc.Has(seg.CompressKeys) {
+			bitmask.Set(seg.WordLevelKeyCompressionEnabled)
+		}
+		if fc.Has(seg.CompressVals) {
+			bitmask.Set(seg.WordLevelValCompressionEnabled)
+		}
 		_, err := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0)
 		return err
 	})

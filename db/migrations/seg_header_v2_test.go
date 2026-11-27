@@ -149,3 +149,23 @@ func TestUpgradeSegHeadersV2_EmptySampleKeepsV1(t *testing.T) {
 	defer d.Close()
 	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
 }
+
+func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
+	cfg := seg.DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	cfg.ValuesOnCompressedPage = 256 // the flag is set, the stored uint8 count is 0
+	c, err := seg.NewCompressor(context.Background(), t.Name(), path, t.TempDir(), cfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	pairs := manyPairs()
+	for _, kv := range pairs {
+		require.NoError(t, c.AddWord([]byte(kv[0])))
+		require.NoError(t, c.AddWord([]byte(kv[1])))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	require.Equal(t, pairs, readBackPairs(t, path))
+}
