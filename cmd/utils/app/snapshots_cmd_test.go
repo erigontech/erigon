@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
@@ -126,6 +127,34 @@ func TestIndexAggOptsOpenADatadirWithAGap(t *testing.T) {
 	agg, err := tryOpenAgg(t.Context(), dirs, chainDB, log.New(), indexAggOpts...)
 	require.NoError(t, err)
 	agg.Close()
+}
+
+func TestTryOpenAggSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
+	}
+	dataDir := utils.DataDirFlag
+	cmd := &cli.Command{
+		Name:   "accessor",
+		Flags:  []cli.Flag{&dataDir},
+		Before: commonBeforeSnapshotCommand,
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+			defer chainDB.Close()
+			agg, err := tryOpenAgg(ctx, dirs, chainDB, log.New())
+			if err != nil {
+				return err
+			}
+			require.False(t, statecfg.ExperimentalCommitmentV3)
+			agg.Close()
+			return nil
+		},
+	}
+	require.NoError(t, cmd.Run(t.Context(), []string{"accessor", "--datadir", dirs.DataDir}))
 }
 
 func TestSegLS_NoChaindata(t *testing.T) {

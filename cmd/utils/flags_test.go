@@ -22,8 +22,10 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -50,6 +53,26 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
+
+func datadirWith(t *testing.T, files ...string) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	for _, file := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
+	}
+	return dirs
+}
+
+func datadirWithState(t *testing.T, key []byte) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.TblCommitmentVals, key, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
+	}))
+	return dirs
+}
 
 func Test_SplitTagsFlag(t *testing.T) {
 	tests := []struct {
@@ -558,8 +581,9 @@ func TestSetEthConfigLegacyDatadirWarningsRespectSnapshotDownloads(t *testing.T)
 func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger log.Logger, args ...string) bool {
 	t.Helper()
 	flag := ExperimentalCommitmentV3Flag
+	chainTomlURL := SnapChainTomlURLFlag
 	app := &cli.Command{
-		Flags: []cli.Flag{&flag},
+		Flags: []cli.Flag{&flag, &chainTomlURL},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			setCommitmentV3(context.Background(), cmd, dirs, chain, logger, true)
 			return nil
@@ -585,12 +609,7 @@ func TestSetCommitmentV3Flag(t *testing.T) {
 func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
-	datadirWith := func(file string) datadir.Dirs {
-		dirs := datadir.New(t.TempDir())
-		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
-		return dirs
-	}
-	legacyDirs, v3Dirs := datadirWith("v2.0-commitment.0-1.kv"), datadirWith("v3.0-commitment.0-1.kv")
+	legacyDirs, v3Dirs := datadirWith(t, "v2.0-commitment.0-1.kv"), datadirWith(t, "v3.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, args ...string) bool {
 		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
 		return runSetCommitmentV3(t, dirs, "mainnet", log.Root(), args...)
@@ -613,15 +632,7 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
-	datadirWith := func(files ...string) datadir.Dirs {
-		dirs := datadir.New(t.TempDir())
-		for _, file := range files {
-			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
-		}
-		return dirs
-	}
-	legacyDirs := datadir.New(filepath.Join(t.TempDir(), "legacy datadir"))
-	require.NoError(t, os.WriteFile(filepath.Join(legacyDirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	legacyDirs := datadirWith(t, "v2.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, chain string, args ...string) (bool, string) {
 		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
 		var logs strings.Builder
@@ -656,7 +667,27 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	_, logs = run(legacyDirs, "sepolia", "--"+ExperimentalCommitmentV3Flag.Name+"=false")
 	require.NotContains(t, logs, warning, "an explicit legacy choice must not warn")
 
-	for _, dirs := range []datadir.Dirs{datadirWith(), datadirWith("v3.0-commitment.0-1.kv")} {
+	for _, tc := range []struct {
+		name string
+		env  string
+		args []string
+	}{
+		{name: "snapshot branch", env: "SNAPS_GIT_BRANCH"},
+		{name: "erigon snapshot branch", env: "ERIGON_SNAPS_GIT_BRANCH"},
+		{name: "remote preverified", env: snapcfg.RemotePreverifiedEnvKey},
+		{name: "chain toml url", args: []string{"--" + SnapChainTomlURLFlag.Name + "=https://example.com/chain.toml"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv(tc.env, "override")
+			}
+			_, logs := run(legacyDirs, "sepolia", tc.args...)
+			require.NotContains(t, logs, "seg reset")
+			require.Contains(t, logs, "snapshot list override must be removed")
+		})
+	}
+
+	for _, dirs := range []datadir.Dirs{datadirWith(t), datadirWith(t, "v3.0-commitment.0-1.kv")} {
 		v3, logs = run(dirs, "sepolia")
 		require.True(t, v3, "a fresh or v3 datadir must use commitment v3")
 		require.NotContains(t, logs, warning, dirs.DataDir)
@@ -666,22 +697,38 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 func TestSetCommitmentV3FollowsChaindata(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
-	datadirWithState := func(key []byte) datadir.Dirs {
-		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).MustOpen()
-		defer db.Close()
-		require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Put(kv.TblCommitmentVals, key, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
-		}))
-		return dirs
-	}
 	run := func(dirs datadir.Dirs) bool {
 		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
 		return runSetCommitmentV3(t, dirs, "mainnet", log.Root())
 	}
 
-	require.False(t, run(datadirWithState(commitment.KeyCommitmentState)), "a datadir with legacy commitment in chaindata only must use the legacy trie")
-	require.True(t, run(datadirWithState(commitment.KeyCommitmentV3State)), "a datadir with v3 commitment in chaindata only must use the v3 trie")
+	require.False(t, run(datadirWithState(t, commitment.KeyCommitmentState)), "a datadir with legacy commitment in chaindata only must use the legacy trie")
+	require.True(t, run(datadirWithState(t, commitment.KeyCommitmentV3State)), "a datadir with v3 commitment in chaindata only must use the v3 trie")
+}
+
+func TestSetCommitmentV3RejectsInvalidEnv(t *testing.T) {
+	if os.Getenv("ERIGON_INVALID_COMMITMENT_TEST") == "1" {
+		dirs := datadirWith(t, "v2.0-commitment.0-1.kv")
+		if os.Getenv("ERIGON_INVALID_COMMITMENT_FLAG") == "1" {
+			runSetCommitmentV3(t, dirs, "mainnet", log.Root(), "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+		} else {
+			runSetCommitmentV3(t, dirs, "mainnet", log.Root())
+		}
+		return
+	}
+
+	for _, withFlag := range []bool{false, true} {
+		t.Run(fmt.Sprintf("with flag=%t", withFlag), func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestSetCommitmentV3RejectsInvalidEnv$")
+			cmd.Env = append(os.Environ(), "ERIGON_INVALID_COMMITMENT_TEST=1", "ERIGON_COMMITMENT_V3=0")
+			if withFlag {
+				cmd.Env = append(cmd.Env, "ERIGON_INVALID_COMMITMENT_FLAG=1")
+			}
+			output, err := cmd.CombinedOutput()
+			require.Error(t, err)
+			require.Contains(t, string(output), "ERIGON_COMMITMENT_V3=\"0\" is invalid; accepted values are true or false")
+		})
+	}
 }
 
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {

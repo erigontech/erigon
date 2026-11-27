@@ -384,6 +384,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, dbstate.ErrCannotStartWithoutSaltFiles
 		}
 
+		if _, _, err := utils.SetCommitmentV3FromDatadir(ctx, cfg.Dirs, logger); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, err
+		}
+
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(roTxLimit)
 		rawDB, err := kv2.New(dbcfg.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)

@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -36,13 +37,41 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func TestRpcdaemonCommitmentV3DatadirSelection(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	for _, tc := range []struct {
+		name string
+		file string
+		v3   bool
+	}{
+		{name: "legacy", file: "v2.0-commitment.0-1.kv"},
+		{name: "v3", file: "v3.0-commitment.0-1.kv", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, tc.file), nil, 0o644))
+			statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
+			got, found, err := utils.SetCommitmentV3FromDatadir(t.Context(), dirs, log.New())
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, tc.v3, got)
+			require.NoError(t, dbstate.CheckSnapshotsCompatibility(dirs))
+		})
+	}
+}
 
 func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
 	handshake := func(t *testing.T, corsDomains []string, origin string) int {

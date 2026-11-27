@@ -120,6 +120,12 @@ func commonBeforeSnapshotCommand(ctx context.Context, cliCtx *cli.Command) (cont
 	if err != nil {
 		return ctx, err
 	}
+	if cliCtx.Name != "reset" {
+		dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+		if _, _, err := utils.SetCommitmentV3FromDatadir(ctx, dirs, log.Root()); err != nil {
+			return ctx, err
+		}
+	}
 	return ctx, nil
 }
 

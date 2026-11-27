@@ -2005,36 +2005,82 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 }
 
 func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dirs, chain string, logger log.Logger, downloadsEnabled bool) {
-	envSet := dbg.EnvString("COMMITMENT_V3", "") != ""
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
 		on := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
-		if !on && envSet && statecfg.ExperimentalCommitmentV3 {
+		envV3, envSet, err := commitmentV3Env()
+		if err != nil {
+			Fatalf("%v", err)
+		}
+		if !on && envSet && envV3 {
 			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
 		statecfg.SetCommitmentV3(on)
 		return
 	}
-	if envSet {
-		return
-	}
-	v3, found, err := dbstate.CommitmentV3OfDatadir(nodeCtx, dirs, logger)
+	v3, found, err := SetCommitmentV3FromDatadir(nodeCtx, dirs, logger)
 	if err != nil {
 		Fatalf("reading the commitment state of the datadir: %v", err)
 	}
 	if found {
-		statecfg.SetCommitmentV3(v3)
 		logger.Info("[commitment] the datadir selects the commitment trie", "v3", v3)
 		if !v3 {
-			warnLegacyCommitmentDatadir(dirs, chain, logger, downloadsEnabled)
+			warnLegacyCommitmentDatadir(dirs, chain, logger, downloadsEnabled, hasSnapshotListOverride(ctx))
 		}
 	}
 }
 
-func warnLegacyCommitmentDatadir(dirs datadir.Dirs, chain string, logger log.Logger, downloadsEnabled bool) {
+func commitmentV3Env() (v3, set bool, err error) {
+	value, set := os.LookupEnv("COMMITMENT_V3")
+	if !set {
+		value, set = os.LookupEnv(dbg.ErigonEnvPrefix + "COMMITMENT_V3")
+	}
+	if !set || value == "" {
+		return false, false, nil
+	}
+	switch {
+	case strings.EqualFold(value, "true"):
+		return true, true, nil
+	case strings.EqualFold(value, "false"):
+		return false, true, nil
+	default:
+		return false, true, fmt.Errorf("ERIGON_COMMITMENT_V3=%q is invalid; accepted values are true or false", value)
+	}
+}
+
+func SetCommitmentV3FromDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (v3, found bool, err error) {
+	if v3, set, err := commitmentV3Env(); err != nil || set {
+		if err != nil {
+			return false, false, err
+		}
+		statecfg.SetCommitmentV3(v3)
+		return v3, false, nil
+	}
+	v3, found, err = dbstate.CommitmentV3OfDatadir(ctx, dirs, logger)
+	if err != nil {
+		return false, false, err
+	}
+	if found {
+		statecfg.SetCommitmentV3(v3)
+	}
+	return v3, found, nil
+}
+
+func hasSnapshotListOverride(ctx *cli.Command) bool {
+	return os.Getenv("SNAPS_GIT_BRANCH") != "" ||
+		os.Getenv(dbg.ErigonEnvPrefix+"SNAPS_GIT_BRANCH") != "" ||
+		os.Getenv(snapcfg.RemotePreverifiedEnvKey) != "" ||
+		strings.TrimSpace(ctx.String(SnapChainTomlURLFlag.Name)) != ""
+}
+
+func warnLegacyCommitmentDatadir(dirs datadir.Dirs, chain string, logger log.Logger, downloadsEnabled, snapshotListOverride bool) {
 	logger.Warn("[commitment] the datadir holds legacy commitment, so erigon keeps the legacy commitment trie; new datadirs use the v3 trie")
 	if _, known := snapcfg.KnownCfg(chain); known && downloadsEnabled {
-		logger.Warn("[commitment] to move this node to the v3 trie: stop erigon, run the command at the end of this line, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: erigon seg reset --datadir=\"" + dirs.DataDir + "\" --chain=" + chain)
-		logger.Warn("[commitment] `erigon seg reset` removes chaindata and the snapshot files that are not in the published snapshot list, which includes the legacy commitment files; add --dry-run to list them first")
+		if snapshotListOverride {
+			logger.Warn("[commitment] the snapshot list override must be removed before moving this node to the v3 trie")
+		} else {
+			logger.Warn("[commitment] to move this node to the v3 trie: stop erigon, run the command at the end of this line, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: erigon seg reset --datadir=\"" + dirs.DataDir + "\" --chain=" + chain)
+			logger.Warn("[commitment] `erigon seg reset` removes chaindata and the snapshot files that are not in the published snapshot list, which includes the legacy commitment files; add --dry-run to list them first")
+		}
 	}
 	logger.Warn(fmt.Sprintf("[commitment] to keep the legacy trie without these warnings, start erigon with --%s=false", ExperimentalCommitmentV3Flag.Name))
 }
