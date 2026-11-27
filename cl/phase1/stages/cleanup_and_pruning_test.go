@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
-func TestFloorFor(t *testing.T) {
+func TestColumnRetentionFloor(t *testing.T) {
 	tests := []struct {
 		name       string
 		head, keep uint64
@@ -56,7 +56,8 @@ func TestFloorFor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, test.want, floorFor(test.head, test.keep))
+			cfg := clparams.CaplinConfig{ColumnKeepSlots: test.keep}
+			require.Equal(t, test.want, cfg.ColumnRetentionFloor(&clparams.BeaconChainConfig{}, test.head))
 		})
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -388,7 +390,7 @@ func TestNewP2PConfig_NetRestrictList(t *testing.T) {
 func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 	parse := func(args ...string) uint64 {
 		keepSlots := CaplinColumnKeepSlotsFlag
-		cfg := ethconfig.Config{}
+		cfg := ethconfig.Config{NetworkID: uint64(chainspec.MainnetChainID)}
 		app := &cli.Command{
 			Flags: []cli.Flag{&keepSlots},
 			Action: func(_ context.Context, cmd *cli.Command) error {
@@ -427,6 +429,108 @@ func TestCaplinBlobArchiveFromSlotSetsArchiveConfig(t *testing.T) {
 	require.True(t, cfg.CaplinConfig.ArchiveBlocks)
 	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
 	require.Equal(t, uint64(12345), cfg.CaplinConfig.BlobsArchiveFromSlot)
+}
+
+func TestCaplinRetentionFlags(t *testing.T) {
+	parse := func(args ...string) (ethconfig.Config, error) {
+		mode, distance, sidecars, states := CaplinPruneModeFlag, CaplinPruneDistanceFlag, CaplinPruneSidecarsFlag, CaplinPruneStatesFlag
+		cfg := ethconfig.Config{NetworkID: uint64(chainspec.MainnetChainID)}
+		app := &cli.Command{
+			Flags: []cli.Flag{&mode, &distance, &sidecars, &states},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				return applyCaplinRetentionFlags(cmd, &cfg)
+			},
+		}
+		err := app.Run(context.Background(), append([]string{"test"}, args...))
+		return cfg, err
+	}
+
+	cfg, err := parse("--caplin.prune.mode=archive")
+	require.NoError(t, err)
+	require.True(t, cfg.CaplinConfig.ArchiveBlocks)
+	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.True(t, cfg.CaplinConfig.ArchiveStates)
+	require.Equal(t, clparams.CaplinRetentionSourceNewFlags, cfg.CaplinConfig.RetentionSource)
+
+	_, err = parse("--caplin.prune.mode=minimal")
+	require.EqualError(t, err, "caplin prune mode minimal is available in a later version")
+}
+
+func TestCaplinRetentionFlagsRejectMixing(t *testing.T) {
+	mode, blocks := CaplinPruneModeFlag, CaplinArchiveBlocksFlag
+	cfg := ethconfig.Config{NetworkID: uint64(chainspec.MainnetChainID)}
+	app := &cli.Command{
+		Flags: []cli.Flag{&mode, &blocks},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			return applyCaplinRetentionFlags(cmd, &cfg)
+		},
+	}
+	err := app.Run(context.Background(), []string{"test", "--caplin.prune.mode=archive", "--caplin.blocks-archive"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--caplin.prune.mode")
+	require.Contains(t, err.Error(), "--caplin.blocks-archive")
+}
+
+func TestCaplinPruneFlagUsage(t *testing.T) {
+	for _, flag := range []struct {
+		name  string
+		usage string
+	}{
+		{name: CaplinPruneModeFlag.Name, usage: CaplinPruneModeFlag.Usage},
+		{name: CaplinPruneDistanceFlag.Name, usage: CaplinPruneDistanceFlag.Usage},
+		{name: CaplinPruneSidecarsFlag.Name, usage: CaplinPruneSidecarsFlag.Usage},
+		{name: CaplinPruneStatesFlag.Name, usage: CaplinPruneStatesFlag.Usage},
+	} {
+		usage := flag.name + ": " + flag.usage
+		require.Contains(t, usage, "all")
+		require.Contains(t, usage, "later version")
+		require.Contains(t, usage, "15,660,000")
+		require.Contains(t, usage, "12,460,000 / 15,390,000 / 15,527,424")
+	}
+}
+
+func TestCaplinRetentionFlagsSkipUnknownNetwork(t *testing.T) {
+	mode := CaplinPruneModeFlag
+	cfg := ethconfig.Config{NetworkID: 123456}
+	app := &cli.Command{
+		Flags: []cli.Flag{&mode},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			return applyCaplinRetentionFlags(cmd, &cfg)
+		},
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"test", "--caplin.prune.mode=archive"}))
+	require.False(t, cfg.CaplinConfig.ArchiveBlocks)
+	require.False(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.False(t, cfg.CaplinConfig.ArchiveStates)
+}
+
+func TestCaplinLegacyRetentionSource(t *testing.T) {
+	blocks := CaplinArchiveBlocksFlag
+	cfg := ethconfig.Config{NetworkID: uint64(chainspec.MainnetChainID)}
+	app := &cli.Command{
+		Flags: []cli.Flag{&blocks},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg.CaplinConfig.ArchiveBlocks = true
+			return applyCaplinRetentionFlags(cmd, &cfg)
+		},
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"test", "--caplin.blocks-archive"}))
+	require.Equal(t, clparams.CaplinRetentionSourceLegacyExact, cfg.CaplinConfig.RetentionSource)
+	require.True(t, cfg.CaplinConfig.ArchiveBlocks)
+}
+
+func TestCaplinLegacyInexactRetentionSource(t *testing.T) {
+	columns := CaplinColumnKeepSlotsFlag
+	cfg := ethconfig.Config{NetworkID: uint64(chainspec.MainnetChainID)}
+	app := &cli.Command{
+		Flags: []cli.Flag{&columns},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			cfg.CaplinConfig.ColumnKeepSlots = cmd.Uint64(CaplinColumnKeepSlotsFlag.Name)
+			return applyCaplinRetentionFlags(cmd, &cfg)
+		},
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"test", "--caplin.columns-keep-slots=1"}))
+	require.Equal(t, clparams.CaplinRetentionSourceLegacyInexact, cfg.CaplinConfig.RetentionSource)
 }
 
 func TestCaplinIPBlockLimitFlagsReachConfig(t *testing.T) {
@@ -579,4 +683,33 @@ func TestWarnParallelCommitmentDeprecatedOnEnv(t *testing.T) {
 	logger.SetHandler(log.StreamHandler(&out, log.LogfmtFormat()))
 	warnParallelCommitmentDeprecated(&cli.Command{}, logger)
 	require.Contains(t, out.String(), "COMMITMENT_PARALLEL")
+}
+
+func TestIgnoredRetentionKeepsDefaultRegime(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		id     uint64
+		engine bool
+	}{
+		{"engine", 1, true}, {"unsupported", 777777, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, mode := CaplinUseEngineApiFlag, CaplinPruneModeFlag
+			cmd := &cli.Command{Flags: []cli.Flag{&engine, &mode}, Action: func(_ context.Context, c *cli.Command) error {
+				cfg := ethconfig.Config{NetworkID: tc.id}
+				setCaplin(c, &cfg)
+				if cfg.CaplinConfig.RequestedRetention.Mode != clparams.CaplinPruneModeSpec {
+					t.Fatalf("ignored flag: source=%s mode=%s, want default/spec", cfg.CaplinConfig.RetentionSource, cfg.CaplinConfig.RequestedRetention.Mode)
+				}
+				return nil
+			}}
+			args := []string{"erigon", "--caplin.prune.mode=pruned"}
+			if tc.engine {
+				args = append(args, "--caplin.use-engine-api")
+			}
+			if err := cmd.Run(t.Context(), args); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

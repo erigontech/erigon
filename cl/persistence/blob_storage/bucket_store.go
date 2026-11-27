@@ -234,9 +234,14 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 // bucket holds a sidecar the first read error is returned, so an unreadable store is not
 // mistaken for an empty one.
 func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (uint64, error) {
+	slot, _, err := b.earliestStoredSlotWithPresence(holds)
+	return slot, err
+}
+
+func (b *bucketStore) earliestStoredSlotWithPresence(holds func(dir string) (bool, error)) (uint64, bool, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	buckets := make([]uint64, 0, len(entries))
 	for _, entry := range entries {
@@ -262,10 +267,10 @@ func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (
 			continue
 		}
 		if stored {
-			return bucket * subdivisionSlot, nil
+			return bucket * subdivisionSlot, true, nil
 		}
 	}
-	return 0, firstErr
+	return 0, false, firstErr
 }
 
 // holdsSidecar reads the bucket in small batches and stops at the first entry that is a

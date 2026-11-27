@@ -100,23 +100,19 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 			executionEngine = cc
 		}
 	}
-	chainName := cliCtx.String(utils.ChainFlag.Name)
-	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
-	if err != nil {
-		log.Info("Could not get network id from chain name, setting it to custom network id")
-		networkId = clparams.CustomNetwork
-	}
-
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	config := newCaplinConfig(cliCtx, cfg)
+	config, err := newCaplinConfig(cliCtx, cfg)
+	if err != nil {
+		return err
+	}
 	config.BeaconAPIRouter = rcfg
-	config.NetworkId = networkId
 	return caplin1.RunCaplinService(ctx, executionEngine, config, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }
 
-func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) clparams.CaplinConfig {
-	return clparams.CaplinConfig{
+func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) (clparams.CaplinConfig, error) {
+	config := clparams.CaplinConfig{
+		NodeBinary:                "caplin",
 		SentinelAddr:              cliCtx.String(sentinelflags.SentinelServerAddr.Name),
 		SentinelPort:              uint64(cliCtx.Int(sentinelflags.SentinelServerPort.Name)),
 		CaplinDiscoveryAddr:       cfg.Addr,
@@ -138,4 +134,24 @@ func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) clparams.
 		BootstrapNodes:            cfg.Bootnodes,
 		StaticPeers:               cfg.StaticPeers,
 	}
+	chainName := cliCtx.String(utils.ChainFlag.Name)
+	_, _, networkID, err := clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		log.Info("Could not get network id from chain name, setting it to custom network id")
+		networkID = clparams.CustomNetwork
+	}
+	config.NetworkId = networkID
+	retentionFlagsSet := utils.CaplinRetentionFlagsSet(cliCtx)
+	config.RequestedRetention = clparams.CaplinRetention{Mode: clparams.CaplinPruneModeSpec}
+	config.RetentionSource = clparams.CaplinRetentionSourceDefault
+	if retentionFlagsSet {
+		beaconCfg, err := clparams.ResolveBeaconConfig(uint64(config.NetworkId), config.CustomConfigPath, config.IsDevnet())
+		if err != nil {
+			return clparams.CaplinConfig{}, err
+		}
+		if err := utils.ApplyCaplinNewRetentionFlags(cliCtx, &config, beaconCfg); err != nil {
+			return clparams.CaplinConfig{}, err
+		}
+	}
+	return config, nil
 }

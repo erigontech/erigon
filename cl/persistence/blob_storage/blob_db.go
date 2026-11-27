@@ -44,6 +44,7 @@ type BlobStorage interface {
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	PruneBelow(slot uint64) error
+	EarliestStoredSlot() (uint64, error)
 }
 
 type BlobStore struct {
@@ -58,6 +59,14 @@ func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
 	bs.dropRows = deleteRootRows(db, kv.BlockRootToKzgCommitments)
 	bs.slotLocks.initLocks()
 	return bs
+}
+
+func (bs *BlobStore) EarliestStoredSlot() (uint64, error) {
+	return bs.earliestStoredSlot(bs.holdsSidecar)
+}
+
+func (bs *BlobStore) EarliestStoredSlotWithPresence() (uint64, bool, error) {
+	return bs.earliestStoredSlotWithPresence(bs.holdsSidecar)
 }
 
 /*

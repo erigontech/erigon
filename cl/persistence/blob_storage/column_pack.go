@@ -271,6 +271,10 @@ func (s *dataColumnStorageImpl) EarliestStoredSlot() (uint64, error) {
 	return s.earliestStoredSlot(s.holdsColumn)
 }
 
+func (s *dataColumnStorageImpl) EarliestStoredSlotWithPresence() (uint64, bool, error) {
+	return s.earliestStoredSlotWithPresence(s.holdsColumn)
+}
+
 func (s *dataColumnStorageImpl) holdsColumn(bucket string) (bool, error) {
 	if stored, err := s.holdsSidecar(bucket); stored || err != nil {
 		return stored, err

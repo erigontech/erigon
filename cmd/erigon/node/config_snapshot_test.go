@@ -19,11 +19,15 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -281,4 +285,45 @@ func TestConfigSnapshotStability(t *testing.T) {
 	require.True(t, snap.SnapProduceE3)
 	require.False(t, snap.ExperimentalBAL)
 	require.False(t, snap.NoDownloader)
+}
+
+func runRetentionCLIInFreshProcess(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("ERIGON_RETENTION_TEST") == t.Name() {
+		return true
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(), "ERIGON_RETENTION_TEST="+t.Name())
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s", output)
+	}
+	return false
+}
+
+func TestDevRetentionUsesDevEpoch(t *testing.T) {
+	if !runRetentionCLIInFreshProcess(t) {
+		return
+	}
+	cfg := buildEthConfig(t, []string{"--chain=dev", "--caplin.prune.mode=pruned", "--caplin.prune.sidecars=8192"})
+	chain, _, err := clparams.CustomConfig(cfg.CaplinConfig.CustomConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.CaplinConfig.ColumnKeepSlots, 8192*chain.SlotsPerEpoch; got != want {
+		t.Fatalf("8192 epochs at %d slots/epoch: ColumnKeepSlots=%d, want %d", chain.SlotsPerEpoch, got, want)
+	}
+}
+
+func TestOverrideGenesisSkipsUnsupportedRetention(t *testing.T) {
+	if !runRetentionCLIInFreshProcess(t) {
+		return
+	}
+	path := filepath.Join(t.TempDir(), "genesis.json")
+	if err := os.WriteFile(path, []byte(`{"config":{"chainId":1337},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := buildEthConfig(t, []string{"--override.genesis=" + path, "--caplin.prune.mode=archive"})
+	if cfg.CaplinConfig.ArchiveBlocks || cfg.CaplinConfig.ArchiveStates || cfg.CaplinConfig.ArchiveBlobs {
+		t.Fatalf("network %d: archive blocks=%t states=%t blobs=%t, want all false", cfg.NetworkID, cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveStates, cfg.CaplinConfig.ArchiveBlobs)
+	}
 }
