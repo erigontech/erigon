@@ -2013,7 +2013,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	pubkey := common.Bytes48(bls.CompressPublicKey(privKey.PublicKey()))
 
 	require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
-	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, new(cltypes.Builder).EncodingSizeSSZ())
 	if builderIndex != clparams.BuilderIndexSelfBuild {
 		for i := uint64(0); i <= builderIndex; i++ {
 			builders.Append(&cltypes.Builder{Pubkey: pubkey})

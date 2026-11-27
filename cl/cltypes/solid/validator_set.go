@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -115,17 +116,45 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	t.attesterBits = append(t.attesterBits[:0], v.attesterBits...)
 }
 
-func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf)%validatorSize > 0 {
+func (v *ValidatorSet) checkEncodedLen(n int) error {
+	if n%validatorSize > 0 {
 		return ssz.ErrBufferNotRounded
 	}
-	if l := len(buf) / validatorSize; l > v.list.c {
+	if l := n / validatorSize; l > v.list.c {
 		return fmt.Errorf("validator set length exceeds limit: %d > %d", l, v.list.c)
 	}
-	v.list.decode(buf)
+	return nil
+}
+
+func (v *ValidatorSet) resetDerived() {
 	v.phase0Data = nil
 	v.attesterBits = make([]byte, v.list.l)
+}
+
+func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
+	if err := v.checkEncodedLen(len(buf)); err != nil {
+		return err
+	}
+	v.list.decode(buf)
+	v.resetDerived()
 	return nil
+}
+
+// DecodeSSZFrom decodes exactly n bytes from r straight into chunk storage.
+func (v *ValidatorSet) DecodeSSZFrom(r io.Reader, n int) error {
+	if err := v.checkEncodedLen(n); err != nil {
+		return err
+	}
+	if err := v.list.decodeFrom(r, n); err != nil {
+		return err
+	}
+	v.resetDerived()
+	return nil
+}
+
+// EncodeSSZTo writes the same bytes as EncodeSSZ chunk by chunk.
+func (v *ValidatorSet) EncodeSSZTo(w io.Writer) error {
+	return v.list.writeTo(w)
 }
 
 func (v *ValidatorSet) EncodeSSZ(buf []byte) ([]byte, error) {

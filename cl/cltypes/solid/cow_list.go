@@ -18,6 +18,7 @@ package solid
 
 import (
 	"bytes"
+	"io"
 	"math/bits"
 	"slices"
 	"sync"
@@ -243,6 +244,19 @@ func (l *cowList) encode(dst []byte) []byte {
 	return dst[:len(dst)+size]
 }
 
+func (l *cowList) writeTo(w io.Writer) error {
+	size := l.layout.elemSize
+	for from := 0; from < l.l; {
+		ci, off := l.locate(from)
+		n := min(l.layout.chunkLeaves()-off, l.l-from)
+		if _, err := w.Write(l.chunks[ci].Load().data[off*size : (off+n)*size]); err != nil {
+			return err
+		}
+		from += n
+	}
+	return nil
+}
+
 func (l *cowList) build(layout cowLayout, n int, read func(dst []byte, from int)) []cowSlot {
 	per, size := layout.chunkLeaves(), layout.elemSize
 	count := 0
@@ -274,6 +288,15 @@ func (l *cowList) reset(n int, read func(dst []byte, from int)) {
 func (l *cowList) decode(buf []byte) {
 	size := l.layout.elemSize
 	l.reset(len(buf)/size, func(dst []byte, from int) { copy(dst, buf[from*size:]) })
+}
+
+func (l *cowList) decodeFrom(r io.Reader, n int) (err error) {
+	l.reset(n/l.layout.elemSize, func(dst []byte, _ int) {
+		if err == nil {
+			_, err = io.ReadFull(r, dst)
+		}
+	})
+	return err
 }
 
 func (l *cowList) clear() {

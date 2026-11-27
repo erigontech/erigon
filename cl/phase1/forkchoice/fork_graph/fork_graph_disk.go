@@ -184,9 +184,8 @@ type forkGraphDisk struct {
 	invalidEnvelopes  sync.Map // common.Hash -> struct{}
 	rejectedEnvelopes sync.Map // common.Hash -> struct{}
 
-	// stateDumpLock guards the reusable state buffer and the key of the last state dump
+	// stateDumpLock serializes state file reads and writes and guards the key of the last state dump
 	stateDumpLock  sync.Mutex
-	sszBuffer      []byte
 	lastDumpedRoot common.Hash
 	lastDumpedSlot uint64
 
@@ -251,11 +250,9 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
-	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
 		return nil, err
 	}
-	// preallocate buffer
 	return f, nil
 }
 
@@ -796,6 +793,9 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	for _, root := range oldRoots {
 		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
+		}
+		if removeErr := f.fs.Remove(getBeaconStateTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state temp file", "root", root, "err", removeErr)
 		}
 		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))

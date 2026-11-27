@@ -18,6 +18,7 @@ package raw
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -188,9 +189,10 @@ func (b *BeaconState) getSchema() []any {
 	return s
 }
 
-func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
+// prepareDecode sets the version and allocates the fields that depend on it, before the body is decoded.
+func (b *BeaconState) prepareDecode(length, version int) error {
 	b.version = clparams.StateVersion(version)
-	if len(buf) < int(b.baseOffsetSSZ()) {
+	if length < int(b.baseOffsetSSZ()) {
 		return fmt.Errorf("[BeaconState] err: %w", ssz.ErrLowBufferSize)
 	}
 	if version >= int(clparams.BellatrixVersion) {
@@ -216,10 +218,41 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(b.beaconConfig.PtcSize))
 	}
 	b.validators.SetProgressiveHashing(b.version >= clparams.GloasVersion)
+	return nil
+}
+
+func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
+	if err := b.prepareDecode(len(buf), version); err != nil {
+		return err
+	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
 	}
 	// Capella
+	b.init()
+	return nil
+}
+
+// EncodeSSZTo streams the same bytes as EncodeSSZ and fails if their count differs from EncodingSizeSSZ.
+func (b *BeaconState) EncodeSSZTo(w io.Writer) error {
+	n, err := marshalSSZTo(w, b.getSchema()...)
+	if err != nil {
+		return err
+	}
+	if size := b.EncodingSizeSSZ(); n != size {
+		return fmt.Errorf("[BeaconState] streamed %d bytes, EncodingSizeSSZ is %d", n, size)
+	}
+	return nil
+}
+
+// DecodeCanonicalSSZFrom decodes length bytes of canonical SSZ from r without buffering them.
+func (b *BeaconState) DecodeCanonicalSSZFrom(r io.Reader, length, version int) error {
+	if err := b.prepareDecode(length, version); err != nil {
+		return err
+	}
+	if err := unmarshalSSZFrom(r, length, version, b.getSchema()...); err != nil {
+		return err
+	}
 	b.init()
 	return nil
 }

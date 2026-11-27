@@ -17,6 +17,7 @@
 package raw
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -203,4 +204,10 @@ func TestBeaconStateSSZRoundtrip(t *testing.T) {
 				"encoded bytes differ after roundtrip (len1=%d, len2=%d)", len(encoded1), len(encoded2))
 		})
 	}
+}
+
+func TestEncodeSSZToFailsOnSizeMismatch(t *testing.T) {
+	st := newTestState(clparams.FuluVersion)
+	st.slashings = solid.NewUint64VectorSSZ(int(st.beaconConfig.EpochsPerSlashingsVector) + 1)
+	require.Error(t, st.EncodeSSZTo(&bytes.Buffer{}))
 }
