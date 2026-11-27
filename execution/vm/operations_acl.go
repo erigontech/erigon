@@ -46,18 +46,14 @@ func gasSetCodeFrom(evm *EVM, scope *CallContext, available mdgas.MdGas, _ uint6
 	source := scope.peekAddress(evm)
 	ibs := evm.IntraBlockState()
 	tracer := evm.Config().Tracer
-	cost := mdgas.MdGasCost{Execution: evm.codeAccessGas(source, tracer)}
+	cost := mdgas.MdGasCost{Execution: codeAccessGas(ibs, source, tracer)}
 	if available.Execution < cost.Execution {
 		return cost, ErrOutOfGas
 	}
-	evm.recordCodeAccess(source, tracer)
+	recordCodeAccess(ibs, source, tracer)
 	scope.adoption, scope.writeAdoption = accounts.Code{}, false
 	code, err := ibs.GetCodeWithHash(source)
-	if err != nil || code.IsEmpty() || code.Bytes[0] == 0xef {
-		return cost, err
-	}
-	created, err := ibs.ContractCreatedThisTx(source)
-	if err != nil || created {
+	if err != nil || code.IsEmpty() || code.Bytes[0] == 0xef || ibs.ContractCreatedInTx(source) {
 		return cost, err
 	}
 	cost.Execution += params.WarmStorageReadCostEIP2929

@@ -58,6 +58,7 @@ jobs:
       fail-fast: false   # one crashing target must not cancel the others
       matrix:
         include:
+          - { name: blob-storage-column-pack,   pkg: cl/persistence/blob_storage,    fn: FuzzParsePackHeader }
           - { name: bitutil-encoder,            pkg: common/bitutil,                 fn: FuzzEncoder }
           - { name: bitutil-decoder,            pkg: common/bitutil,                 fn: FuzzDecoder }
           - { name: fusefilter-reader,          pkg: db/datastruct/fusefilter,       fn: FuzzReaderOnBytes }

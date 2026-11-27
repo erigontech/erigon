@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"sync/atomic"
 
@@ -187,16 +188,10 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 	}
 	for i, txn := range bf.block.Transactions() {
 		gasUsed := bf.receipts[i].GasUsed
-		var reward uint256.Int
-		if txn.Type() == types.FrameTxType {
-			paid, err := ethutils.GasTipPaid(txn, gasUsed, baseFee, (*uint256.Int)(&bf.results.blobBaseFee))
-			if err != nil {
-				bf.err = err
-				return
-			}
-			reward.Div(&paid, uint256.NewInt(gasUsed))
-		} else {
-			reward = txn.GetEffectiveGasTip(baseFee)
+		reward, err := ethutils.ReceiptGasTip(txn, gasUsed, baseFee, (*uint256.Int)(&bf.results.blobBaseFee))
+		if err != nil {
+			bf.err = err
+			return
 		}
 		sorter[i] = txGasAndReward{gasUsed: gasUsed, reward: reward}
 	}
@@ -346,15 +341,13 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
-	// The reward percentiles are computed from each block's transactions and the gas
-	// their receipts report; the other series come from headers alone. Availability is
-	// a lower bound, so the oldest block of the range decides for all of it.
+	// Reward percentiles need receipt gas usage. The other series use headers alone.
+	// For mined blocks, the reward range stops before the first unexecuted block
+	// or one whose gas usage is unavailable after pruning.
 	if len(rewardPercentiles) != 0 {
 		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
-			// Fee history stops at the first unavailable block rather than skipping
-			// to newer blocks. If the oldest block is pruned, return an empty result,
-			// matching the missing-block path below.
 			if errors.Is(err, state.ErrPruned) {
+				// A pruned oldest block gives an empty range.
 				err = nil
 			}
 			return common.Big0, nil, nil, nil, nil, nil, err
@@ -537,6 +530,11 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					}
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
+						missingGasUsed := fees.err == nil && (fees.receipts == nil || slices.Contains(fees.receipts, nil))
+						if missingGasUsed || errors.Is(fees.err, state.ErrPruned) {
+							blockResults[idx].missing = true
+							continue
+						}
 					}
 				case byHash:
 					fees.header, fees.err = localBackend.HeaderByHashNumber(fetchCtx, key.hash, blockNumber)

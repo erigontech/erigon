@@ -25,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/multiformats/go-multiaddr"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/freeport"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -152,10 +154,7 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndQUICPortWhenQUICDisabled(t *testin
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 
 	for range 10 {
-		discoveryPort, _, err := availableCaplinTestPorts()
-		if errors.Is(err, syscall.EADDRINUSE) {
-			continue
-		}
+		discoveryPort, err := probeDiscoveryPort(0)
 		require.NoError(t, err)
 
 		cfg := &P2PConfig{
@@ -234,11 +233,7 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 
 	for range 10 {
-		discoveryPort, quicPort, err := availableCaplinTestPorts()
-		if errors.Is(err, syscall.EADDRINUSE) {
-			continue
-		}
-		require.NoError(t, err)
+		discoveryPort := sharedDiscoveryTestPort(t)
 
 		cfg := &P2PConfig{
 			NetworkConfig: &networkConfigCopy,
@@ -246,7 +241,6 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 			IpAddr:        "127.0.0.1",
 			Port:          discoveryPort,
 			TCPPort:       uint(discoveryPort),
-			QUICPort:      uint(quicPort),
 			TmpDir:        t.TempDir(),
 		}
 		ctx, cancel := context.WithCancel(t.Context())
@@ -264,30 +258,33 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 			listener.Close()
 			localNodeDB.Close()
 		})
+		require.Equal(t, discoveryPort, listener.LocalNode().Node().UDP())
+		require.Equal(t, uint(discoveryPort), hostTCPPort(manager.Host()))
 		return
 	}
-	t.Fatal("could not claim distinct discovery and QUIC ports after 10 attempts")
+	t.Fatal("could not start discovery and TCP on a shared port after 10 attempts")
 }
 
-func availableCaplinTestPorts() (int, int, error) {
-	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+func probeDiscoveryPort(port int) (int, error) {
+	probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	defer tcpProbe.Close()
-	discoveryPort := tcpProbe.Addr().(*net.TCPAddr).Port
-	discoveryProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: discoveryPort})
-	if err != nil {
-		return 0, 0, err
+	return probe.LocalAddr().(*net.UDPAddr).Port, probe.Close()
+}
+
+func sharedDiscoveryTestPort(t *testing.T) int {
+	t.Helper()
+	var bindErr error
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); {
+		port, err := freeport.NextFreePort()
+		require.NoError(t, err)
+		if _, bindErr = probeDiscoveryPort(port); bindErr == nil {
+			return port
+		}
 	}
-	defer discoveryProbe.Close()
-	quicProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err != nil {
-		return 0, 0, err
-	}
-	defer quicProbe.Close()
-	quicPort := quicProbe.LocalAddr().(*net.UDPAddr).Port
-	return discoveryPort, quicPort, nil
+	t.Fatalf("could not find a loopback port for both TCP and UDP: %v", bindErr)
+	return 0
 }
 
 func TestNewP2PManagerClosesHostWhenDiscoveryStartupFails(t *testing.T) {

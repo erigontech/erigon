@@ -152,6 +152,7 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 
 		_, err = stream.Write(reqBuf.Bytes())
 		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
 
 		firstByte := make([]byte, 1)
 		_, err = stream.Read(firstByte)

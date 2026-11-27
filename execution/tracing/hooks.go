@@ -172,10 +172,13 @@ type (
 		- State events -
 	*/
 
-	// AccountAccessHook is called before charging for a precompile's account access, including attempts that run out of gas.
+	// AccountAccessHook reports an intended precompile account access before its
+	// gas charge, including attempts where that charge fails. Handlers must not
+	// read or warm the account in execution state.
 	AccountAccessHook = func(addr accounts.Address)
 
-	// AccountReadHook is called before a precompile reads an account, after charging for the read.
+	// AccountReadHook is called before a precompile reads an account, after the
+	// account access gas charge succeeds.
 	AccountReadHook = func(addr accounts.Address)
 
 	// BalanceChangeHook is called when the balance of an account changes.

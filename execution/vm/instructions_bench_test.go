@@ -380,7 +380,7 @@ func BenchmarkLog3(b *testing.B) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-			scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+			scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 			scope.Memory.Resize(uint64(size + 6))
 			op := makeLog(3)
 			var offset uint64
@@ -409,7 +409,7 @@ func BenchmarkLog3Interpreter(b *testing.B) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
-			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			contract.Code = []byte{
 				byte(PUSH3), byte(size >> 16), byte(size >> 8), byte(size), byte(PUSH0),
 				byte(DUP1), byte(DUP1), byte(DUP1), byte(DUP5),
@@ -457,7 +457,7 @@ func BenchmarkExpInterpreter(b *testing.B) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
-			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			for range 256 {
 				contract.Code = append(contract.Code, byte(PUSH1), 13, byte(PUSH4), byte(base>>24), byte(base>>16), byte(base>>8), byte(base), byte(EXP), byte(POP))
 			}
@@ -519,7 +519,7 @@ func BenchmarkOpTransientStorage(b *testing.B) {
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 			addr := accounts.InternAddress(common.Address{1})
-			scope := &CallContext{Contract: *NewContract(addr, addr, addr, uint256.Int{})}
+			scope := &CallContext{Contract: *NewContract(addr, addr, uint256.Int{})}
 			tstore := func(key, val uint256.Int) {
 				scope.Stack.push(val)
 				scope.Stack.push(key)
@@ -565,7 +565,7 @@ func BenchmarkContextAddress(b *testing.B) {
 	}{{"address", opAddress}, {"caller", opCaller}, {"origin", opOrigin}, {"coinbase", opCoinbase}} {
 		b.Run(tc.name, func(b *testing.B) {
 			evm := &EVM{TxContext: evmtypes.TxContext{Origin: address}, Context: evmtypes.BlockContext{Coinbase: address}}
-			scope := evm.getCallContext(*NewContract(address, address, address, uint256.Int{}), nil, mdgas.MdGas{})
+			scope := evm.getCallContext(*NewContract(address, address, uint256.Int{}), nil, mdgas.MdGas{})
 			defer evm.putCallContext(scope)
 			b.ReportAllocs()
 			for b.Loop() {
@@ -594,7 +594,7 @@ func BenchmarkCopyLoop(b *testing.B) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
-			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			n := 64 * 1024 / len(tc.iter)
 			contract.Code = append([]byte{byte(PUSH1), 0xff, byte(PUSH1), 0x20, byte(MSTORE8), byte(JUMPDEST)}, bytes.Repeat(tc.iter, n)...)
 			b.ReportAllocs()

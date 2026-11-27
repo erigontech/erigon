@@ -94,17 +94,20 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 }
 
 func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
-	return decodeDynamicList[T](bytes, start, end, _max, version, false)
+	return DecodeDynamicListWithDecoder[T](bytes, start, end, _max, version, false, nil)
 }
 
 // DecodeDynamicListStrict rejects non-canonical offset tables and propagates
 // strict decoding to elements that support it. Elements without
 // DecodeSSZStrict are decoded with DecodeSSZ.
 func DecodeDynamicListStrict[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
-	return decodeDynamicList[T](bytes, start, end, _max, version, true)
+	return DecodeDynamicListWithDecoder[T](bytes, start, end, _max, version, true, nil)
 }
 
-func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool) ([]T, error) {
+// DecodeDynamicListWithDecoder uses decode for each freshly cloned element, while
+// retaining the ordinary or strict list offset and length checks. A nil callback
+// uses the element's ordinary or strict decoder.
+func DecodeDynamicListWithDecoder[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool, decode func(T, []byte, int) error) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -146,9 +149,12 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 		}
 		objs[i] = objs[i].Clone().(T)
 		var err error
-		if strict {
+		switch {
+		case decode != nil:
+			err = decode(objs[i], buf[currentOffset:endOffset], version)
+		case strict:
 			err = decodeObjectStrict(objs[i], buf[currentOffset:endOffset], version)
-		} else {
+		default:
 			err = objs[i].DecodeSSZ(buf[currentOffset:endOffset], version)
 		}
 		if err != nil {

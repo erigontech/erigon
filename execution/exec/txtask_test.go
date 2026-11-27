@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -332,25 +333,115 @@ func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
 	require.True(t, task(1).ChargesSenderAtValidation(0))
 }
 
-type failingAccountWriter struct {
-	*state.NoopWriter
-	err error
+// failingAccountReader funds one address and, once armed, fails the base read of another,
+// standing in for a transient domain read failure for a specific account.
+type failingAccountReader struct {
+	state.StateReader
+	fundAddr accounts.Address
+	failAddr accounts.Address
+	armed    *bool
+	err      error
 }
 
-func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
-	return w.err
+func (r failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	switch {
+	case addr == r.failAddr && *r.armed:
+		return nil, r.err
+	case addr == r.fundAddr:
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
+		return &acc, nil
+	}
+	return r.StateReader.ReadAccountData(addr)
 }
 
-// A failed write says nothing about the block, so it must stop the stage rather than crash the node or condemn the block.
+// A read failure while composing the write-set says nothing about the block, so it must
+// stop the stage operationally rather than crash the node or condemn the block.
 func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
-	want := errors.New("disk error")
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	for _, txIndex := range []int{0, -1} {
+		t.Run(fmt.Sprintf("txIndex=%d", txIndex), func(t *testing.T) {
+			want := errors.New("disk error")
+			config := chain.TestChainBerlinConfig
+			sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+			to := common.HexToAddress("0xbb")
+			slotOwner := accounts.InternAddress(common.HexToAddress("0xdd"))
+			armed := false
+			reader := failingAccountReader{state.NewNoopReader(), sender, slotOwner, &armed, want}
+			versionMap := state.NewVersionMap(nil)
+			ibs := state.NewWithVersionMap(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, reader), versionMap)
+			defer ibs.Close()
+			ibs.SetTxContext(1, txIndex)
 
-	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
-	result := task.Execute(nil, nil, nil, ibs, failingAccountWriter{state.NewNoopWriter(), want}, chain.TestChainBerlinConfig, nil, datadir.Dirs{}, true)
+			// A storage-only write carries no balance, nonce or code hash, so only
+			// FinalizedWrites reads the account, to decide EIP-161 removal; that base read fails.
+			require.NoError(t, ibs.SetState(slotOwner, accounts.InternKey(common.HexToHash("0x07")), *uint256.NewInt(9)))
+			require.NoError(t, ibs.StateReadError())
+			armed = true
 
-	require.ErrorIs(t, result.Err, want)
-	require.True(t, result.Operational)
+			engine := ethash.NewFaker()
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, Coinbase: common.HexToAddress("0xcc")}
+			getHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+			blockContext := protocol.NewEVMBlockContext(header, getHash, engine, accounts.InternAddress(header.Coinbase), config)
+			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+
+			txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+			txn.SetSender(sender)
+			task := &TxTask{TxNum: 1, TxIndex: txIndex, Header: header, Config: config, Txs: types.Transactions{txn}, EvmBlockContext: blockContext}
+			result := task.Execute(evm, engine, nil, ibs, config, nil, datadir.Dirs{}, false)
+
+			require.ErrorIs(t, result.Err, want)
+			require.True(t, result.Operational)
+			require.Nil(t, result.TxOut)
+		})
+	}
+}
+
+func TestCreateReceiptBlobGasUsed(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	to := crypto.PubkeyToAddress(key.PublicKey)
+	config := chain.TestChainOsakaConfig
+	signer := types.MakeSigner(config, 1, 0)
+	newDynamic := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{To: &to, GasLimit: 21_000},
+			ChainID:  *config.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		}
+	}
+	newBlob := func(hashes ...common.Hash) types.Transaction {
+		return &types.BlobTx{DynamicFeeTransaction: newDynamic(), MaxFeePerBlobGas: *uint256.NewInt(1), BlobVersionedHashes: hashes}
+	}
+	dynamic := newDynamic()
+
+	tests := []struct {
+		name string
+		tx   types.Transaction
+	}{
+		{"blob-2", newBlob(common.Hash{1, 1}, common.Hash{1, 2})},
+		{"blob-1", newBlob(common.Hash{1, 1})},
+		{"dynamic-fee", &dynamic},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			signedTx, err := types.SignTx(tc.tx, *signer, key)
+			require.NoError(t, err)
+			result := &TxResult{
+				Task: &TxTask{
+					Header: &types.Header{Number: *uint256.NewInt(1)},
+					Txs:    types.Transactions{signedTx},
+					Config: config,
+				},
+			}
+			receipt, err := result.CreateReceipt(0, 21_000, 0)
+			require.NoError(t, err)
+			require.Equal(t, signedTx.GetBlobGas(), receipt.BlobGasUsed)
+			if signedTx.Type() == types.BlobTxType {
+				require.NotZero(t, receipt.BlobGasUsed)
+			}
+		})
+	}
 }

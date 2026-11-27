@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 	"time"
 
@@ -33,15 +34,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+const allIrreversible = uint64(math.MaxUint64)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -122,7 +121,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+		err = agg.BuildFiles(db, txs, allIrreversible)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -221,7 +220,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+		err = agg.BuildFiles(db, txs, allIrreversible)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())

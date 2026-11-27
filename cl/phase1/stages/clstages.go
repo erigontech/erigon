@@ -157,6 +157,9 @@ func ClStagesCfg(
 		caplinConfig.ImmediateBlobsBackfilling,
 		log.Root(),
 	)
+	if len(caplinConfig.BlobsBackfillEndpoints) > 0 {
+		blobDownloader.SetBlobEndpoints(caplinConfig.BlobsBackfillEndpoints, caplinConfig.BlobsBackfillEndpointWorkers)
+	}
 
 	return &Cfg{
 		rpc:                     rpc,

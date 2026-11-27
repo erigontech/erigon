@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -56,6 +57,58 @@ func (r *ecrecoverAccessReader) ReadAccountCode(addr accounts.Address) ([]byte, 
 	return r.code[addr], nil
 }
 
+func TestRunPrecompiledEcrecoverState(t *testing.T) {
+	fixtures, err := loadJson("ecRecover")
+	require.NoError(t, err)
+	index := slices.IndexFunc(fixtures, func(f precompiledTest) bool { return f.Name == "ValidKey" })
+	require.NotEqual(t, -1, index)
+	input, expected := common.FromHex(fixtures[index].Input), common.FromHex(fixtures[index].Expected)
+	signer := accounts.InternAddress(common.BytesToAddress(expected))
+	precompile := accounts.InternAddress(common.HexToAddress("0x01"))
+	for _, fork := range []struct {
+		name   string
+		bogota bool
+	}{
+		{name: "osaka"},
+		{name: "bogota", bogota: true},
+	} {
+		t.Run(fork.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			p := Precompiles(&chain.Rules{IsOsaka: true, IsBogota: fork.bogota})[precompile]
+			for _, tc := range []struct {
+				name    string
+				code    []byte
+				output  []byte
+				gasUsed uint64
+			}{
+				{name: "regular code", code: []byte{byte(STOP)}, gasUsed: 6100},
+				{name: "empty code", output: expected, gasUsed: 3200},
+				{name: "delegation", code: types.AddressToDelegation(accounts.ZeroAddress), output: expected, gasUsed: 3200},
+				{name: "regular code again", code: []byte{byte(STOP)}, gasUsed: 3200},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					require.NoError(t, ibs.SetCode(signer, tc.code, tracing.CodeChangeUnspecified))
+					initial := mdgas.MdGas{Execution: 10_000, State: 50_000}
+					output, remaining, err := RunPrecompiledContract(p, input, initial, ibs, nil)
+					require.NoError(t, err)
+					wantOutput, gasUsed := tc.output, tc.gasUsed
+					if !fork.bogota {
+						wantOutput, gasUsed = expected, 3000
+					}
+					require.Equal(t, wantOutput, output)
+					require.Equal(t, mdgas.MdGas{Execution: initial.Execution - gasUsed, State: initial.State}, remaining)
+					if fork.bogota && precompileCacheEnabled {
+						cached, ok := p.(*cachedStatefulPrecompile)
+						require.True(t, ok, "stateful precompile must preserve caching")
+						require.True(t, cachedPrecompileHit(cached.cachedPrecompile, input))
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestEcrecoverAccountAccess(t *testing.T) {
 	fixtures, err := loadJson("ecRecover")
 	require.NoError(t, err)
@@ -72,84 +125,79 @@ func TestEcrecoverAccountAccess(t *testing.T) {
 	config := chain.AllProtocolChanges.Copy()
 	config.BogotaTime = new(uint64)
 
-	for _, versioned := range []bool{false, true} {
-		t.Run(map[bool]string{false: "serial", true: "versioned"}[versioned], func(t *testing.T) {
-			for _, tc := range []struct {
-				name     string
-				input    []byte
-				code     []byte
-				gas      uint64
-				warm     bool
-				revert   bool
-				wantRead bool
-				output   []byte
-				err      error
-			}{
-				{name: "unpaid cold check", input: input, code: contractCode, gas: 6099, err: ErrOutOfGas},
-				{name: "unpaid warm check", input: input, code: contractCode, gas: 3199, warm: true, err: ErrOutOfGas},
-				{name: "failed recovery", code: contractCode, gas: 3000},
-				{name: "absent signer", input: input, gas: 6100, wantRead: true, output: expected},
-				{name: "empty code", input: input, code: []byte{}, gas: 6100, wantRead: true, output: expected},
-				{name: "rejected code", input: input, code: contractCode, gas: 6100, wantRead: true},
-				{name: "reverted cold read", input: input, code: contractCode, gas: 6100, wantRead: true, revert: true},
-				{name: "reverted warm read", input: input, code: contractCode, gas: 3200, warm: true, wantRead: true, revert: true},
-				{name: "delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected},
-				{name: "reverted delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected, revert: true},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					reader := &ecrecoverAccessReader{
-						code:         map[accounts.Address][]byte{target: contractCode},
-						accountReads: make(map[accounts.Address]int),
-						codeReads:    make(map[accounts.Address]int),
-					}
-					if tc.code != nil {
-						reader.code[signer] = tc.code
-					}
-					var ibs *state.IntraBlockState
-					if versioned {
-						ibs = state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-					} else {
-						ibs = state.New(reader)
-					}
-					defer ibs.Close()
-					ibs.SetTxContext(1, 0)
-					evm := NewEVM(evmtypes.BlockContext{Coinbase: coinbase}, evmtypes.TxContext{}, ibs, config, Config{})
-					var accessList types.AccessList
-					if tc.warm {
-						accessList = types.AccessList{{Address: signer.Value()}}
-					}
-					ibs.Prepare(evm.ChainRules(), caller, coinbase, precompile, ActivePrecompiles(evm.ChainRules()), accessList)
-					require.Zero(t, reader.accountReads[signer])
-					require.Zero(t, reader.codeReads[signer])
-					require.Equal(t, tc.warm, ibs.AddressInAccessList(signer))
-
-					snapshot := ibs.PushSnapshot()
-					output, _, _, err := evm.StaticCall(caller, precompile, tc.input, mdgas.MdGas{Execution: tc.gas})
-					require.ErrorIs(t, err, tc.err)
-					require.Equal(t, tc.output, output)
-					require.Equal(t, tc.warm || tc.wantRead, ibs.AddressInAccessList(signer))
-					if tc.revert {
-						ibs.RevertToSnapshot(snapshot, ErrExecutionReverted)
-					}
-					ibs.PopSnapshot(snapshot)
-
-					require.Equal(t, tc.wantRead, reader.accountReads[signer] > 0, "signer account read")
-					require.Equal(t, tc.wantRead && len(tc.code) > 0, reader.codeReads[signer] > 0, "signer code read")
-					require.Equal(t, tc.warm || tc.wantRead && !tc.revert, ibs.AddressInAccessList(signer))
-					require.Zero(t, reader.accountReads[target])
-					require.Zero(t, reader.codeReads[target])
-					require.False(t, ibs.AddressInAccessList(target))
-
-					io := state.NewVersionedIO(1)
-					io.RecordReads(state.Version{TxIndex: 0}, ibs.VersionedReads())
-					io.RecordWrites(state.Version{TxIndex: 0}, ibs.VersionedWrites())
-					want := types.BlockAccessList{{Address: precompile.Value()}, {Address: coinbase.Value()}}
-					if tc.wantRead {
-						want = append(want, types.AccountChanges{Address: signer.Value()})
-					}
-					require.Equal(t, want, io.AsBlockAccessList())
-				})
+	for _, tc := range []struct {
+		name     string
+		input    []byte
+		code     []byte
+		gas      uint64
+		warm     bool
+		revert   bool
+		wantRead bool
+		output   []byte
+		err      error
+	}{
+		{name: "unpaid cold check", input: input, code: contractCode, gas: 6099, err: ErrOutOfGas},
+		{name: "unpaid warm check", input: input, code: contractCode, gas: 3199, warm: true, err: ErrOutOfGas},
+		{name: "failed recovery", code: contractCode, gas: 3000},
+		{name: "absent signer", input: input, gas: 6100, wantRead: true, output: expected},
+		{name: "empty code", input: input, code: []byte{}, gas: 6100, wantRead: true, output: expected},
+		{name: "rejected code", input: input, code: contractCode, gas: 6100, wantRead: true},
+		{name: "reverted cold read", input: input, code: contractCode, gas: 6100, wantRead: true, revert: true},
+		{name: "reverted warm read", input: input, code: contractCode, gas: 3200, warm: true, wantRead: true, revert: true},
+		{name: "delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected},
+		{name: "wrong delegation prefix", input: input, code: append([]byte{0xef, 0x01, 0x01}, delegationCode[3:]...), gas: 6100, wantRead: true},
+		{name: "delegation prefix only", input: input, code: delegationCode[:3], gas: 6100, wantRead: true},
+		{name: "short delegation", input: input, code: delegationCode[:22], gas: 6100, wantRead: true},
+		{name: "long delegation", input: input, code: append(slices.Clone(delegationCode), 0), gas: 6100, wantRead: true},
+		{name: "reverted delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected, revert: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &ecrecoverAccessReader{
+				code:         map[accounts.Address][]byte{target: contractCode},
+				accountReads: make(map[accounts.Address]int),
+				codeReads:    make(map[accounts.Address]int),
 			}
+			if tc.code != nil {
+				reader.code[signer] = tc.code
+			}
+			ibs := state.New(reader)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 0)
+			evm := NewEVM(evmtypes.BlockContext{Coinbase: coinbase}, evmtypes.TxContext{}, ibs, config, Config{})
+			var accessList types.AccessList
+			if tc.warm {
+				accessList = types.AccessList{{Address: signer.Value()}}
+			}
+			ibs.Prepare(evm.ChainRules(), caller, coinbase, precompile, ActivePrecompiles(evm.ChainRules()), accessList)
+			require.Zero(t, reader.accountReads[signer])
+			require.Zero(t, reader.codeReads[signer])
+			require.Equal(t, tc.warm, ibs.AddressInAccessList(signer))
+
+			snapshot := ibs.PushSnapshot()
+			output, _, _, err := evm.StaticCall(caller, precompile, tc.input, mdgas.MdGas{Execution: tc.gas})
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.output, output)
+			require.Equal(t, tc.warm || tc.wantRead, ibs.AddressInAccessList(signer))
+			if tc.revert {
+				ibs.RevertToSnapshot(snapshot, ErrExecutionReverted)
+			}
+			ibs.PopSnapshot(snapshot)
+
+			require.Equal(t, tc.wantRead, reader.accountReads[signer] > 0, "signer account read")
+			require.Equal(t, tc.wantRead && len(tc.code) > 0, reader.codeReads[signer] > 0, "signer code read")
+			require.Equal(t, tc.warm || (tc.wantRead && !tc.revert), ibs.AddressInAccessList(signer))
+			require.Zero(t, reader.accountReads[target])
+			require.Zero(t, reader.codeReads[target])
+			require.False(t, ibs.AddressInAccessList(target))
+
+			io := state.NewVersionedIO(1)
+			io.RecordReads(state.Version{TxIndex: 0}, ibs.Reads())
+			io.RecordWrites(state.Version{TxIndex: 0}, ibs.Writes())
+			want := types.BlockAccessList{{Address: precompile.Value()}, {Address: coinbase.Value()}}
+			if tc.wantRead {
+				want = append(want, types.AccountChanges{Address: signer.Value()})
+			}
+			require.Equal(t, want, io.AsBlockAccessList())
 		})
 	}
 }

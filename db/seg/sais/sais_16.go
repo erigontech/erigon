@@ -38,10 +38,10 @@ func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 	} else {
 		induceSubL_16_32(text, sa, freq, bucket)
 		induceSubS_16_32(text, sa, freq, bucket)
-		length_16_32(text, sa, numLMS)
+		length_16_32(text, sa)
 		maxID := assignID_16_32(text, sa, numLMS)
 		if maxID < numLMS {
-			map_32(sa, numLMS)
+			map_32(sa)
 			recurse_32(sa, tmp, numLMS, maxID)
 			unmap_16_32(text, sa, numLMS)
 		} else {
@@ -192,7 +192,7 @@ func induceSubS_16_32(text []uint16, sa, freq, bucket []int32) {
 	}
 }
 
-func length_16_32(text []uint16, sa []int32, numLMS int) {
+func length_16_32(text []uint16, sa []int32) {
 	end := 0
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false

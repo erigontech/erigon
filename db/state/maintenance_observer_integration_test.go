@@ -50,7 +50,7 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 			return nil
 		}))
 	})
-	<-agg.BuildFilesInBackground(db, 3*stepSize, unboundedFinalityCtx)
+	<-agg.BuildFilesInBackground(db, 3*stepSize, allIrreversible)
 	require.Positive(t, published)
 	var want []state.MaintenancePoint
 	for range published / stepSize {
@@ -85,7 +85,7 @@ func TestMaintenanceObserverBuildCompletion(t *testing.T) {
 			}
 		}
 	}, func([]string) {})
-	finished := agg.BuildFilesInBackground(db, 3*stepSize, unboundedFinalityCtx)
+	finished := agg.BuildFilesInBackground(db, 3*stepSize, allIrreversible)
 	select {
 	case <-mergeReached:
 	case <-time.After(time.Minute):
@@ -123,8 +123,8 @@ func TestMaintenanceObserverPrunePrecedesBuild(t *testing.T) {
 			}
 		}
 	})
-	started, finished, err := agg.CollateAndPrune(t.Context(), db, func(kv.TemporalRwTx) (kv.FinalityContext, error) {
-		return unboundedFinalityCtx, nil
+	started, finished, err := agg.CollateAndPrune(t.Context(), db, func(kv.TemporalRwTx) (uint64, error) {
+		return allIrreversible, nil
 	})
 	require.NoError(t, err)
 	<-finished
@@ -157,8 +157,8 @@ func TestMaintenanceObserverPruneTransaction(t *testing.T) {
 			}))
 		}
 	})
-	_, finished, err := agg.CollateAndPrune(t.Context(), db, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-		return unboundedFinalityCtx, tx.Put(kv.Sequence, key, value)
+	_, finished, err := agg.CollateAndPrune(t.Context(), db, func(tx kv.TemporalRwTx) (uint64, error) {
+		return allIrreversible, tx.Put(kv.Sequence, key, value)
 	})
 	require.NoError(t, err)
 	<-finished

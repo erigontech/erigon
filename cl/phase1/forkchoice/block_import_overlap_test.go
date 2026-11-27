@@ -1070,7 +1070,7 @@ func TestBlockImportOverlapReadersUseSyncedHead(t *testing.T) {
 			requireStateHash(t, view, wantRoot)
 			return nil
 		}))
-		owned, err := test.store.GetOwnedStateAtBlockRoot(parentRoot)
+		owned, err := test.store.GetOwnedStateAtBlockRoot(parentRoot, nil)
 		require.NoError(t, err)
 		requireStateHash(t, owned, wantRoot)
 		called := false

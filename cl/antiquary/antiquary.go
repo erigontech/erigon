@@ -67,7 +67,8 @@ type Antiquary struct {
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
 	lastBlobGapLog                 time.Time
-	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, is stored
+	lastCanonicalHeadCapLog        time.Time
+	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, was stored at the last scan
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -419,7 +420,7 @@ func (s *Antiquary) antiquate() error {
 		return nil
 	}
 
-	var from, to uint64
+	var from, to, canonicalHead uint64
 
 	if err := s.mainDB.View(s.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
@@ -430,21 +431,29 @@ func (s *Antiquary) antiquate() error {
 			return err
 		}
 		to = highest
-		return nil
+		canonicalHead, _, err = beacon_indicies.ReadCanonicalHead(roTx)
+		return err
 	}); err != nil {
 		return err
 	}
 
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	to -= min(to, safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+	uncapped := to
+	to = min(to, canonicalHead+1)
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
 		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
 			to = min(to, segFrom)
+			uncapped = min(uncapped, segFrom)
 			return false
 		}
 		return true
 	})
+	uncapped = (uncapped / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	if uncapped > max(from, to) {
+		s.reportCanonicalHeadCap(canonicalHead, uncapped, time.Now())
+	}
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
 		return nil
@@ -594,32 +603,45 @@ const blobRetirementGapLogInterval = 10 * time.Minute
 // blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
 // segments below it are still complete.
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
-	if !s.blobBackfilled.Load() {
-		for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
-			want, skipped, err := blobCount(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			if skipped {
-				continue
-			}
-			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-			if err != nil {
-				return false, err
-			}
-			stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
-			if err != nil {
-				return false, err
-			}
-			if !stored {
-				s.blobCheckedTo = slot
-				s.reportBlobRetirementGap(from, slot, time.Now())
-				return false, nil
-			}
+	start := max(from, s.blobCheckedTo)
+	for slot := start; slot < to; slot++ {
+		want, skipped, err := blobCount(tx, slot)
+		if err != nil {
+			return false, err
 		}
+		if skipped {
+			continue
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
+		if err != nil {
+			return false, err
+		}
+		if !stored {
+			s.blobCheckedTo = slot
+			s.reportBlobRetirementGap(from, slot, time.Now())
+			return false, nil
+		}
+	}
+	if start > from {
+		s.blobCheckedTo = from
+		return s.blobSegmentComplete(tx, from, to, blobCount)
 	}
 	mxBlobRetirementGapSlot.SetUint64(0)
 	return true, nil
+}
+
+const canonicalHeadCapLogInterval = 10 * time.Minute
+
+func (s *Antiquary) reportCanonicalHeadCap(canonicalHead, to uint64, now time.Time) {
+	if now.Sub(s.lastCanonicalHeadCapLog) < canonicalHeadCapLogInterval {
+		return
+	}
+	s.lastCanonicalHeadCapLog = now
+	s.logger.Info("[Antiquary] Block freezing waits for the canonical index", "canonicalHead", canonicalHead, "freezeBound", to)
 }
 
 func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {

@@ -416,7 +416,7 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash) (*sta
 	return st.Copy()
 }
 
-func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash, _ *state.CachingBeaconState) (*state.CachingBeaconState, error) {
 	return f.GetStateAtBlockRoot(blockRoot)
 }
 

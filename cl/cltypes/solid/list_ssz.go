@@ -237,6 +237,17 @@ func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error)
 	return
 }
 
+// DecodeDynamicSSZWithDecoder decodes a dynamic list with a context-aware
+// element decoder, preserving the list's configured limit and hashing mode.
+func (l *ListSSZ[T]) DecodeDynamicSSZWithDecoder(buf []byte, version int, strict bool, decode func(T, []byte, int) error) (err error) {
+	if l.static {
+		return errors.New("custom dynamic decoder used for static list")
+	}
+	l.list, err = ssz.DecodeDynamicListWithDecoder[T](buf, 0, uint32(len(buf)), uint64(l.limit), version, strict, decode)
+	l.invalidateRoots()
+	return
+}
+
 func (l *ListSSZ[T]) EncodingSizeSSZ() (size int) {
 	if l.static {
 		return len(l.list) * l.bytesPerElement

@@ -944,7 +944,7 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 }
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
+	return b.baseApi.receiptsGenerator.GetReceiptsGasUsed(ctx, b.tx, block)
 }
 
 func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {

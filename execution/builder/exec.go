@@ -150,8 +150,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
 
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -508,7 +506,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 						return nil, nil, err
 					}
 				}
-				_, feeErr = frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
+				_, _, feeErr = frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
 			} else if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
 				feeErr = protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */)
 			}

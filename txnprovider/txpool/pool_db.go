@@ -33,11 +33,9 @@ import (
 )
 
 var (
-	PoolChainConfigKey    = []byte("chain_config")
-	PoolLastSeenBlockKey  = []byte("last_seen_block")
-	PoolPendingBaseFeeKey = []byte("pending_base_fee")
-	PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-	PoolStateVersion      = []byte("state_version")
+	PoolChainConfigKey   = []byte("chain_config")
+	PoolLastSeenBlockKey = []byte("last_seen_block")
+	PoolStateVersion     = []byte("state_version")
 )
 
 func LastSeenBlock(tx kv.Getter) (uint64, error) {

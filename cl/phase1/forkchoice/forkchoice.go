@@ -94,6 +94,14 @@ type preverifiedAppendListsSizes struct {
 	historicalSummariesLength uint64
 }
 
+// pendingEnvelopeRetryBooking holds back the next retry of a pending envelope until at. A probe booking paces reads of
+// column storage; an attempt booking (attempt) paces applying the envelope. A caller that has news of new columns
+// retries through a probe booking (ignoreProbe) but never through an attempt booking.
+type pendingEnvelopeRetryBooking struct {
+	at      time.Time
+	attempt bool
+}
+
 type ForkChoiceStore struct {
 	timeMs                 atomic.Uint64
 	highestSeen            atomic.Uint64
@@ -172,7 +180,8 @@ type ForkChoiceStore struct {
 	totalActiveBalances *lru.Cache[common.Hash, uint64]
 	// Randao mixes
 	randaoMixesLists *lru.Cache[common.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
-	randaoDeltas     *lru.Cache[common.Hash, randaoDelta]       // small entry can be lots of elements.
+	ancestors        *lru.Cache[ancestorKey, ForkChoiceNode]
+	randaoDeltas     *lru.Cache[common.Hash, randaoDelta] // small entry can be lots of elements.
 	// participation tracking
 	participation *lru.Cache[uint64, *solid.ParticipationBitList] // epoch -> [participation]
 
@@ -229,9 +238,9 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
-	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// Booking that holds back the next retry of a pending envelope, by block root. The background retry and
 	// a proposal's retry of its parent share it.
-	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, *pendingEnvelopeRetryBooking]
 	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
@@ -406,7 +415,7 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	if err != nil {
 		return nil, err
 	}
@@ -480,6 +489,7 @@ func NewForkChoiceStore(
 		finalityCheckpoints:            finalityCheckpoints,
 		totalActiveBalances:            totalActiveBalances,
 		randaoMixesLists:               randaoMixesLists,
+		ancestors:                      newAncestorCache(),
 		randaoDeltas:                   randaoDeltas,
 		headSet:                        headSet,
 		weights:                        make(map[common.Hash]uint64),
@@ -845,31 +855,46 @@ func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
 	return f.anchorExecutionPayloadBid.BuilderIndex, true
 }
 
-func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+// copyCurrentStateLocked copies the current state of blockRoot into reuse, overwriting it, or into a new state when
+// reuse is nil or has another config.
+func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash, reuse *state.CachingBeaconState) (*state.CachingBeaconState, bool, error) {
 	current := f.forkGraph.CurrentStateLocked(blockRoot)
 	if current == nil {
 		return nil, false, nil
 	}
 	start := time.Now()
 	defer currentStateCopy.ObserveDuration(start)
-	if f.totalActiveBalances != nil {
-		if total, ok := f.totalActiveBalances.Get(blockRoot); ok {
-			copied, err := current.CopyWithTotalActiveBalance(total)
-			return copied, true, err
-		}
+	copied := reuse
+	if copied == nil || copied.BeaconConfig() != current.BeaconConfig() {
+		copied = state.New(current.BeaconConfig())
 	}
-	copied, err := current.Copy()
-	return copied, true, err
+	var err error
+	if total, ok := f.cachedTotalActiveBalance(blockRoot); ok {
+		err = current.CopyIntoWithTotalActiveBalance(copied, total)
+	} else {
+		err = current.CopyInto(copied)
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	return copied, true, nil
 }
 
-func (f *ForkChoiceStore) copyCurrentState(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+func (f *ForkChoiceStore) cachedTotalActiveBalance(blockRoot common.Hash) (uint64, bool) {
+	if f.totalActiveBalances == nil {
+		return 0, false
+	}
+	return f.totalActiveBalances.Get(blockRoot)
+}
+
+func (f *ForkChoiceStore) copyCurrentState(blockRoot common.Hash, reuse *state.CachingBeaconState) (*state.CachingBeaconState, bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.copyCurrentStateLocked(blockRoot)
+	return f.copyCurrentStateLocked(blockRoot, reuse)
 }
 
 func (f *ForkChoiceStore) copyStateAtBlockRootLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	copied, current, err := f.copyCurrentStateLocked(blockRoot)
+	copied, current, err := f.copyCurrentStateLocked(blockRoot, nil)
 	if current || err != nil {
 		return copied, err
 	}
@@ -884,7 +909,7 @@ func (f *ForkChoiceStore) getStateLocked(blockRoot common.Hash) (*state.CachingB
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	copied, current, err := f.copyCurrentState(blockRoot)
+	copied, current, err := f.copyCurrentState(blockRoot, nil)
 	if current || err != nil {
 		return copied, err
 	}
@@ -895,9 +920,10 @@ type ownedStateReplayer interface {
 	ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error)
 }
 
-// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies an aliased replay.
-func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	copied, current, err := f.copyCurrentState(blockRoot)
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies an aliased replay. A non-nil reuse is a state
+// no one else references; a copy of the current state may be written into it.
+func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash, reuse *state.CachingBeaconState) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot, reuse)
 	if current || err != nil {
 		return copied, err
 	}

@@ -36,8 +36,10 @@ import (
 )
 
 // FrameValidation describes a successful pool simulation at one state snapshot.
-// It supplies payer reservations and dependencies for invalidating that result;
-// it does not guarantee that the transaction's execution frames will succeed.
+// Its dependencies tell the pool when to revalidate. The execution frames can still fail.
+//
+// MaxCost is the amount debited from the payer at payment approval using the
+// simulated fees. The pool reserves the full signed MaxFee, which can be higher.
 type FrameValidation struct {
 	Payer             common.Address
 	MaxCost           uint256.Int
@@ -142,11 +144,9 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 		validation.dependencies[types.FrameNonceManager] = struct{}{}
 	}
 	config.Tracer = &tracing.Hooks{
-		OnOpcodeV2: validation.onOpcode,
-		OnEnterV2:  validation.onEnter,
-		OnAccountRead: func(addr accounts.Address) {
-			validation.dependencies[addr.Value()] = struct{}{}
-		},
+		OnOpcodeV2:    validation.onOpcode,
+		OnEnterV2:     validation.onEnter,
+		OnAccountRead: validation.onAccountRead,
 	}
 	evm.ResetBetweenBlocks(evm.Context, NewEVMTxContext(msg), evm.IntraBlockState(), config, evm.ChainRules())
 	st := NewTxnExecutor(evm, msg, NewGasPool(msg.Gas(), tx.GetBlobGas()))
@@ -393,6 +393,10 @@ func (v *frameValidationTracer) afterFrame() error {
 	}
 	v.Payer, v.MaxCost = ctx.Payer.Value(), ctx.MaxCost
 	return nil
+}
+
+func (v *frameValidationTracer) onAccountRead(addr accounts.Address) {
+	v.dependencies[addr.Value()] = struct{}{}
 }
 
 func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, opErr error) {

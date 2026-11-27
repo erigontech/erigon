@@ -17,3 +17,11 @@
 package mdbx
 
 func RoTxPoolLen(db *MdbxKV) int { return len(db.roTxPool) }
+
+func ScannedSpaceDirty(tx *MdbxTx) (uint64, error) {
+	info, err := tx.tx.Info(true)
+	if err != nil {
+		return 0, err
+	}
+	return info.SpaceDirty, nil
+}

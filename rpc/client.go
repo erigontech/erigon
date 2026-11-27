@@ -122,6 +122,9 @@ func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 }
 
 func (cc *clientConn) close(err error, inflightReq *requestOp) {
+	// The connection is gone, so there is no point in finishing calls that are
+	// still being served on it. Cancel them before waiting for them to return.
+	cc.handler.cancelRoot()
 	cc.handler.close(err, inflightReq)
 	cc.codec.Close()
 }
@@ -146,6 +149,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 		if !c.isHTTP {
 			select {
 			case c.reqTimeout <- op:
+			case <-op.resp: // closed when the connection is torn down, which can wait for this call
 			case <-c.closing:
 			}
 		}
@@ -637,7 +641,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 
 		case err := <-c.readErr:
-			conn.handler.logger.Trace("RPC connection read error", "err", err)
+			conn.handler.log().Trace("RPC connection read error", "err", err)
 			// A read error is fatal for the connection, and all pending requests must be cancelled,
 			// including any that might still be considered in-flight. Once the resp channel is closed
 			// here, a later reconnect must not re-register this op (sending on a closed channel would

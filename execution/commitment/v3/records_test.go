@@ -63,7 +63,7 @@ func TestDeltas(t *testing.T) {
 		n.addLeaf(3, 4, 9)
 
 		var acc deltaParts
-		hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(ctx, n, n, &acc)
+		hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(context.Background(), ctx, n, n, &acc)
 		require.NoError(t, err)
 		require.Len(t, hash, 32)
 		require.Len(t, acc, 1)
@@ -91,7 +91,7 @@ func TestDeltas(t *testing.T) {
 					require.NoError(t, insert(root, path, []byte{byte(i)}))
 				}
 				g := graph{plane: planeStorage, addrHash: addr[:]}
-				parts, _, err := g.persistGraph(ctx, root, foldPlan{})
+				parts, _, err := g.persistGraph(context.Background(), ctx, root, foldPlan{})
 				require.NoError(t, err)
 				require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 				require.NotEmpty(t, ctx.branches)
@@ -108,7 +108,7 @@ func TestDeltas(t *testing.T) {
 		storageRound(t, ctx, addr, seed)
 		previous, start := ctx.Records(), len(ctx.Deltas())
 		next := []commitmenttest.Op{{Key: seed[0].Key, Delete: true}, {Key: slotPath(1, 4), Storage: []byte{5}}, seed[2]}
-		root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, next), foldPlan{ctx: t.Context(), factory: ctx.Open, workers: 2, fanOutMin: 1})
+		root, parts, err := runStorageTaskWithPlan(t.Context(), ctx, storageTaskFor(addr, next), foldPlan{ctx: t.Context(), factory: ctx.Open, workers: 2, fanOutMin: 1})
 		require.NoError(t, err)
 		require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 		for _, delta := range ctx.Deltas()[start:] {
@@ -129,7 +129,7 @@ func TestDeltas(t *testing.T) {
 		rebuilt := runner.NewMemory(runner.ContextSpec{})
 		want := storageRound(t, rebuilt, addr, []commitmenttest.Op{seed[0], seed[1], added})
 		require.Equal(t, want, root)
-		reachable, err := enumerateStorageRecords(ctx, addr)
+		reachable, err := enumerateStorageRecords(t.Context(), ctx, addr)
 		require.NoError(t, err)
 		orphans := len(liveStorageRecords(ctx.Records())) - len(reachable)
 		require.Zero(t, orphans)
@@ -154,7 +154,7 @@ func TestDeltas(t *testing.T) {
 
 		diverging := commitmenttest.Path([]byte{0x0c, 0x07}, 0x05)
 		require.NoError(t, insert(root, diverging, []byte{0x01}))
-		parts, _, err := g.persistGraph(ctx, root, foldPlan{})
+		parts, _, err := g.persistGraph(context.Background(), ctx, root, foldPlan{})
 		require.NoError(t, err)
 		require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 

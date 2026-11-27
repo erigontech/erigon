@@ -35,8 +35,8 @@ type TraceAPI interface {
 
 	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
 	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (*TraceCallResult, error)
-	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error)
-	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
+	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (*TraceCallResult, error)
+	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) ([]*TraceCallResult, error)
 	RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error)
 
 	// Filtering (see ./trace_filtering.go)
@@ -51,7 +51,6 @@ type TraceAPI interface {
 type TraceAPIImpl struct {
 	*BaseAPI
 	kv            kv.TemporalRoDB
-	maxTraces     uint64
 	gasCap        uint64
 	compatibility bool // Bug for bug compatiblity with OpenEthereum
 }
@@ -61,7 +60,6 @@ func NewTraceAPI(base *BaseAPI, kv kv.TemporalRoDB, cfg *rpccfg.TraceApiConfig) 
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,
-		maxTraces:     cfg.MaxTraces,
 		gasCap:        cfg.GasCap,
 		compatibility: cfg.Compatibility,
 	}

@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -149,7 +148,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
-			RlpTx:   bytes.Clone(rlp),
+			RlpTx:   rlp,
 		})
 	}, tx)
 	return reply, nil
@@ -276,13 +275,13 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.NonceTooLow:
 		return txpoolproto.ImportResult_STALE
-	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.ReplacedByHigherTip, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.BlobReplacementTypeMismatch, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
 		txpoolcfg.TipAboveFeeCap, txpoolcfg.DelegatedNonceGap, txpoolcfg.DelegatedTxnLimit, txpoolcfg.InvalidFrame:
 		// INVALID includes rejections under current fork rules or pool policy;
 		// it does not imply that the transaction can never be accepted.

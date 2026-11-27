@@ -25,6 +25,9 @@ import (
 const (
 	envelopeSubmissionRetryInterval = 500 * time.Millisecond
 	headStateRetryInterval          = time.Second
+
+	// A builder boost factor of 100 selects bids by plain value comparison.
+	gloasBuilderConfig = `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
 )
 
 // Service is the embedded dev validator. It runs as a goroutine inside
@@ -318,15 +321,22 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("randao reveal: %w", err)
 	}
 
+	version := s.cfg.GetCurrentStateVersion(epoch)
+
 	// Get block template (unsigned BeaconBlock). Retry a few times if the EL
 	// is busy with fork choice (semaphore contention in AssembleBlock).
-	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
-		slot, hexutil.Encode(randaoReveal[:]))
-
+	randaoQuery := "randao_reveal=" + hexutil.Encode(randaoReveal[:])
+	fetchTemplate := func() (*beaconResponse, error) {
+		if version < clparams.GloasVersion {
+			return s.client.getResponse(ctx, fmt.Sprintf("/eth/v3/validator/blocks/%d?%s", slot, randaoQuery))
+		}
+		return s.client.postResponse(ctx, fmt.Sprintf("/eth/v4/validator/blocks/%d?%s&include_payload=true", slot, randaoQuery),
+			gloasBuilderConfig, http.Header{"Eth-Consensus-Version": {version.String()}})
+	}
 	var response *beaconResponse
 	var getErr error
 	for range 5 {
-		response, getErr = s.client.getResponse(ctx, path)
+		response, getErr = fetchTemplate()
 		if getErr == nil {
 			break
 		}
@@ -338,11 +348,11 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 
 	blockResponse := response.Data
 
-	version := s.cfg.GetCurrentStateVersion(epoch)
 	var denebBlock struct {
-		Block     json.RawMessage `json:"block"`
-		KZGProofs json.RawMessage `json:"kzg_proofs"`
-		Blobs     json.RawMessage `json:"blobs"`
+		Block                    json.RawMessage `json:"block"`
+		KZGProofs                json.RawMessage `json:"kzg_proofs"`
+		Blobs                    json.RawMessage `json:"blobs"`
+		ExecutionPayloadEnvelope json.RawMessage `json:"execution_payload_envelope"`
 	}
 	if err := json.Unmarshal(blockResponse, &denebBlock); err != nil {
 		return fmt.Errorf("parse deneb block wrapper: %w", err)
@@ -381,7 +391,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		if block.Block.Slot != slot {
 			return fmt.Errorf("block template slot %d does not match requested slot %d", block.Block.Slot, slot)
 		}
-		signedEnvelope, err = s.signExecutionPayloadEnvelope(block.Block, response.ExecutionPayloadEnvelope, key)
+		signedEnvelope, err = s.signExecutionPayloadEnvelope(block.Block, denebBlock.ExecutionPayloadEnvelope, key)
 		if err != nil {
 			return err
 		}

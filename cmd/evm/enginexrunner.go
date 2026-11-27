@@ -46,11 +46,11 @@ var engineXTestCommand = cli.Command{
 	Name:      "enginextest",
 	Usage:     "Executes engine-x test fixtures using the existing EngineXTestRunner",
 	ArgsUsage: "<path>",
-	Description: "Each test runs in its own short-lived Erigon node whose datadir lives\n" +
-		"under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
-		"per-tester create/unlink work serialises through the journal and\n" +
-		"dominates wall time. Pointing $TMPDIR at a RAM-backed filesystem cuts\n" +
-		"wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
+	Description: "Tests share a short-lived Erigon node when the fork, pre-alloc hash, and\n" +
+		"EIP-8253 account list match. Its datadir lives under $TMPDIR (default /tmp).\n" +
+		"On a journaled filesystem like ext4, the per-tester create/unlink work\n" +
+		"serialises through the journal and dominates wall time. Pointing $TMPDIR\n" +
+		"at a RAM-backed filesystem cuts wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
 		"\n" +
 		"    RAMDISK=$(./tools/create-ramdisk)\n" +
 		"    TMPDIR=$RAMDISK evm enginextest ...\n" +
@@ -80,9 +80,33 @@ var engineXTestCommand = cli.Command{
 	},
 }
 
+// engineXNamedTest locates a test in its fixture file. Indexing decodes each
+// test once and keeps only its location; a worker decodes it again when it runs it.
 type engineXNamedTest struct {
-	name string
-	def  engineapitester.EngineXTestDefinition
+	name   string
+	file   string
+	offset int64
+	size   int
+	raw    json.RawMessage // the test itself, from a file that cannot be read again, such as a pipe
+}
+
+func (t engineXNamedTest) definition() (engineapitester.EngineXTestDefinition, error) {
+	var def engineapitester.EngineXTestDefinition
+	if t.raw != nil {
+		err := json.Unmarshal(t.raw, &def)
+		return def, err
+	}
+	f, err := os.Open(t.file)
+	if err != nil {
+		return def, err
+	}
+	defer f.Close()
+	raw := make([]byte, t.size)
+	if _, err := f.ReadAt(raw, t.offset); err != nil {
+		return def, fmt.Errorf("read %s: %w", t.file, err)
+	}
+	err = json.Unmarshal(raw, &def)
+	return def, err
 }
 
 type engineXGroupKey struct {
@@ -179,11 +203,19 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	resultCh := make(chan testResult, totalTests)
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		readMu   sync.Mutex
+		readErrs []error
+	)
 	for w := uint64(0); w < workers; w++ {
 		wg.Go(func() {
 			for key := range groupCh {
-				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
+				if err := runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh); err != nil {
+					readMu.Lock()
+					readErrs = append(readErrs, err)
+					readMu.Unlock()
+				}
 			}
 		})
 	}
@@ -215,7 +247,7 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	if timeIt {
 		printTimings(results)
 	}
-	return nil
+	return errors.Join(readErrs...)
 }
 
 // printTimings writes per-test wall-time to stderr sorted descending by Time.
@@ -245,8 +277,8 @@ func printTimings(results []testResult) {
 // Files under any pre_alloc/ directory are skipped: those are pre-allocation
 // inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
 // follow the engine-x JSON schema. Every other JSON in the tree is expected
-// to be a valid engine-x fixture; an unmarshal error is treated as a hard
-// failure rather than silently skipped.
+// to be a valid engine-x fixture; a test that does not decode, also one the
+// filter skips, is a hard failure rather than silently skipped.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
 	files, err := collectFiles(path)
 	if err != nil {
@@ -258,22 +290,34 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 		if isUnderPreAlloc(fname) {
 			continue
 		}
-		src, err := os.ReadFile(fname)
+		info, err := os.Stat(fname)
 		if err != nil {
-			return nil, 0, fmt.Errorf("read %s: %w", fname, err)
+			return nil, 0, err
 		}
-		var tests map[string]engineapitester.EngineXTestDefinition
-		err = json.Unmarshal(src, &tests)
-		if err != nil {
-			return nil, 0, fmt.Errorf("unmarshal %s: %w", fname, err)
-		}
-		for name, def := range tests {
+		err = decodeFixtures(fname, func(name string, dec *json.Decoder) error {
+			var raw json.RawMessage
+			if err := dec.Decode(&raw); err != nil {
+				return err
+			}
+			offset := dec.InputOffset() - int64(len(raw))
+			var def engineapitester.EngineXTestDefinition
+			if err := json.Unmarshal(raw, &def); err != nil {
+				return err
+			}
 			if !re.MatchString(name) {
-				continue
+				return nil
+			}
+			test := engineXNamedTest{name: name, file: fname, offset: offset, size: len(raw)}
+			if !info.Mode().IsRegular() {
+				test.raw = raw
 			}
 			key := engineXGroupKey{fork: def.Fork, hash: def.PreAllocHash}
-			groups[key] = append(groups[key], engineXNamedTest{name: name, def: def})
+			groups[key] = append(groups[key], test)
 			total++
+			return nil
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("unmarshal %s: %w", fname, err)
 		}
 	}
 	return groups, total, nil
@@ -300,7 +344,7 @@ func runEngineXGroup(
 	tests []engineXNamedTest,
 	timeIt bool,
 	resultCh chan<- testResult,
-) {
+) (readErr error) {
 	defer func() {
 		err := runner.Evict(key.fork, key.hash)
 		if err != nil {
@@ -316,17 +360,20 @@ func runEngineXGroup(
 		// short-circuit through the already-known-block fast path instead of
 		// re-executing.
 		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
-		var err error
-		if timeIt {
+		def, err := t.definition()
+		if err != nil && readErr == nil {
+			readErr = fmt.Errorf("test %s: %w", t.name, err)
+		}
+		if err == nil && timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
-				return nil, 0, runner.Run(testCtx, t.def)
+				return nil, 0, runner.Run(testCtx, def)
 			})
 			if err == nil {
 				r.Stats = &stats
 			}
-		} else {
-			err = runner.Run(testCtx, t.def)
+		} else if err == nil {
+			err = runner.Run(testCtx, def)
 		}
 		if err != nil {
 			r.Pass = false
@@ -334,6 +381,7 @@ func runEngineXGroup(
 		}
 		resultCh <- r
 	}
+	return readErr
 }
 
 // safeFilenameRe matches characters that are unsafe in filenames across

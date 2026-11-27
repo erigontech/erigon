@@ -232,15 +232,19 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 // calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
 // assemble a cross-entity snapshot published atomically as aggregatorVisible.
 func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
-	var checker func(startTxNum, endTxNum uint64) bool
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, ii.dependentsPresent(), false, toTxNum))
+}
+
+// dependentsPresent is Domain.dependentsPresent for an index.
+func (ii *InvertedIndex) dependentsPresent() func(startTxNum, endTxNum uint64) bool {
 	c := ii.checker
-	if c != nil {
-		ue := FromII(ii.Name)
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-		}
+	if c == nil {
+		return nil
 	}
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	ue := FromII(ii.Name)
+	return func(startTxNum, endTxNum uint64) bool {
+		return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	}
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -631,11 +635,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.total++
-		fromCache, ok := iit.seekInFilesCache.Get(hi)
+		fromCache, ok := iit.seekInFilesCache.get(key, hi)
 		// A miss is stored as found=0, and a hit is only stored when found>txNum,
 		// so found=0 is unambiguous. It has to be tested first: txNum=0 also
 		// satisfies txNum<=found and would turn the miss into a hit.
-		if ok && fromCache.lo == lo && fromCache.requested <= txNum {
+		if ok && fromCache.requested <= txNum {
 			if fromCache.found == 0 {
 				iit.seekInFilesCache.hit++
 				return false, res, nil
@@ -673,13 +677,13 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			return false, iiSeekResult{txNum: equalOrHigherTxNum}, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
-			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i})
+			iit.seekInFilesCache.add(key, hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i})
 		}
 		return true, iiSeekResult{txNum: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i}, nil
 	}
 
 	if iit.seekInFilesCache != nil {
-		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: 0})
+		iit.seekInFilesCache.add(key, hi, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	}
 	return false, res, nil
 }
@@ -718,7 +722,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 
 	// Adjust DB query bounds to exclude the range already covered by files.
 	// Range semantics: asc=[from,to), desc=(to,from].
-	// Files cover [0, filesEndTxNum).
+	// Files cover up to filesEndTxNum; below the first file this assumes the files were retired and the DB was pruned.
 	// Asc:  DB should cover [filesEndTxNum, endTxNum) — adjust inclusive lower bound.
 	// Desc: DB should cover (filesEndTxNum-1, startTxNum] — adjust exclusive lower bound.
 	//       filesEndTxNum-1 because `to` is exclusive, so value > (filesEndTxNum-1) ≡ value >= filesEndTxNum.
@@ -1291,18 +1295,18 @@ func (ii *InvertedIndex) buildMapAccessorAt(ctx context.Context, idxPath string,
 	return nil
 }
 
-func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) retiredFiles {
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
 	if sf.decomp == nil {
-		return // build was skipped — don't overwrite existing dirty files
+		return nil // build was skipped — don't overwrite existing dirty files
 	}
 	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
-	ii.dirtyFiles.Set(fi)
+	return ii.dirtyFiles.replace(fi)
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {

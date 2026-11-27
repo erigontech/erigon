@@ -106,34 +106,62 @@ type FrameFeeBudget struct {
 
 var ErrFrameFeeBudget = errors.New("frame fee budget below base fees")
 
+// ExecutionFeeCap uses the combined execution and state gas limit to price the
+// budget left after paying for blobs.
+func (fees *FrameFees) ExecutionFeeCap(gasLimit, blobGas uint64, blobBaseFee *uint256.Int) *uint256.Int {
+	var blobCost uint256.Int
+	if _, overflow := blobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee); overflow || blobCost.Gt(&fees.MaxFee) {
+		return new(uint256.Int)
+	}
+	return new(uint256.Int).Div(new(uint256.Int).Sub(&fees.MaxFee, &blobCost), uint256.NewInt(gasLimit))
+}
+
+// RequiredCost returns the total base-fee charge at the declared gas limit and
+// the portion spent on blobs. MaxFee must cover the total.
+func (fees *FrameFees) RequiredCost(gasLimit, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (required, blobCost uint256.Int, err error) {
+	if _, overflow := blobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee); overflow {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	if _, overflow := required.MulOverflow(uint256.NewInt(gasLimit), baseFee); overflow {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	if _, overflow := required.AddOverflow(&required, &blobCost); overflow || required.Gt(&fees.MaxFee) {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	return required, blobCost, nil
+}
+
 // Budget reserves base fees and as much of the priority fee as MaxFee permits.
 // GASPRICE rounds the reserved priority fee down; settlement uses the remaining
 // budget directly rather than multiplying that rounded price by gas used.
-func (fees *FrameFees) Budget(gas, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (budget FrameFeeBudget, err error) {
-	var required, executionCost uint256.Int
-	_, overflow := budget.BlobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee)
-	if overflow {
-		return budget, ErrFrameFeeBudget
-	}
-	_, overflow = executionCost.MulOverflow(uint256.NewInt(gas), baseFee)
-	if overflow {
-		return budget, ErrFrameFeeBudget
-	}
-	_, overflow = required.AddOverflow(&executionCost, &budget.BlobCost)
-	if overflow || required.Gt(&fees.MaxFee) {
-		return budget, ErrFrameFeeBudget
+func (fees *FrameFees) Budget(gasLimit, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (budget FrameFeeBudget, err error) {
+	var required uint256.Int
+	required, budget.BlobCost, err = fees.RequiredCost(gasLimit, blobGas, baseFee, blobBaseFee)
+	if err != nil {
+		return budget, err
 	}
 	available := new(uint256.Int).Sub(&fees.MaxFee, &required)
-	priority := fees.PriorityCost(gas, available)
+	priority := framePriorityCost(gasLimit, &fees.TipCap, available)
 	budget.MaxCost.Add(&required, &priority)
-	budget.GasPrice.Div(&priority, uint256.NewInt(gas))
+	budget.GasPrice.Div(&priority, uint256.NewInt(gasLimit))
 	budget.GasPrice.Add(&budget.GasPrice, baseFee)
 	return budget, nil
 }
 
-func (fees *FrameFees) PriorityCost(gas uint64, available *uint256.Int) uint256.Int {
+// Settle returns the fee for the gas actually charged and the proposer's share,
+// both in wei. The blob fee is accounted for separately in BlobCost.
+func (budget *FrameFeeBudget) Settle(gasUsed uint64, baseFee, tipCap *uint256.Int) (gasFee, tip uint256.Int) {
+	gasFee.Mul(uint256.NewInt(gasUsed), baseFee)
+	var available uint256.Int
+	available.Sub(&budget.MaxCost, &budget.BlobCost).Sub(&available, &gasFee)
+	tip = framePriorityCost(gasUsed, tipCap, &available)
+	gasFee.Add(&gasFee, &tip)
+	return gasFee, tip
+}
+
+func framePriorityCost(gas uint64, tipCap, available *uint256.Int) uint256.Int {
 	var priority uint256.Int
-	if _, overflow := priority.MulOverflow(&fees.TipCap, uint256.NewInt(gas)); overflow || priority.Gt(available) {
+	if _, overflow := priority.MulOverflow(tipCap, uint256.NewInt(gas)); overflow || priority.Gt(available) {
 		return *available
 	}
 	return priority
@@ -378,11 +406,7 @@ func (tx *FrameTransaction) GetFeeCap() *uint256.Int {
 
 // ExecutionFeeCap converts the total fee budget to a per-gas bound after blobs.
 func (tx *FrameTransaction) ExecutionFeeCap(blobBaseFee *uint256.Int) *uint256.Int {
-	var blobCost uint256.Int
-	if _, overflow := blobCost.MulOverflow(uint256.NewInt(tx.GetBlobGas()), blobBaseFee); overflow || blobCost.Gt(&tx.Fees.MaxFee) {
-		return new(uint256.Int)
-	}
-	return new(uint256.Int).Div(new(uint256.Int).Sub(&tx.Fees.MaxFee, &blobCost), uint256.NewInt(tx.GetGasLimit()))
+	return tx.Fees.ExecutionFeeCap(tx.GetGasLimit(), tx.GetBlobGas(), blobBaseFee)
 }
 
 func (tx *FrameTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
@@ -418,7 +442,9 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	if !tx.UsesLegacyNonce() {
 		args.KeyedNoncesLen = uint64(len(tx.NonceKeys))
 	}
-	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
+	// EIP-8250 charges the RLP-encoded nonce key list, including its prefix, as
+	// calldata. Only a single-use keyed nonce (MaxUint64) omits the nonce value
+	// from that charge.
 	args.DataLen, args.DataNonZeroLen = tx.nonceDataCounts()
 	addData := func(data []byte) {
 		args.DataLen += uint64(len(data))
@@ -447,6 +473,8 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		addData(sig.Signer)
 		addData(sig.Message)
 		if len(sig.Message) == 0 {
+			// SigningHash commits only to this signature's length. Charging all
+			// its bytes as nonzero gives a fixed calldata cost for that length.
 			args.DataLen += uint64(len(sig.Signature))
 			args.DataNonZeroLen += uint64(len(sig.Signature))
 		} else {
@@ -483,7 +511,7 @@ func (tx *FrameTransaction) nonceDataCounts() (size, nonZero uint64) {
 	prefixLen := rlp.EncodeListPrefixToBuf(payloadLen, buf[:])
 	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:prefixLen]))
 	var nonceLen int
-	if tx.UsesLegacyNonce() || tx.Nonce != math.MaxUint64 {
+	if !tx.UsesSingleUseNonce() {
 		nonceLen = rlp.EncodeU64ToBuf(tx.Nonce, buf[:])
 	}
 	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:nonceLen]))
@@ -582,6 +610,12 @@ func (tx *FrameTransaction) validateNonceKeys() error {
 // nonce. Every explicit key, including zero, selects FrameNonceManager storage.
 func (tx *FrameTransaction) UsesLegacyNonce() bool {
 	return len(tx.NonceKeys) == 0
+}
+
+// UsesSingleUseNonce reports whether each nonce key must start at zero and is
+// consumed by setting its sequence to MaxUint64.
+func (tx *FrameTransaction) UsesSingleUseNonce() bool {
+	return tx.Nonce == math.MaxUint64 && !tx.UsesLegacyNonce()
 }
 
 func FrameNonceSlot(sender common.Address, key uint256.Int) common.Hash {

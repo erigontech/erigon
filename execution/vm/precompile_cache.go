@@ -63,6 +63,11 @@ type cachedPrecompile struct {
 	domainHash uint64
 }
 
+type cachedStatefulPrecompile struct {
+	*cachedPrecompile
+	StatefulPrecompiledContract
+}
+
 func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Address) PrecompiledContract {
 	normalize := precompileCacheKey(p)
 	if !precompileCacheEnabled || normalize == nil {
@@ -71,7 +76,11 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 	var domain [21]byte
 	domain[0] = byte(tier)
 	copy(domain[1:], address[:])
-	return newCachedPrecompile(p, normalize, domain)
+	cached := newCachedPrecompile(p, normalize, domain)
+	if stateful, ok := p.(StatefulPrecompiledContract); ok {
+		return &cachedStatefulPrecompile{cachedPrecompile: cached, StatefulPrecompiledContract: stateful}
+	}
+	return cached
 }
 
 func newCachedPrecompile(p PrecompiledContract, normalize func([]byte) ([]byte, bool), domain [21]byte) *cachedPrecompile {
@@ -116,7 +125,7 @@ func admit(key, gas uint64) bool {
 // on), or nil for a precompile that is not cached.
 func precompileCacheKey(p PrecompiledContract) func([]byte) ([]byte, bool) {
 	switch p.(type) {
-	case *ecrecover:
+	case *ecrecover, *ecrecoverAccountCode:
 		return zeroPaddedKey(128)
 	case *bigModExp:
 		return modExpKey

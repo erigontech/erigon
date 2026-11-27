@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -32,14 +33,18 @@ func TestToWriteSetPreservesAdoptedCodeHash(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{1})
 	code := accounts.NewCode([]byte{0})
-	writes := ToWriteSet(types.BlockAccessList{{
+	bl := types.BlockAccessList{{
 		Address: addr.Value(), CodeChanges: []*types.CodeChange{{Index: 1, CodeHash: code.Hash}},
-	}}, 1)
+	}}
+	writes := ToWriteSet(bl, 1)
 	hash, ok := writes.GetCodeHash(addr)
 	require.True(t, ok)
 	require.Equal(t, code.Hash, hash.Val)
 	_, ok = writes.GetCode(addr)
 	require.False(t, ok)
+
+	_, ok = ToWriteSetAfter(bl, 1, 2).GetCodeHash(addr)
+	require.False(t, ok, "the checkpoint already includes the adoption")
 }
 
 func TestFinalChange(t *testing.T) {
@@ -95,4 +100,29 @@ func TestFinalChangeUpTo(t *testing.T) {
 	if _, ok := finalChangeUpTo([]*types.BalanceChange(nil), 100); ok {
 		t.Fatal("finalChangeUpTo on an empty list returned ok=true")
 	}
+}
+
+func TestToWriteSetAfterKeepsFieldsChangedAfterTheCheckpoint(t *testing.T) {
+	a, b := [20]byte{1}, [20]byte{2}
+	slot := accounts.InternKey([32]byte{7})
+	bl := types.BlockAccessList{
+		{
+			Address:        a,
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(10)}, {Index: 4, Value: *uint256.NewInt(40)}},
+			NonceChanges:   []*types.NonceChange{{Index: 1, Value: 1}},
+			StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 3, Value: *uint256.NewInt(3)}, {Index: 5, Value: *uint256.NewInt(5)}}}},
+		},
+		{Address: b, BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(20)}}},
+	}
+	addrA, addrB := accounts.InternAddress(a), accounts.InternAddress(b)
+
+	ws := ToWriteSetAfter(bl, 2, 4)
+	require.True(t, ws.Has(state.WriteHeader{Address: addrA, Path: state.BalancePath}), "changed at 4, after the checkpoint at 2")
+	require.True(t, ws.Has(state.WriteHeader{Address: addrA, Path: state.StoragePath, Key: slot}), "latest change up to 4 is at 3")
+	require.False(t, ws.Has(state.WriteHeader{Address: addrA, Path: state.NoncePath}), "last changed at 1")
+	require.False(t, ws.Has(state.WriteHeader{Address: addrB, Path: state.BalancePath}), "last changed at the checkpoint itself")
+
+	all := ToWriteSetAfter(bl, -1, 4)
+	require.True(t, all.Has(state.WriteHeader{Address: addrA, Path: state.NoncePath}))
+	require.True(t, all.Has(state.WriteHeader{Address: addrB, Path: state.BalancePath}))
 }

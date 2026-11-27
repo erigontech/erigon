@@ -19,20 +19,19 @@ package v3
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -108,7 +107,7 @@ func (b *witnessBed) hphWitness(t testing.TB, keys witnessKeys, exclusion bool) 
 	keys.touch(u)
 	byHash, proved, root, err := hph.WitnessesByHash(ctx, u, exclusion)
 	require.NoError(t, err)
-	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 	require.NoError(t, err)
 	return nodes
 }
@@ -124,8 +123,24 @@ func (b *witnessBed) v3Witness(t testing.TB, keys witnessKeys, exclusion bool) [
 	keys.touch(u)
 	byHash, proved, root, err := tr.WitnessesByHash(ctx, u, exclusion)
 	require.NoError(t, err)
-	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+	nodes, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 	require.NoError(t, err)
+	return nodes
+}
+
+func (b *witnessBed) v3NativeWitness(t testing.TB, keys witnessKeys, exclusion bool) [][]byte {
+	t.Helper()
+	ctx := context.Background()
+	tr := b.openV3(ctx)
+	_, _, err := tr.RestoreState(b.v3State)
+	require.NoError(t, err)
+	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	defer u.Close()
+	keys.touch(u)
+	nodes, root, err := tr.WitnessNodes(ctx, u, exclusion)
+	require.NoError(t, err)
+	require.NotEmpty(t, nodes)
+	require.Equal(t, root, crypto.Keccak256(nodes[0]))
 	return nodes
 }
 
@@ -189,7 +204,6 @@ type witnessShape struct {
 	accountPrefixes [][]byte
 	slotPrefixes    [][]byte
 	sharedSlots     bool
-	batch           func(*rand.Rand, *witnessBed) []commitmenttest.Op
 }
 
 func witnessState(rng *rand.Rand, shape witnessShape) []commitmenttest.Op {
@@ -354,8 +368,60 @@ func TestWitnessRejectsCorruptRecords(t *testing.T) {
 			u.TouchHashedKey([]byte{1, 4})
 			_, _, _, err = tr.WitnessesByHash(t.Context(), u, false)
 			require.ErrorIs(t, err, errWitnessHash)
+			_, _, err = tr.WitnessNodes(t.Context(), u, false)
+			require.ErrorIs(t, err, errWitnessHash)
 		})
 	}
+}
+
+func TestWitnessSupersetAtExtensionEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		inner, storage bool
+	}{
+		{name: "account-root"},
+		{name: "account-inner", inner: true},
+		{name: "storage-root", storage: true},
+		{name: "storage-inner", inner: true, storage: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefixes := [][]byte{{1, 2, 3}, {1, 2, 4}}
+			if tc.inner {
+				prefixes = append(prefixes, []byte{8})
+			}
+			shape := witnessShape{accounts: len(prefixes), accountPrefixes: prefixes}
+			if tc.storage {
+				shape = witnessShape{accounts: 1, slots: len(prefixes), slotPrefixes: prefixes}
+			}
+			b := newWitnessBed(t, witnessState(rand.New(rand.NewSource(0)), shape))
+			end := []byte{1, 2}
+			if tc.storage {
+				end = slices.Concat(accountNibbles(b.accounts[0]), end)
+			}
+			tr := b.openV3(t.Context())
+			_, _, err := tr.RestoreState(b.v3State)
+			require.NoError(t, err)
+			fetch := func(key []byte) map[string][]byte {
+				t.Helper()
+				u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+				defer u.Close()
+				u.TouchHashedKey(key)
+				nodes, _, _, err := tr.WitnessesByHash(t.Context(), u, false)
+				require.NoError(t, err)
+				return nodes
+			}
+			atEnd := fetch(end)
+			pastEnd := fetch(slices.Concat(end, []byte{15}))
+			require.Equal(t, pastEnd, atEnd)
+		})
+	}
+}
+
+func TestWitnessNodesRequiresContext(t *testing.T) {
+	nodes, root, err := (&Trie{}).WitnessNodes(t.Context(), nil, false)
+	require.ErrorIs(t, err, errTrieContext)
+	require.Nil(t, nodes)
+	require.Nil(t, root)
 }
 
 func TestWitnessMatchesHPH(t *testing.T) {
@@ -376,20 +442,69 @@ func TestWitnessMatchesHPH(t *testing.T) {
 					edges := witnessEdgeKeys(rng, b)
 					for _, exclusion := range []bool{false, true} {
 						label := fmt.Sprintf("seed=%d round=%d exclusion=%t", seed, round, exclusion)
-						requireSameNodes(t, b.hphWitness(t, keys, exclusion), b.v3Witness(t, keys, exclusion), label)
+						hph := b.hphWitness(t, keys, exclusion)
+						v3 := b.v3Witness(t, keys, exclusion)
+						requireSameNodes(t, hph, v3, label)
+						requireSameNodes(t, v3, b.v3NativeWitness(t, keys, exclusion), label+" native")
 						for _, key := range edges.plain {
 							single := witnessKeys{plain: [][]byte{key}}
-							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), fmt.Sprintf("%s plain=%x", label, key))
+							edgeLabel := fmt.Sprintf("%s plain=%x", label, key)
+							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), edgeLabel)
+							requireSameNodes(t, b.v3Witness(t, single, exclusion), b.v3NativeWitness(t, single, exclusion), edgeLabel+" native")
 						}
 						for _, key := range edges.hashed {
 							single := witnessKeys{hashed: [][]byte{key}}
-							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), fmt.Sprintf("%s hashed=%x", label, key))
+							edgeLabel := fmt.Sprintf("%s hashed=%x", label, key)
+							requireSameNodes(t, b.hphWitness(t, single, exclusion), b.v3Witness(t, single, exclusion), edgeLabel)
+							requireSameNodes(t, b.v3Witness(t, single, exclusion), b.v3NativeWitness(t, single, exclusion), edgeLabel+" native")
 						}
 					}
 				}
 			}
 		})
 	}
+}
+
+func TestWitnessEncoderMatchesShapes(t *testing.T) {
+	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
+		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
+	})
+	seeds := int64(25)
+	if testing.Short() {
+		seeds = 3
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			for seed := range seeds {
+				rng := rand.New(rand.NewSource(seed))
+				b := newWitnessBed(t, witnessState(rng, shape))
+				keys := witnessKeySet(rng, b)
+				for _, exclusion := range []bool{false, true} {
+					for _, nodes := range [][][]byte{b.hphWitness(t, keys, exclusion), b.v3NativeWitness(t, keys, exclusion)} {
+						want := witnessBytesFromNodes(t, nodes)
+						gotWitness, err := opstream.Encode(nodes, nil)
+						require.NoError(t, err)
+						var got bytes.Buffer
+						_, err = gotWitness.WriteInto(&got)
+						require.NoError(t, err)
+						require.Equal(t, want, got.Bytes(), "seed=%d exclusion=%t", seed, exclusion)
+					}
+				}
+			}
+		})
+	}
+}
+
+func witnessBytesFromNodes(t testing.TB, nodes [][]byte) []byte {
+	t.Helper()
+	tr, err := trie.RLPDecode(nodes)
+	require.NoError(t, err)
+	witness, err := tr.ExtractWitness(false, nil)
+	require.NoError(t, err)
+	var output bytes.Buffer
+	_, err = witness.WriteInto(&output)
+	require.NoError(t, err)
+	return output.Bytes()
 }
 
 func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
@@ -449,30 +564,17 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 	return ops
 }
 
-func (b *witnessBed) hphCollapses(t *testing.T, batch []commitmenttest.Op) ([]string, []byte) {
-	t.Helper()
-	ctx := context.Background()
-	b.hphMem.Apply(batch)
-	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
-	require.NoError(t, hph.SetState(b.hphState))
-	var events []string
-	hph.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
-	u := testUpdates(t, commitment.ModeUpdate, batch)
-	root, err := hph.Process(ctx, u, "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	return events, root
-}
-
-func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceOnly bool) ([]string, []byte) {
+func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceOnly bool) ([]collapseTestEvent, []byte) {
 	t.Helper()
 	ctx := context.Background()
 	b.v3Mem.Apply(batch)
 	tr := b.openV3(ctx)
 	_, _, err := tr.RestoreState(b.v3State)
 	require.NoError(t, err)
-	var events []string
-	record := func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) }
+	events := make([]collapseTestEvent, 0)
+	record := func(sibling, prefix []byte) {
+		events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
+	}
 	u := testUpdates(t, commitment.ModeCollect, batch)
 	if traceOnly {
 		before, err := tr.RootHash()
@@ -488,54 +590,6 @@ func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceO
 	root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	return events, root
-}
-
-func TestCollapseTracerMatchesHPH(t *testing.T) {
-	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
-		{name: "propagate", accounts: 3, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
-		{name: "propagate-deep", accounts: 5, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8, 0x1}, {0x8, 0x5}, {0xc}}},
-		{name: "storage-propagate", accounts: 1, slots: 3, slotPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
-		{
-			name: "storage-delete-without-storage", accounts: 3, accountPrefixes: [][]byte{{0x6, 0x1}, {0x6, 0x9}, {0xb}},
-			batch: func(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
-				addr := b.accounts[0]
-				return []commitmenttest.Op{{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, nil, slotNibbles(addr))...), Delete: true}}
-			},
-		},
-		{
-			name: "split-then-propagate", accounts: 4, accountPrefixes: [][]byte{{0x1, 0x2, 0x1}, {0x1, 0x8}, {0x1, 0x9}, {0x5}},
-			batch: func(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
-				return []commitmenttest.Op{
-					{Key: craftKey(rng, length.Addr, []byte{0x1, 0x2, 0x5}, accountNibbles), Account: randomWitnessAccount(rng)},
-					{Key: b.accounts[1], Delete: true},
-					{Key: b.accounts[2], Delete: true},
-					{Key: b.accounts[3], Delete: true},
-				}
-			},
-		},
-	})
-	for _, shape := range shapes {
-		t.Run(shape.name, func(t *testing.T) {
-			for seed := range int64(40) {
-				rng := rand.New(rand.NewSource(seed))
-				pre := witnessState(rng, shape)
-				b := newWitnessBed(t, pre)
-				batch := collapseBatch(rng, b)
-				if shape.batch != nil {
-					batch = shape.batch(rng, b)
-				}
-				wantEvents, wantRoot := b.hphCollapses(t, batch)
-				gotEvents, gotRoot := b.v3Collapses(t, batch, false)
-				label := fmt.Sprintf("seed=%d batch=%d ops", seed, len(batch))
-				require.Equal(t, wantRoot, gotRoot, label)
-				require.Equal(t, wantEvents, gotEvents, label)
-				traceEvents, traceRoot := newWitnessBed(t, pre).v3Collapses(t, batch, true)
-				require.Equal(t, wantEvents, traceEvents, label+" trace-only")
-				require.Equal(t, wantRoot, traceRoot, label+" trace-only root")
-				requireSameChildCounts(t, b, pre, batch, wantEvents, label)
-			}
-		})
-	}
 }
 
 type countingReads struct {
@@ -565,8 +619,10 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 		_, _, err := tr.RestoreState(b.v3State)
 		require.NoError(t, err)
 		counting.reads = map[string]int{}
-		var events []string
-		tr.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
+		events := make([]collapseTestEvent, 0)
+		tr.SetCollapseTracer(func(sibling, prefix []byte) {
+			events = append(events, collapseTestEvent{sibling: bytes.Clone(sibling), prefix: bytes.Clone(prefix)})
+		})
 		u := testUpdates(t, commitment.ModeCollect, batch)
 		root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
@@ -606,7 +662,7 @@ func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
 		byHash, proved, gotRoot, err := tr.WitnessesByHash(ctx, u, false)
 		require.NoError(t, err)
 		require.Equal(t, root, gotRoot)
-		nodes, err := trie.WitnessNodesForKeysByHash(byHash, gotRoot, proved)
+		nodes, err := trie.WitnessNodesForKeysByHash(byHash, gotRoot, proved, false)
 		require.NoError(t, err)
 		requireSameNodes(t, want, nodes, "changed root")
 		require.NotEmpty(t, counting.reads)
@@ -645,39 +701,12 @@ func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
 			byHash, proved, root, err := tr.WitnessesByHash(ctx, u, false)
 			u.Close()
 			require.NoError(t, err)
-			got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+			got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved, false)
 			require.NoError(t, err)
 			requireSameNodes(t, want, got, fmt.Sprintf("seed %d", seed))
 			for k := range counting.reads {
 				require.Zerof(t, processReads[k], "seed %d: record %x read by both Process and the witness walk", seed, k)
 			}
-		}
-	}
-}
-
-func requireSameChildCounts(t *testing.T, b *witnessBed, pre, batch []commitmenttest.Op, events []string, label string) {
-	t.Helper()
-	hphRecords, v3Records := b.hphMem.Records(), b.v3Mem.Records()
-	read := func(key []byte) ([]byte, error) { return v3Records[string(key)], nil }
-	tr := &Trie{}
-	check := func(prefix []byte) {
-		want := commitment.BranchData(hphRecords[string(nibbles.HexToCompact(prefix))]).ChildCount()
-		got, err := tr.BranchChildCount(read, prefix)
-		require.NoError(t, err)
-		require.Equal(t, want, got, "%s prefix=%x", label, prefix)
-	}
-	for _, event := range events {
-		prefix, err := hex.DecodeString(event[strings.IndexByte(event, '/')+1:])
-		require.NoError(t, err)
-		check(prefix)
-	}
-	state := make(commitmenttest.State)
-	state.Apply(pre)
-	state.Apply(batch)
-	for _, op := range state.Ops() {
-		full := commitment.KeyToHexNibbleHash(op.Key)
-		for cut := 0; cut <= len(full); cut++ {
-			check(full[:cut])
 		}
 	}
 }

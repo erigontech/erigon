@@ -603,10 +603,13 @@ func TestFacadePruneRejectsAWriteIntoTheBucketItRemoves(t *testing.T) {
 func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
+		batch             bool
 		releaseWriteFirst bool
 	}{
 		{name: "write released first", releaseWriteFirst: true},
-		{name: "both released together", releaseWriteFirst: false},
+		{name: "both released together"},
+		{name: "batch write released first", batch: true, releaseWriteFirst: true},
+		{name: "batch both released together", batch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := newPruneRaceFs(afero.NewBasePathFs(afero.NewOsFs(), t.TempDir()))
@@ -614,15 +617,27 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 			const slot = 1000
 			root := common.Hash{3}
 			_, file := (&bucketStore{fs: fs}).path(slot, root, 0)
+			tmpFile := file + tmpSuffix
+			if tc.batch {
+				tmpFile = testPackFile(slot, root) + tmpSuffix
+			}
 			fs.removePath = "0"
-			fs.createPath = file + tmpSuffix
+			fs.createPath = tmpFile
 			require.NoError(t, fs.MkdirAll(fs.removePath, 0o755))
 
 			writeDone := make(chan error, 1)
 			go func() {
+				if tc.batch {
+					writeDone <- storage.WriteColumnSidecarsBatch(t.Context(), root, []*cltypes.DataColumnSidecar{createTestDataColumnSidecar(slot, 0), createTestDataColumnSidecar(slot, 1)})
+					return
+				}
 				writeDone <- storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0))
 			}()
-			<-fs.createEntered
+			select {
+			case <-fs.createEntered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the write never created its temp file")
+			}
 
 			pruneDone := make(chan error, 1)
 			go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
@@ -646,7 +661,7 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 				require.NoError(t, <-pruneDone)
 			}
 
-			tmpExists, err := afero.Exists(fs, file+tmpSuffix)
+			tmpExists, err := afero.Exists(fs, tmpFile)
 			require.NoError(t, err)
 			require.False(t, tmpExists)
 			exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, 0)
@@ -859,7 +874,7 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	b := newBucketStore(t, fs)
 
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
 
@@ -870,7 +885,7 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
 
-	slot, err = b.EarliestStoredSlot()
+	slot, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }
@@ -883,12 +898,12 @@ func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing
 	for i := range 3 * listBatch {
 		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
 	}
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
 
 	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
-	slot, err = b.EarliestStoredSlot()
+	slot, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(4*subdivisionSlot), slot)
 }
@@ -912,7 +927,7 @@ func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
 
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }
@@ -923,6 +938,6 @@ func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *tes
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
 
-	_, err := b.EarliestStoredSlot()
+	_, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.ErrorIs(t, err, os.ErrPermission)
 }

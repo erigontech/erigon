@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -222,7 +223,7 @@ func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
 	collision, err := evm.hasCreateCollision(addr)
 	require.NoError(t, err)
 	require.False(t, collision)
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, nonceRead := reads.GetNonce(addr)
 	_, codeHashRead := reads.GetCodeHash(addr)
 	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
@@ -255,6 +256,53 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 	}
 }
 
+// A run that reads an unfinished write is cancelled at its next jump: the loop after the read does not finish and
+// the marker store after it does not run. A re-run once the write is done runs to the end.
+func TestSpeculativeRunStopsAtTheJumpAfterADependency(t *testing.T) {
+	t.Parallel()
+
+	contract := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	other := common.HexToAddress("0x0b")
+	code := append([]byte{byte(PUSH20)}, other[:]...)
+	code = append(code,
+		byte(BALANCE), byte(POP), // reads the unfinished write
+		byte(PUSH1), 100, // loop counter
+		byte(JUMPDEST), byte(PUSH1), 1, byte(SWAP1), byte(SUB), byte(DUP1), byte(PUSH1), 25, byte(JUMPI),
+		byte(POP), byte(PUSH1), 1, byte(PUSH1), 1, byte(SSTORE), byte(STOP)) // marker: slot 1 = 1
+	marker := accounts.InternKey(common.BigToHash(common.Big1))
+
+	vmap := state.NewVersionMap(nil)
+	vmap.WriteBalance(accounts.InternAddress(other), state.Version{TxIndex: 1}, *uint256.NewInt(7), false)
+
+	run := func(inc state.Incarnation) (*state.IntraBlockState, mdgas.MdGas) {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), vmap)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 2)
+		ibs.SetVersion(inc)
+		require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
+		evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+		ibs.SetCancel(evm.Cancel)
+		defer ibs.SetCancel(nil)
+		_, left, _, err := evm.Call(accounts.ZeroAddress, contract, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
+		require.NoError(t, err)
+		return ibs, left
+	}
+
+	ibs, leftCancelled := run(0)
+	require.True(t, ibs.HadInvalidRead())
+	v, err := ibs.GetState(contract, marker)
+	require.NoError(t, err)
+	require.True(t, v.IsZero(), "the cancelled run stopped before the marker store")
+
+	vmap.WriteBalance(accounts.InternAddress(other), state.Version{TxIndex: 1}, *uint256.NewInt(7), true)
+	ibs, leftFull := run(1)
+	require.False(t, ibs.HadInvalidRead())
+	v, err = ibs.GetState(contract, marker)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), v.Uint64(), "the re-run reaches the marker store")
+	require.Greater(t, leftCancelled.Execution, leftFull.Execution, "the cancelled run used less gas")
+}
+
 func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
 	t.Parallel()
 
@@ -279,7 +327,7 @@ func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
 	_, _, _, err := evm.Call(accounts.ZeroAddress, callee, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 
-	reads := ibs.VersionedReads()
+	reads := ibs.Reads()
 	_, balanceRead := reads.GetBalance(callee)
 	require.False(t, balanceRead, "a zero-value call to an account with code depends on no balance")
 }

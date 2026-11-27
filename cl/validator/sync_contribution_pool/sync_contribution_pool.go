@@ -36,10 +36,17 @@ type syncContributionKey struct {
 	beaconBlockRoot   common.Hash
 }
 
+// syncContributionAggregate is a contribution built from sync committee messages, with the running aggregate of
+// the signatures behind contribution.Signature.
+type syncContributionAggregate struct {
+	contribution *cltypes.Contribution
+	signatures   bls.SignatureAggregator
+}
+
 type syncContributionPoolImpl struct {
 	// syncContributionPoolForBlocks is a map of sync contributions, indexed by slot, subcommittee index and block root.
-	syncContributionPoolForBlocks     map[syncContributionKey]*cltypes.Contribution // Used for block publishing.
-	syncContributionPoolForAggregates map[syncContributionKey]*cltypes.Contribution // Used for sync committee messages aggregation.
+	syncContributionPoolForBlocks     map[syncContributionKey]*cltypes.Contribution      // Used for block publishing.
+	syncContributionPoolForAggregates map[syncContributionKey]*syncContributionAggregate // Used for sync committee messages aggregation.
 	beaconCfg                         *clparams.BeaconChainConfig
 
 	mu sync.Mutex
@@ -50,7 +57,7 @@ var ErrIsSuperset = errors.New("sync contribution is a superset of existing atte
 func NewSyncContributionPool(beaconCfg *clparams.BeaconChainConfig) SyncContributionPool {
 	return &syncContributionPoolImpl{
 		syncContributionPoolForBlocks:     make(map[syncContributionKey]*cltypes.Contribution),
-		syncContributionPoolForAggregates: make(map[syncContributionKey]*cltypes.Contribution),
+		syncContributionPoolForAggregates: make(map[syncContributionKey]*syncContributionAggregate),
 		beaconCfg:                         beaconCfg,
 	}
 }
@@ -93,7 +100,7 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 		beaconBlockRoot:   beaconBlockRoot,
 	}
 
-	contribution, ok := s.syncContributionPoolForAggregates[key] // this should be exposed to the outside world. through Beacon API.
+	aggregate, ok := s.syncContributionPoolForAggregates[key] // this should be exposed to the outside world. through Beacon API.
 	// Return a copies.
 	if !ok {
 		// if we dont have it return an empty contribution (no aggregation bits).
@@ -105,7 +112,7 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 			Signature:         bls.InfiniteSignature,
 		}
 	}
-	return contribution.Copy()
+	return aggregate.contribution.Copy()
 }
 
 // cleanupOldContributions keeps the contributions from the head's slot to one epoch after it: after
@@ -125,7 +132,7 @@ func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.Cach
 	}
 }
 
-// AddSyncCommitteeMessage aggregates a sync committee message to a contribution to the pool.
+// AddSyncCommitteeMessage aggregates a pre-verified sync committee message without group-checking its signature again.
 func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.CachingBeaconState, subCommittee uint64, message *cltypes.SyncCommitteeMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,18 +146,17 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	}
 
 	// We retrieve a base contribution
-	contribution, ok := s.syncContributionPoolForAggregates[key]
+	aggregate, ok := s.syncContributionPoolForAggregates[key]
 	if !ok {
-		contribution = &cltypes.Contribution{
+		aggregate = &syncContributionAggregate{contribution: &cltypes.Contribution{
 			Slot:              message.Slot,
 			SubcommitteeIndex: subCommittee,
 			BeaconBlockRoot:   message.BeaconBlockRoot,
 			AggregationBits:   make([]byte, s.syncAggregationBitsSize()),
-			Signature:         bls.InfiniteSignature,
-		}
+		}}
 	}
 	// We use the a copy of this contribution
-	contribution = contribution.Copy() // make a copy
+	contribution := aggregate.contribution.Copy() // make a copy
 	// First we find the aggregation bits to which this validator needs to be turned on.
 	publicKey, err := headState.ValidatorPublicKey(int(message.ValidatorIndex))
 	if err != nil {
@@ -161,32 +167,31 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	if err != nil {
 		return err
 	}
-	signatures := [][]byte{}
-	committee := syncCommittee.GetCommittee()
+	positions := 0
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
-		if committee[i] == publicKey { // turn on this bit
+		if syncCommittee.PublicKeyAt(int(i)) == publicKey { // turn on this bit
 			if utils.IsBitOn(contribution.AggregationBits, int(i-startSubCommittee)) {
 				return nil
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 			// Note: it's possible that one validator appears multiple times in the subcommittee.
-			signatures = append(signatures, bytes.Clone(message.Signature[:]))
+			positions++
 		}
 	}
-	if len(signatures) == 0 {
+	if positions == 0 {
 		log.Warn("Validator not found in sync committee", "validatorIndex", message.ValidatorIndex, "subCommittee", subCommittee, "slot", message.Slot, "beaconBlockRoot", message.BeaconBlockRoot)
 		return errors.New("validator not found in sync committee")
 	}
-	// Compute the aggregated signature.
-	signatures = append(signatures, bytes.Clone(contribution.Signature[:]))
-	aggregatedSignature, err := bls.AggregateSignatures(signatures)
-	if err != nil {
-		return err
+	for range positions {
+		if err := aggregate.signatures.AddValidated(message.Signature[:]); err != nil {
+			return err
+		}
 	}
-	copy(contribution.Signature[:], aggregatedSignature)
-	s.syncContributionPoolForAggregates[key] = contribution
+	contribution.Signature = aggregate.signatures.Compressed()
+	aggregate.contribution = contribution
+	s.syncContributionPoolForAggregates[key] = aggregate
 	s.cleanupOldContributions(headState)
 	return nil
 }

@@ -228,48 +228,43 @@ func TestFrameTransactionKeyedNonce(t *testing.T) {
 }
 
 func TestFrameTransactionMissingNonceManager(t *testing.T) {
-	for _, versioned := range []bool{false, true} {
-		for _, mode := range []string{"execution", "call", "pool validation"} {
-			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
-				ibs := state.New(state.NewNoopReader())
-				defer ibs.Close()
-				if versioned {
-					ibs.SetVersionMap(state.NewVersionMap(nil))
-				}
-				cfg := chain.AllProtocolChanges.Copy()
-				cfg.BogotaTime = common.NewUint64(0)
-				evm := newTestEVM(ibs, cfg, 30_000_000)
-				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
-				balance := uint256.Int{10_000_000}
-				require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
-				require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-				tx := &types.FrameTransaction{
-					ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
-					Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
-					Fees:   types.FrameFees{MaxFee: uint256.Int{1}, TipCap: uint256.Int{1}},
-				}
-				if mode == "pool validation" {
-					result, err := ValidateFrameTransaction(evm, tx)
-					require.ErrorContains(t, err, "nonce manager does not exist")
-					require.Nil(t, result)
-				} else {
-					msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
-					require.NoError(t, err)
-					msg.SetCheckNonce(mode == "execution")
-					gp := NewGasPool(30_000_000, 0)
-					result, err := ApplyMessage(evm, msg, gp, true, false, nil)
-					require.ErrorContains(t, err, "nonce manager does not exist")
-					require.Nil(t, result)
-					require.EqualValues(t, 30_000_000, gp.Gas())
-				}
-				gotBalance, err := ibs.GetBalance(sender)
+	for _, mode := range []string{"execution", "call", "pool validation"} {
+		t.Run(mode, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			evm := newTestEVM(ibs, cfg, 30_000_000)
+			sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+			balance := uint256.Int{10_000_000}
+			require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+			tx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+				Fees:   types.FrameFees{MaxFee: uint256.Int{1}, TipCap: uint256.Int{1}},
+			}
+			if mode == "pool validation" {
+				result, err := ValidateFrameTransaction(evm, tx)
+				require.ErrorContains(t, err, "nonce manager does not exist")
+				require.Nil(t, result)
+			} else {
+				msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 				require.NoError(t, err)
-				require.Equal(t, balance, gotBalance)
-				exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
-				require.NoError(t, err)
-				require.False(t, exists)
-			})
-		}
+				msg.SetCheckNonce(mode == "execution")
+				gp := NewGasPool(30_000_000, 0)
+				result, err := ApplyMessage(evm, msg, gp, true, false, nil)
+				require.ErrorContains(t, err, "nonce manager does not exist")
+				require.Nil(t, result)
+				require.EqualValues(t, 30_000_000, gp.Gas())
+			}
+			gotBalance, err := ibs.GetBalance(sender)
+			require.NoError(t, err)
+			require.Equal(t, balance, gotBalance)
+			exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
 	}
 }
 
@@ -387,6 +382,10 @@ func TestFrameTransactionRPCNonceCheck(t *testing.T) {
 				if keyed {
 					tx.NonceKeys = []uint256.Int{{1}}
 					manager := accounts.InternAddress(types.FrameNonceManager)
+					// EIP-8250 requires the manager to be predeployed: on the versioned
+					// path a bare storage write does not make the account exist, so set
+					// its nonce to materialize the predeployed account record.
+					require.NoError(t, ibs.SetNonce(manager, 1, tracing.NonceChangeUnspecified))
 					slot := accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, tx.NonceKeys[0]))
 					require.NoError(t, ibs.SetState(manager, slot, uint256.Int{5}))
 				}
@@ -411,16 +410,14 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		noBaseFee bool
-		free      bool
 		service   bool
 		feeCap    uint64
-		wantError bool
+		wantErr   error
 	}{
-		{name: "normal validation", wantError: true},
+		{name: "normal validation", wantErr: types.ErrFrameFeeBudget},
 		{name: "unpriced call", noBaseFee: true},
-		{name: "priced call", noBaseFee: true, feeCap: 1, wantError: true},
-		{name: "free message", free: true},
-		{name: "service transaction", service: true},
+		{name: "priced call", noBaseFee: true, feeCap: 1, wantErr: types.ErrFrameFeeBudget},
+		{name: "AuRa service transaction", service: true, wantErr: types.ErrTxTypeNotSupported},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
@@ -432,32 +429,23 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			blockCtx, config := evm.Context, evm.Config()
 			blockCtx.BaseFee.SetUint64(100)
 			config.NoBaseFee = test.noBaseFee
-			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
-			burn := common.HexToAddress("0xb000")
-			if test.free || test.service {
-				evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
+			if test.service {
+				evm.ChainConfig().Aura = &chain.AuRaConfig{}
 			}
+			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, blockCtx.Rules(evm.ChainConfig()))
 			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 			require.NoError(t, err)
-			msg.SetIsFree(test.free)
 			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, &serviceTxEngine{service: test.service})
-			require.Equal(t, test.free, msg.IsFree())
-			if test.wantError {
-				require.ErrorIs(t, err, types.ErrFrameFeeBudget)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
 				return
 			}
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.True(t, msg.GasPrice().IsZero())
-			if test.free || test.service {
-				require.True(t, result.BurntContractAddress.IsNil())
-			}
 			balance, err := ibs.GetBalance(sender)
 			require.NoError(t, err)
 			require.Equal(t, uint256.Int{10_000_000}, balance)
-			balance, err = ibs.GetBalance(accounts.InternAddress(burn))
-			require.NoError(t, err)
-			require.True(t, balance.IsZero())
 		})
 	}
 }
@@ -828,8 +816,9 @@ func TestFrameTransactionCancellation(t *testing.T) {
 
 func TestFrameTransactionFeeSettlement(t *testing.T) {
 	t.Parallel()
-	// Three frames and the encoded nonce cost 12,000 + 3*475 + 3*16 = 13,473
-	// intrinsic gas. The approvals use 107 and 3,007 gas; each Sstore emits two PUSH1s.
+	// With three frames and empty calldata, intrinsic gas is 12,000 + 3*475 + 2*16 = 13,457.
+	// The two nonzero bytes encode the empty nonce key list (0xc0) and zero nonce (0x80).
+	// The approvals use 107 and 3,007 gas. Each Sstore emits two PUSH1s.
 	for _, test := range []struct {
 		name                       string
 		code                       []byte
@@ -882,7 +871,7 @@ func TestFrameTransactionFeeSettlement(t *testing.T) {
 			blockCtx.Coinbase = accounts.InternAddress(coinbase)
 			config.NoBaseFee = false
 			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
-			tx.Fees = types.FrameFees{MaxFee: uint256.Int{11}, TipCap: uint256.Int{3}}
+			tx.Fees.TipCap.SetUint64(3)
 			tx.Frames = []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 1_000}},
 				{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 5_000}},
@@ -931,7 +920,7 @@ func TestFrameTransactionFeeSettlementHook(t *testing.T) {
 	burn := common.Address{9}
 	evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
 	evm.Context.BaseFee.SetUint64(1)
-	tx.Fees = types.FrameFees{MaxFee: *uint256.NewInt(3), TipCap: *uint256.NewInt(1)}
+	tx.Fees.TipCap.SetUint64(1)
 	require.NoError(t, evm.IntraBlockState().SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
 	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() * 3)

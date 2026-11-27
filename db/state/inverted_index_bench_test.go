@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -15,8 +14,7 @@ import (
 // Run with II_LRU_ENABLED=false to bypass the seek cache, otherwise the cache short-circuits
 // before the sequence decoding this is meant to measure.
 func BenchmarkInvertedIndexSeekInFiles(b *testing.B) {
-	logger := log.New()
-	db, ii, txs := filledInvIndexOfSize(b, 1000, 16, 31, logger)
+	db, ii, txs := filledInvIndexOfSize(b, 1000, 16, 31)
 	ctx := b.Context()
 
 	tx, err := db.BeginRw(ctx)
@@ -51,9 +49,38 @@ func BenchmarkInvertedIndexSeekInFiles(b *testing.B) {
 	}
 }
 
+func BenchmarkIISeekInFilesCacheHit(b *testing.B) {
+	requireIISeekCache(b)
+	iit := storageDomainTxWithFileKey(b, equalHashSalt, equalHashKeyA, []byte{1}).ht.iit
+	if found, _, err := iit.seekInFiles(equalHashKeyA, 0); err != nil || !found {
+		b.Fatal(found, err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, err := iit.seekInFiles(equalHashKeyA, 0); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkIISeekInFilesCacheInsert(b *testing.B) {
+	requireIISeekCache(b)
+	c := NewIISeekInFilesCache()
+	b.ReportAllocs()
+	for i := uint64(0); b.Loop(); i++ {
+		c.add(equalHashKeyA, i*0x9E3779B97F4A7C15, iiSeekInFilesCacheItem{requested: i, found: i + 1, fileIdx: 1})
+	}
+}
+
+func requireIISeekCache(b *testing.B) {
+	if !iiGetFromFileCacheEnabled || iiGetFromFileCacheLimit == 0 {
+		b.Fatal("the II seek cache is disabled (II_LRU_ENABLED=false or II_LRU=0): nothing to measure")
+	}
+}
+
 func BenchmarkInvertedIndexIntersectOnFiles(b *testing.B) {
 	const txs, sparseEvery = 1 << 16, 1000
-	db, ii := testDbAndInvertedIndex(b, 1024, log.New())
+	db, ii := testDbAndInvertedIndex(b, 1024)
 	dense, sparse := []byte("dense"), []byte("sparse")
 	err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		iit := ii.beginForTests()

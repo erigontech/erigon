@@ -1,8 +1,8 @@
 package trie
 
-import "errors"
+import "github.com/erigontech/erigon/execution/commitment/witness/opstream"
 
-func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
+func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*opstream.Witness, error) {
 	var rd RetainDecider
 	if rl != nil {
 		rd = rl
@@ -10,18 +10,10 @@ func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 	return extractWitnessFromRootNode(t.RootNode, trace, rd)
 }
 
-func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {
-	foundNode, _, found, _ := t.getNode(prefix)
-	if !found {
-		return nil, errors.New("no data found for given prefix")
-	}
-	return extractWitnessFromRootNode(foundNode, trace, rl)
-}
-
 // extractWitnessFromRootNode extracts witness for subtrie starting from the specified root
 // if retainDec param is nil it will make a witness for the full subtrie,
 // if retainDec param is set, it decides which accounts/storages stay in the witness; other paths will be hashed.
-func extractWitnessFromRootNode(root Node, trace bool, retainDec RetainDecider) (*Witness, error) {
+func extractWitnessFromRootNode(root Node, trace bool, retainDec RetainDecider) (*opstream.Witness, error) {
 	builder := NewWitnessBuilder(root, trace)
 	var limiter *MerklePathLimiter = nil
 	if retainDec != nil {

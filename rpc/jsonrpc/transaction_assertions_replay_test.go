@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/execution/vm/testutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -63,8 +62,7 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 		Push(32).Push0().Op(vm.LOG0).Bytes()
 	// Revert if the preceding transaction's fee debit is missing from the prestate.
 	assertionCode := program.New().Push0().Push(5).Op(vm.TXTRACE).
-		Push(mixedFrameReplayBalance).Op(vm.EQ)
-	testutil.AssertStackWord(assertionCode, 0).Op(vm.STOP)
+		Push(mixedFrameReplayBalance).Op(vm.EQ).AssertEq(0).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -80,7 +78,6 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 	require.NoError(t, err)
 	frameTx := &types.FrameTransaction{
 		ChainID: *cfg.ChainID, Nonce: 1, NonceKeys: nil, SenderAddress: sender,
-		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 10_000}},
@@ -88,7 +85,7 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 		},
 		Signatures: []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}},
 	}
-	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
+	frameTx.Fees.MaxFee.SetUint64(frameTx.GetGasLimit())
 	hash := frameTx.SigningHash(nil)
 	sig, err := crypto.Sign(hash[:], key)
 	require.NoError(t, err)
@@ -177,8 +174,7 @@ func TestAssertReplayPreservesFeeAccounting(t *testing.T) {
 	// With no value transfers, the payer's balance delta must equal the pre-charge.
 	code := program.New().Push0().Push(0x19).Op(vm.TXTRACE).
 		Push0().Push(6).Op(vm.TXTRACE).
-		Push0().Push(5).Op(vm.TXTRACE, vm.SUB, vm.EQ)
-	testutil.AssertStackWord(code, 1).Op(vm.STOP)
+		Push0().Push(5).Op(vm.TXTRACE, vm.SUB, vm.EQ).AssertEq(1).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -194,14 +190,13 @@ func TestAssertReplayPreservesFeeAccounting(t *testing.T) {
 		for nonce := range uint64(2) {
 			tx := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: nonce, SenderAddress: sender,
-				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 10_000}},
 					{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 				},
 			}
-			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit())
 			b.AddTx(tx)
 		}
 	})

@@ -27,8 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -45,22 +43,14 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
+// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
 func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	if evm.chainRules.IsBogota {
-		contract := p
-		if cached, ok := contract.(*cachedPrecompile); ok {
-			contract = cached.PrecompiledContract
-		}
-		if _, ok := contract.(*ecrecover); ok {
-			return evm.runEcrecover(p, input, gas, tracer)
-		}
-	}
 	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
-		return RunPrecompiledContract(p, input, gas, tracer)
+		return RunPrecompiledContract(p, input, gas, evm.intraBlockState, tracer)
 	}
 	buf := evm.outputBuffer(evm.depth+1, uint64(len(input)))
 	if buf == nil {
-		return RunPrecompiledContract(p, input, gas, tracer)
+		return RunPrecompiledContract(p, input, gas, evm.intraBlockState, tracer)
 	}
 	gasCost := p.RequiredGas(input)
 	if gas.Execution < gasCost {
@@ -73,51 +63,6 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 	}
 	*buf = append((*buf)[:0], input...)
 	return slices.Clip(*buf), remaining, nil
-}
-
-func (evm *EVM) codeAccessGas(address accounts.Address, tracer *tracing.Hooks) uint64 {
-	if tracer != nil && tracer.OnAccountAccess != nil {
-		tracer.OnAccountAccess(address)
-	}
-	gasCost := params.ExtCodeWarmAccessGasEIP8038
-	if !evm.intraBlockState.AddressInAccessList(address) {
-		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
-	}
-	return gasCost
-}
-
-func (evm *EVM) recordCodeAccess(address accounts.Address, tracer *tracing.Hooks) {
-	evm.intraBlockState.AddAddressToAccessList(address)
-	evm.intraBlockState.MarkAddressAccess(address, false)
-	if tracer != nil && tracer.OnAccountRead != nil {
-		tracer.OnAccountRead(address)
-	}
-}
-
-func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
-	if err != nil || len(output) == 0 {
-		return output, gas, err
-	}
-	address := accounts.InternAddress(common.BytesToAddress(output))
-	gasCost := evm.codeAccessGas(address, tracer)
-	if gas.Execution < gasCost {
-		return nil, gas, ErrOutOfGas
-	}
-	remaining := gas
-	remaining.Execution -= gasCost
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
-	}
-	evm.recordCodeAccess(address, tracer)
-	code, err := evm.intraBlockState.GetCode(address)
-	if err != nil {
-		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	if _, delegated := types.ParseDelegation(code); len(code) != 0 && !delegated {
-		return nil, remaining, nil
-	}
-	return output, remaining, nil
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -344,7 +289,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -462,7 +407,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -530,7 +475,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -588,7 +533,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -641,13 +586,9 @@ type codeAndHash struct {
 	hash accounts.CodeHash
 }
 
-func NewCodeAndHash(code []byte) *codeAndHash {
-	return &codeAndHash{code: code}
-}
-
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.NewCode(c.code).Hash
 	}
 	return c.hash
 }
@@ -723,11 +664,6 @@ func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
 	return targetNonce != 0 || !targetCodeHash.IsEmpty(), nil
 }
 
-func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
-	ret, addr, gasRemaining, gasUsed, err := evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
-	return ret, addr, gasRemaining, gasUsed, err
-}
-
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
 	return evm.createWithPreparation(caller, codeAndHash, gas, value, address, typ, incrementNonce, bailout, nil)
@@ -739,6 +675,14 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
+	// With EIP-3860, nested creations select the replacement when calculating
+	// the initcode charge, before gas is forwarded to the constructor.
+	if override := evm.config.OverrideInitCode; override != nil && (preparation == nil || !evm.config.HasEip3860(evm.chainRules)) {
+		if replacement, matched := override(address); matched {
+			codeAndHash.code = replacement
+			codeAndHash.hash = accounts.NilCodeHash
+		}
+	}
 
 	depth := evm.depth
 	if depth == 0 {
@@ -978,7 +922,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
 	isCreate := typ == CREATE || typ == CREATE2
-	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Value()))
 }
 
 // Frame calls sit below a synthetic transaction root. Opcode depths

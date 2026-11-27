@@ -746,70 +746,123 @@ const (
 // waits for the next chain tip sync, and the next proposer builds on the empty parent. Column storage probes and
 // application attempts are rate-limited per envelope, so this is cheap to poll.
 func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, false)
+}
+
+// RetryPendingExecutionPayloadEnvelopesOnColumnsStored retries the queued envelopes at or after minSlot after a
+// column store, without waiting out the probe interval.
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, true)
+}
+
+func (f *ForkChoiceStore) retryPendingEnvelopesFrom(ctx context.Context, minSlot uint64, ignoreProbe bool) {
 	for _, root := range f.pendingEnvelopes.Keys() {
 		if ctx.Err() != nil {
 			return
 		}
-		block, ok := f.forkGraph.GetBlock(root)
-		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
-			continue
+		if block, ok := f.blockFrom(root, minSlot); ok {
+			f.retryPendingEnvelopeWhenDue(ctx, root, block, ignoreProbe)
 		}
-		f.retryPendingEnvelopeWhenDue(ctx, root, block)
 	}
+}
+
+func (f *ForkChoiceStore) blockFrom(root common.Hash, minSlot uint64) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
+		return nil, false
+	}
+	return block, true
+}
+
+func (f *ForkChoiceStore) PendingEnvelopeRetryWake() <-chan struct{} {
+	return f.emitters.PendingEnvelopeRetryWake()
+}
+
+func (f *ForkChoiceStore) WakePendingEnvelopeRetry() {
+	f.emitters.WakePendingEnvelopeRetry()
+}
+
+// HasAttemptablePendingEnvelope reports whether a retry from minSlot could attempt a queued envelope now. It books
+// and applies nothing.
+func (f *ForkChoiceStore) HasAttemptablePendingEnvelope(minSlot uint64) bool {
+	for _, root := range f.pendingEnvelopes.Keys() {
+		if block, ok := f.blockFrom(root, minSlot); ok && !f.pendingEnvelopeAttemptBooked(root) && f.envelopeColumnsAvailable(root, block) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *ForkChoiceStore) pendingEnvelopeAttemptBooked(root common.Hash) bool {
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	defer f.dataAvailableEnvelopeRetryMu.Unlock()
+	booking, ok := f.dataAvailableEnvelopeRetryAt.Peek(root)
+	return ok && booking.attempt && time.Now().Before(booking.at)
+}
+
+func (f *ForkChoiceStore) envelopeColumnsAvailable(root common.Hash, block *cltypes.SignedBeaconBlock) bool {
+	if commitments := block.GetBlobKzgCommitments(); commitments == nil || commitments.Len() == 0 {
+		return true
+	}
+	if f.peerDas == nil {
+		return false
+	}
+	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root)
+	return err == nil && available
 }
 
 // retryPendingEnvelopeWhenDue applies the envelope queued for root when its pacing allows and its
 // columns are available, and returns when the next attempt is due.
-func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock) time.Time {
+func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock, ignoreProbe bool) time.Time {
 	now := time.Now()
-	retryAt, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval))
+	booked, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval), ignoreProbe)
 	if !due {
-		return retryAt
+		return booked.at
 	}
-	if commitments := block.GetBlobKzgCommitments(); commitments != nil && commitments.Len() > 0 {
-		if f.peerDas == nil {
-			return retryAt
-		}
-		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
-			return retryAt
-		}
+	if !f.envelopeColumnsAvailable(root, block) {
+		return booked.at
 	}
-	attemptAt := now.Add(dataAvailableEnvelopeRetryInterval)
-	f.rebookPendingEnvelopeRetry(root, retryAt, attemptAt)
+	attempt := &pendingEnvelopeRetryBooking{at: now.Add(dataAvailableEnvelopeRetryInterval), attempt: true}
+	if !f.rebookPendingEnvelopeRetry(root, booked, attempt) {
+		return booked.at
+	}
 	f.processPendingEnvelopeAfterBlock(ctx, root, true)
 	if ctx.Err() != nil {
 		// The caller's context ended the attempt before a verdict, so it does not hold the interval.
-		f.rebookPendingEnvelopeRetry(root, attemptAt, time.Time{})
+		f.rebookPendingEnvelopeRetry(root, attempt, nil)
 		return time.Now()
 	}
-	return attemptAt
+	return attempt.at
 }
 
-// bookPendingEnvelopeRetry books the next retry of root at next unless one is booked for later
-// than now, and reports whether this caller booked it.
-func (f *ForkChoiceStore) bookPendingEnvelopeRetry(root common.Hash, now, next time.Time) (time.Time, bool) {
+// bookPendingEnvelopeRetry books the next retry of root at next unless one is booked for later than now,
+// and reports whether this caller booked it.
+func (f *ForkChoiceStore) bookPendingEnvelopeRetry(root common.Hash, now, next time.Time, ignoreProbe bool) (*pendingEnvelopeRetryBooking, bool) {
 	f.dataAvailableEnvelopeRetryMu.Lock()
 	defer f.dataAvailableEnvelopeRetryMu.Unlock()
-	if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
-		return retryAt, false
+	if booking, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(booking.at) && (booking.attempt || !ignoreProbe) {
+		return booking, false
 	}
-	f.dataAvailableEnvelopeRetryAt.Add(root, next)
-	return next, true
+	booking := &pendingEnvelopeRetryBooking{at: next}
+	f.dataAvailableEnvelopeRetryAt.Add(root, booking)
+	return booking, true
 }
 
-// rebookPendingEnvelopeRetry moves the booking of root from booked to next, or drops it when next
-// is zero. A booking that another caller made since is kept.
-func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, next time.Time) {
+// rebookPendingEnvelopeRetry moves the booking of root from booked to next, or drops it when next is nil, and
+// reports whether the caller may go on. A booking that another caller made since stops the caller when it is an
+// attempt or when the caller drops; otherwise the caller takes it over.
+func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, next *pendingEnvelopeRetryBooking) bool {
 	f.dataAvailableEnvelopeRetryMu.Lock()
 	defer f.dataAvailableEnvelopeRetryMu.Unlock()
-	if current, ok := f.dataAvailableEnvelopeRetryAt.Peek(root); !ok || !current.Equal(booked) {
-		return
+	if current, ok := f.dataAvailableEnvelopeRetryAt.Peek(root); ok && current != booked && (current.attempt || next == nil) {
+		return false
 	}
-	if next.IsZero() {
+	if next == nil {
 		f.dataAvailableEnvelopeRetryAt.Remove(root)
-		return
+	} else {
+		f.dataAvailableEnvelopeRetryAt.Add(root, next)
 	}
-	f.dataAvailableEnvelopeRetryAt.Add(root, next)
+	return true
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
@@ -828,11 +881,11 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return time.Time{}
 	}
-	block, ok := f.forkGraph.GetBlock(blockRoot)
-	if !ok || block == nil || block.Block == nil {
+	block, ok := f.blockFrom(blockRoot, 0)
+	if !ok {
 		return time.Time{}
 	}
-	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block)
+	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, false)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {

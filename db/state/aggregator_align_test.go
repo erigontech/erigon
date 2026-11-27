@@ -17,13 +17,21 @@
 package state
 
 import (
-	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -46,13 +54,23 @@ func generateStandaloneIIFiles(t *testing.T, dirs datadir.Dirs, ranges []testFil
 
 func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 	t.Helper()
+	requireVisibleEndOrEmpty(t, agg, end, false)
+}
+
+// requireVisibleEndOrEmpty is requireVisibleEnd that also accepts an empty list when emptyAllowed is set.
+func requireVisibleEndOrEmpty(t *testing.T, agg *Aggregator, end uint64, emptyAllowed bool) {
+	t.Helper()
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	for _, d := range kv.StateDomains {
-		require.EqualValues(t, end, at.d[d].files.EndTxNum(), "domain %s", d)
+		if !emptyAllowed || len(at.d[d].files) > 0 {
+			require.EqualValues(t, end, at.d[d].files.EndTxNum(), "domain %s", d)
+		}
 	}
 	for _, ii := range at.standaloneIIs() {
-		require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
+		if !emptyAllowed || len(ii.files) > 0 {
+			require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
+		}
 	}
 }
 
@@ -67,6 +85,308 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 	require.NoError(t, agg.OpenFolder(db))
 
 	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+// a gap in one domain's files lowers every list's visible end
+func TestVisibleFilesAligned_GapInOneListLowersEveryList(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+// a gap in the middle of one domain's files lowers every list's visible end to the gap
+func TestVisibleFilesAligned_MiddleGapInOneListLowersEveryList(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+// a values list whose first file is unreadable lowers every list to that file's start
+func TestVisibleFilesAligned_LeadingGapInOneListLowersEveryList(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-1.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
+}
+
+// a file is covered only by smaller files that can become visible; without their commitment they can not
+func TestBuildMissedAccessorsKeepsAFileCoveredByHiddenFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-2.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
+	built, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-2.bt"))
+	require.NoError(t, err)
+	require.Len(t, built, 1)
+}
+
+// Every list kind with one file missing, on a datadir whose DB was pruned to the end of its files.
+// Values files are never retired, so any missing values file cuts every list and startup refuses.
+// History and index files are retired from the start, so a missing first (or first merged) file
+// reads as retired; a missing middle or last file is a hole that cuts every list.
+func TestVisibleFilesWithAMissingFile(t *testing.T) {
+	type kind struct {
+		name    string
+		dir     func(datadir.Dirs) string
+		pattern string // the file and its accessors in dir
+		retired bool   // removed from the start by Retire
+	}
+	var kinds []kind
+	for _, d := range []string{"accounts", "storage", "code", "commitment"} {
+		kinds = append(kinds, kind{d + ".kv", func(d datadir.Dirs) string { return d.SnapDomain }, d, false})
+	}
+	for _, d := range []string{"accounts", "storage", "code"} {
+		kinds = append(kinds,
+			kind{d + ".v", func(d datadir.Dirs) string { return d.SnapHistory }, d, true},
+			kind{d + ".ef", func(d datadir.Dirs) string { return d.SnapIdx }, d, true})
+	}
+	for _, ii := range []string{"logaddrs", "logtopics", "tracesfrom", "tracesto"} {
+		kinds = append(kinds, kind{ii + ".ef", func(d datadir.Dirs) string { return d.SnapIdx }, ii, true})
+	}
+	const filesEnd = 4 * alignStepSize
+	for _, k := range kinds {
+		for _, pos := range []struct {
+			name    string
+			ranges  []testFileRange
+			missing testFileRange
+		}{
+			{"first", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{0, 1}},
+			{"middle", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{2, 3}},
+			{"last", []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, testFileRange{3, 4}},
+			{"merged", []testFileRange{{0, 2}, {2, 3}, {3, 4}}, testFileRange{0, 2}},
+			{"all", []testFileRange{{0, 4}}, testFileRange{0, 4}},
+		} {
+			t.Run(k.name+"/"+pos.name, func(t *testing.T) {
+				t.Cleanup(statecfg.SetCommitmentV3(false))
+				db, agg := testDbAndAggregatorv3(t, alignStepSize)
+				generateStateFiles(t, agg.Dirs(), pos.ranges)
+				generateStandaloneIIFiles(t, agg.Dirs(), pos.ranges)
+				generateCommitmentFile(t, agg.Dirs(), pos.ranges)
+				removeFiles(t, agg.Dirs(), k.dir(agg.Dirs()), k.pattern, pos.missing)
+				require.NoError(t, agg.OpenFolder(db))
+
+				wantEnd, wantRefuse := uint64(pos.missing.fromStep*alignStepSize), true
+				switch {
+				case pos.name == "all" && strings.HasSuffix(k.name, ".v"):
+					// the index left without its history can not be read: a hole at 0
+				case k.retired && pos.name == "all":
+					// a list with no file left cuts no other list, but the DB pruned past it refuses
+					wantEnd = filesEnd
+				case k.retired && pos.missing.fromStep == 0:
+					wantEnd, wantRefuse = filesEnd, false
+				}
+				requireVisibleEndOrEmpty(t, agg, wantEnd, pos.name == "all" && wantEnd == filesEnd)
+				err := pruneEverythingTo(t, db, agg, filesEnd, nil, nil)
+				if wantRefuse {
+					require.ErrorContains(t, err, "gap between snapshot files and DB")
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+// Startup must accept the datadirs that normal operation and recovery leave behind.
+func TestVisibleFilesAfterRecoveryFlows(t *testing.T) {
+	all := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
+	const filesEnd = 4 * alignStepSize
+	stateFiles := func(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+		generateStateFiles(t, dirs, ranges)
+		generateStandaloneIIFiles(t, dirs, ranges)
+		generateCommitmentFile(t, dirs, ranges)
+	}
+	for _, tc := range []struct {
+		name      string
+		prepare   func(t *testing.T, dirs datadir.Dirs)
+		prunedTo  uint64 // 0: the DB is empty, as after removing chaindata
+		extra     []kv.Domain
+		cleared   []kv.InvertedIdx // removed with their prune bookmarks
+		wantEnd   uint64
+		rebuildTo uint64 // visible end after BuildMissedAccessors, 0: not checked
+	}{
+		{name: "chaindata removed", prepare: func(t *testing.T, dirs datadir.Dirs) { stateFiles(t, dirs, all) }, wantEnd: filesEnd},
+		{name: "killed mid-merge", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}, {3, 4}})
+			for _, d := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
+				require.NoError(t, os.WriteFile(filepath.Join(d, "v1.0-accounts.0-4.kv.tmp"), []byte("partial"), 0o644))
+			}
+		}, prunedTo: filesEnd, wantEnd: filesEnd},
+		{name: "killed mid-build", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			accessor, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.3-4.bt"))
+			require.NoError(t, err)
+			require.Len(t, accessor, 1)
+			require.NoError(t, dir.RemoveFile(accessor[0]))
+		}, prunedTo: 3 * alignStepSize, wantEnd: 3 * alignStepSize, rebuildTo: filesEnd},
+		{name: "optional domain enabled on a synced node", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			generateDomainFiles(t, "receipt", dirs, []testFileRange{{2, 3}, {3, 4}})
+		}, prunedTo: filesEnd, extra: []kv.Domain{kv.ReceiptDomain}, wantEnd: filesEnd},
+		{name: "custom trace reset", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			for _, r := range all {
+				removeFiles(t, dirs, dirs.SnapIdx, "logaddrs", r)
+			}
+		}, prunedTo: filesEnd, cleared: []kv.InvertedIdx{kv.LogAddrIdx}, wantEnd: filesEnd},
+		{name: "rm-state of the first accounts step, then stage_exec --reset", prepare: func(t *testing.T, dirs datadir.Dirs) {
+			stateFiles(t, dirs, all)
+			removeFiles(t, dirs, dirs.SnapDomain, "accounts", testFileRange{0, 1})
+		}, wantEnd: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			tc.prepare(t, agg.Dirs())
+			require.NoError(t, agg.OpenFolder(db))
+
+			requireVisibleEndOrEmpty(t, agg, tc.wantEnd, len(tc.cleared) > 0)
+			at := agg.BeginFilesRo()
+			for _, id := range tc.extra {
+				require.EqualValues(t, 2*alignStepSize, at.d[id].files.StartTxNum(), "domain %s", id)
+				require.EqualValues(t, filesEnd, at.d[id].files.EndTxNum(), "domain %s", id)
+			}
+			at.Close()
+			if tc.prunedTo > 0 { // OpenFolder already ran the startup check on the empty DB
+				require.NoError(t, pruneEverythingTo(t, db, agg, tc.prunedTo, tc.extra, tc.cleared))
+			}
+			if tc.rebuildTo > 0 {
+				require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+				requireVisibleEnd(t, agg, tc.rebuildTo)
+			}
+		})
+	}
+}
+
+// A smaller history or index file covers a merged one only if it can become visible: a history file needs the index
+// file of its range and an index file needs its history file. Otherwise the merged file's accessor is rebuilt.
+func TestBuildMissedAccessorsKeepsAHistoryOrIndexFileCoveredByHiddenFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		gone    func(datadir.Dirs) string // the dir whose smaller files are removed
+		version string                    // of the merged file's accessor that the test removes
+		ext     string
+	}{
+		{"index file covered by files without history", func(d datadir.Dirs) string { return d.SnapHistory }, "v1.0", "efi"},
+		{"history file covered by files without index", func(d datadir.Dirs) string { return d.SnapIdx }, "v2.0", "vi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			dirs := agg.Dirs()
+			generateAccountsFile(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+			generateCommitmentFile(t, dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+			removeFiles(t, dirs, tc.gone(dirs), "accounts", testFileRange{0, 1})
+			removeFiles(t, dirs, tc.gone(dirs), "accounts", testFileRange{1, 2})
+			require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapAccessors, tc.version+"-accounts.0-2."+tc.ext)))
+			require.NoError(t, agg.OpenFolder(db))
+
+			require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1, kv.SkipCoveredAccessors))
+			built, err := filepath.Glob(filepath.Join(dirs.SnapAccessors, "*-accounts.0-2."+tc.ext)) // a rebuild may use a newer version
+			require.NoError(t, err)
+			require.Len(t, built, 1)
+		})
+	}
+}
+
+// The coverage filter reads dependency state, which is guarded by dirtyFilesLock.
+func TestCoverageFilterRunsUnderTheDirtyFilesLock(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	accessors, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-accounts.0-2.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, dir.RemoveFile(accessors[0]))
+	require.NoError(t, agg.OpenFolder(db))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			agg.DisableAllDependencies()
+			agg.EnableAllDependencies()
+		}
+	}()
+	for range 100 {
+		agg.hasAccessorsToBuild()
+	}
+	<-done
+}
+
+// removeFiles removes the data file of base for r and every accessor of it.
+func removeFiles(t *testing.T, dirs datadir.Dirs, dataDir, base string, r testFileRange) {
+	t.Helper()
+	name := fmt.Sprintf("*-%s.%d-%d.*", base, r.fromStep, r.toStep)
+	data, err := filepath.Glob(filepath.Join(dataDir, name))
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+	var accessors []string
+	switch {
+	case dataDir == dirs.SnapHistory:
+		accessors, err = filepath.Glob(filepath.Join(dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", base, r.fromStep, r.toStep)))
+	case dataDir == dirs.SnapIdx:
+		accessors, err = filepath.Glob(filepath.Join(dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", base, r.fromStep, r.toStep)))
+	}
+	require.NoError(t, err)
+	for _, f := range append(data, accessors...) {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+}
+
+// pruneEverythingTo marks every values, history and index table as pruned to txNum and runs the startup check.
+func pruneEverythingTo(t *testing.T, db kv.RwDB, agg *Aggregator, txNum uint64, extra []kv.Domain, cleared []kv.InvertedIdx) error {
+	t.Helper()
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stat := &prune.Stat{TxTo: txNum}
+	for _, id := range kv.StateDomains {
+		d := agg.d[id]
+		require.NoError(t, SavePruneValProgress(tx, d.ValuesTable, stat))
+		if id != kv.CommitmentDomain { // the fixture has no commitment history
+			require.NoError(t, SavePruneValProgress(tx, d.History.ValuesTable, stat))
+		}
+	}
+	for _, ii := range agg.standaloneIIs() {
+		if ii != nil && !slices.Contains(cleared, ii.Name) {
+			require.NoError(t, SavePruneValProgress(tx, ii.ValuesTable, stat))
+		}
+	}
+	for _, id := range extra {
+		require.NoError(t, SavePruneValProgress(tx, agg.d[id].ValuesTable, stat))
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	return at.CheckFilesDBGap(tx)
 }
 
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
@@ -220,9 +540,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	tx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRo(t, db)
 
 	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
 	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
@@ -260,4 +578,183 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestVisibleFilesAligned_HistoryGapLowersEveryList(t *testing.T) {
+	for _, path := range []string{"accessor/v2.0-accounts.1-2.vi", "accessor/v1.0-accounts.1-2.efi"} {
+		t.Run(path, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+
+			requireVisibleEnd(t, agg, alignStepSize)
+		})
+	}
+}
+
+func TestVisibleFilesAligned_CutThroughAMergedFileRepeats(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	merged := []testFileRange{{0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), merged)
+	generateCommitmentFile(t, agg.Dirs(), merged)
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-tracesto.1-2.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
+}
+
+func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+
+	agg.buildsMissedAccessorsAfterOpen = true
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	requireVisibleEnd(t, agg, 2*alignStepSize)
+}
+
+func TestHasAccessorsToBuildSkipsCoveredFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-2.bt")))
+	require.NoError(t, agg.OpenFolder(nil))
+
+	require.False(t, agg.hasAccessorsToBuild(), "startup builds no accessor for a file covered by indexed files")
+}
+
+// exitedInChildProcess re-runs the test in a child process, because the gap check exits the process.
+// The child must also print each of wantOutput before the gap check exits it.
+func exitedInChildProcess(t *testing.T, wantOutput ...string) bool {
+	t.Helper()
+	if os.Getenv("ERIGON_GAP_CHECK_CHILD") != "" {
+		return false
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
+	tmp := t.TempDir() // the child exits before its own cleanup
+	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1", "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
+	require.Equal(t, 1, exitErr.ExitCode(), "the gap check exits with code 1:\n%s", out)
+	require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
+	for _, want := range append(wantOutput, "gap between snapshot files and DB") {
+		require.Contains(t, string(out), want)
+	}
+	return true
+}
+
+func TestOpenFolderChecksGapWhenNoAccessorBuildFollows(t *testing.T) {
+	if exitedInChildProcess(t) {
+		return
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+	require.NoError(t, agg.OpenFolder(db))
+}
+
+func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) {
+	const opened = "OpenFolder deferred the gap check"
+	if exitedInChildProcess(t, opened) {
+		return
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	for _, path := range []string{"idx/v1.0-accounts.1-2.ef", "accessor/v2.0-accounts.1-2.vi"} {
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 3 * alignStepSize})
+	}))
+	agg.buildsMissedAccessorsAfterOpen = true
+	require.NoError(t, agg.OpenFolder(db))
+	fmt.Println(opened)
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+}
+
+// files left by a history that is switched off do not cut the lists that are read
+func TestVisibleFilesAligned_DisabledHistoryLeftoversDoNotCut(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 2*alignStepSize)
+}
+
+func TestUnalignIdx_KeepsStateVisibleWhileAnIndexLags(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	for _, name := range []kv.InvertedIdx{kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+		generateStandaloneIIFile(t, name, agg.Dirs(), ranges)
+	}
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+
+	realign := agg.UnalignIdx(kv.LogAddrIdx)
+	at := agg.BeginFilesRo()
+	for _, d := range kv.StateDomains {
+		require.EqualValues(t, 2*alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
+	}
+	at.Close()
+
+	realign()
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+func TestVisibleFilesAligned_HistoryGapLowersEveryListWithoutDependencies(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.1-2.vi")))
+	agg.DisableAllDependencies()
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
 }

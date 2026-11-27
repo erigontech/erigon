@@ -18,13 +18,13 @@ package tracetest
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -42,17 +42,16 @@ import (
 
 func ecrecoverInput(t *testing.T) ([]byte, accounts.Address) {
 	t.Helper()
-	data, err := os.ReadFile("../../../../vm/testdata/precompiles/ecRecover.json")
+	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	var fixtures []struct{ Input, Expected, Name string }
-	require.NoError(t, json.Unmarshal(data, &fixtures))
-	for _, fixture := range fixtures {
-		if fixture.Name == "ValidKey" {
-			return common.FromHex(fixture.Input), accounts.InternAddress(common.BytesToAddress(common.FromHex(fixture.Expected)))
-		}
-	}
-	t.Fatal("missing ecRecover fixture")
-	return nil, accounts.NilAddress
+	hash := crypto.Keccak256Hash([]byte("ecrecover tracing"))
+	signature, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+	input := make([]byte, 128)
+	copy(input, hash[:])
+	input[63] = signature[64] + 27
+	copy(input[64:], signature[:64])
+	return input, accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 }
 
 func callEcrecover(ibs *state.IntraBlockState, hooks *tracing.Hooks, input []byte, gas uint64) ([]byte, error) {
@@ -77,33 +76,54 @@ func TestEcrecoverPrestate(t *testing.T) {
 	input, signer := ecrecoverInput(t)
 	for _, wrapper := range []string{"direct", "mux", "debug"} {
 		t.Run(wrapper, func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			require.NoError(t, ibs.SetCode(signer, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
-			name := "prestateTracer"
-			var config json.RawMessage
-			if wrapper == "mux" {
-				name, config = "muxTracer", json.RawMessage(`{"prestateTracer":{}}`)
+			for _, tc := range []struct {
+				name string
+				gas  uint64
+				warm bool
+				err  error
+			}{
+				{name: "cold", gas: 6100},
+				{name: "cold out of gas", gas: 6099, err: vm.ErrOutOfGas},
+				{name: "warm", gas: 3200, warm: true},
+				{name: "warm out of gas", gas: 3199, warm: true, err: vm.ErrOutOfGas},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					ibs := state.New(state.NewNoopReader())
+					defer ibs.Close()
+					require.NoError(t, ibs.SetCode(signer, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+					if tc.warm {
+						ibs.AddAddressToAccessList(signer)
+					}
+					name := "prestateTracer"
+					var config json.RawMessage
+					if wrapper == "mux" {
+						name, config = "muxTracer", json.RawMessage(`{"prestateTracer":{}}`)
+					}
+					tracer, err := tracers.New(name, nil, config)
+					require.NoError(t, err)
+					if wrapper == "debug" {
+						tracer = debugtracer.New(t.TempDir(), debugtracer.WithWrappedTracer(tracer))
+					}
+					output, err := callEcrecover(ibs, tracer.Hooks, input, tc.gas)
+					require.ErrorIs(t, err, tc.err)
+					require.Empty(t, output)
+					result, err := tracer.GetResult()
+					require.NoError(t, err)
+					if wrapper == "mux" {
+						var results map[string]json.RawMessage
+						require.NoError(t, json.Unmarshal(result, &results))
+						result = results["prestateTracer"]
+					}
+					var pre prestateTrace
+					require.NoError(t, json.Unmarshal(result, &pre))
+					if tc.err != nil {
+						require.NotContains(t, pre, signer)
+						return
+					}
+					require.Contains(t, pre, signer)
+					require.Equal(t, "0x00", pre[signer].Code)
+				})
 			}
-			tracer, err := tracers.New(name, nil, config)
-			require.NoError(t, err)
-			if wrapper == "debug" {
-				tracer = debugtracer.New(t.TempDir(), debugtracer.WithWrappedTracer(tracer))
-			}
-			output, err := callEcrecover(ibs, tracer.Hooks, input, 6100)
-			require.NoError(t, err)
-			require.Empty(t, output)
-			result, err := tracer.GetResult()
-			require.NoError(t, err)
-			if wrapper == "mux" {
-				var results map[string]json.RawMessage
-				require.NoError(t, json.Unmarshal(result, &results))
-				result = results["prestateTracer"]
-			}
-			var pre prestateTrace
-			require.NoError(t, json.Unmarshal(result, &pre))
-			require.Contains(t, pre, signer)
-			require.Equal(t, "0x00", pre[signer].Code)
 		})
 	}
 }

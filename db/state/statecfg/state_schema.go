@@ -225,6 +225,9 @@ const DefaultCommitmentV3 = false
 
 var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
+const MixedCommitmentAdvice = "roll the conversion back with `integration commitment convert --restore`, " +
+	"or run `erigon seg reset` and restart erigon to download v3 files from the seeders"
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
@@ -414,6 +417,20 @@ func EnableCommitmentV3Records(c *DomainCfg) {
 	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
 	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
 	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
+}
+
+func SetCommitmentFileVersions(domainV3, historyV3 bool) {
+	cfg := Schema.CommitmentDomain
+	d, h := legacyCommitmentDomain, legacyCommitmentDomain
+	if domainV3 {
+		EnableCommitmentV3Records(&d)
+	}
+	if historyV3 {
+		EnableCommitmentV3Records(&h)
+	}
+	cfg.CommitmentV3Records, cfg.Accessors, cfg.FileVersion = d.CommitmentV3Records, d.Accessors, d.FileVersion
+	cfg.Hist.FileVersion.DataV = h.Hist.FileVersion.DataV
+	Schema.CommitmentDomain = cfg
 }
 
 func EnableHistoricalCommitment() {

@@ -118,7 +118,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		if res, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil); err != nil {
+		if res, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil, nil); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -142,7 +142,7 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
 		suppliedGas := mdgas.MdGas{Execution: gas, State: 50_000}
-		_, remaining, err := RunPrecompiledContract(p, in, suppliedGas, nil)
+		_, remaining, err := RunPrecompiledContract(p, in, suppliedGas, nil, nil)
 		require.ErrorIs(t, err, ErrOutOfGas)
 		require.Equal(t, suppliedGas, remaining)
 		// Verify that the precompile did not touch the input buffer
@@ -159,7 +159,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil)
+		_, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil, nil)
 		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -197,7 +197,7 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
-	_, _, err := RunPrecompiledContract(modExpContract, input, mdgas.MdGas{Execution: maxGas}, nil)
+	_, _, err := RunPrecompiledContract(modExpContract, input, mdgas.MdGas{Execution: maxGas}, nil, nil)
 	require.NoError(t, err)
 }
 
@@ -208,52 +208,52 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	// length_of_EXPONENT = 1024; everything else is zero
 	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000")
 	gas := pragueModExp.RequiredGas(in)
-	res, _, err := RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	res, _, err := RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 
 	// length_of_EXPONENT = 1025; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2048; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^32; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^64; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
@@ -359,7 +359,7 @@ var precompileSuccessVectors = map[string]string{
 var precompiledContractSets = []PrecompiledContracts{
 	PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
 	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsPrague,
-	PrecompiledContractsOsaka,
+	PrecompiledContractsOsaka, PrecompiledContractsBogota,
 }
 
 // checkNoAlias runs p against rawInput from a backing array with a spare tail,
@@ -433,7 +433,10 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 	}
 	for _, set := range precompiledContractSets {
 		for addr, p := range set {
-			if cached, ok := p.(*cachedPrecompile); ok {
+			switch cached := p.(type) {
+			case *cachedPrecompile:
+				p = cached.PrecompiledContract
+			case *cachedStatefulPrecompile:
 				p = cached.PrecompiledContract
 			}
 			typ := reflect.TypeOf(p)
@@ -513,21 +516,21 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 	p := &countingPrecompile{output: []byte{1, 2, 3}}
 	c := newCachedPrecompile(p, wholeInputKey, [21]byte{201})
 	input := fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1))
-	out, gas, err := RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
+	out, gas, err := RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil, nil)
 	if err != nil || gas.Execution != 50 {
 		t.Fatalf("gas=%v err=%v", gas, err)
 	}
 	out[0] = 9
-	out, gas, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil)
+	out, gas, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3050}, nil, nil)
 	if err != nil || gas.Execution != 50 || !bytes.Equal(out, []byte{1, 2, 3}) || p.calls != 1 {
 		t.Fatalf("output=%x gas=%v calls=%d err=%v", out, gas, p.calls, err)
 	}
 	out[1] = 9
-	out, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3000}, nil)
+	out, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 3000}, nil, nil)
 	if err != nil || !bytes.Equal(out, []byte{1, 2, 3}) {
 		t.Fatal("cache output was mutated")
 	}
-	_, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 2999}, nil)
+	_, _, err = RunPrecompiledContract(c, input, mdgas.MdGas{Execution: 2999}, nil, nil)
 	if !errors.Is(err, ErrOutOfGas) || p.calls != 1 {
 		t.Fatal("cache hit bypassed gas check")
 	}

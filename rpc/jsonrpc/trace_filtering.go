@@ -70,7 +70,8 @@ type withdrawalBalanceDiff struct {
 }
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -177,7 +178,8 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (_ ParityTraces, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPendingNumber(blockNr); err != nil {
 		return nil, err
 	}
@@ -296,7 +298,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) (err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
 		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}
@@ -517,9 +520,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.New(state.NewHistoryReaderV3(dbtx, txNum))
+		ibs := state.NewVersionedCall(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
-		transactions.VersionedCallState(ibs)
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -761,15 +763,14 @@ func (api *TraceAPIImpl) callBlock(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 	// The block-start system calls come before tx 0, as block execution runs them.
 	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -922,9 +923,8 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 		return func(txIndex int) error {
 			msg := msgs[txIndex]
-			workerIbs := state.New(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
+			workerIbs := state.NewVersionedCall(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
 			defer workerIbs.Close()
-			transactions.VersionedCallState(workerIbs)
 
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: callParams[txIndex].txHash}
 
@@ -1020,13 +1020,12 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedCall(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
+	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, logger, nil)
 	if err != nil {
 		return nil, err
 	}

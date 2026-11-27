@@ -48,7 +48,7 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	uncle := &types.Header{Number: *uint256.NewInt(20_999_999)}
 	block := types.NewBlockFromStorage(header.Hash(), header, nil, []*types.Header{uncle}, nil, nil)
 
-	marshalled := ethapi.RPCMarshalBlock(block, true, false, nil, nil)
+	marshalled := ethapi.RPCMarshalBlock(block, true, false)
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
 	var txCount uint64
 	marshalled.TransactionCount = &txCount
@@ -106,7 +106,7 @@ func TestBuildBlockHandlesPendingBlock(t *testing.T) {
 	t.Parallel()
 
 	block := types.NewBlock(&types.Header{Number: *uint256.NewInt(1)}, nil, nil, nil, nil, nil)
-	marshalled := ethapi.RPCMarshalBlock(block, true, false, nil, nil)
+	marshalled := ethapi.RPCMarshalBlock(block, true, false)
 	marshalled.MarkPending()
 
 	r := &queryResolver{}
@@ -131,7 +131,7 @@ func TestBuildBlockRejectsUnexpectedWithdrawalsType(t *testing.T) {
 
 	r := &queryResolver{}
 	_, err := r.buildBlock(map[string]any{
-		"block":       ethapi.RPCMarshalBlock(block, true, false, nil, nil),
+		"block":       ethapi.RPCMarshalBlock(block, true, false),
 		"receipts":    []*jsonrpc.GraphQLReceipt{},
 		"withdrawals": []map[string]any{{"index": hexutil.Uint64(7)}},
 	}, true)

@@ -140,7 +140,10 @@ func (t *muxTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUs
 
 func (t *muxTracer) OnAccountAccess(addr accounts.Address) {
 	for _, child := range t.tracers {
-		if child.Hooks != nil && child.OnAccountAccess != nil {
+		if child.Hooks == nil {
+			continue
+		}
+		if child.OnAccountAccess != nil {
 			child.OnAccountAccess(addr)
 		}
 	}
@@ -148,7 +151,10 @@ func (t *muxTracer) OnAccountAccess(addr accounts.Address) {
 
 func (t *muxTracer) OnAccountRead(addr accounts.Address) {
 	for _, child := range t.tracers {
-		if child.Hooks != nil && child.OnAccountRead != nil {
+		if child.Hooks == nil {
+			continue
+		}
+		if child.OnAccountRead != nil {
 			child.OnAccountRead(addr)
 		}
 	}

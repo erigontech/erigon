@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -157,9 +158,7 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.Cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
-	}
+	err := emt.bgComponentsEg.Wait()
 	if emt.blockRetire != nil {
 		emt.blockRetire.Close()
 	}
@@ -177,6 +176,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		_ = dir.RemoveAll(emt.Dirs.DataDir)
+	}
+	if err != nil && emt.tb != nil {
+		require.NoError(emt.tb, commonerrors.NilIfCanceled(err))
 	}
 }
 
@@ -710,7 +712,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			nil,
 			// txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
-			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
 				dbOpts := mdbx.New(dbcfg.TxPoolDB, logger)
 				if tb == nil {
@@ -919,8 +920,26 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if err = mock.InsertChain(c); err != nil {
 		tb.Fatal(err)
 	}
+	if withTxPool {
+		mock.waitForTxPoolStartup(5 * time.Second)
+	}
 
 	return mock
+}
+
+func (emt *ExecModuleTester) waitForTxPoolStartup(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(emt.Ctx, timeout)
+	defer cancel()
+	for !emt.TxPool.Started() {
+		if err := common.Sleep(ctx, time.Millisecond); err != nil {
+			err = fmt.Errorf("transaction pool did not finish startup: %w", err)
+			if emt.tb == nil {
+				emt.Close()
+				panic(err)
+			}
+			emt.tb.Fatal(err)
+		}
+	}
 }
 
 func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
@@ -950,6 +969,10 @@ func (emt *ExecModuleTester) GenerateChainFrom(parent *types.Block, n int, gen f
 
 func (emt *ExecModuleTester) GenerateChainWithConfig(config *chain.Config, parent *types.Block, n int, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
 	return blockgen.GenerateChain(config, parent, emt.Engine, emt.DB, n, gen)
+}
+
+func (emt *ExecModuleTester) GenerateChainWithTimeOffsets(parent *types.Block, timeOffsets []int64, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
+	return blockgen.GenerateChainWithTimeOffsets(emt.ChainConfig, parent, emt.Engine, emt.DB, timeOffsets, gen)
 }
 
 func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {

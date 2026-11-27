@@ -172,7 +172,7 @@ func TestExecutionClientEngineRemoteGetHeaderByHash(t *testing.T) {
 
 	t.Run("known", func(t *testing.T) {
 		block := types.NewBlockWithHeader(header, nil)
-		blockJSON, err := jsonstream.Marshal(ethapi.RPCMarshalBlock(block, true, false, nil, nil))
+		blockJSON, err := jsonstream.Marshal(ethapi.RPCMarshalBlock(block, true, false))
 		require.NoError(t, err)
 		client, calls := newPayloadDataRPCClient(t, json.RawMessage(blockJSON))
 		got, err := client.GetHeaderByHash(t.Context(), hash)
@@ -197,7 +197,7 @@ func TestExecutionClientEngineRemoteGetHeaderByHash(t *testing.T) {
 func TestExecutionClientEngineRemoteRejectsWrongHeaderHash(t *testing.T) {
 	header := newPayloadDataTestHeader()
 	block := types.NewBlockWithHeader(header, nil)
-	blockJSON, err := jsonstream.Marshal(ethapi.RPCMarshalBlock(block, true, false, nil, nil))
+	blockJSON, err := jsonstream.Marshal(ethapi.RPCMarshalBlock(block, true, false))
 	require.NoError(t, err)
 	client, calls := newPayloadDataRPCClient(t, json.RawMessage(blockJSON))
 

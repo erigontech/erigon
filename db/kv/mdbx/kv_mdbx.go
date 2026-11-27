@@ -997,24 +997,20 @@ func (tx *MdbxTx) Count(bucket string) (uint64, error) {
 	return st.Entries, nil
 }
 
-func (tx *MdbxTx) CollectMetrics() {
-	if !tx.db.opts.metrics {
-		return
-	}
-
-	info, err := tx.db.env.Info(tx.tx)
+func (db *MdbxKV) collectEnvMetrics() {
+	info, err := db.env.Info(nil)
 	if err != nil {
 		return
 	}
 	if info.SinceReaderCheck.Hours() > 1 {
-		if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
-			tx.db.log.Error("failed ReaderCheck", "err", err)
+		if staleReaders, err := db.env.ReaderCheck(); err != nil {
+			db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			tx.db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
+			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
 		}
 	}
 
-	dbLabel := string(tx.db.opts.label)
+	dbLabel := string(db.opts.label)
 	kv.MDBXGauges.DbSize.WithLabelValues(dbLabel).SetUint64(info.Geo.Current)
 	kv.MDBXGauges.DbPgopsNewly.WithLabelValues(dbLabel).SetUint64(info.PageOps.Newly)
 	kv.MDBXGauges.DbPgopsCow.WithLabelValues(dbLabel).SetUint64(info.PageOps.Cow)
@@ -1025,8 +1021,15 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.MDBXGauges.DbPgopsUnspill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Unspill)
 	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 	kv.MDBXGauges.UnsyncedBytes.WithLabelValues(dbLabel).SetUint64(uint64(info.UnsyncedBytes))
+}
 
-	txInfo, err := tx.tx.Info(true)
+func (tx *MdbxTx) CollectMetrics() {
+	if !tx.db.opts.metrics || tx.readOnly {
+		return
+	}
+
+	dbLabel := string(tx.db.opts.label)
+	txInfo, err := tx.tx.Info(false)
 	if err != nil {
 		return
 	}
@@ -1372,7 +1375,11 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearTable(bucket string) error {
-	dbi := tx.db.buckets[bucket].DBI
+	cfg, ok := tx.db.buckets[bucket]
+	if !ok {
+		return fmt.Errorf("table %s not found", bucket)
+	}
+	dbi := cfg.DBI
 	if dbi == NonExistingDBI {
 		return nil
 	}
@@ -1464,6 +1471,10 @@ func (tx *MdbxTx) Commit() error {
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
+		if !tx.readOnly {
+			// mdbx_env_info always scans the reader table, so it runs after the write lock is released.
+			tx.db.collectEnvMetrics()
+		}
 	}
 	// Per-commit diagnostic log. Pairs with the MDBX_TX_OPEN/COMMIT/ROLLBACK
 	// tracer and the CONCURRENT_TX dumper — only useful when actively
@@ -1526,7 +1537,7 @@ func (tx *MdbxTx) Rollback() {
 }
 
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
-	txInfo, err := tx.tx.Info(true)
+	txInfo, err := tx.tx.Info(tx.readOnly)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1647,11 +1658,7 @@ func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, err := tx.statelessCursor(kv.Sequence)
-	if err != nil {
-		return 0, err
-	}
-	_, v, err := c.SeekExact([]byte(bucket))
+	v, err := tx.GetOne(kv.Sequence, []byte(bucket))
 	if err != nil {
 		return 0, err
 	}
@@ -2401,7 +2408,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	// to find LAST dup with given prefix (descending):
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok {
-		_, firstV, err = s.c.PrevDup()
+		firstV, err = s.c.LastDup()
 		if err != nil {
 			return err
 		}

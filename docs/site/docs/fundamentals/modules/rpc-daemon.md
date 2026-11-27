@@ -121,7 +121,6 @@ Flags:
       --tls.key string                              key file for client side TLS handshake for GRPC
       --trace string                                Write execution trace to the given file
       --trace.compat                                Bug for bug compatibility with OE for trace_ routines
-      --trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
       --txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
       --verbosity string                            Set the log level for console logs (default "info")
       --ws                                          Enable Websockets - Same port as HTTP[S]

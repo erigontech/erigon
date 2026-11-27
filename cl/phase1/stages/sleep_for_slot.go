@@ -27,13 +27,19 @@ import (
 
 // A head change only has to reach the synced head before the next slot, seconds after the attestation and payload
 // deadlines that cause it. A poll that finds the head cache invalidated recomputes the head under the fork choice lock,
-// so this loop adds at most five such recomputations a second.
+// so the polls add at most five such recomputations a second. A column wake reads the head only when a parked envelope
+// can be attempted, which an attempt booking limits to once a second per root; a failed read mutes column wakes until
+// the next poll.
 const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 
 type sleepForSlotForkChoice interface {
 	GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error)
 	GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool)
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
+	PendingEnvelopeRetryWake() <-chan struct{}
+	HasAttemptablePendingEnvelope(minSlot uint64) bool
+	WakePendingEnvelopeRetry()
+	RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64)
 }
 
 type sleepForSlotSyncedData interface {
@@ -71,57 +77,92 @@ func waitForNextSlotOrHeadChange(
 	defer timer.Stop()
 
 	var tick <-chan time.Time
+	var columnsStored <-chan struct{}
 	if beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion {
 		ticker := time.NewTicker(sleepForSlotHeadPollInterval)
 		defer ticker.Stop()
 		tick = ticker.C
+		columnsStored = forkChoice.PendingEnvelopeRetryWake()
 	}
 
+	columnWake := columnsStored
+	columnWakeUnserved := false
+	defer func() {
+		if columnWakeUnserved {
+			forkChoice.WakePendingEnvelopeRetry()
+		}
+	}()
 	for {
+		columnsWoke := false
 		select {
 		case <-ctx.Done():
 			return sleepForSlotWake{}, false, ctx.Err()
 		case <-timer.C:
 			return sleepForSlotWake{}, false, nil
 		case <-tick:
-			if !time.Now().Before(nextSlotTime) {
-				return sleepForSlotWake{}, false, nil
+			if columnWakeUnserved {
+				forkChoice.WakePendingEnvelopeRetry()
 			}
-			currentSlot := clock.GetCurrentSlot()
-			head, headSlot, err := forkChoice.GetHeadNode()
-			select {
-			case <-ctx.Done():
-				return sleepForSlotWake{}, false, ctx.Err()
-			default:
+			columnWake = columnsStored
+		case <-columnWake:
+			columnsWoke = true
+			columnWakeUnserved = true
+		}
+		if !time.Now().Before(nextSlotTime) {
+			return sleepForSlotWake{}, false, nil
+		}
+		currentSlot := clock.GetCurrentSlot()
+		columnFloor := max(currentSlot, 1) - 1
+		if columnsWoke {
+			if err := ctx.Err(); err != nil {
+				return sleepForSlotWake{}, false, err
 			}
-			if !time.Now().Before(nextSlotTime) {
-				return sleepForSlotWake{}, false, nil
-			}
-			if err != nil {
+			if !forkChoice.HasAttemptablePendingEnvelope(columnFloor) {
+				columnWakeUnserved = false
 				continue
 			}
-			executionHead, ready := forkChoice.GetExecutionHead(head)
-			// Both fork-choice reads can block past cancellation or the slot boundary.
-			select {
-			case <-ctx.Done():
-				return sleepForSlotWake{}, false, ctx.Err()
-			default:
+		}
+		head, headSlot, err := forkChoice.GetHeadNode()
+		select {
+		case <-ctx.Done():
+			return sleepForSlotWake{}, false, ctx.Err()
+		default:
+		}
+		if !time.Now().Before(nextSlotTime) {
+			return sleepForSlotWake{}, false, nil
+		}
+		if err != nil {
+			if columnsWoke {
+				columnWake = nil
 			}
-			if !time.Now().Before(nextSlotTime) {
-				return sleepForSlotWake{}, false, nil
-			}
-			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
-			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
-				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
-			}
+			continue
+		}
+		executionHead, ready := forkChoice.GetExecutionHead(head)
+		// Both fork-choice reads can block past cancellation or the slot boundary.
+		select {
+		case <-ctx.Done():
+			return sleepForSlotWake{}, false, ctx.Err()
+		default:
+		}
+		if !time.Now().Before(nextSlotTime) {
+			return sleepForSlotWake{}, false, nil
+		}
+		changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
+		if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
+			return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
+		}
+		retryCtx, cancel := context.WithDeadline(ctx, nextSlotTime)
+		if columnsWoke {
+			forkChoice.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(retryCtx, columnFloor)
+			columnWakeUnserved = false
+		} else {
 			// The head's envelope decides whether the next proposer builds on a full or empty parent.
 			minRetrySlot := headSlot
 			if currentSlot > 0 {
 				minRetrySlot = min(minRetrySlot, currentSlot-1)
 			}
-			retryCtx, cancel := context.WithDeadline(ctx, nextSlotTime)
 			forkChoice.RetryDataAvailablePendingExecutionPayloadEnvelopes(retryCtx, minRetrySlot)
-			cancel()
 		}
+		cancel()
 	}
 }

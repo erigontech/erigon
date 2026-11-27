@@ -38,12 +38,15 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func TestBeaconBlocksByRangeRequestCost(t *testing.T) {
@@ -129,6 +132,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 
 	firstByte := make([]byte, 1)
 	_, err = stream.Read(firstByte)
@@ -254,6 +258,7 @@ func TestBeaconBlocksByRangeHandlerStaysInRequestedRange(t *testing.T) {
 			require.NoError(t, err)
 			_, err = stream.Write(reqBuf.Bytes())
 			require.NoError(t, err)
+			require.NoError(t, stream.CloseWrite())
 
 			if tc.wantInvalid {
 				code := make([]byte, 1)
@@ -338,6 +343,35 @@ func TestOversizedFixedSizeRequestGetsInvalidRequest(t *testing.T) {
 			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
 			_, err := stream.Write(binary.AppendUvarint(nil, uint64(clparams.MaxPayloadSize)))
 			require.NoError(t, err)
+			requireResponseCode(t, stream, InvalidRequestPrefix)
+		})
+	}
+}
+
+func TestRequestWithTrailingByteGetsInvalidRequest(t *testing.T) {
+	roots := solid.NewHashList(1)
+	roots.Append(common.Hash{1})
+	blobIDs := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](1, new(cltypes.BlobIdentifier).EncodingSizeSSZ())
+	blobIDs.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{1}})
+	for _, tc := range []struct {
+		protocol string
+		request  ssz.Marshaler
+	}{
+		{communication.BeaconBlocksByRangeProtocolV2, &cltypes.BeaconBlocksByRangeRequest{StartSlot: 1, Count: 1, Step: 1}},
+		{communication.BeaconBlocksByRootProtocolV2, roots},
+		{communication.BlobSidecarByRootProtocolV1, blobIDs},
+		{communication.LightClientBootstrapProtocolV1, &cltypes.Root{Root: common.Hash{1}}},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			var wire bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, tc.request))
+			wire.WriteByte(0x00)
+
+			stream, _ := newHeartbeatTestStream(t, protocol.ID(tc.protocol))
+			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+			_, err := stream.Write(wire.Bytes())
+			require.NoError(t, err)
+			require.NoError(t, stream.CloseWrite())
 			requireResponseCode(t, stream, InvalidRequestPrefix)
 		})
 	}
