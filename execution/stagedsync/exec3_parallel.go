@@ -1760,7 +1760,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
-	// dependency and pauses until this tx commits.
+	// dependency and re-runs once this tx validates.
 	be.versionMap.FlushWrites(result.TxOut, false)
 }
 
@@ -2621,13 +2621,13 @@ type blockExecutor struct {
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
+	// re-queues wakeAt[F] and wakeValidated[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
-	// wakeValidated maps a task to the named re-runs waiting for it to validate; finalizing
-	// F also re-queues wakeValidated[F]. validatedTasks holds the tasks validated since
-	// their last re-exec signal.
+	// wakeValidated maps a task to the named re-runs waiting for it to validate.
+	// validatedTasks holds the tasks validated since their last re-exec signal and not
+	// yet committed.
 	wakeValidated  map[int][]*poolTask
 	validatedTasks map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
