@@ -282,3 +282,76 @@ func TestFileCompressionFromString(t *testing.T) {
 	var c FileCompression
 	require.Error(t, c.FromString("nope"))
 }
+
+func repetitiveWords(n int) [][]byte {
+	words := make([][]byte, n)
+	for i := range words {
+		words[i] = []byte(fmt.Sprintf("0xf90211a0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-word-%d", i%26))
+	}
+	return words
+}
+
+func readAllWords(t *testing.T, file string) [][]byte {
+	t.Helper()
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	r := NewReader(d.MakeGetter(), CompressNone)
+	var got [][]byte
+	for r.HasNext() {
+		w, _ := r.Next(nil)
+		got = append(got, bytes.Clone(w))
+	}
+	return got
+}
+
+func newTestCompressor(t *testing.T) (*Compressor, string) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "test.seg")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	c, err := NewCompressor(t.Context(), t.Name(), file, t.TempDir(), cfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	return c, file
+}
+
+func TestNewWriterKeepsParityAfterOddCount(t *testing.T) {
+	c, file := newTestCompressor(t)
+	words := repetitiveWords(200)
+	_, err := NewWriter(c, CompressKeys).Write(words[0])
+	require.NoError(t, err)
+	w := NewWriter(c, CompressKeys) // the next word is a value
+	for _, word := range words[1:] {
+		_, err := w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	require.Equal(t, words, readAllWords(t, file))
+}
+
+func TestStaleWriterFollowsHeader(t *testing.T) {
+	c, file := newTestCompressor(t)
+	words := repetitiveWords(200)
+	stale := NewWriter(c, CompressKeys|CompressVals)
+	NewWriter(c, CompressNone)
+	for _, word := range words {
+		_, err := stale.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	require.Equal(t, words, readAllWords(t, file))
+}
+
+func TestPagedReaderNext2KeepsHeapBuffer(t *testing.T) {
+	file := writeKVFile(t, CompressNone, repetitiveWords(10))
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	r := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 1, false)
+	buf := make([]byte, 0, 256)
+	_, v, bufOut, _ := r.Next2(buf)
+	require.NotEmpty(t, v)
+	require.Equal(t, &buf[:1][0], &bufOut[:1][0], "an uncompressed word is a slice of the mapping, so it must not come back as the scratch buffer")
+}

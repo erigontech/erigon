@@ -103,6 +103,13 @@ func (g *Reader) FileName() string  { return g.Getter.FileName() }
 
 // Compression is the word-level compression Next applies: the file header's when it has one.
 func (g *Reader) Compression() FileCompression { return g.c }
+
+func (g *Reader) nextIsCompressed() bool {
+	if g.nextValue {
+		return g.c.Has(CompressVals)
+	}
+	return g.c.Has(CompressKeys)
+}
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -138,10 +145,10 @@ func (g *Reader) Skip() (uint64, int) {
 	return g.Getter.SkipUncompressed()
 }
 
+// Writer takes the compression of each word from the Compressor's header bits and the
+// word's position, so its words always match the header, whichever Writer wrote them.
 type Writer struct {
 	*Compressor
-	keyWritten bool
-	c          FileCompression
 }
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
@@ -158,19 +165,15 @@ func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 		panic("seg.NewWriter: the header would not describe the words already written")
 	}
 	kv.featureFlagBitmask = bitmask
-	return &Writer{kv, false, compress}
+	return &Writer{kv}
 }
 
 func (c *Writer) Write(word []byte) (n int, err error) {
-	fl := CompressKeys
-	if c.keyWritten {
-		fl = CompressVals
-		c.keyWritten = false
-	} else {
-		c.keyWritten = true
+	fl := WordLevelKeyCompressionEnabled
+	if c.Count()%2 == 1 {
+		fl = WordLevelValCompressionEnabled
 	}
-
-	if c.c&fl != 0 {
+	if c.featureFlagBitmask.Has(fl) {
 		return len(word), c.Compressor.AddWord(word)
 	}
 	return len(word), c.Compressor.AddUncompressedWord(word)
