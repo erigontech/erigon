@@ -470,11 +470,20 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
-	// A primitive goes through its wrapper object, so it follows JSON.stringify like an object does.
-	if _, isObject := res.(*goja.Object); !isObject && !goja.IsUndefined(res) && !goja.IsNull(res) {
-		res = res.ToObject(vm)
+	if _, isObject := res.(*goja.Object); isObject || goja.IsUndefined(res) || goja.IsNull(res) {
+		return json.Marshal(res)
 	}
-	return json.Marshal(res)
+	// A primitive is stringified as the only element of an array without a prototype:
+	// that follows JSON.stringify, which reads no toJSON hook of a string, number or boolean.
+	holder := vm.NewArray(res)
+	if err := holder.SetPrototype(nil); err != nil {
+		return nil, err
+	}
+	encoded, err = json.Marshal(holder)
+	if err != nil {
+		return nil, err
+	}
+	return encoded[1 : len(encoded)-1], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

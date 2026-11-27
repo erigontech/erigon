@@ -72,7 +72,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	}
 
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, gasLimit, nil, nil), contract.Caller())
-	tracer.EmitEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas, value, contractCode)
+	tracer.EmitEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, nil, startGas, value, contractCode)
 	ret, endGas, gasUsed, err := env.Run(contract, startGas, []byte{}, false)
 	tracer.EmitExit(0, ret, gasUsed, err, true)
 	// Rest gas assumes no refund
@@ -540,12 +540,12 @@ func TestTracerRecursionAsDeepAsCallFrames(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestEmptyOutputIsAnEmptyBuffer(t *testing.T) {
-	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return toHex(ctx.output); }}`, nil, nil)
+func TestEmptyInputAndOutputAreEmptyBuffers(t *testing.T) {
+	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return toHex(ctx.input) + toHex(ctx.output); }}`, nil, nil)
 	require.NoError(t, err)
 	res, err := runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
 	require.NoError(t, err)
-	require.JSONEq(t, `"0x"`, string(res))
+	require.JSONEq(t, `"0x0x"`, string(res))
 }
 
 func TestTopLevelPrimitiveResults(t *testing.T) {
@@ -557,6 +557,13 @@ func TestTopLevelPrimitiveResults(t *testing.T) {
 	res, err := run(`'to=' + toHex(ctx.to)`)
 	require.NoError(t, err)
 	require.JSONEq(t, `"to=0x0000000000000000000000000000000000000000"`, string(res))
+
+	res, err = run(`(String.prototype.toJSON = function() { return 'changed'; }, 'original')`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"original"`, string(res), "JSON.stringify reads no toJSON hook of a primitive")
+	res, err = run(`(Number.prototype.toJSON = function() { return 'changed'; }, 1)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `1`, string(res))
 
 	_, nestedErr := run(`{amount: 42n}`)
 	require.Error(t, nestedErr)
@@ -574,7 +581,7 @@ func TestRegexpMatchesHaveATimeBudget(t *testing.T) {
 	}}`, nil, nil)
 	require.NoError(t, err)
 	start := time.Now()
-	_, err = runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	_, err = tracer.GetResult()
 	require.ErrorContains(t, err, "timeout")
 	require.Less(t, time.Since(start), 10*time.Second)
 }
