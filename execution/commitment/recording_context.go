@@ -34,7 +34,7 @@ type RecordingContext struct {
 	branches    map[string][]byte
 	accounts    map[string][]byte
 	storages    map[string][]byte
-	PutBranches map[string]BranchWrite
+	putBranches map[string]BranchWrite
 }
 
 func NewRecordingContext(inner PatriciaContext) *RecordingContext {
@@ -43,7 +43,7 @@ func NewRecordingContext(inner PatriciaContext) *RecordingContext {
 		branches:    make(map[string][]byte),
 		accounts:    make(map[string][]byte),
 		storages:    make(map[string][]byte),
-		PutBranches: make(map[string]BranchWrite),
+		putBranches: make(map[string]BranchWrite),
 	}
 }
 
@@ -85,7 +85,7 @@ func (rc *RecordingContext) Storage(plainKey []byte) (*Update, error) {
 }
 
 func (rc *RecordingContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	rc.PutBranches[string(bytes.Clone(prefix))] = BranchWrite{
+	rc.putBranches[string(bytes.Clone(prefix))] = BranchWrite{
 		PrevData: bytes.Clone(prevData),
 		NewData:  bytes.Clone(data),
 	}

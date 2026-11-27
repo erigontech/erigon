@@ -59,8 +59,6 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	plainKeys, updates := ub.Build()
 	_, ms := sequentialRoot(t, plainKeys, updates)
 
-	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{MaxDepth: commitment.WarmupMaxDepth})
-	defer w.Close()
 	extensionHops, storageRootExtensions := 0, 0
 	for _, pk := range append(plainKeys, newSlots...) {
 		hk := commitment.KeyToHexNibbleHash(pk)
@@ -82,7 +80,15 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 			}
 		}
 		rec := &branchReadRecorder{MockState: ms, read: map[string]bool{}}
-		w.WarmupKey(rec, hk, 0)
+		w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+			CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return rec, nil },
+			NumWorkers: 1,
+			MaxDepth:   commitment.WarmupMaxDepth,
+		})
+		w.Start()
+		w.WarmKey(hk, 0, 0)
+		require.NoError(t, w.WaitBufferFree(0))
+		w.CloseAndWait()
 		require.Equal(t, want, rec.read, "plain key %x", pk)
 	}
 	require.NotZero(t, extensionHops, "fixture must carry extension nodes between branches")

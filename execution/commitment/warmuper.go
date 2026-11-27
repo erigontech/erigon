@@ -124,7 +124,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.WarmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -142,7 +142,7 @@ func (w *Warmuper) Start() {
 	})
 }
 
-func (w *Warmuper) WarmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
+func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [MaxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
