@@ -252,7 +252,7 @@ func newSizeCheckingDownloader(t *testing.T, config *chain.Config, blocks []*typ
 	exec := &sizeCheckingExecutionModule{config: config, genesis: genesis, insertErr: insertErr}
 	return NewEngineBlockDownloader(
 		t.Context(), logger, exec, downloadBlockReader{genesis: genesis}, mdbxtest.NewTestDB(t, dbcfg.ChainDB),
-		config, ethconfig.Sync{LoopBlockLimit: 500, MaxReorgDepth: 96, BlockDownload: p2pcfg.DefaultBlockDownload}, bbd,
+		config, ethconfig.Sync{LoopBlockLimit: 500, MaxReorgDepth: 96}, bbd,
 	)
 }
 
@@ -329,6 +329,14 @@ func TestDownloadInsertErrorDoesNotMarkChainBad(t *testing.T) {
 	require.Zero(t, e.badHeaders.Len())
 }
 
+func TestDownloadUsesDefaultBlocksBatchSize(t *testing.T) {
+	config := &chain.Config{}
+	blocks := downloadTestChain(nil, nil)
+	e := newSizeCheckingDownloader(t, config, blocks, context.Canceled)
+	err := e.processReq(t.Context(), BackwardDownloadRequest{MissingHash: blocks[len(blocks)-1].Hash(), Trigger: FcuTrigger})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 type batchRecordingFetcher struct {
 	downloadChainFetcher
 	mu        sync.Mutex
@@ -367,6 +375,9 @@ func TestDownloadUsesConfiguredBlocksBatchSize(t *testing.T) {
 	)
 	err := e.processReq(t.Context(), BackwardDownloadRequest{MissingHash: blocks[len(blocks)-1].Hash(), Trigger: FcuTrigger})
 	require.ErrorIs(t, err, context.Canceled)
-	require.Positive(t, fetcher.maxBodies)
-	require.LessOrEqual(t, fetcher.maxBodies, 2)
+	fetcher.mu.Lock()
+	maxBodies := fetcher.maxBodies
+	fetcher.mu.Unlock()
+	require.Positive(t, maxBodies)
+	require.LessOrEqual(t, maxBodies, 2)
 }

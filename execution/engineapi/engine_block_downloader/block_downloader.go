@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -192,7 +193,11 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 }
 
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
-	blocksBatchSize := min(e.syncCfg.BlockDownload.BlocksBatchSize, uint64(e.syncCfg.LoopBlockLimit))
+	blocksBatchSize := e.syncCfg.BlockDownload.BlocksBatchSize
+	if blocksBatchSize == 0 {
+		blocksBatchSize = p2pcfg.DefaultBlockDownload.BlocksBatchSize
+	}
+	blocksBatchSize = min(blocksBatchSize, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
 		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))

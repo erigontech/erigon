@@ -53,8 +53,10 @@ func WithChainLengthCurrentHead(head uint64) BbdOption {
 }
 
 func applyBbdOptions(blockDownload p2pcfg.BlockDownload, opts ...BbdOption) bbdRequestConfig {
-	config := defaultBbdRequestConfig
-	config.BlockDownload = blockDownload
+	config := bbdRequestConfig{
+		BlockDownload:    blockDownload,
+		chainLengthLimit: math.MaxUint64,
+	}
 	for _, opt := range opts {
 		config = opt(config)
 	}
@@ -66,10 +68,4 @@ type bbdRequestConfig struct {
 	peerId                 *PeerId
 	chainLengthLimit       uint64
 	chainLengthCurrentHead *uint64
-}
-
-var defaultBbdRequestConfig = bbdRequestConfig{
-	BlockDownload:    p2pcfg.DefaultBlockDownload,
-	peerId:           nil,
-	chainLengthLimit: math.MaxUint64,
 }

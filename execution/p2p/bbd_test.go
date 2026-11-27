@@ -179,7 +179,7 @@ func TestBackwardBlockDownloader_DiscardsBALWithInvalidBlockAccessIndex(t *testi
 	feed := BbdResultFeed{ch: make(chan BlockBatchResult, 1)}
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	require.NoError(t, bbd.downloadBlocksForHeaders(t.Context(), []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed))
+	require.NoError(t, bbd.downloadBlocksForHeaders(t.Context(), []*types.Header{header}, peersContext{}, applyBbdOptions(p2pcfg.DefaultBlockDownload), ticker, feed))
 	batch, err := feed.Next(t.Context())
 	require.NoError(t, err)
 	require.Len(t, batch.Blocks, 1)
@@ -224,7 +224,7 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 		defer ticker.Stop()
 		result := make(chan error, 1)
 		go func() {
-			result <- bbd.downloadBlocksForHeaders(ctx, []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed)
+			result <- bbd.downloadBlocksForHeaders(ctx, []*types.Header{header}, peersContext{}, applyBbdOptions(p2pcfg.DefaultBlockDownload), ticker, feed)
 		}()
 		synctest.Wait()
 		select {
@@ -299,6 +299,50 @@ func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Hea
 	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
 	require.NoError(t, err)
 	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+}
+
+func TestBackwardBlockDownloader_PartialConfigUsesDefaults(t *testing.T) {
+	headers := newTestHeaderChain(31, nil)
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	peerTracker.PeerConnected(PeerIdFromUint64(1))
+	bbd := NewBackwardBlockDownloader(
+		logger,
+		&chainServingBbdFetcher{headers: headers},
+		peerTracker,
+		t.TempDir(),
+		WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10}),
+	)
+	feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+}
+
+func TestBackwardBlockDownloader_InvalidMaxParallelBodyDownloadsUseDefault(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value int
+	}{
+		{name: "zero", value: 0},
+		{name: "negative", value: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headers := newTestHeaderChain(31, nil)
+			logger := testlog.Logger(t, log.LvlCrit)
+			peerTracker := NewPeerTracker(logger, nil)
+			peerTracker.PeerConnected(PeerIdFromUint64(1))
+			bbd := NewBackwardBlockDownloader(
+				logger,
+				&chainServingBbdFetcher{headers: headers},
+				peerTracker,
+				t.TempDir(),
+				WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10, MaxParallelBodyDownloads: test.value}),
+			)
+			feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+			require.NoError(t, err)
+			require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+		})
+	}
 }
 
 // A persistent full BAL deficit must not fail the download: the blocks are

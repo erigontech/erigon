@@ -45,3 +45,35 @@ var DefaultBlockDownload = BlockDownload{
 	BALsBatchFetchTimeout:        time.Minute,
 	BALsRequestTimeout:           10 * time.Second,
 }
+
+func (b BlockDownload) WithDefaults() BlockDownload {
+	defaults := DefaultBlockDownload
+	if b.BlocksBatchSize != 0 {
+		defaults.BlocksBatchSize = b.BlocksBatchSize
+	}
+	if b.MaxParallelBodyDownloads > 0 {
+		defaults.MaxParallelBodyDownloads = b.MaxParallelBodyDownloads
+	}
+	if b.MaxParallelHeaderDownloads > 0 {
+		defaults.MaxParallelHeaderDownloads = b.MaxParallelHeaderDownloads
+	}
+	if b.InitialHeaderFetchTimeout != 0 {
+		defaults.InitialHeaderFetchTimeout = b.InitialHeaderFetchTimeout
+	}
+	if b.HeaderChainBatchFetchTimeout != 0 {
+		defaults.HeaderChainBatchFetchTimeout = b.HeaderChainBatchFetchTimeout
+	}
+	if b.BodiesBatchFetchTimeout != 0 {
+		defaults.BodiesBatchFetchTimeout = b.BodiesBatchFetchTimeout
+	}
+	if b.BALsBatchFetchTimeout != 0 {
+		defaults.BALsBatchFetchTimeout = b.BALsBatchFetchTimeout
+	}
+	if b.BALsRequestTimeout != 0 {
+		defaults.BALsRequestTimeout = b.BALsRequestTimeout
+	}
+	defaults.InitialHeaderFetchRetries = b.InitialHeaderFetchRetries
+	defaults.HeaderChainBatchFetchRetries = b.HeaderChainBatchFetchRetries
+	defaults.BodiesBatchFetchRetries = b.BodiesBatchFetchRetries
+	return defaults
+}

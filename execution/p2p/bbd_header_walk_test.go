@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -220,7 +221,7 @@ func TestBackwardBlockDownloader_HeaderWalkKeepsSeveralRequestsInFlight(t *testi
 	fetcher := &concurrencyHeaderFetcher{
 		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
 		waitForOverlap: func(end uint64, inFlight int64) {
-			if end == 0 || end > uint64(len(headers))-3*defaultBbdRequestConfig.BlocksBatchSize {
+			if end == 0 || end > uint64(len(headers))-3*p2pcfg.DefaultBlockDownload.BlocksBatchSize {
 				return
 			}
 			if inFlight >= 4 {
@@ -353,7 +354,7 @@ func TestBackwardBlockDownloader_HeaderWalkKeepsRangesOnPeersThatServeThem(t *te
 	defer collector.Close()
 	peers := newPeersContext([]*PeerId{PeerIdFromUint64(2), PeerIdFromUint64(1)})
 
-	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, defaultBbdRequestConfig)
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, applyBbdOptions(p2pcfg.DefaultBlockDownload))
 	require.NoError(t, err)
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.Positive(t, fetcher.rangeCalls[*PeerIdFromUint64(2)])
@@ -382,7 +383,7 @@ func TestBackwardBlockDownloader_HeaderRangeFailuresDoNotMarkPeersMissing(t *tes
 	defer collector.Close()
 	peers := newPeersContext([]*PeerId{PeerIdFromUint64(2), PeerIdFromUint64(1)})
 
-	_, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, defaultBbdRequestConfig)
+	_, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, peers, applyBbdOptions(p2pcfg.DefaultBlockDownload))
 	require.NoError(t, err)
 	require.Positive(t, fetcher.rangeCalls[*PeerIdFromUint64(1)])
 	require.Contains(t, tracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64()), PeerIdFromUint64(1))
@@ -405,7 +406,7 @@ func TestBackwardBlockDownloader_HeaderWalkGivesUpOnStalledRanges(t *testing.T) 
 	bbd := newTestBbd(t, fetcher)
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
 	defer collector.Close()
-	config := defaultBbdRequestConfig
+	config := applyBbdOptions(p2pcfg.DefaultBlockDownload)
 	config.HeaderChainBatchFetchTimeout = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -444,7 +445,7 @@ func TestBackwardBlockDownloader_HeaderWalkRefreshGivesRangesBackToPeersWhoseRan
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
 	defer collector.Close()
 
-	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), defaultBbdRequestConfig)
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), applyBbdOptions(p2pcfg.DefaultBlockDownload))
 	require.NoError(t, err)
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.Greater(t, fetcher.rangeCalls.Load(), int64(1))
@@ -484,7 +485,7 @@ func TestBackwardBlockDownloader_HeaderWalkRangeFailureFromBeforeRefreshKeepsRan
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), testlog.Logger(t, log.LvlCrit))
 	defer collector.Close()
 
-	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), defaultBbdRequestConfig)
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(t.Context(), headers[len(headers)-1], fixedHeaderReader{headers[0]}, collector, newPeersContext([]*PeerId{PeerIdFromUint64(1)}), applyBbdOptions(p2pcfg.DefaultBlockDownload))
 	require.NoError(t, err)
 	require.Equal(t, headers[1].Hash(), connectionPoint.Hash())
 	require.EqualValues(t, 9, fetcher.rangeCalls.Load())

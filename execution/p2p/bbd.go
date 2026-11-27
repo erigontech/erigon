@@ -82,6 +82,7 @@ func NewBackwardBlockDownloader(
 	for _, opt := range opts {
 		opt(bbd)
 	}
+	bbd.blockDownload = bbd.blockDownload.WithDefaults()
 	return bbd
 }
 
