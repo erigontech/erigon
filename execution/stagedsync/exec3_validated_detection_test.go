@@ -507,3 +507,35 @@ func TestMarkReadersDirty(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatedReexecWaitsForStaleWriterCommit(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	be.readerByAddr = map[accounts.Address][]addrReader{}
+	be.finalizedResults = map[int]*execResult{}
+	be.execFailed = make([]int, 4)
+	be.coinbaseFlushedUpTo = -1
+	addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addr, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 3}, reads)
+	be.indexReads(3, reads)
+	be.finalizedResults[3] = &execResult{TxResult: &exec.TxResult{Task: be.tasks[3].Task}}
+	markValidated(be, 3)
+	pt := newPoolUnitTask(be, 3)
+	pt.parked = true
+	writes := newWS().stor(addr, key, state.Version{TxIndex: 1}, *uint256.NewInt(7)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 1}, writes)
+	be.versionMap.FlushWrites(writes, false)
+	be.versionMap.MarkWritesValidated(writes, nil)
+
+	be.revalidateCommittedDependents(1, nil)
+	require.False(t, be.validateTasks.checkComplete(3))
+	be.signalCommitted(0)
+	require.Zero(t, pe.pool.queue.Len())
+	be.signalCommitted(1)
+	require.Equal(t, 1, pe.pool.queue.Len(), "writer commit must queue the stale reader")
+	require.Same(t, pt, pe.pool.pop())
+}

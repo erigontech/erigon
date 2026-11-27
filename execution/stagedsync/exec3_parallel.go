@@ -2933,12 +2933,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				if !be.validateNow(txVersion.TxIndex) {
+				if valid, _ := be.validateNow(txVersion.TxIndex); !valid {
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
 					be.validateTasks.clearComplete(tx)
-					be.signalSelfLoopReexec(tx)
+					be.signalSelfLoopReexec(tx, tx-1)
 					break
 				}
 				delete(be.revalidate, tx)
@@ -2964,7 +2964,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				if senderWrites == nil {
 					be.validateTasks.clearComplete(tx)
-					be.signalSelfLoopReexec(tx)
+					be.signalSelfLoopReexec(tx, tx-1)
 					break
 				}
 				// Serial execution reads the sender before charging it; the block access list
@@ -3035,7 +3035,7 @@ func (be *blockExecutor) signalCommitted(tx int) {
 
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
-func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+func (be *blockExecutor) signalSelfLoopReexec(tx, target int) {
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3047,11 +3047,18 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	}
 	if pt.parked {
 		pt.parked = false
+		pt.reruns++
+		if pt.reruns > poolNamedReruns {
+			target = tx - 1
+		}
 		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt, be.wakeAt) {
+		if !be.requeueAt(tx, target, pt, be.wakeAt) {
 			be.pool.push(pt)
 		}
 		return
+	}
+	if !pt.pending || target+1 > pt.pendingTarget {
+		pt.pendingTarget = target + 1
 	}
 	pt.pending = true
 	pt.mu.Unlock()
@@ -3152,7 +3159,8 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			continue
 		}
 		txVersion := txResult.Task.Version()
-		if be.validateNow(txVersion.TxIndex) {
+		valid, blocker := be.validateNow(txVersion.TxIndex)
+		if valid {
 			continue
 		}
 		be.cntValidationFail++
@@ -3160,7 +3168,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.validateTasks.clearComplete(tx)
 		// Signal the parked worker to re-execute in place; leave execTasks complete so
 		// the re-sent result re-validates without going through the dispatch path.
-		be.signalSelfLoopReexec(tx)
+		be.signalSelfLoopReexec(tx, blocker)
 	}
 }
 
@@ -3195,14 +3203,27 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return slices.Sorted(maps.Keys(set))
 }
 
-func (be *blockExecutor) validateNow(txIdx int) bool {
-	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+func (be *blockExecutor) validateNow(txIdx int) (bool, int) {
+	tx := be.taskIndexOf(txIdx)
+	blocker := -1
+	invalid := false
+	valid := be.versionMap.ValidateVersion(txIdx, be.blockIO,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				return state.VersionInvalid
+				invalid = true
+				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
+					if b >= tx {
+						panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency", be.blockNum, tx, txIdx, b, wv.TxIndex))
+					}
+					blocker = b
+				}
 			}
 			return state.VersionValid
-		}, false, "") == state.VersionValid
+		}, false, "")
+	if valid != state.VersionValid || blocker < 0 {
+		blocker = tx - 1
+	}
+	return valid == state.VersionValid && !invalid, blocker
 }
 
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
@@ -3232,7 +3253,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 
 			// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
 			// write stamp does not imply an unchanged read set.
-			valid := be.validateNow(txVersion.TxIndex)
+			valid, blocker := be.validateNow(txVersion.TxIndex)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3269,7 +3290,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// Signal the parked worker whose stale verdict we rejected to re-exec in
 			// place; leave execTasks complete so the re-sent result re-validates
 			// without going through the dispatch path.
-			be.signalSelfLoopReexec(tx)
+			be.signalSelfLoopReexec(tx, blocker)
 		}
 
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {

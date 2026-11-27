@@ -26,10 +26,11 @@ type poolTask struct {
 	result     *exec.TxResult
 	reruns     int
 
-	mu      sync.Mutex
-	parked  bool
-	pending bool
-	fin     bool
+	mu            sync.Mutex
+	parked        bool
+	pending       bool
+	pendingTarget int
+	fin           bool
 }
 
 type poolWorker struct {
@@ -292,8 +293,17 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.mu.Lock()
 	if pt.pending {
 		pt.pending = false
+		target := pt.pendingTarget - 1
+		pt.pendingTarget = 0
+		if target < 0 {
+			target = pt.tv.index - 1
+		}
 		pt.mu.Unlock()
-		return pt.rerunAfterPredecessor()
+		pt.reruns++
+		if pt.reruns > poolNamedReruns {
+			target = pt.tv.index - 1
+		}
+		return pt.waitThen(target, psReexec)
 	}
 	pt.parked = true
 	pt.mu.Unlock()
