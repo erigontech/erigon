@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dlclark/regexp2/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 type vmContext struct {
@@ -544,4 +546,35 @@ func TestEmptyOutputIsAnEmptyBuffer(t *testing.T) {
 	res, err := runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
 	require.NoError(t, err)
 	require.JSONEq(t, `"0x"`, string(res))
+}
+
+func TestTopLevelPrimitiveResults(t *testing.T) {
+	run := func(result string) (json.RawMessage, error) {
+		tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return `+result+`; }}`, nil, nil)
+		require.NoError(t, err)
+		return runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	}
+	res, err := run(`'to=' + toHex(ctx.to)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"to=0x0000000000000000000000000000000000000000"`, string(res))
+
+	_, nestedErr := run(`{amount: 42n}`)
+	require.Error(t, nestedErr)
+	_, err = run(`42n`)
+	require.EqualError(t, err, nestedErr.Error(), "a top-level BigInt fails as a nested one does")
+}
+
+func TestRegexpMatchesHaveATimeBudget(t *testing.T) {
+	require.Equal(t, rpccfg.DefaultEvmCallTimeout, regexp2.DefaultMatchTimeout)
+
+	defer func(old time.Duration) { regexp2.DefaultMatchTimeout = old }(regexp2.DefaultMatchTimeout)
+	regexp2.DefaultMatchTimeout = 50 * time.Millisecond
+	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function() {
+		return /^(?=(a|aa)+b)/.test('a'.repeat(64));
+	}}`, nil, nil)
+	require.NoError(t, err)
+	start := time.Now()
+	_, err = runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	require.ErrorContains(t, err, "timeout")
+	require.Less(t, time.Since(start), 10*time.Second)
 }

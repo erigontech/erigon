@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"slices"
 
+	"github.com/dlclark/regexp2/v2"
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 var assetTracers = make(map[string]string)
@@ -53,6 +55,9 @@ func init() {
 		panic(err)
 	}
 	tracers.RegisterLookup(true, newJsTracer)
+	// goja runs some patterns on regexp2, whose matches ignore Interrupt and by default never time out;
+	// bound them by the same limit as an RPC EVM call.
+	regexp2.DefaultMatchTimeout = rpccfg.DefaultEvmCallTimeout
 }
 
 // bigIntProgram is compiled once and the exported function mostly invoked to convert
@@ -331,7 +336,10 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 	toValue := to.Value()
 	t.ctx["to"] = t.vm.ToValue(toValue[:])
 	// goja turns a nil slice into null, which the buffer helpers reject; an empty call has an empty buffer.
-	t.ctx["input"] = t.vm.ToValue(append([]byte{}, input...))
+	if input == nil {
+		input = []byte{}
+	}
+	t.ctx["input"] = t.vm.ToValue(input)
 	if gas.State != 0 {
 		t.ctx["stateGas"] = t.vm.ToValue(gas.State)
 	}
@@ -449,19 +457,23 @@ func (t *jsTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, wrapError("result", err)
 	}
-	encoded, err := marshalResult(res)
+	encoded, err := marshalResult(t.vm, res)
 	if err != nil {
 		return nil, err
 	}
 	return json.RawMessage(encoded), t.err
 }
 
-func marshalResult(res goja.Value) (encoded []byte, err error) {
+func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
+	// A primitive goes through its wrapper object, so it follows JSON.stringify like an object does.
+	if _, isObject := res.(*goja.Object); !isObject && !goja.IsUndefined(res) && !goja.IsNull(res) {
+		res = res.ToObject(vm)
+	}
 	return json.Marshal(res)
 }
 
