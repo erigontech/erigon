@@ -29,7 +29,7 @@ bodies:
             current: v2.1
             min: v1.0
         seg:
-            current: v1.1
+            current: v1.2
             min: v1.0
 code:
     domain:
@@ -84,7 +84,7 @@ headers:
             current: v2.1
             min: v1.0
         seg:
-            current: v1.1
+            current: v1.2
             min: v1.0
 logaddrs:
     ii:
@@ -196,7 +196,7 @@ transactions:
             current: v2.1
             min: v1.0
         seg:
-            current: v1.1
+            current: v1.2
             min: v1.0
 transactiontoblock:
     block:

@@ -155,8 +155,8 @@ var CaplinIndexes = struct {
 	BeaconBlockSlot,
 	BlobSidecarSlot Index
 }{
-	BeaconBlockSlot: Index{Name: "beaconblocks", Version: version.V1_1_standart},
-	BlobSidecarSlot: Index{Name: "blocksidecars", Version: version.V1_1_standart},
+	BeaconBlockSlot: Index{Name: "beaconblocks", Version: version.V1_2_standart},
+	BlobSidecarSlot: Index{Name: "blocksidecars", Version: version.V1_2_standart},
 }
 
 func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bool {

@@ -273,7 +273,7 @@ func TestCaplinStateBuildMissingIndicesIndexesNewestEqualRangeVersion(t *testing
 		words [][]byte
 	}{
 		{version.V1_0, [][]byte{bytes.Repeat([]byte{'a'}, 300), []byte("OLD")}},
-		{version.V1_1, [][]byte{[]byte("N"), []byte("NEW")}},
+		{version.V1_2, [][]byte{[]byte("N"), []byte("NEW")}},
 	} {
 		segPath := filepath.Join(dirs.SnapCaplin, strings.ReplaceAll(snaptype.BeaconBlocks.FileName(f.v, 0, 2), "beaconblocks", table))
 		c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.SnapCaplin, seg.DefaultCfg, log.LvlDebug, logger)
@@ -380,7 +380,7 @@ func TestCaplinStateRemoveOverlapsKeepsNewestEqualRangeVersion(t *testing.T) {
 	table := kv.PendingDepositsDump
 
 	oldSeg, _ := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
-	newSeg, _ := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+	newSeg, _ := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_2, logger)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 	require.NoError(t, s.RemoveOverlaps(nil))
@@ -443,7 +443,7 @@ func TestCaplinStateRemoveOverlapsReportsOlderEqualRangeIndex(t *testing.T) {
 	table := kv.PendingDepositsDump
 
 	oldSeg, oldIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
-	newSeg, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+	newSeg, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_2, logger)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
@@ -512,7 +512,7 @@ func TestCaplinStateRemoveOverlapsKeepsSupersededIdxPinnedByRetiredSegment(t *te
 	pin := s.View()
 	defer pin.Close()
 
-	_, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+	_, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_2, logger)
 	require.NoError(t, s.OpenFolder())
 
 	require.NoError(t, s.RemoveOverlaps(nil))

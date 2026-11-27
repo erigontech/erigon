@@ -13,7 +13,7 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 2}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
 	Schema.BodiesBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.BodiesBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.BodiesBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.DataKV = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 3}, version.Version{1, 0}}
@@ -28,7 +28,7 @@ func InitSchemasGen() {
 	Schema.CommitmentDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 1}, version.Version{1, 0}}
 	Schema.CommitmentDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.HeadersBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.HeadersBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.HeadersBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.LogAddrIdx.FileVersion.DataEF = version.Versions{version.Version{3, 1}, version.Version{1, 0}}
 	Schema.LogAddrIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
 	Schema.LogTopicIdx.FileVersion.DataEF = version.Versions{version.Version{3, 1}, version.Version{1, 0}}
@@ -58,6 +58,6 @@ func InitSchemasGen() {
 	Schema.TracesToIdx.FileVersion.DataEF = version.Versions{version.Version{3, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
 	Schema.TransactionsBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.TransactionsBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.TransactionsBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.TxnHash2BlockNumBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 }

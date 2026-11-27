@@ -22,13 +22,13 @@ var (
 	BeaconBlocks = SnapType{
 		enum:     CaplinEnums.BeaconBlocks,
 		name:     "beaconblocks",
-		versions: version.V1_1_standart,
+		versions: version.V1_2_standart,
 		indexes:  []Index{CaplinIndexes.BeaconBlockSlot},
 	}
 	BlobSidecars = SnapType{
 		enum:     CaplinEnums.BlobSidecars,
 		name:     "blobsidecars",
-		versions: version.V1_1_standart,
+		versions: version.V1_2_standart,
 		indexes:  []Index{CaplinIndexes.BlobSidecarSlot},
 	}
 
