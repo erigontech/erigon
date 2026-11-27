@@ -87,7 +87,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build erigon and eez
-        run: go build -o build/bin/ ./cmd/erigon ./cmd/eez
+        run: make erigon eez
 
       - name: Check out eez-rollup0
         uses: actions/checkout@v7
@@ -183,7 +183,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build erigon and eez
-        run: go build -o build/bin/ ./cmd/erigon ./cmd/eez
+        run: make erigon eez
 
       # Only for testing/kurtosis/ci-args.yaml: the images carry the rest.
       - name: Check out eez-rollup0
