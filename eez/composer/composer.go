@@ -971,7 +971,9 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // disposePartial disposes of p, a batch L1 kept part of, by what ran: the
 // outbound transactions in the block derivation rebuilt at its height and
 // the triggers L1 has are spent and let go, kept with p for a later reorg;
-// the rest return to the pool, the one where L1 stopped charged. A batch
+// the rest return to the pool, the one where L1 stopped charged when the
+// composer's own posting settled the batch: another posting, or a
+// settlement record derivation no longer holds, names no culprit. A batch
 // the provers refused was never posted: its culprit, unless it ran, is
 // ejected instead, and no other is charged. A batch its own posting settled
 // whole, derivation passing it before its verdict, is only released. False
@@ -1020,7 +1022,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 		return true
 	}
 	var culprit *Held
-	if p.Culprit == nil {
+	if p.Culprit == nil && own {
 		culprit = partialCulprit(p.Txs, spent)
 	}
 	charged := common.Hash{}

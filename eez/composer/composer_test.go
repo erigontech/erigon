@@ -1011,19 +1011,27 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 		attempts uint32 // of the first unspent outbound transaction
 		lookup   error
 		allSpent bool
+		// settler is the posting derivation recorded for the height, none
+		// when zero.
+		settler common.Hash
 		// queued are the transactions back in the pool, with their attempts.
 		queued map[common.Hash]uint32
 		kept   bool // the batch waits for the next call
 	}{
-		{name: "the rest requeued, the first unspent charged", queued: map[common.Hash]uint32{{2}: 1, {4}: 0}},
-		{name: "the charge evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
-		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{}, kept: true},
-		{name: "every transaction spent", allSpent: true, queued: map[common.Hash]uint32{}},
+		{name: "the rest requeued, the first unspent charged", settler: common.Hash{0xf}, queued: map[common.Hash]uint32{{2}: 1, {4}: 0}},
+		{name: "the charge evicts the chain", settler: common.Hash{0xf}, attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
+		{name: "another posting's settlement charges none", settler: common.Hash{0xe}, attempts: 2, queued: map[common.Hash]uint32{{2}: 2, {4}: 0}},
+		{name: "no settlement record charges none", attempts: 2, queued: map[common.Hash]uint32{{2}: 2, {4}: 0}},
+		{name: "a lookup failing", settler: common.Hash{0xf}, lookup: errors.New("node down"), queued: map[common.Hash]uint32{}, kept: true},
+		{name: "every transaction spent", settler: common.Hash{0xf}, allSpent: true, queued: map[common.Hash]uint32{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			chain := newTestChain(t, 8, 8)
 			node := &triggers{landed: map[common.Hash]bool{}, failed: c.lookup}
 			h := newHarness(t, chain, 8, node)
+			if c.settler != (common.Hash{}) {
+				h.c.Settlements(settlements(deriver.Record{TxHash: c.settler, LastL2Block: 8}))
+			}
 			pool := NewHeldPool()
 			h.c.Recover(pool, nil)
 			// a's outbound transaction ran: it is in the block derivation rebuilt.
@@ -1049,7 +1057,7 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 				pool.PushFront([]*Held{behind})
 				txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
 				c.queued = maps.Clone(c.queued)
-				if c.attempts < maxAttempts-1 {
+				if c.attempts < maxAttempts-1 || c.settler != (common.Hash{0xf}) {
 					c.queued[behind.Hash] = 0
 				}
 			}
@@ -1093,6 +1101,7 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 func TestComposerDisposesOfAPartialBatchLedByOutbound(t *testing.T) {
 	chain := newTestChain(t, 8, 8)
 	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8}))
 	pool := NewHeldPool()
 	h.c.Recover(pool, nil)
 	out, cut := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2)
@@ -1618,21 +1627,34 @@ func TestComposerDisposesOfAFailedBatchL1Settled(t *testing.T) {
 
 // TestComposerDisposesOfAFailedOutboundBatchL1Settled: a failed batch whose
 // height L1 settled after all is disposed of by what ran, as a partial one:
-// an outbound transaction not in the settled block waits again.
+// an outbound transaction not in the settled block waits again, charged
+// only when the composer's own posting settled the height.
 func TestComposerDisposesOfAFailedOutboundBatchL1Settled(t *testing.T) {
-	chain := newTestChain(t, 8)
-	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
-	pool := NewHeldPool()
-	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
-	out := held(addr(0xa), 0, Outbound, 1)
-	require.NoError(t, pool.Push(out, 0))
-	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
-	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
-	h.c.RecoverFailed(t.Context())
-	h.cursor.Store(8)
-	h.c.RecoverFailed(t.Context())
-	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
-	require.Equal(t, uint32(1), out.Attempts, "where L1 stopped")
+	for _, c := range []struct {
+		name     string
+		settler  common.Hash
+		attempts uint32
+	}{
+		{name: "its own posting", settler: common.Hash{0xf}, attempts: 1},
+		{name: "another posting", settler: common.Hash{0xe}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8)
+			h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+			h.c.Settlements(settlements(deriver.Record{TxHash: c.settler, LastL2Block: 8}))
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+			out := held(addr(0xa), 0, Outbound, 1)
+			require.NoError(t, pool.Push(out, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+			h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+			h.c.RecoverFailed(t.Context())
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
+			require.Equal(t, c.attempts, out.Attempts, "where L1 stopped")
+		})
+	}
 }
 
 // TestComposerEjectsAnOutboundCulprit: an outbound transaction the provers
