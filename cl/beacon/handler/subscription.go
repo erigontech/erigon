@@ -112,8 +112,8 @@ func (a *ApiHandler) syncCommitteeSubnets(indices []string) ([]uint64, error) {
 }
 
 func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
-	req := []*cltypes.BeaconCommitteeSubscription{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[cltypes.BeaconCommitteeSubscription](r.Body)
+	if err != nil {
 		log.Error("failed to decode request", "err", err)
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return

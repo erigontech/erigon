@@ -2206,7 +2206,7 @@ func TestPoolSyncCommitteesPublishesTheLastSlotOfAPeriodOnTheNextCommitteeSubnet
 	require.Equal(t, []string{clgossip.TopicNameSyncCommittee(1)}, topics)
 }
 
-func TestPoolPostRejectsNullListElement(t *testing.T) {
+func TestPostRejectsNullListElement(t *testing.T) {
 	for _, tc := range []struct {
 		name, path, version string
 	}{
@@ -2215,6 +2215,7 @@ func TestPoolPostRejectsNullListElement(t *testing.T) {
 		{name: "bls to execution changes", path: "/eth/v1/beacon/pool/bls_to_execution_changes"},
 		{name: "sync committees", path: "/eth/v1/beacon/pool/sync_committees"},
 		{name: "contributions and proofs", path: "/eth/v1/validator/contribution_and_proofs"},
+		{name: "beacon committee subscriptions", path: "/eth/v1/validator/beacon_committee_subscriptions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)

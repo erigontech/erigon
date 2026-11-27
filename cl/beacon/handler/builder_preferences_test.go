@@ -31,9 +31,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type boundedChunkReader struct {
@@ -241,4 +243,26 @@ func TestPostValidatorBuilderPreferencesBoundsSlowEntriesAndContinues(t *testing
 		require.Equal(t, i, failure.Index)
 		require.Equal(t, "slow failure", failure.Message)
 	}
+}
+
+func TestPostBuilderRegisterValidatorRejectsNullElement(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mock_services.NewMockBuilderClient(ctrl)
+	var relayCalls atomic.Int32
+	client.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, []*cltypes.ValidatorRegistration) error {
+			relayCalls.Add(1)
+			return nil
+		}).AnyTimes()
+	handler := &ApiHandler{builderClient: client, logger: log.Root()}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/register_validator", strings.NewReader("[null]"))
+
+	var err error
+	require.NotPanics(t, func() { _, err = handler.PostEthV1BuilderRegisterValidator(httptest.NewRecorder(), request) })
+
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+	require.ErrorContains(t, err, "element at index 0 is null")
+	require.Zero(t, relayCalls.Load())
 }
