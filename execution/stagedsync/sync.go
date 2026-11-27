@@ -41,16 +41,15 @@ type Sync struct {
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 
-	stages        []*Stage
-	unwindOrder   []*Stage
-	pruningOrder  []*Stage
-	currentStage  uint
-	timings       []Timing
-	logPrefixes   []string
-	logger        log.Logger
-	stagesIdsList []string
-	mode          stages.Mode
-	metricsCache  metricsCache
+	stages       []*Stage
+	unwindOrder  []*Stage
+	pruningOrder []*Stage
+	currentStage uint
+	timings      []Timing
+	logPrefixes  []string
+	logger       log.Logger
+	mode         stages.Mode
+	metricsCache metricsCache
 }
 
 type Timing struct {
@@ -183,13 +182,6 @@ func (s *Sync) LogPrefix() string {
 	return s.logPrefixes[s.currentStage]
 }
 
-func (s *Sync) StagesIdsList() []string {
-	if s == nil {
-		return []string{}
-	}
-	return s.stagesIdsList
-}
-
 func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
@@ -222,23 +214,20 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 
 	logPrefixes := make([]string, len(stagesList))
-	stagesIdsList := make([]string, len(stagesList))
 	for i := range stagesList {
 		logPrefixes[i] = fmt.Sprintf("%d/%d %s", i+1, len(stagesList), stagesList[i].ID)
-		stagesIdsList[i] = string(stagesList[i].ID)
 	}
 
 	return &Sync{
-		cfg:           cfg,
-		stages:        stagesList,
-		currentStage:  0,
-		unwindOrder:   unwindStages,
-		pruningOrder:  pruneStages,
-		logPrefixes:   logPrefixes,
-		logger:        logger,
-		stagesIdsList: stagesIdsList,
-		mode:          mode,
-		metricsCache:  newMetricsCache(),
+		cfg:          cfg,
+		stages:       stagesList,
+		currentStage: 0,
+		unwindOrder:  unwindStages,
+		pruningOrder: pruneStages,
+		logPrefixes:  logPrefixes,
+		logger:       logger,
+		mode:         mode,
+		metricsCache: newMetricsCache(),
 	}
 }
 
@@ -449,14 +438,14 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
+func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, irreversibleBlock uint64, timeout time.Duration) error {
 	defer func() { s.currentStage = 0 }()
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(ctx, initialCycle, finalityCtx, s.pruningOrder[i], tx, timeout); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, irreversibleBlock, s.pruningOrder[i], tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -572,7 +561,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, finalityCtx kv.FinalityContext, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, irreversibleBlock uint64, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
 	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
@@ -584,7 +573,7 @@ func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, finalityCtx kv
 	if err != nil {
 		return err
 	}
-	pruneState.FinalityCtx = finalityCtx
+	pruneState.IrreversibleBlock = irreversibleBlock
 	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}

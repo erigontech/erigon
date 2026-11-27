@@ -1305,26 +1305,38 @@ func TestFramePoolBatchKeepsFirstValidationForRepeatedSlot(t *testing.T) {
 
 func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	var restored TxnSlots
 	restored.Append(blocker, sender[:], true)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.err = status.Error(codes.Unavailable, "backend unavailable")
 	backend.onValidate = func() {
+		backend.onValidate = nil
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.Len(t, pool.restoreFramesLocked(pool.lastSeenBlock.Load(), restored), 1)
 	}
 
-	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	staleLegacy := framePoolSlot(t, sender, 1, 2)
+	currentLegacy := framePoolSlotWithNonce(t, sender, 1, 1, 2)
+	keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
 	var txns TxnSlots
-	txns.Append(candidate, sender[:], true)
+	txns.Append(staleLegacy, sender[:], true)
+	txns.Append(currentLegacy, sender[:], true)
+	txns.Append(keyed, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
-	rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow, txpoolcfg.InvalidFrame, txpoolcfg.InvalidFrame}, reasons)
+
+	rejection, ok := pool.frameRejections.Peek(string(staleLegacy.IDHash[:]))
 	require.True(t, ok)
-	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	require.Equal(t, frameRejection{generation: pool.stateGeneration, reason: txpoolcfg.NonceTooLow}, rejection)
+	for _, candidate := range []*TxnSlot{currentLegacy, keyed} {
+		rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+		require.True(t, ok)
+		require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	}
 }
 
 func TestRemoteFrameAdmissionAfterSenderPenalty(t *testing.T) {
