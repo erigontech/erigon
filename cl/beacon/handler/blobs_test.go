@@ -54,6 +54,7 @@ type blobsTestFixture struct {
 	handler         *ApiHandler
 	fcu             *forkchoicemock.ForkChoiceStorageMock
 	slot            uint64
+	root            common.Hash
 	versionedHashes []common.Hash
 }
 
@@ -319,6 +320,7 @@ func setupBlobsTestOfVersion(t *testing.T, version clparams.StateVersion, commit
 		handler:         handler,
 		fcu:             fcu,
 		slot:            slot,
+		root:            blockRoot,
 		versionedHashes: versionedHashes,
 	}
 }

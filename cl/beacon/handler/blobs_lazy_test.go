@@ -35,15 +35,12 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 type lazyBlobsFixture struct {
 	blobsTestFixture
 	peerDas *das_mock.MockPeerDas
-	root    common.Hash
 }
 
 // setupLazyBlobsTest is a node in lazy blob mode: its blob storage is empty, and PeerDas builds blobs from columns.
@@ -65,12 +62,7 @@ func lazyBlobsOf(t *testing.T, f blobsTestFixture, gloas bool) lazyBlobsFixture 
 	peerDas := newLazyPeerDas(t)
 	f.handler.peerDas = peerDas
 
-	var root common.Hash
-	require.NoError(t, f.handler.indiciesDB.View(t.Context(), func(tx kv.Tx) (err error) {
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, f.slot)
-		return err
-	}))
-	return lazyBlobsFixture{blobsTestFixture: f, peerDas: peerDas, root: root}
+	return lazyBlobsFixture{blobsTestFixture: f, peerDas: peerDas}
 }
 
 func newLazyPeerDas(t *testing.T) *das_mock.MockPeerDas {
@@ -165,19 +157,12 @@ func TestBlobSidecarsAreBuiltFromColumnsWhenStorageIsEmpty(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupLazyBlobsTest(t, false)
-			var asked []uint64
-			var withSidecars bool
-			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, gomock.Any(), gomock.Any()).
-				DoAndReturn(func(_ context.Context, _ uint64, _ common.Hash, indices []uint64, sidecars bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error) {
-					asked, withSidecars = indices, sidecars
-					return nil, columnSidecars(tc.want...), nil
-				})
+			f.peerDas.EXPECT().BlobsFromColumns(gomock.Any(), f.slot, f.root, tc.asked, true).
+				Return(nil, columnSidecars(tc.want...), nil)
 
 			out := requestLazyBlobEndpoint(t, f, "blob_sidecars", tc.query)
 
 			require.Equal(t, http.StatusOK, out.status)
-			require.True(t, withSidecars)
-			require.Equal(t, tc.asked, asked)
 			want := make([]string, len(tc.want))
 			for i, index := range tc.want {
 				want[i] = strconv.FormatUint(index, 10)

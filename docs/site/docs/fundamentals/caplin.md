@@ -44,7 +44,7 @@ For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sideca
 
 ### Lazy Blob Mode
 
-From Fulu on, a supernode (a node that has every data column in custody) can rebuild the blobs of a block from its columns, so it does not need to store the blob sidecars as well. In lazy mode Caplin stores the columns of a block but no blob sidecars, and the blob endpoints (`/eth/v1/beacon/blob_sidecars` and `/eth/v1/beacon/blobs`) build the blobs from the columns when they are requested.
+From Fulu on, a supernode (a node that has every data column in custody) can rebuild the blobs of a block from its columns, so it does not need to store the blob sidecars as well. In lazy mode Caplin stores the columns of a block but no blob sidecars, and the blob endpoints build the blobs from the columns when they are requested: `/eth/v1/beacon/blobs` for every block from Fulu on, and `/eth/v1/beacon/blob_sidecars` for Fulu blocks only.
 
 A supernode uses lazy mode for the blocks from the slot at which it became a supernode, when all of these hold:
 

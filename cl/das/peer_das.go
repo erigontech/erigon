@@ -76,7 +76,8 @@ type PeerDas interface {
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
 	// BlobsFromColumns rebuilds from the stored columns the blobs of a Fulu or later block at the given indices, which are
 	// ascending and unique, and with withSidecars also their Fulu blob sidecars. Nil indices select every blob of the
-	// block. An index at or above the block's blob count is skipped.
+	// block. An index at or above the block's blob count is skipped. The returned blobs and sidecars can be shared with other
+	// callers, so they must not be modified.
 	BlobsFromColumns(ctx context.Context, slot uint64, blockRoot common.Hash, indices []uint64, withSidecars bool) ([]*cltypes.Blob, []*cltypes.BlobSidecar, error)
 	IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool
 	IsArchivedMode() bool

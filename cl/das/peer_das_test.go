@@ -3998,23 +3998,6 @@ func atFuluFromGenesis(r *recoveryRun) {
 	r.d.beaconConfig = &cfg
 }
 
-// startLazyRecovery runs the worker of a supernode in lazy blob mode with half of the columns of a block stored, and
-// asks it to recover the block without metadata.
-func startLazyRecovery(t *testing.T, instrument func(r *recoveryRun)) *recoveryRun {
-	t.Helper()
-	r := startRecoveryWithPublisher(t, recoveryOptions{
-		caplinConfig: &clparams.CaplinConfig{},
-		supernode:    true,
-		unscheduled:  true,
-		instrument: func(r *recoveryRun) {
-			atFuluFromGenesis(r)
-			instrument(r)
-		},
-	})
-	r.scheduleWithoutMetadata(t)
-	return r
-}
-
 func TestLazyBlobRecoveryStoresColumnsWithoutBlobSidecars(t *testing.T) {
 	g := startGossipRecovery(t, false, atFuluFromGenesis)
 
@@ -4040,13 +4023,13 @@ func TestLazyBlobRecoverySkipsABlockWithAllColumnsStored(t *testing.T) {
 	g.schedule(t)
 	requireBlobRecoveryReleased(t, g.d, g.root)
 	g.requireAllColumnsStored(t)
-	readsOfFirstRecovery := g.columnReads.reads.Load()
-	require.Positive(t, readsOfFirstRecovery)
+	firstRecoveryReads := g.columnReads.reads.Load()
+	require.Positive(t, firstRecoveryReads)
 
 	g.scheduleWithoutMetadata(t)
 	requireBlobRecoveryReleased(t, g.d, g.root)
 
-	require.Equal(t, readsOfFirstRecovery, g.columnReads.reads.Load(), "column reads of the second request")
+	require.Equal(t, firstRecoveryReads, g.columnReads.reads.Load(), "column reads of the second request")
 	g.requireNoBlobSidecars(t)
 }
 
@@ -4135,10 +4118,17 @@ func TestLazyBlobRecoveryEndsAfterOneStoreAttempt(t *testing.T) {
 	for _, silent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("silent=%t", silent), func(t *testing.T) {
 			var columns *dropColumnStorage
-			r := startLazyRecovery(t, func(r *recoveryRun) {
-				columns = &dropColumnStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1, silent: silent}
-				r.d.columnStorage = columns
+			r := startRecoveryWithPublisher(t, recoveryOptions{
+				caplinConfig: &clparams.CaplinConfig{},
+				supernode:    true,
+				unscheduled:  true,
+				instrument: func(r *recoveryRun) {
+					atFuluFromGenesis(r)
+					columns = &dropColumnStorage{DataColumnStorage: r.d.columnStorage, column: r.d.beaconConfig.NumberOfColumns - 1, silent: silent}
+					r.d.columnStorage = columns
+				},
 			})
+			r.scheduleWithoutMetadata(t)
 
 			requireBlobRecoveryReleased(t, r.d, r.root)
 
