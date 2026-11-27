@@ -1064,6 +1064,43 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 	}
 }
 
+func (t *TransactionMisc) cachedHash() *common.Hash { return t.hash.Load() }
+
+func TestTxnEncodingsCacheHashes(t *testing.T) {
+	t.Parallel()
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	dynFee := func() DynamicFeeTransaction { // a fresh value each time: the hash cache must not be copied
+		return DynamicFeeTransaction{
+			CommonTx: CommonTx{Nonce: 1, To: &to, GasLimit: 21000, Data: bytes.Repeat([]byte("abc"), 100)},
+			ChainID:  u256.Num1,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	txns := []Transaction{
+		rightvrsTx,
+		signedEip2718Tx,
+		signedDynFeeTx,
+		&BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
+	}
+	var encodings TxnEncodings
+	decoded := make([]Transaction, len(txns))
+	for i, txn := range txns {
+		stored, err := rlp.EncodeToBytes(txn)
+		require.NoError(t, err)
+		decoded[i], err = DecodeTransaction(stored)
+		require.NoError(t, err)
+		require.NoError(t, encodings.Add(stored))
+	}
+	encodings.CacheHashes(decoded)
+	for i, txn := range txns {
+		cached := decoded[i].(interface{ cachedHash() *common.Hash }).cachedHash()
+		require.NotNil(t, cached, "type %d", txn.Type())
+		require.Equal(t, txn.Hash(), *cached, "type %d", txn.Type())
+	}
+}
+
 // A stored record whose framing is not one transaction's is rejected, not handed out as one.
 func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
 	wrap := func(b []byte) []byte {

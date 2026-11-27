@@ -175,3 +175,59 @@ func TestTxnLookupInFilesDoesNotDecodeTheTxn(t *testing.T) {
 	}
 	require.Equal(t, allocs(legacy, 0), allocs(setCode, 1))
 }
+
+// Txns read from the files for a caller that reads every txn hash get the hashes of their stored
+// encodings, which must be the hashes of the txns.
+func TestTxsFromSnapshotWithTxnHashes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+	ver := version.V1_0
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	to := common.Address{1}
+	dynFee := func(nonce uint64) types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, To: &to, GasLimit: 1_000_000, Data: make([]byte, 200*nonce)},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	var txns []types.Transaction
+	for _, txn := range []types.Transaction{
+		types.NewTransaction(0, to, uint256.NewInt(1), 1_000_000, uint256.NewInt(1), nil),
+		&types.AccessListTx{
+			LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 1_000_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
+			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}},
+		},
+		func() types.Transaction { txn := dynFee(2); return &txn }(),
+		&types.BlobTx{DynamicFeeTransaction: dynFee(3), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&types.SetCodeTransaction{DynamicFeeTransaction: dynFee(4), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 2}}},
+	} {
+		signed, signErr := types.SignTx(txn, *signer, key)
+		require.NoError(t, signErr)
+		txns = append(txns, signed)
+	}
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestTxnSegment(t, 1, 1000, dirs.Snap, ver, txns, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	blockReader := NewBlockReader(snapshots)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	txnSeg, ok := blockReader.viewSingleFile(tx, snaptype2.Transactions, 5)
+	require.True(t, ok)
+
+	read, _, err := blockReader.txsFromSnapshot(0, uint32(len(txns)), txnSeg, nil, true)
+	require.NoError(t, err)
+	require.Len(t, read, len(txns))
+	for i, txn := range read {
+		require.Equal(t, txns[i].Hash(), txn.Hash(), "txn %d", i)
+	}
+}

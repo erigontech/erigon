@@ -237,8 +237,8 @@ github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc
 github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
 github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08 h1:w969GEJNOpz9bobmO3c7SzWRsJgZQ9RqMkAMTl5yWEw=
 github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08/go.mod h1:WQvAqmoairhdM5RFNFDKK9oT6dzuZEbWMJH+ZdRTjP0=
-github.com/erigontech/fastkeccak v1.1.0 h1:MFjmJs21P/meeW96befEakcdjLbjyjCQJyvniIlDQSc=
-github.com/erigontech/fastkeccak v1.1.0/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
+github.com/erigontech/fastkeccak v1.1.1-0.20261127153403-3081678d9016 h1:eQYK2d428n7ht/POIkFXMe2RJfH1mok6UN3VxlIr0bQ=
+github.com/erigontech/fastkeccak v1.1.1-0.20261127153403-3081678d9016/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
 github.com/erigontech/mdbx-go v0.43.1 h1:0wCMZVU2COvRPZ5sjEX4H/1zLHpXsqSzH2yj7G9haS0=
 github.com/erigontech/mdbx-go v0.43.1/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.4.1 h1:LnD0xscr390TAiVzpiRGvibkLbqk5o6+sDNKxJjzOh0=
