@@ -104,7 +104,26 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 				require.NoError(c.t, err)
 				recentState, err := preState.Copy()
 				require.NoError(c.t, err)
-				require.NoError(c.t, transition.DefaultMachine.ProcessSlots(recentState, lastSlot))
+				found := false
+				for _, block := range blocks {
+					if block.Block.Slot > lastSlot {
+						break
+					}
+					require.NoError(c.t, transition.TransitionState(recentState, block, nil, false))
+					blockRoot, err := block.Block.HashSSZ()
+					require.NoError(c.t, err)
+					if common.Hash(blockRoot) == root {
+						found = true
+						break
+					}
+				}
+				require.True(c.t, found)
+				if recentState.Slot() < lastSlot {
+					require.NoError(c.t, transition.DefaultMachine.ProcessSlots(recentState, lastSlot))
+				}
+				stateRoot, err := recentState.BlockRoot()
+				require.NoError(c.t, err)
+				require.Equal(c.t, root, common.Hash(stateRoot))
 				fcu.StateAtBlockRootVal[root] = recentState
 			}
 			require.NoError(c.t, sm.OnHeadState(postState))
