@@ -56,7 +56,7 @@ func UpgradeSegHeaders(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := upgradeSegHeader(filepath.Join(d, e.Name()), logger); err != nil {
+			if err := upgradeSegHeader(ctx, filepath.Join(d, e.Name()), logger); err != nil {
 				return err
 			}
 		}
@@ -66,7 +66,7 @@ func UpgradeSegHeaders(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 
 // upgradeSegHeader patches the header of a single seg-format file. A file that cannot
 // be read keeps its header, and readers open it with the caller's compression.
-func upgradeSegHeader(path string, logger log.Logger) error {
+func upgradeSegHeader(ctx context.Context, path string, logger log.Logger) error {
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
 		logger.Warn("[seg_header] keeping the header", "file", filepath.Base(path), "err", err)
@@ -79,7 +79,10 @@ func upgradeSegHeader(path string, logger log.Logger) error {
 	if _, ok := d.WordLevelCompression(); ok {
 		return nil
 	}
-	fc, err := detectCompression(d)
+	fc, err := detectCompression(ctx, d)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		logger.Warn("[seg_header] keeping the header", "file", filepath.Base(path), "err", err)
 		return nil
@@ -106,7 +109,7 @@ func upgradeSegHeader(path string, logger log.Logger) error {
 // detectCompression reads every word twice: with the full decode, which is right for
 // every word, and as uncompressed. A key (even word) or value (odd word) that does not
 // read back the same as uncompressed sets the compression bit for its side.
-func detectCompression(d *seg.Decompressor) (fc seg.FileCompression, err error) {
+func detectCompression(ctx context.Context, d *seg.Decompressor) (fc seg.FileCompression, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("corrupted: %v", rec)
@@ -114,29 +117,33 @@ func detectCompression(d *seg.Decompressor) (fc seg.FileCompression, err error) 
 	}()
 	full, raw := d.MakeGetter(), d.MakeGetter()
 	full.Reset(0)
-	var keys, vals bool
 	var word []byte
 	var start, end uint64
 	words := 0
 	for ; full.HasNext(); words++ {
+		if words == d.Count() {
+			return 0, fmt.Errorf("has more words than the header says (%d)", d.Count())
+		}
+		if words%(1<<20) == 0 && ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
 		word, end = full.Next(word[:0])
 		if !readsUncompressed(raw, start, word, end) {
-			keys, vals = keys || words%2 == 0, vals || words%2 == 1
+			if words%2 == 0 {
+				fc |= seg.CompressKeys
+			} else {
+				fc |= seg.CompressVals
+			}
 		}
 		start = end
 	}
 	if words != d.Count() {
 		return 0, fmt.Errorf("has %d words, header says %d", words, d.Count())
 	}
-	switch {
-	case keys && vals:
-		return seg.CompressKeys | seg.CompressVals, nil
-	case keys:
-		return seg.CompressKeys, nil
-	case vals:
-		return seg.CompressVals, nil
+	if fc == 0 {
+		return seg.CompressNone, nil
 	}
-	return seg.CompressNone, nil
+	return fc, nil
 }
 
 func readsUncompressed(g *seg.Getter, offset uint64, want []byte, wantEnd uint64) (ok bool) {
@@ -157,6 +164,18 @@ func setWordLevelFlags(path string, fc seg.FileCompression) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
+	}
+	if sharesInode(info) { // snapshots are hardlinked as immutable files: patch a private copy
+		tmp := path + ".tmp"
+		if err := datadir.CopyFile(path, tmp); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			return err
+		}
+		if err := dir.FsyncDir(filepath.Dir(path)); err != nil {
+			return err
+		}
 	}
 	if err := os.Chmod(path, info.Mode()|0o200); err != nil {
 		return err

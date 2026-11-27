@@ -117,7 +117,7 @@ func TestUpgradeSegHeaders(t *testing.T) {
 			path := filepath.Join(d, tc.file)
 			writeV1SegFile(t, path, tc.written, pairs)
 
-			require.NoError(t, upgradeSegHeader(path, log.New()))
+			require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 
 			dec, err := seg.NewDecompressor(path)
 			require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestUpgradeSegHeaders_EmptySample(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
 	writeV1SegFile(t, path, seg.CompressKeys|seg.CompressVals, pairs)
 
-	require.NoError(t, upgradeSegHeader(path, log.New()))
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 	requireHeader(t, path, seg.CompressKeys|seg.CompressVals)
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
@@ -181,7 +181,7 @@ func TestUpgradeSegHeaders_KeepsPageLevelFlag(t *testing.T) {
 	require.NoError(t, c.Compress())
 	c.Close()
 
-	require.NoError(t, upgradeSegHeader(path, log.New()))
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
@@ -199,7 +199,7 @@ func TestUpgradeSegHeaders_LatePatterns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-storage.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressKeys, pairs)
 
-	require.NoError(t, upgradeSegHeader(path, log.New()))
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 	requireHeader(t, path, seg.CompressKeys)
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
@@ -272,7 +272,7 @@ func TestUpgradeSegHeaders_HistoryRandomAccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
 	writeV1SegFile(t, path, seg.CompressVals, pairs)
 
-	require.NoError(t, upgradeSegHeader(path, log.New()))
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
@@ -290,4 +290,31 @@ func TestUpgradeSegHeaders_HistoryRandomAccess(t *testing.T) {
 		v, _ := r.Next(nil)
 		require.Equal(t, pairs[i][1], string(v))
 	}
+}
+
+func TestUpgradeSegHeaders_HardlinkedMirrorKeepsBytes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
+	mirror := filepath.Join(root, "mirror.kv")
+	require.NoError(t, os.Link(path, mirror))
+	before, err := os.ReadFile(mirror)
+	require.NoError(t, err)
+
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
+
+	requireHeader(t, path, seg.CompressVals)
+	after, err := os.ReadFile(mirror)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a hardlinked mirror must not change")
+}
+
+func TestUpgradeSegHeaders_CanceledKeepsHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.ErrorIs(t, upgradeSegHeader(ctx, path, log.New()), context.Canceled)
+	requireNotPatched(t, path)
 }
