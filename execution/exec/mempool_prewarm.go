@@ -60,7 +60,7 @@ type MempoolTransactions func(ctx context.Context, head common.Hash, height, gas
 
 type mempoolPrewarmStats struct {
 	accounts, slots               int
-	branchKeys                    []string
+	branchKeys                    map[string]struct{}
 	branchKeysWalked, branchReads uint64
 }
 
@@ -69,7 +69,6 @@ type mempoolPrewarmGetter struct {
 	ctx          context.Context
 	stats        *mempoolPrewarmStats
 	seenBranches mapset.Set[string]
-	queued       mapset.Set[string]
 }
 
 func (g *mempoolPrewarmGetter) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -87,8 +86,8 @@ func (g *mempoolPrewarmGetter) GetLatest(domain kv.Domain, key []byte, opts kv.G
 	value, step, err := g.StateGetter.GetLatest(domain, key, opts)
 	if err == nil && g.seenBranches != nil {
 		plainKey := string(key)
-		if !g.seenBranches.Contains(plainKey) && g.queued.Add(plainKey) {
-			g.stats.branchKeys = append(g.stats.branchKeys, plainKey)
+		if !g.seenBranches.Contains(plainKey) {
+			g.stats.branchKeys[plainKey] = struct{}{}
 		}
 	}
 	return value, step, err
@@ -176,8 +175,8 @@ func (bra *BlockReadAheader) prewarmMempoolTxns(
 			}
 			getter := &mempoolPrewarmGetter{
 				StateGetter: readAheadGetter(tx, bra.stateCache, true), ctx: workerCtx, stats: &stats[worker], seenBranches: seenBranches,
-				queued: mapset.NewThreadUnsafeSet[string](),
 			}
+			stats[worker].branchKeys = make(map[string]struct{})
 			ibs := state.New(state.NewReaderV3(getter))
 			defer ibs.Close()
 			ibs.SetTxContext(child.Number.Uint64(), 0)
@@ -201,7 +200,7 @@ func (bra *BlockReadAheader) prewarmMempoolTxns(
 				msg.SetCheckNonce(false)
 				ibs.Reset()
 				ibs.SetNoConflictDetection()
-				if txn.GetTo() == nil {
+				if txn.IsContractDeploy() {
 					if err := ibs.SetNonce(msg.From(), txn.GetNonce(), tracing.NonceChangeUnspecified); err != nil {
 						return err
 					}
@@ -251,7 +250,7 @@ func walkMempoolV3Branches(ctx context.Context, tx kv.TemporalTx, stats *mempool
 		}
 		return data
 	}
-	for _, plainKey := range stats.branchKeys {
+	for plainKey := range stats.branchKeys {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

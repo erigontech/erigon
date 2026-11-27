@@ -1126,11 +1126,11 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		chargedGas := intrinsicGas
 		if prewarmCtx != nil {
-			declaredGas := slot.GetGas()
 			if isFrame {
-				declaredGas = limits.Total()
+				chargedGas = max(chargedGas, limits.Total())
+			} else {
+				chargedGas = max(chargedGas, slot.GetGas())
 			}
-			chargedGas = max(chargedGas, declaredGas)
 		}
 		if chargedGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -1245,11 +1245,10 @@ func (p *TxPool) PrewarmTxns(ctx context.Context, head common.Hash, height, gasB
 		p.lock.Unlock()
 		return nil, nil
 	}
-	var selected TxnsRlp
+	selected := TxnsRlp{ParsedTxn: types.Transactions{}}
 	p.selectBestLocked(n, &selected, height, mdgas.NewFullMdGas(gasBudget, gasBudget, math.MaxUint64), seen, math.MaxInt, ctx)
 	p.lock.Unlock()
 
-	txns := make(types.Transactions, 0, len(selected.ParsedTxn))
 	var buf bytes.Buffer
 	for i, txn := range selected.ParsedTxn {
 		if err := ctx.Err(); err != nil {
@@ -1268,9 +1267,9 @@ func (p *TxPool) PrewarmTxns(ctx context.Context, head common.Hash, height, gasB
 			return nil, err
 		}
 		privateTxn.SetSender(accounts.InternAddress(selected.Senders.AddressAt(i)))
-		txns = append(txns, privateTxn)
+		selected.ParsedTxn[i] = privateTxn
 	}
-	return txns, nil
+	return selected.ParsedTxn, nil
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
