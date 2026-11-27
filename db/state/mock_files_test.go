@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
 )
 
 type testFileRange struct {
@@ -43,7 +42,7 @@ type testFileRange struct {
 func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, stepSize uint64, ranges []testFileRange) {
 	t.Helper()
 	var allFiles []string //nolint:prealloc
-	v := version.V1_0
+	v := statecfg.Version{}
 	acc := schema.AccessorList()
 
 	for _, r := range ranges {
@@ -59,8 +58,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, step
 			allFiles = append(allFiles, file)
 		}
 		if acc.Has(statecfg.AccessorHashMap) {
-			// zero version: let the schema name it with its own accessor version
-			file, _ := schema.AccessorIdxFile(statecfg.Version{}, from, to, 0)
+			file, _ := schema.AccessorIdxFile(v, from, to, 0)
 			allFiles = append(allFiles, file)
 		}
 	}
@@ -122,7 +120,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, allFiles []string) {
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
-			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence); err != nil {
+			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree); err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
