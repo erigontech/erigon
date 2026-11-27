@@ -2020,6 +2020,45 @@ func TestComposerRollsOutADisposedPartialBatch(t *testing.T) {
 	require.Zero(t, ran.Attempts+landed.Attempts)
 }
 
+// TestComposerRollsOutARefusedPartialBatch: the culprit a refused batch was
+// disposed of with is done with: once an L1 reorg rolls the batch out,
+// recovery requeues what ran and evicts nothing, the culprit's sender
+// having sent its nonce again since.
+func TestComposerRollsOutARefusedPartialBatch(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	ran := held(addr(0xa), 0, Outbound, 1)
+	ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+	culprit := held(addr(0xb), 0, Outbound, 2)
+	node := &reorged{landed: map[common.Hash]bool{}}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for _, tx := range []*Held{ran, culprit} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.cursor.Store(5)
+	h.c.RecoverFailed(t.Context())
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt), Culprit: culprit})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Zero(t, pool.Len(), "the culprit ejected")
+	again := held(addr(0xb), 0, Outbound, 3)
+	require.NoError(t, pool.Push(again, 0))
+	node.dropped.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{ran, again}, pool.PopN(math.MaxInt))
+	require.Zero(t, ran.Attempts+again.Attempts)
+}
+
 // reorged is a rolling L1 on which the transactions in landed have
 // receipts until an L1 reorg drops them.
 type reorged struct {

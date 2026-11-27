@@ -248,7 +248,8 @@ func (l *Ledger[T]) PartialToDispose(cursor uint64) (Posted[T], bool) {
 
 // ClaimPartial settles post's partial batch, keeping spent, the
 // transactions that ran, and whether another posting settled it; false
-// when a reorg or a rebuild took it first.
+// when a reorg or a rebuild took it first. The disposal dealt with its
+// culprit: a later roll-out recovers spent alone.
 func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T, superseded bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -256,7 +257,8 @@ func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T, sup
 	if e == nil {
 		return false
 	}
-	e.Txs, e.resolution, e.confirmed, e.Superseded = spent, Settled, true, superseded
+	var none T
+	e.Txs, e.Culprit, e.resolution, e.confirmed, e.Superseded = spent, none, Settled, true, superseded
 	return true
 }
 
