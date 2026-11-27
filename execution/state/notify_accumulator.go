@@ -26,7 +26,8 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-const notifyWriteSetsPerWorker = 512
+// Two chunks run in about half the serial time from 256 write sets.
+const notifyWriteSetsPerWorker = 128
 
 type notifyOpKind uint8
 
