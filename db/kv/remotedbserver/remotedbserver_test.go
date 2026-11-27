@@ -22,7 +22,9 @@ import (
 	"errors"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -417,4 +419,221 @@ func TestRangeCopiesPairsAndClosesIterator(t *testing.T) {
 	_, err = s.Range(t.Context(), &remoteproto.RangeReq{TxId: 1, Limit: -1})
 	require.ErrorIs(t, err, errNext)
 	require.True(t, it.closed)
+}
+
+// slotLimitedDB has one read-tx slot, handed to waiting readers in arrival order.
+// A reader signals on waiting only once it is queued, so a test that waits for the
+// signal knows the slot cannot be taken ahead of that reader.
+type slotLimitedDB struct {
+	kv.TemporalRoDB
+	mu      sync.Mutex
+	held    bool
+	queue   []chan struct{}
+	waiting chan struct{}
+}
+
+func (db *slotLimitedDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.mu.Lock()
+	if !db.held {
+		db.held = true
+		db.mu.Unlock()
+		return &slotTx{db: db}, nil
+	}
+	turn := make(chan struct{})
+	db.queue = append(db.queue, turn)
+	db.mu.Unlock()
+	db.waiting <- struct{}{}
+
+	select {
+	case <-turn:
+		return &slotTx{db: db}, nil
+	case <-ctx.Done():
+		db.mu.Lock()
+		i := slices.Index(db.queue, turn)
+		if i >= 0 {
+			db.queue = slices.Delete(db.queue, i, i+1)
+		}
+		db.mu.Unlock()
+		if i < 0 { // the slot was handed over while ctx was being cancelled
+			db.release()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+func (db *slotLimitedDB) release() {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.queue) == 0 {
+		db.held = false
+		return
+	}
+	close(db.queue[0])
+	db.queue = db.queue[1:]
+}
+
+func (db *slotLimitedDB) waitQueued(t *testing.T) {
+	t.Helper()
+	select {
+	case <-db.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reader queued for the read-tx slot")
+	}
+}
+
+func (db *slotLimitedDB) free() bool {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return !db.held
+}
+
+type slotTx struct {
+	kv.TemporalTx
+	db   *slotLimitedDB
+	once sync.Once
+}
+
+func (tx *slotTx) Rollback() { tx.once.Do(tx.db.release) }
+
+func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	holder, err := s.begin(t.Context())
+	require.NoError(t, err)
+
+	waitCtx, cancelWait := context.WithCancel(t.Context())
+	defer cancelWait()
+	waiterDone := make(chan error, 1)
+	go func() {
+		id, err := s.begin(waitCtx)
+		if err == nil {
+			s.rollback(id)
+		}
+		waiterDone <- err
+	}()
+	db.waitQueued(t)
+
+	rollbackDone := make(chan struct{})
+	go func() {
+		s.rollback(holder)
+		close(rollbackDone)
+	}()
+
+	select {
+	case err := <-waiterDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		cancelWait()
+		<-rollbackDone
+		t.Fatal("begin waiting for a read-tx slot was not unblocked by a concurrent rollback")
+	}
+	<-rollbackDone
+}
+
+func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	renewed, err := s.begin(t.Context())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	otherID := make(chan uint64, 1)
+	go func() {
+		id, err := s.begin(ctx)
+		if err == nil {
+			otherID <- id
+		}
+	}()
+	db.waitQueued(t)
+
+	renewDone := make(chan error, 1)
+	renewQueued := make(chan struct{})
+	go func() {
+		renewErr := make(chan error, 1)
+		go func() { renewErr <- s.renew(ctx, renewed) }()
+		var other uint64
+		select {
+		case other = <-otherID:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-db.waiting:
+		case <-ctx.Done():
+			return
+		}
+		close(renewQueued)
+		s.rollback(other)
+		renewDone <- <-renewErr
+	}()
+
+	select {
+	case err := <-renewDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		cancel()
+		select {
+		case <-renewQueued:
+			t.Fatal("renew waiting for a read-tx slot was not unblocked by a concurrent rollback")
+		default:
+			t.Fatal("renew did not queue for the read-tx slot")
+		}
+	}
+	s.rollback(renewed)
+}
+
+func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	renewed, err := s.begin(t.Context())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	otherID := make(chan uint64, 1)
+	go func() {
+		id, err := s.begin(ctx)
+		if err == nil {
+			otherID <- id
+		}
+	}()
+	db.waitQueued(t)
+
+	renewDone := make(chan error, 1)
+	go func() { renewDone <- s.renew(ctx, renewed) }()
+	var other uint64
+	select {
+	case other = <-otherID:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("renew blocked the begin that waits for the read-tx slot")
+	}
+	db.waitQueued(t)
+
+	renewedRollbackDone := make(chan struct{})
+	go func() {
+		s.rollback(renewed)
+		close(renewedRollbackDone)
+	}()
+	require.Eventually(t, func() bool {
+		if !s.txsMapLock.TryRLock() {
+			return true
+		}
+		defer s.txsMapLock.RUnlock()
+		_, ok := s.txs[renewed]
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+
+	go s.rollback(other)
+
+	select {
+	case err := <-renewDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("rollback of a renewing tx blocked the rollback that frees the read-tx slot")
+	}
+	<-renewedRollbackDone
+	require.True(t, db.free(), "the tx opened by renew must be rolled back")
 }

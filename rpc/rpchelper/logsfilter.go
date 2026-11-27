@@ -32,6 +32,9 @@ type LogsFilterAggregator struct {
 	aggLogsFilter  LogsFilter                                  // Aggregation of all current log filters
 	logsFilters    *concurrent.SyncMap[LogsSubID, *LogsFilter] // Filter for each subscriber, keyed by filterID
 	logsFilterLock sync.RWMutex
+	// Index of logsFilters by address, so a log only visits the filters that can match it.
+	filtersByAddr  map[common.Address]map[LogsSubID]*LogsFilter
+	anyAddrFilters map[LogsSubID]*LogsFilter
 }
 
 // LogsFilter represents one subscriber or the aggregate of all subscribers.
@@ -60,7 +63,9 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 			addrs:  concurrent.NewSyncMap[common.Address, int](),
 			topics: concurrent.NewSyncMap[common.Hash, int](),
 		},
-		logsFilters: concurrent.NewSyncMap[LogsSubID, *LogsFilter](),
+		logsFilters:    concurrent.NewSyncMap[LogsSubID, *LogsFilter](),
+		filtersByAddr:  make(map[common.Address]map[LogsSubID]*LogsFilter),
+		anyAddrFilters: make(map[LogsSubID]*LogsFilter),
 	}
 }
 
@@ -98,7 +103,36 @@ func (a *LogsFilterAggregator) insertLogsFilter(filter *LogsFilter) LogsSubID {
 	filterId := LogsSubID(generateSubscriptionID())
 	a.addLogsFilterLocked(filter)
 	a.logsFilters.Put(filterId, filter)
+	a.indexLogsFilterLocked(filterId, filter)
 	return filterId
+}
+
+func (a *LogsFilterAggregator) indexLogsFilterLocked(filterId LogsSubID, filter *LogsFilter) {
+	if filter.allAddrs > 0 {
+		a.anyAddrFilters[filterId] = filter
+		return
+	}
+	_ = filter.addrs.Range(func(addr common.Address, _ int) error {
+		byID, ok := a.filtersByAddr[addr]
+		if !ok {
+			byID = make(map[LogsSubID]*LogsFilter)
+			a.filtersByAddr[addr] = byID
+		}
+		byID[filterId] = filter
+		return nil
+	})
+}
+
+func (a *LogsFilterAggregator) unindexLogsFilterLocked(filterId LogsSubID, filter *LogsFilter) {
+	delete(a.anyAddrFilters, filterId)
+	_ = filter.addrs.Range(func(addr common.Address, _ int) error {
+		byID := a.filtersByAddr[addr]
+		delete(byID, filterId)
+		if len(byID) == 0 {
+			delete(a.filtersByAddr, addr)
+		}
+		return nil
+	})
 }
 
 func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, bool) {
@@ -126,6 +160,7 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	if !ok {
 		return false
 	}
+	a.unindexLogsFilterLocked(filterId, filter)
 	a.subtractLogFilters(filter)
 	return true
 }
@@ -254,18 +289,16 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	_ = a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
-		if filter.allAddrs == 0 {
-			if _, ok := filter.addrs.Get(addr); !ok {
-				return nil
-			}
+	for _, filter := range a.anyAddrFilters {
+		if a.chooseTopics(filter, topics) {
+			filter.sender.Send(lg)
 		}
-		if !a.chooseTopics(filter, topics) {
-			return nil
+	}
+	for _, filter := range a.filtersByAddr[addr] {
+		if a.chooseTopics(filter, topics) {
+			filter.sender.Send(lg)
 		}
-		filter.sender.Send(lg)
-		return nil
-	})
+	}
 }
 
 // chooseTopics checks if the log topics match the filter's topics.

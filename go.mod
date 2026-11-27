@@ -8,7 +8,7 @@ replace github.com/libp2p/go-libp2p-pubsub => github.com/domiwei/go-libp2p-pubsu
 
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
-	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
+	github.com/erigontech/fastkeccak v0.1.1-0.20261125212329-2896a6477a7f
 	github.com/erigontech/mdbx-go v0.43.1
 	github.com/erigontech/secp256k1 v1.4.1
 )
@@ -22,6 +22,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/OffchainLabs/go-bitfield v0.0.0-20261020212435-260d98aec40c
 	github.com/RoaringBitmap/roaring/v2 v2.30.0
+	github.com/anacrolix/chansync v0.8.0
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
@@ -41,6 +42,7 @@ require (
 	github.com/dop251/goja v0.0.0-20230605162241-28ee0ee714f3
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
+	github.com/ethereum/c-kzg-4844/v2 v2.1.8
 	github.com/felixge/fgprof v0.9.5
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-chi/cors v1.2.2
@@ -129,7 +131,6 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alecthomas/repr v0.5.2 // indirect
 	github.com/anacrolix/btree v0.1.1 // indirect
-	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.1-0.20260525063928-ec3a9bd99456 // indirect
 	github.com/anacrolix/go-libutp v1.5.2-0.20260908013213-836dd42cdde6 // indirect
 	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866 // indirect

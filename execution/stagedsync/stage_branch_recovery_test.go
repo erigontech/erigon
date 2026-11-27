@@ -272,11 +272,8 @@ func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recov
 	header, err := rawdb.ReadHeaderByHash(tx, head)
 	require.NoError(t, err)
 	require.NotNil(t, header)
-	for _, id := range m.Sync.StagesIdsList() {
-		if stages.SyncStage(id) == stages.Snapshots {
-			continue
-		}
-		progress, readErr := stages.GetStageProgress(tx, stages.SyncStage(id))
+	for _, id := range stagedsync.DefaultUnwindOrder {
+		progress, readErr := stages.GetStageProgress(tx, id)
 		require.NoError(t, readErr)
 		require.Equal(t, header.Number.Uint64(), progress, "%s must reach the recovered head", id)
 	}

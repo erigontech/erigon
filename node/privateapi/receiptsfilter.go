@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -99,12 +100,14 @@ func (a *ReceiptsFilterAggregator) removeReceiptsFilterLocked(filterId uint64) {
 	a.checkEmpty()
 }
 
-func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) {
+// updateReceiptsFilter applies filterReq and, if it asks, acks it on the stream. The ack
+// is sent under receiptsFilterLock like every receipt, so the stream has one sender at a time.
+func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) error {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filter, ok := a.receiptsFilters[filterId]
 	if !ok {
-		return
+		return nil
 	}
 	a.subtractReceiptsFilters(filter)
 	filter.txHashes = make(map[common.Hash]int)
@@ -127,6 +130,10 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterR
 
 	a.addReceiptsFilters(filter)
 	a.checkEmpty()
+	if !filterReq.GetAck() {
+		return nil
+	}
+	return filter.sender.Send(&remoteproto.SubscribeReceiptsReply{FilterApplied: true})
 }
 
 func (a *ReceiptsFilterAggregator) addReceiptsFilters(filter *ReceiptsFilter) {
@@ -152,7 +159,9 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	var filterReq *remoteproto.ReceiptsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
-		a.updateReceiptsFilter(filterId, filterReq)
+		if err := a.updateReceiptsFilter(filterId, filterReq); err != nil {
+			return fmt.Errorf("acking receipts filter request: %w", err)
+		}
 	}
 	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
@@ -281,24 +290,18 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 
 	// The RPC side has neither the transaction nor the chain config the fees are derived from.
 	if rn.Tx != nil && rn.Header != nil {
-		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(effectiveGasPrice(rn.Tx, rn.Header.BaseFee))
+		var blobPrice *uint256.Int
 		if numBlobs := len(rn.Tx.GetBlobHashes()); numBlobs > 0 {
+			blobPrice = a.blobGasPrice(rn.Tx, rn.Header)
 			protoReceipt.BlobGasUsed = misc.GetBlobGasUsed(numBlobs)
-			if price := a.blobGasPrice(rn.Tx, rn.Header); price != nil {
-				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(price)
+			if blobPrice != nil {
+				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(blobPrice)
 			}
 		}
+		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(ethutils.ReceiptGasPrice(rn.Tx, receipt.GasUsed, rn.Header.BaseFee, blobPrice))
 	}
 
 	return protoReceipt
-}
-
-func effectiveGasPrice(txn types.Transaction, baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return txn.GetTipCap()
-	}
-	tip := txn.GetEffectiveGasTip(baseFee)
-	return new(uint256.Int).Add(baseFee, &tip)
 }
 
 func (a *ReceiptsFilterAggregator) blobGasPrice(txn types.Transaction, header *types.Header) *uint256.Int {

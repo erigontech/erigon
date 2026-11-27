@@ -38,23 +38,38 @@ func finalChangeUpTo[T indexedChange](changes []T, maxTxIndex uint32) (T, bool) 
 	return zero, false
 }
 
+// changedIn returns the latest change at or before maxTxIndex when it is after afterTxIndex.
+func changedIn[T indexedChange](changes []T, afterTxIndex int64, maxTxIndex uint32) (T, bool) {
+	change, ok := finalChangeUpTo(changes, maxTxIndex)
+	if !ok || int64(change.GetIndex()) <= afterTxIndex {
+		var zero T
+		return zero, false
+	}
+	return change, true
+}
+
 // ToWriteSet returns the latest BAL changes at or before maxTxIndex as state writes.
 func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state.WriteSet {
+	return ToWriteSetAfter(blockAccessList, -1, maxTxIndex)
+}
+
+// ToWriteSetAfter is ToWriteSet limited to fields whose latest change at or before maxTxIndex is after afterTxIndex.
+func ToWriteSetAfter(blockAccessList types.BlockAccessList, afterTxIndex int64, maxTxIndex uint32) *state.WriteSet {
 	writes := &state.WriteSet{}
 	for i := range blockAccessList {
 		accountChanges := &blockAccessList[i]
 		addr := accounts.InternAddress(accountChanges.Address)
-		if balance, ok := finalChangeUpTo(accountChanges.BalanceChanges, maxTxIndex); ok {
+		if balance, ok := changedIn(accountChanges.BalanceChanges, afterTxIndex, maxTxIndex); ok {
 			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: balance.Value,
 			})
 		}
-		if nonce, ok := finalChangeUpTo(accountChanges.NonceChanges, maxTxIndex); ok {
+		if nonce, ok := changedIn(accountChanges.NonceChanges, afterTxIndex, maxTxIndex); ok {
 			writes.SetNonce(addr, &state.VersionedWrite[uint64]{
 				WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nonce.Value,
 			})
 		}
-		if code, ok := finalChangeUpTo(accountChanges.CodeChanges, maxTxIndex); ok {
+		if code, ok := changedIn(accountChanges.CodeChanges, afterTxIndex, maxTxIndex); ok {
 			// Emit CodeHashPath alongside CodePath so codeHash is single-sourced from
 			// the bytecode on every path; the BAL carries only the bytecode.
 			c := accounts.NewCode(code.Bytecode)
@@ -66,7 +81,7 @@ func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state
 			})
 		}
 		for _, slotChanges := range accountChanges.StorageChanges {
-			if change, ok := finalChangeUpTo(slotChanges.Changes, maxTxIndex); ok {
+			if change, ok := changedIn(slotChanges.Changes, afterTxIndex, maxTxIndex); ok {
 				writes.SetStorage(addr, slotChanges.Slot, &state.VersionedWrite[uint256.Int]{
 					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slotChanges.Slot}, Val: change.Value,
 				})

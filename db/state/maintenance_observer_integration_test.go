@@ -55,7 +55,7 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 			return nil
 		}))
 	})
-	<-agg.BuildFilesInBackground(db, 3*stepSize, unboundedFinalityCtx)
+	<-agg.BuildFilesInBackground(db, 3*stepSize, allIrreversible)
 	require.Positive(t, published)
 	var want []state.MaintenancePoint
 	for range published / stepSize {
@@ -68,7 +68,7 @@ func TestMaintenanceObserverMergePublication(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	writeStepsKeys(t, db, agg, mkAddrs(0x10, 2), 0, 3)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, unboundedFinalityCtx, false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, allIrreversible, false))
 	<-agg.WaitForBuildAndMerge(t.Context())
 	inputs := agg.Files()
 	require.NotEmpty(t, inputs)
@@ -138,7 +138,7 @@ func TestMaintenanceObserverBuildCompletion(t *testing.T) {
 			}
 		}
 	}, func([]string) {})
-	finished := agg.BuildFilesInBackground(db, 3*stepSize, unboundedFinalityCtx)
+	finished := agg.BuildFilesInBackground(db, 3*stepSize, allIrreversible)
 	select {
 	case <-mergeReached:
 	case <-time.After(time.Minute):
@@ -176,8 +176,8 @@ func TestMaintenanceObserverPrunePrecedesBuild(t *testing.T) {
 			}
 		}
 	})
-	started, finished, err := agg.CollateAndPrune(t.Context(), db, func(kv.TemporalRwTx) (kv.FinalityContext, error) {
-		return unboundedFinalityCtx, nil
+	started, finished, err := agg.CollateAndPrune(t.Context(), db, func(kv.TemporalRwTx) (uint64, error) {
+		return allIrreversible, nil
 	})
 	require.NoError(t, err)
 	<-finished
@@ -210,8 +210,8 @@ func TestMaintenanceObserverPruneTransaction(t *testing.T) {
 			}))
 		}
 	})
-	_, finished, err := agg.CollateAndPrune(t.Context(), db, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-		return unboundedFinalityCtx, tx.Put(kv.Sequence, key, value)
+	_, finished, err := agg.CollateAndPrune(t.Context(), db, func(tx kv.TemporalRwTx) (uint64, error) {
+		return allIrreversible, tx.Put(kv.Sequence, key, value)
 	})
 	require.NoError(t, err)
 	<-finished

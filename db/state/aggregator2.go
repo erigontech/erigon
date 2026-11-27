@@ -53,7 +53,7 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
 	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
-		if err := CheckRestoreResetDone(opts.dirs); err != nil {
+		if err := CheckExecResetDone(opts.dirs); err != nil {
 			return nil, err
 		}
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
@@ -228,25 +228,54 @@ func (w *workersCfg) unlockEditing() {
 	w.pending = nil
 }
 
+func CheckMixedCommitmentFiles(d datadir.Dirs) error {
+	domainLegacy, domainV3, err := commitmentFileNames(d.SnapDomain)
+	if err != nil {
+		return err
+	}
+	historyLegacy, historyV3, err := commitmentFileNames(d.SnapHistory)
+	if err != nil {
+		return err
+	}
+	switch {
+	case domainLegacy != "" && domainV3 != "":
+		return mixedCommitmentError(domainLegacy, domainV3, statecfg.MixedCommitmentAdvice)
+	case historyLegacy != "" && historyV3 != "":
+		return mixedCommitmentError(historyLegacy, historyV3, statecfg.MixedCommitmentAdvice)
+	case domainLegacy != "" && historyV3 != "":
+		return mixedCommitmentError(domainLegacy, historyV3, "finish the conversion with `integration commitment convert --v3 --no-history`, or "+statecfg.MixedCommitmentAdvice)
+	case domainV3 != "" && historyLegacy != "":
+		return mixedCommitmentError(historyLegacy, domainV3, statecfg.MixedCommitmentAdvice)
+	}
+	return nil
+}
+
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
-	for _, dirPath := range d.VersionedDirs() {
-		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
-			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
-				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
-					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
-						"convert the datadir with `integration commitment convert --v3`, "+
-						"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
-				}
-				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
-					return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
-						"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
+	if err := CheckMixedCommitmentFiles(d); err != nil {
+		return err
+	}
+	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
+		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
+				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
+					"convert the datadir with `integration commitment convert --v3`, "+
+					"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
 			}
+			if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
+				return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
+					"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
+	}
+	return CheckSnapshotFileVersions(d)
+}
+
+func CheckSnapshotFileVersions(d datadir.Dirs) error {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { // skip magically disappeared files
@@ -290,6 +319,5 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			return err
 		}
 	}
-
 	return nil
 }

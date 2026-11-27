@@ -96,16 +96,21 @@ func (arr *RawUint64List) Static() bool {
 }
 
 func (arr *RawUint64List) Bytes() []byte {
-	out, _ := arr.EncodeSSZ(nil)
-	return out
+	return arr.appendBytes(nil)
 }
 
-func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
+func (arr *RawUint64List) appendBytes(dst []byte) []byte {
 	for _, v := range arr.u {
 		dst = binary.LittleEndian.AppendUint64(dst, v)
 	}
-	return dst, nil
+	return dst
+}
+
+func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	if len(arr.u) > arr.c {
+		return nil, fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(arr.u), arr.c)
+	}
+	return arr.appendBytes(buf), nil
 }
 
 func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {
@@ -206,20 +211,12 @@ func (arr *RawUint64List) MarshalJSON() ([]byte, error) {
 }
 
 func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
-	var strs []string
-	if err := json.Unmarshal(data, &strs); err != nil {
+	values, err := unmarshalUint64StringsJSON(data)
+	if err != nil {
 		return err
 	}
-	if len(strs) > arr.c {
-		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(strs), arr.c)
-	}
-	values := make([]uint64, len(strs))
-	for i, s := range strs {
-		v, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			return err
-		}
-		values[i] = v
+	if len(values) > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(values), arr.c)
 	}
 	arr.u = values
 	arr.cachedHash = common.Hash{}

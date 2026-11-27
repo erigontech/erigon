@@ -82,14 +82,14 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.
 	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
-		transaction.MaxFeePerGas = txn.GetFeeCap()
 		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+		if txType != types.FrameTxType {
+			transaction.MaxFeePerGas = txn.GetFeeCap()
+		}
 	}
 	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	} else if frame, ok := txn.(*types.FrameTransaction); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
 	}
 	return transaction
 }
@@ -314,30 +314,11 @@ const zeroStorageHash = "0x00000000000000000000000000000000000000000000000000000
 
 // GetAccountInfo returns the balance (hex), nonce, and bytecode for an account at the given block.
 func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error) {
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	if err != nil {
 		return "", 0, "", err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return "", 0, "", err
-	}
-
-	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return "", 0, "", err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
-		return "", 0, "", err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return "", 0, "", err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
@@ -369,30 +350,11 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	if err != nil {
-		return "", err
+		return zeroStorageHash, err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return zeroStorageHash, err
-	}
-
-	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return zeroStorageHash, err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
-		return zeroStorageHash, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return zeroStorageHash, err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
@@ -460,10 +422,6 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
-		return nil, err
-	}
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -514,7 +472,11 @@ func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, er
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
-	return api.eth.GetLogs(ctx, crit)
+	res, err := api.eth.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return res.Logs, nil
 }
 
 func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {

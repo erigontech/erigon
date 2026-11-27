@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
@@ -115,14 +114,6 @@ func (r *revisions) revertToSnapshot(revid int) revision {
 // reset falls back to the inline buf rather than retaining it for the IBS lifetime.
 const maxRetainedRevisionsCap = 2048
 
-// BalanceIncrease represents the increase of balance of an account that did not require
-// reading the account first
-type BalanceIncrease struct {
-	increase    uint256.Int
-	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
-	count       int  // Number of increases - this needs tracking for proper reversion
-}
-
 type accessOptions struct {
 	revertable bool
 }
@@ -146,12 +137,6 @@ type IntraBlockState struct {
 	stateReader StateReader
 	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
-	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject
-	stateObjectsDirty map[accounts.Address]struct{}
-
-	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
-
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
@@ -170,26 +155,24 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal          *journal
-	stateObjectArena stateObjectArena // same lifetime with `journal`. used only if `noMaterialize == true`
-	trace            bool
-	tracingHooks     *tracing.Hooks
-	balanceInc       map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
-	recordAccess     bool                                  // gates MarkAddressAccess — enabled in Prepare
+	journal      *journal
+	trace        bool
+	tracingHooks *tracing.Hooks
+	recordAccess bool // gates MarkAddressAccess — enabled in Prepare
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level.
-	versionMap      *VersionMap
-	versionedWrites WriteSet
-	versionedReads  ReadSet
-	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
+	versionMap *VersionMap
+	writes     WriteSet
+	reads      ReadSet
+	// origins collects committed pre-block base cells (at originIndex) that a cold
 	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
 	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
 	// Block-STM invariant holds (versionMap mutated only at pre-exec seed and flush).
-	versionedOrigins WriteSet
+	origins WriteSet
 	// committedBase memoizes the per-tx committed (pre-block) account fallback for
-	// versionedAccountBase. The base reader can serve the published writes of lower txs,
+	// accountBase. The base reader can serve the published writes of lower txs,
 	// so the memo keeps the attempt's view consistent; its read-only callers share the
 	// cached pointer. Reset per tx.
 	committedBase       map[accounts.Address]*accounts.Account
@@ -201,6 +184,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
+	cancel              func() // cancels the running EVM once a read dependency voids the run
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
@@ -209,11 +193,6 @@ type IntraBlockState struct {
 	sdProbe      map[accounts.Address]sdProbeEntry
 	sdProbeEpoch uint64
 
-	// noMaterialize suppresses the stateObject cache on the parallel execution
-	// path: create/write flows record only versioned cells and committed reads
-	// resolve from the state reader. Left false for genesis/RPC/serial, which
-	// still commit via FinalizeTx→so.data.
-	noMaterialize       bool
 	noConflictDetection bool
 	codeByHash          CodeByHash
 
@@ -221,7 +200,7 @@ type IntraBlockState struct {
 
 	lastCode accounts.Code // last code stored by SetCode
 	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
-	// tables and their unique handles alive, which is the reuse the next call pays for.
+	// tables and the canon table entries they point to alive, which is the reuse the next call pays for.
 	internCache *storageKeyCache
 	addrCache   *addressCache
 	internOps   uint32
@@ -238,21 +217,21 @@ type sdProbeEntry struct {
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	ibs := &IntraBlockState{
-		stateReader:       stateReader,
-		stateObjects:      map[accounts.Address]*stateObject{},
-		stateObjectsDirty: map[accounts.Address]struct{}{},
-		nilAccounts:       map[accounts.Address]struct{}{},
-		journal:           newJournal(),
-		accessList:        accessList{addresses: make(map[accounts.Address]int)},
-		transientStorage:  newTransientStorage(),
-		balanceInc:        map[accounts.Address]*BalanceIncrease{},
-		recordAccess:      false,
-		txIndex:           0,
-		trace:             false,
-		dep:               UnknownDep,
+		stateReader:      stateReader,
+		journal:          newJournal(),
+		accessList:       accessList{addresses: make(map[accounts.Address]int)},
+		transientStorage: newTransientStorage(),
+		recordAccess:     false,
+		txIndex:          0,
+		trace:            false,
+		dep:              UnknownDep,
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	// The IBS is always versioned: it reads through the version-map view and never
+	// materializes a stateObject. Callers that need a shared block-level map rebind
+	// it via SetVersionMap (NewWithVersionMap); the rest get a private empty map.
+	ibs.SetVersionMap(NewVersionMap(nil))
 	return ibs
 }
 
@@ -266,9 +245,7 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 // re-executing a block's txs in order (a later tx may re-create an account an
 // earlier one destroyed, so conflict detection stays on).
 func NewVersionedBlock(stateReader StateReader) *IntraBlockState {
-	ibs := NewWithVersionMap(stateReader, NewVersionMap(nil))
-	ibs.SetTxContext(0, 0)
-	return ibs
+	return New(stateReader)
 }
 
 // NewVersionedCall is NewVersionedBlock for a single call, with cross-tx conflict
@@ -311,14 +288,13 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
+// SetVersionMap binds the IBS to a non-nil version map. The IBS always reads and
+// writes through a version map; a nil map is an invariant violation, not a state.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
-	noMaterialize := versionMap != nil
-	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		panic("noMaterialize changed with arena slots outstanding")
+	if versionMap == nil {
+		panic("IntraBlockState requires a non-nil version map")
 	}
 	ibs.versionMap = versionMap
-	ibs.noMaterialize = noMaterialize
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
@@ -331,10 +307,6 @@ func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
 }
 
-func (ibs *IntraBlockState) IsVersioned() bool {
-	return ibs.versionMap != nil
-}
-
 func (ibs *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
 	ibs.tracingHooks = hooks
 }
@@ -344,44 +316,32 @@ func (ibs *IntraBlockState) SetTrace(trace bool) {
 }
 
 func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
-	return ibs.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key})
+	return ibs.writes.Has(WriteHeader{Address: addr, Path: path, Key: key})
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
-	clear(ibs.nilAccounts)
 	ibs.lastCode = accounts.Code{}
-	for _, so := range ibs.stateObjects {
-		so.release()
-	}
-	clear(ibs.stateObjects)
-	clear(ibs.stateObjectsDirty)
 	ibs.logs.reset()
-	clear(ibs.balanceInc)
 	ibs.clearJournalAndRefund()
 	ibs.txIndex = 0
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.versionMap = nil
-	// noMaterialize is meaningful only alongside a versionMap; clear it with the
-	// map so a reused IBS can't run unversioned with the stateObject cache still
-	// suppressed (which would silently drop writes). The versioned worker re-sets
-	// both right after Reset; the block assembler never calls Reset mid-block.
-	ibs.noMaterialize = false
+	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
-	// Read side rebinds to a fresh empty set: VersionedReads() at end of
+	// Read side rebinds to a fresh empty set: Reads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
 	// handed-over maps intact while the next tx lazily reallocs.
-	ibs.versionedReads = ReadSet{}
-	// Write side: VersionedWrites() returns Cloned snapshots, so the
-	// originals in ibs.versionedWrites are no longer referenced after the
+	ibs.reads = ReadSet{}
+	// Write side: Writes() returns Cloned snapshots, so the
+	// originals in ibs.writes are no longer referenced after the
 	// boundary call, so recycle can take every VW back.
-	ibs.versionedWrites.recycle()
-	ibs.versionedOrigins.ReleaseAndReset()
+	ibs.writes.recycle()
+	ibs.origins.ReleaseAndReset()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
 	ibs.accountReadCount = 0
@@ -417,7 +377,7 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 // ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
 // large to keep.
 func ReleasePooled(ibs *IntraBlockState) {
-	if ibs.stateObjects == nil { // closed: its maps are gone
+	if ibs.journal == nil { // closed
 		return
 	}
 	if ibs.resetForPool() {
@@ -434,8 +394,8 @@ const maxPooledEntries = 16 * 1024
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
-	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	reads := ibs.reads
+	poolable := ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
@@ -443,7 +403,7 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	// One call never hands its read set out, so the maps keep their capacity
 	// instead of the empty set Reset installs.
 	reads.clearForReuse()
-	ibs.versionedReads = reads
+	ibs.reads = reads
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)
@@ -465,50 +425,24 @@ func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection =
 
 func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 
-// Release Deprecated use Close
-func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
-
-// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// Close returns pooled resources (like journal, versioned writes)
 // back to their pools. Call this when the IntraBlockState is no longer needed.
 // Call Reset() to re-use IntraBlockState object
 // Idempotent, thread-unsafe
 func (ibs *IntraBlockState) Close() {
-	if ibs == nil || ibs.stateObjects == nil {
+	if ibs == nil || ibs.journal == nil {
 		return
 	}
 
-	stateObjects, journal := ibs.stateObjects, ibs.journal
-	ibs.stateObjects, ibs.journal = nil, nil
-	ibs.stateObjectArena.release()
+	journal := ibs.journal
+	ibs.journal = nil
 	ibs.logs.release()
 	ibs.revisions.reset()
-	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
+	// Safe to pool: Writes/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
-	ibs.versionedWrites.ReleaseAndReset()
-	ibs.versionedOrigins.ReleaseAndReset()
-
-	releaseResources(stateObjects, journal)
-}
-
-// The noMaterialize path never releases what it takes, so a pool draw there
-// would be a one-way drain on the materializing paths.
-func (ibs *IntraBlockState) allocStateObject() *stateObject {
-	if ibs.noMaterialize {
-		if so := ibs.stateObjectArena.alloc(); so != nil {
-			return so
-		}
-		return newHeapObject()
-	}
-	return stateObjectPool.Get().(*stateObject)
-}
-
-func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
-	for _, so := range stateObjects {
-		so.release()
-	}
-	if journal != nil {
-		journal.release()
-	}
+	ibs.writes.ReleaseAndReset()
+	ibs.origins.ReleaseAndReset()
+	journal.release()
 }
 
 // TxOutputBuffer gives the first top-level frame after Prepare a buffer for its
@@ -539,7 +473,7 @@ func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
 func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
-	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
+	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(lp.Address)) {
 		var topics string
 		for i := 0; i < len(lp.Topics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
@@ -623,23 +557,15 @@ func (ibs *IntraBlockState) SubRefund(gas uint64) error {
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self destructed accounts.
 func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Exists %x: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, exists)
 		}()
 	}
-	if ibs.versionMap == nil {
-		s, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return false, err
-		}
-		return s != nil && !s.deleted, nil
-	}
-
 	// Existence needs only the base record + self-destruct gate, not the
 	// per-field overlay. A same-tx self-destruct is still alive (EIP-6780); a
-	// cross-tx one makes versionedAccountBase return nil.
-	readAccount, _, _, err := ibs.versionedAccountBase(addr, true)
+	// cross-tx one makes accountBase return nil.
+	readAccount, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
@@ -649,18 +575,10 @@ func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Empty %x: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, empty)
 		}()
-	}
-	if ibs.versionMap == nil {
-		so, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return false, err
-		}
-
-		return so == nil || so.deleted || so.data.Empty(), nil
 	}
 	if warmEmpty, ok := ibs.emptyFromWarmReads(addr); ok {
 		return warmEmpty, nil
@@ -669,7 +587,7 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the per-field
 	// overlay and a full-account allocation are avoided.
-	account, source, _, err := ibs.versionedAccountBase(addr, true)
+	account, source, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
@@ -677,10 +595,10 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		if source == ReadSetRead {
 			return true, nil
 		}
-		// Do NOT call accountRead here: versionedAccountBase already recorded the
-		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
-		// account would make downstream reads treat the account as existing,
-		// skipping createObject and its AddressPath write that OCC needs.
+		// accountBase already recorded the AddressPath read with Val=nil.
+		// Overwriting it with a non-nil empty account would make downstream reads
+		// treat the account as existing, skipping create and its
+		// AddressPath write that OCC needs.
 		// The empty verdict depends on the balance being zero; record that balance
 		// read anchored on the destruct so a later funding write invalidates this
 		// reader. The destruct records a balance-clear write at this version (real
@@ -689,7 +607,7 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// absent account is not a real EVM balance access, so it stays out of the
 		// block access list.
 		if destructed, sdRes, ok := ibs.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+			ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{
 				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}, internal: true},
 			})
 		}
@@ -697,20 +615,19 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	}
 
 	// EIP-6780: an account self-destructed in THIS tx stays alive until end-of-tx
-	// cleanup, so it must not read as empty. On the noMaterialize path the
-	// self-destruct has already cleared the versioned nonce/code-hash/balance cells,
-	// so recognize the own-tx SelfDestruct write directly. CreateAccount records
-	// SelfDestructPath=false for a new or revived account, so only a true write
-	// counts as destroyed.
-	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
+	// cleanup, so it must not read as empty. The self-destruct has already
+	// cleared the versioned nonce/code-hash/balance cells, so recognize the own-tx
+	// SelfDestruct write directly. CreateAccount records SelfDestructPath=false for
+	// a new or revived account, so only a true write counts as destroyed.
+	if sd, ok := ibs.ownSelfDestruct(addr); ok && sd {
 		return false, nil
 	}
 
-	return ibs.emptyFromVersionedFields(addr, account)
+	return ibs.emptyFromFields(addr, account)
 }
 
-// emptyFromVersionedFields computes the EIP-161 emptiness verdict for an
-// account that versionedAccountBase resolved as existing, reading the current
+// emptyFromFields computes the EIP-161 emptiness verdict for an
+// account that accountBase resolved as existing, reading the current
 // balance/nonce/codeHash per-field (short-circuiting on the first non-empty
 // field) instead of reconstructing the whole account. The per-field refresh
 // reads apply the same self-destruct gate as the whole-account path.
@@ -722,32 +639,32 @@ func (ibs *IntraBlockState) emptyFromWarmReads(addr accounts.Address) (empty, ok
 	if !ibs.warmReadable(addr) {
 		return false, false
 	}
-	account, ok := ibs.versionedReads.GetAddress(addr)
+	account, ok := ibs.reads.GetAddress(addr)
 	if !ok || !warmSource(account.Source) || account.Val == nil || account.Val.IsNil() {
 		return false, false
 	}
-	balance, ok := ibs.versionedReads.GetBalance(addr)
+	balance, ok := ibs.reads.GetBalance(addr)
 	if !ok || !warmSource(balance.Source) {
 		return false, false
 	}
 	if !balance.Val.IsZero() {
 		return false, true
 	}
-	nonce, ok := ibs.versionedReads.GetNonce(addr)
+	nonce, ok := ibs.reads.GetNonce(addr)
 	if !ok || !warmSource(nonce.Source) {
 		return false, false
 	}
 	if nonce.Val != 0 {
 		return false, true
 	}
-	codeHash, ok := ibs.versionedReads.GetCodeHash(addr)
+	codeHash, ok := ibs.reads.GetCodeHash(addr)
 	if !ok || !warmSource(codeHash.Source) {
 		return false, false
 	}
 	return codeHash.Val == accounts.EmptyCodeHash, true
 }
 
-func (ibs *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
+func (ibs *IntraBlockState) emptyFromFields(addr accounts.Address, account *accounts.Account) (bool, error) {
 	balance, _, _, err := refreshBalance(ibs, addr, account.Balance)
 	if err != nil {
 		return false, err
@@ -777,24 +694,9 @@ func (ibs *IntraBlockState) GetBalance(addr accounts.Address) (uint256.Int, erro
 }
 
 func (ibs *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return u256.Num0, false, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-				balance := stateObject.Balance()
-				fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, balance.String())
-			}
-			return stateObject.Balance(), true, nil
-		}
-		return u256.Num0, false, nil
-	}
-
 	balance, source, _, err := readBalance(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, balance.String())
 	}
 	return balance, source == StorageRead || source == MapRead, err
@@ -802,20 +704,9 @@ func (ibs *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return 0, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			return stateObject.Nonce(), nil
-		}
-		return 0, nil
-	}
+	nonce, _, _, err := readNonce(ibs, addr, false)
 
-	nonce, _, _, err := readNonce(ibs, addr)
-
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
 	}
 
@@ -835,10 +726,10 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 
 // ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded past its
 // end. On a code-cache miss a reader that serves segments copies without caching the code; any
-// other reader reads the whole code, which fills the cache. Without a version map, or with a
-// code-access hook, it always reads the whole code.
+// other reader reads the whole code, which fills the cache. With a code-access hook it always
+// reads the whole code.
 func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) error {
-	if ibs.versionMap == nil || ibs.codeAccess != nil {
+	if ibs.codeAccess != nil {
 		code, err := ibs.GetCode(addr)
 		common.CopySegment(dst, code, from)
 		return err
@@ -848,40 +739,16 @@ func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64
 	if !seg.copied {
 		common.CopySegment(dst, code.Bytes, from)
 	}
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) ReadCodeSegmentTo (%s) %x: from %d, %d bytes, err: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, from, len(dst), err)
 	}
 	return err
 }
 
 func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return accounts.Code{}, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			code, err := stateObject.CodeTyped()
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-				if err != nil {
-					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, err)
-				} else {
-					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, code.Len())
-				}
-			}
-			if err == nil {
-				ibs.callCodeAccessHook(addr, code.Bytes)
-			}
-			return code, err
-		}
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, 0)
-		}
-		return accounts.Code{}, nil
-	}
 	code, source, _, err := readCode(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		if err != nil {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, err)
 		} else {
@@ -897,41 +764,13 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return 0, err
-		}
-		if stateObject == nil || stateObject.deleted {
-			return 0, nil
-		}
-		if stateObject.code.Bytes != nil {
-			ibs.callCodeAccessHook(addr, stateObject.code.Bytes)
-			return stateObject.code.Len(), nil
-		}
-		if stateObject.data.CodeHash.IsEmpty() {
-			return 0, nil
-		}
-		// Size-only read: ReadAccountCodeSize, not ReadAccountCode. It routes
-		// through the size-only cache layer, and is correct on the Stateless
-		// reader — a size-only witness node has the size but no bytes, so
-		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
-		// consensus.
-		size, err := ibs.stateReader.ReadAccountCodeSize(addr)
-		ibs.RecordStateReadError(err)
-		if err != nil {
-			return 0, err
-		}
-		return size, nil
-	}
-
 	if ibs.codeAccess != nil {
 		code, err := ibs.getCode(addr)
 		return code.Len(), err
 	}
 	size, source, _, err := readCodeSize(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetCodeSize (%s) %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, size)
 	}
 
@@ -953,17 +792,6 @@ func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byt
 }
 
 func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return accounts.NilCodeHash, err
-		}
-		if stateObject == nil || stateObject.deleted {
-			return accounts.NilCodeHash, nil
-		}
-		return stateObject.data.CodeHash, nil
-	}
-
 	hash, _, _, err := readCodeHash(ibs, addr, false)
 	if err != nil {
 		return accounts.NilCodeHash, err
@@ -973,7 +801,7 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	// The SELFDESTRUCT cleared the CodeHashPath cell but the code is still present,
 	// so recompute the hash from it.
 	if hash == accounts.EmptyCodeHash && ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
-		if cw, ok := ibs.versionedWrites.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
+		if cw, ok := ibs.writes.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
 			return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
 		}
 	}
@@ -983,7 +811,7 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 		// codehash from the reconstructed account (EmptyCodeHash), distinguishing it
 		// from a genuinely absent account (NilCodeHash). Branch-agnostic: a burned
 		// account reconstructs as nil here and falls through to NilCodeHash.
-		acc, _, _, err := ibs.getVersionedAccount(addr, false)
+		acc, _, _, err := ibs.accountBase(addr, false)
 		if err != nil {
 			return accounts.NilCodeHash, err
 		}
@@ -995,7 +823,7 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 }
 
 // GetCommittedCodeHash returns the code hash at tx start (this-tx-exclusive),
-// read through versionedReadCore so a predecessor's in-flight code write is seen
+// read through readCore so a predecessor's in-flight code write is seen
 // as a dependency rather than silently falling back to the pre-block value. It is
 // the code-hash analogue of GetCommittedState; SetCode's net-zero baseline uses
 // it. Absent/code-less accounts normalise to EmptyCodeHash.
@@ -1010,15 +838,17 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 	return hash, nil
 }
 
-// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
-// code hash comes from the same read as the code.
-func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
+// ResolveCode returns the code a call to addr executes. With followDelegation set, it follows an
+// EIP-7702 delegation; otherwise a delegation designator is ordinary code. The code hash comes
+// from the same read as the code.
+func (ibs *IntraBlockState) ResolveCode(addr accounts.Address, followDelegation bool) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr)
-	// eip-7702
-	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation)
+	if followDelegation {
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			return ibs.getCode(delegation)
+		}
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -1030,30 +860,13 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// eip-7702 - for account read recording we don't count this as
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
-	if ibs.versionMap != nil {
-		code, _, _, err := readCode(ibs, addr)
-		if err != nil {
-			return accounts.ZeroAddress, false, err
-		}
-		ibs.callCodeAccessHook(addr, code.Bytes)
-		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-			return delegation, true, nil
-		}
-		return accounts.ZeroAddress, false, nil
-	}
-	stateObject, err := ibs.getStateObject(addr, false)
+	code, _, _, err := readCode(ibs, addr)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
 	}
-	if stateObject != nil && !stateObject.deleted {
-		code, err := stateObject.Code()
-		if err != nil {
-			return accounts.ZeroAddress, false, err
-		}
-		ibs.callCodeAccessHook(addr, code)
-		if delegation, ok := types.ParseDelegation(code); ok {
-			return delegation, true, nil
-		}
+	ibs.callCodeAccessHook(addr, code.Bytes)
+	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+		return delegation, true, nil
 	}
 	return accounts.ZeroAddress, false, nil
 }
@@ -1061,25 +874,25 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := readState(ibs, addr, key)
+	value, source, _, err := readState(ibs, addr, key)
 
-	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
-		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
+	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Value()) && traceKey(key))) {
+		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, value.Hex()[2:])
 	}
 
-	return versionedValue, err
+	return value, err
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := readCommittedState(ibs, addr, key)
+	value, source, _, err := readCommittedState(ibs, addr, key)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
+		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, value.Hex()[2:])
 	}
 
-	return versionedValue, err
+	return value, err
 }
 
 func (ibs *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
@@ -1092,48 +905,30 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return ibs.versionMap.ReadStatus(addr, path, key, txIdx)
 }
 
-// writeBalanceVersioned records a balance change on the versionMap write-set and
-// the journal without materializing the stateObject on the common existing-alive
-// path; an already-materialized one is kept in step. An absent or
-// destroyed-no-revival account is materialized via GetOrNewStateObject so
-// createObject records the AddressPath write OCC needs; the create path never
-// reads balance (matching the old stateObject path). The journal prev comes from a
-// caller that already read the balance, or, when nil, is read only in the existing
-// branch so a create does not widen the OCC read-set with a spurious BalancePath
-// read.
-func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
-	base, _, _, err := ibs.versionedAccountBase(addr, true)
+// writeBalance records a balance change on the versionMap write-set and the journal.
+// An absent account (base == nil) is created via create, which records the AddressPath
+// write OCC needs; the create path never reads balance, so its journal prev is the fresh
+// account's zero. A live account — including one with an in-block lifecycle event such as
+// a SELFDESTRUCT — keeps its record and journals its own balance, read from the caller
+// or, when nil, here so a create does not widen the OCC read-set with a spurious balance read.
+func (ibs *IntraBlockState) writeBalance(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
+	base, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return err
 	}
-	if base != nil && prev == nil {
+	if base == nil {
+		ibs.create(addr, false)
+		prev = &uint256.Int{}
+	} else if prev == nil {
 		cur, _, err := ibs.getBalance(addr)
 		if err != nil {
 			return err
 		}
 		prev = &cur
 	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		stateObject, err := ibs.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-		// A destroyed-then-revived account's transient lags this tx's own balance
-		// write, so seed the live balance first or a revert restores the wrong
-		// one. The base==nil create path never read balance, so leave it untouched.
-		if base != nil {
-			stateObject.setBalance(*prev)
-		}
-		stateObject.SetBalance(update, wasCommited, reason)
-		ibs.recordWriteBalance(addr, update)
-		return nil
-	}
-	ibs.journal.balanceChange(addr, *prev, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
+	ibs.journal.balanceChange(addr, *prev, wasCommited, ibs.writes.balanceDeleted(addr))
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
-	}
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.setBalance(update)
 	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
@@ -1142,48 +937,6 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if ibs.versionMap == nil {
-		// If this account has not been read, add to the balance increment map
-		if _, needAccount := ibs.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
-			ibs.journal.balanceIncrease(addr, amount)
-
-			bi, ok := ibs.balanceInc[addr]
-			if !ok {
-				bi = &BalanceIncrease{}
-				ibs.balanceInc[addr] = bi
-			}
-
-			if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
-				prev := new(uint256.Int)
-				amount := amount
-				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-					ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-				}
-				var readStart time.Time
-				if dbg.KVReadLevelledMetrics {
-					readStart = time.Now()
-				}
-				account, _ := ibs.stateReader.ReadAccountDataForDebug(addr)
-				if dbg.KVReadLevelledMetrics {
-					ibs.accountReadDuration += time.Since(readStart)
-					ibs.accountReadCount++
-				}
-				ibs.stateReader.SetTrace(false, "")
-				if account != nil {
-					prev.Add(&account.Balance, &bi.increase)
-				} else {
-					prev.Add(prev, &bi.increase)
-				}
-
-				ibs.tracingHooks.OnBalanceChange(addr, *prev, *new(uint256.Int).Add(prev, &amount), reason)
-			}
-
-			bi.increase = u256.Add(bi.increase, amount)
-			bi.count++
-			return nil
-		}
-	}
-
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -1195,7 +948,7 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			bal, _ := ibs.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
@@ -1210,95 +963,49 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 
 	update := u256.Add(prev, amount)
 
-	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
-	}
-
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	stateObject.SetBalance(update, wasCommited, reason)
-	ibs.recordWriteBalance(addr, update)
-	return nil
-}
-
-func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
-	ibs.journal.touchAccount(addr, false, uint256.Int{})
-	if addr == ripemd {
-		// Explicitly put it in the dirty-cache, which is otherwise generated from
-		// flattened journals.
-		ibs.journal.dirty(addr)
-	}
+	return ibs.writeBalance(addr, &prev, update, wasCommited, reason)
 }
 
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
-	if ibs.versionMap != nil && addr != ripemd {
-		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
+	if addr != ripemd {
+		if _, ok := ibs.writes.GetBalance(addr); ok {
 			return nil
 		}
 	}
-	markTouched := func() {
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
-		}
-		if ibs.versionMap != nil {
-			// Versioned path: pair the BalancePath=0 write with a journal entry
-			// that reverts it, so the write-set stays in step through reverts
-			// without any dirties re-processing (deprecated on this path).
-			prevWrite, had := ibs.versionedWrites.GetBalance(addr)
-			var prev uint256.Int
-			if had {
-				prev = prevWrite.Val
-			}
-			ibs.recordWriteBalance(addr, uint256.Int{})
-			ibs.journal.touchAccount(addr, !had, prev)
-			return
-		}
-		ibs.recordWriteBalance(addr, uint256.Int{})
-		if _, ok := ibs.journal.dirties[addr]; !ok {
-			ibs.touchAccount(addr)
-		}
-	}
-
-	if ibs.versionMap != nil {
-		// The touch only depends on emptiness. For an existing account compute
-		// it from field reads without materializing/reconstructing the
-		// stateObject; only an absent account needs GetOrNewStateObject so
-		// createObject records the AddressPath write (OCC create detection).
-		account, _, _, err := ibs.versionedAccountBase(addr, true)
-		if err != nil {
-			return err
-		}
-		if account != nil {
-			empty, err := ibs.emptyFromVersionedFields(addr, account)
-			if err != nil {
-				return err
-			}
-			if empty {
-				markTouched()
-			}
-			return nil
-		}
-		// No cell and no committed record: getStateObject would resolve the same absence again.
-		if ibs.noMaterialize && ibs.versionMap.load(addr) == nil {
-			ibs.createObject(addr, nil)
-			markTouched()
-			return nil
-		}
-	}
-
-	stateObject, err := ibs.GetOrNewStateObject(addr)
+	// The touch only depends on emptiness. For an existing account compute it
+	// from field reads without reconstructing the account.
+	account, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return err
 	}
-	if stateObject.data.Empty() {
-		markTouched()
+	if account != nil {
+		empty, err := ibs.emptyFromFields(addr, account)
+		if err != nil {
+			return err
+		}
+		if !empty {
+			return nil
+		}
+	} else {
+		// Absent or destroyed-no-revival: (re)create as empty and touch, recording
+		// the AddressPath write for OCC create detection. A fresh account is empty.
+		ibs.create(addr, false)
 	}
-
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
+		fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
+	}
+	// Pair the BalancePath=0 write with a journal entry that reverts it, so the
+	// write-set stays in step through reverts.
+	prevWrite, had := ibs.writes.GetBalance(addr)
+	var prev uint256.Int
+	if had {
+		prev = prevWrite.Val
+	}
+	ibs.recordWriteBalance(addr, uint256.Int{})
+	ibs.journal.touchAccount(addr, !had, prev)
 	return nil
 }
 
@@ -1342,7 +1049,7 @@ func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	if err != nil {
 		return nil, err
 	}
-	nonce, _, _, err := readNonce(ibs, addr)
+	nonce, _, _, err := readNonce(ibs, addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,28 +1069,24 @@ func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	return &acc, nil
 }
 
-func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
-	return ibs.versionedAccountBase(addr, readStorage)
-}
-
 // readAbsentFromMap reports whether this tx already read addr as absent from the
 // version map (a destruct with no revival). That verdict is final for the tx: the
 // committed record must not revive it, and validation catches a later re-creation.
 func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.reads.GetAddress(addr)
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // readAbsentFromCommitted reports whether this tx already read addr as absent from the committed state.
 func (ibs *IntraBlockState) readAbsentFromCommitted(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.reads.GetAddress(addr)
 	return ok && tr.Source == StorageRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
 // the base reader can serve a lower tx's creation later in the attempt.
 func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.reads.GetAddress(addr)
 	return ok && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
@@ -1394,20 +1097,16 @@ func (ibs *IntraBlockState) absenceIsFinal(addr accounts.Address) bool {
 	if !ibs.readAbsentFromMap(addr) {
 		return false
 	}
-	tr, _ := ibs.versionedReads.GetAddress(addr)
+	tr, _ := ibs.reads.GetAddress(addr)
 	return !ibs.versionMap.destructKeptBalance(addr, tr.Version.TxIndex)
 }
 
-// versionedAccountBase resolves account existence via the AddressPath read (and
+// accountBase resolves account existence via the AddressPath read (and
 // storage fallback), applying the self-destruct/revival gate, but does NOT
 // overlay the per-field versionMap cells. It returns nil when the account is
 // absent or was destroyed with no revival. The AddressPath read it performs
 // records the nil-read that OCC uses to detect create/absent conflicts.
-func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
-	if ibs.versionMap == nil {
-		return nil, UnknownSource, UnknownVersion, nil
-	}
-
+func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	readAccount, source, version, err := readAccount(ibs, addr)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
@@ -1422,6 +1121,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// A repeat read keeps a recorded committed absence: validation rejects it if a
 	// destruct or re-creation was flushed since.
 	repeatedCommittedAbsence := readAccount == nil && source == StorageRead && ibs.readAbsentFromCommitted(addr)
+	var recreation *ReadResult
 	if readAccount == nil && !repeatedCommittedAbsence {
 		if ibs.versionMap.absentAccountHook != nil {
 			ibs.versionMap.absentAccountHook()
@@ -1463,13 +1163,15 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				// estimate again, so the committed record must not revive the account, here or
 				// in a later load of it. Only a re-creation by the destroying tx itself is left to
 				// the committed reader.
-				if _, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1); res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
+				_, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1)
+				if res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
 					destructVersion := sdRes.Version()
-					if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
-						ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
+					if _, ok := ibs.reads.GetAddress(addr); !ok {
+						ibs.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
 					}
 					return nil, MapRead, destructVersion, nil
 				}
+				recreation = &res
 			}
 		}
 	}
@@ -1501,7 +1203,17 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
 		if destructDep != UnknownDep {
-			ibs.dep = max(ibs.dep, destructDep)
+			ibs.recordDep(destructDep)
+		}
+		// Only the re-creation keeps the account present, so the read must fail validation once it is gone.
+		if recreation != nil {
+			if recreation.Status() == MVReadResultDependency {
+				ibs.recordDep(recreation.DepIdx())
+			}
+			if _, ok := ibs.reads.GetAddress(addr); !ok {
+				acc := *readAccount
+				ibs.reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: recreation.Version()}, Val: NewAccountView(&acc)})
+			}
 		}
 	}
 
@@ -1513,7 +1225,7 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 	if cached, ok := ibs.committedBase[addr]; ok {
 		return cached, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -1556,7 +1268,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 		return err
 	}
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		defer func() {
 			bal, _ := ibs.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
@@ -1567,90 +1279,48 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 
 	update := u256.Sub(prev, amount)
 
-	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
-	}
-
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	stateObject.SetBalance(update, wasCommited, reason)
-	return nil
+	return ibs.writeBalance(addr, &prev, update, wasCommited, reason)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		amount := amount
 		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, amount.String())
 	}
-	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, nil, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
-	}
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	stateObject.SetBalance(amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
-	ibs.recordWriteBalance(addr, stateObject.Balance())
-	return nil
+	return ibs.writeBalance(addr, nil, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason tracing.NonceChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetNonce %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
 	}
 
 	wasCommited := !ibs.hasWrite(addr, NoncePath, accounts.NilKey)
-	if ibs.versionMap != nil {
-		return ibs.writeNonceVersioned(addr, nonce, wasCommited, reason)
-	}
-
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-
-	stateObject.SetNonce(nonce, wasCommited, reason)
-	ibs.recordWriteNonce(addr, stateObject.Nonce(), reason)
-	return nil
+	return ibs.writeNonce(addr, nonce, wasCommited, reason)
 }
 
-// writeNonceVersioned records a nonce write on the parallel (versionMap) path
-// without materializing a stateObject for an existing, live account. A nonce SET
-// does not depend on the prior value, so prev is read WITHOUT recording an OCC
-// read. Absent/destroyed accounts still materialize (account creation).
-func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
-	base, _, _, err := ibs.versionedAccountBase(addr, true)
+// writeNonce records a nonce write on the parallel (versionMap) path without
+// materializing a stateObject. A nonce SET does not depend on the prior value,
+// so prev is read WITHOUT recording an OCC read. An absent account (base == nil)
+// is created via create with no stateObject; a live account with an in-block
+// lifecycle event keeps its record and code.
+func (ibs *IntraBlockState) writeNonce(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
+	base, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return err
 	}
-	if base == nil || ibs.accountLifecycle(addr) {
-		stateObject, err := ibs.GetOrNewStateObject(addr)
-		if err != nil {
-			return err
-		}
-		// The object is built from the base record and can lag this tx's own
-		// nonce write: seed it so a revert restores the live nonce.
-		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-			stateObject.setNonce(vw.Val)
-		}
-		stateObject.SetNonce(nonce, wasCommited, reason)
-		ibs.recordWriteNonce(addr, nonce, reason)
-		return nil
+	// The journal prev is the fresh account's zero on a create, else the live account's
+	// nonce, finally overridden by this tx's own nonce cell, which is authoritative when
+	// it leads the base record.
+	prev := uint64(0)
+	if base == nil {
+		ibs.create(addr, false)
+	} else {
+		prev = base.Nonce
 	}
-	prev := base.Nonce
-	// Keep an already-materialized stateObject's so.data in step so the
-	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
-	if so, ok := ibs.stateObjects[addr]; ok {
-		prev = so.data.Nonce
-		so.setNonce(nonce)
-	}
-	// The tx's own nonce cell is authoritative for the journal prev: so.data can
-	// lag if the object was materialized after this tx's earlier writes.
-	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
+	if vw, ok := ibs.writes.GetNonce(addr); ok {
 		prev = vw.Val
 	}
 	ibs.journal.nonceChange(addr, prev, wasCommited)
@@ -1661,7 +1331,7 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 			ibs.tracingHooks.OnNonceChange(addr, prev, nonce)
 		}
 	}
-	ibs.recordWriteNonce(addr, nonce, reason)
+	ibs.recordWriteNonce(addr, nonce)
 	return nil
 }
 
@@ -1684,7 +1354,7 @@ func printCode(c []byte) (int, string) {
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		lenc, cs := printCode(code)
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, lenc, cs)
 	}
@@ -1696,68 +1366,19 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		ibs.lastCode = canonical
 	}
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
-	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
+	if !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
 	}
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	codeHash := canonical.Hash
-	baseCodeHash := stateObject.data.CodeHash
-	origHash := stateObject.original.CodeHash
-	if ibs.versionMap != nil {
-		// baseCodeHash ("what this SetCode saw") is the current cell, including
-		// this tx's own earlier code writes. origHash (the cumulative net-zero
-		// baseline) is the versionMap floor at txIndex — the tx-start value.
-		if ch, chErr := ibs.GetCodeHash(addr); chErr == nil {
-			baseCodeHash = ch
-		}
-		origHash, err = ibs.GetCommittedCodeHash(addr)
-		if err != nil {
-			return err
-		}
-	}
-	if ibs.noMaterialize {
-		seed, err := ibs.codeSeed(addr, baseCodeHash)
-		if err != nil {
-			return err
-		}
-		stateObject.setCode(seed)
-	}
-	written, err := stateObject.SetCode(canonical, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
-	if err != nil {
-		return err
-	}
-	if written {
-		// Skip when the new code matches either the value seen by THIS SetCode
-		// call (revert to in-tx base) or the pre-tx original (cumulative net-zero,
-		// e.g. an EIP-7702 delegate-then-reset in the same tx). The net-zero case
-		// is disabled for newly created objects, whose original holds the
-		// pre-creation snapshot — deleting the code writes there corrupts the trie.
-		matchesOriginal := !stateObject.newlyCreated && codeHash == origHash
-		unchanged := codeHash == baseCodeHash || matchesOriginal
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			if unchanged {
-				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
-			} else {
-				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, len(code))
-			}
-		}
-		ibs.writeCode(addr, canonical, unchanged)
-	}
-	return nil
+	return ibs.writeCode(addr, canonical, reason)
 }
 
-// writeCode records code as this tx's Code, CodeHash and CodeSize writes, or
+// writeCodeCells records code as this tx's Code, CodeHash and CodeSize writes, or
 // drops those writes when the code is unchanged.
-func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, unchanged bool) {
+func (ibs *IntraBlockState) writeCodeCells(addr accounts.Address, code accounts.Code, unchanged bool) {
 	if unchanged {
-		ibs.versionedWrites.DelCode(addr)
-		ibs.versionedWrites.DelCodeHash(addr)
-		ibs.versionedWrites.DelCodeSize(addr)
+		ibs.writes.DelCode(addr)
+		ibs.writes.DelCodeHash(addr)
+		ibs.writes.DelCodeSize(addr)
 		return
 	}
 	ibs.recordWriteCode(addr, code)
@@ -1783,12 +1404,11 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 	}
 }
 
-// setCreatedCode is SetCode for an account this tx created, on the noMaterialize
-// path: its prior code is this tx's own cells, so no transient stateObject is
-// rebuilt, and the net-zero check against the tx-start code does not apply.
+// setCreatedCode is SetCode for an account this tx created: its prior code is this
+// tx's own cells, so the net-zero check against the tx-start code does not apply.
 func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
-	cw, hadCode := ibs.versionedWrites.GetCode(addr)
-	hw, hadHash := ibs.versionedWrites.GetCodeHash(addr)
+	cw, hadCode := ibs.writes.GetCode(addr)
+	hw, hadHash := ibs.writes.GetCodeHash(addr)
 	var prev accounts.Code
 	switch {
 	case hadCode:
@@ -1809,7 +1429,77 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 		return nil
 	}
 	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
-	ibs.writeCode(addr, code, code.Hash == prev.Hash)
+	ibs.writeCodeCells(addr, code, code.Hash == prev.Hash)
+	return nil
+}
+
+// getOrCreate ensures addr has a record — creating one when the version map has
+// none — and reports whether this tx created it (its own AddressPath write, from the
+// create here or an earlier op in this tx).
+func (ibs *IntraBlockState) getOrCreate(addr accounts.Address) (created bool, err error) {
+	base, _, _, err := ibs.accountBase(addr, false)
+	if err != nil {
+		return false, err
+	}
+	if base == nil {
+		ibs.create(addr, false)
+	}
+	_, created = ibs.writes.GetAddress(addr)
+	return created, nil
+}
+
+// writeCode is SetCode for an account not caught by setCreatedCode (an existing,
+// warm or lifecycle account). An absent account is created first, which makes the
+// pre-write code empty and disables the net-zero check.
+func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+	// createdThisTx is the own AddressPath write (from the create here or an earlier
+	// op in this tx, e.g. create→SELFDESTRUCT), not base == nil: the create's own
+	// AddressPath write already makes base non-nil.
+	createdThisTx, err := ibs.getOrCreate(addr)
+	if err != nil {
+		return err
+	}
+	// baseCodeHash ("what this SetCode saw") is the current cell, including this
+	// tx's own earlier code writes. origHash (the cumulative net-zero baseline) is
+	// the versionMap floor at txIndex — the tx-start value.
+	baseCodeHash, err := ibs.GetCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	origHash, err := ibs.GetCommittedCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	seed, err := ibs.codeSeed(addr, baseCodeHash)
+	if err != nil {
+		return err
+	}
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
+	if seed.Hash == code.Hash && bytes.Equal(seed.Bytes, code.Bytes) {
+		return nil
+	}
+	// Pass seed.Hash (the actual previous code's hash), not baseCodeHash (the
+	// CodeHashPath cell, which can lag this tx's own Code write), so a revert restores
+	// exactly what the materialized path restored.
+	ibs.journalCodeChange(addr, seed.Hash, seed.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	// Skip when the new code matches either the value seen by this SetCode call
+	// (revert to in-tx base) or the pre-tx original (cumulative net-zero, e.g. an
+	// EIP-7702 delegate-then-reset in the same tx). The net-zero case is disabled
+	// for an account this tx created — its origHash is a pre-creation snapshot, not a
+	// value the tx reverts to.
+	matchesOriginal := !createdThisTx && code.Hash == origHash
+	unchanged := code.Hash == baseCodeHash || matchesOriginal
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
+		if unchanged {
+			fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
+				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, origHash, len(code.Bytes))
+		} else {
+			fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
+				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, len(code.Bytes))
+		}
+	}
+	ibs.writeCodeCells(addr, code, unchanged)
 	return nil
 }
 
@@ -1845,53 +1535,16 @@ func (ibs *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
-	return ibs.setState(addr, key, value, false)
-}
-
-func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, key, value.Hex())
 	}
-
-	// The EVM SSTORE path (force==false) writes through cells without
-	// materializing a stateObject. force==true (replay) and a fakeStorage
-	// override (eth_simulate) still need the object.
-	if ibs.versionMap != nil && !force {
-		if so, ok := ibs.stateObjects[addr]; !ok || so.fakeStorage == nil {
-			return ibs.setStateVersioned(addr, key, value)
-		}
-	}
-
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	set, err := stateObject.SetState(key, value, force)
-	if err != nil {
-		return err
-	}
-	if set {
-		// Record even when value equals origin: dropping the write entry leaves
-		// the journal nothing to restore when a nested write is reverted.
-		prev, _ := stateObject.GetCommittedState(key)
-		ibs.recordWriteStorage(addr, key, value, prev)
-	}
-	return nil
-}
-
-// setStateVersioned records a storage write on the parallel (versionMap) path
-// without materializing a stateObject. It mirrors stateObject.SetState's set
-// decision and journalling. An already-materialized stateObject is kept in step
-// so the so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
-func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
 	prev, source, _, commited, err := readStateForSet(ibs, addr, key)
 	if err != nil {
 		return err
 	}
-	// See stateObject.SetState: a value resolved from a cached read or the
-	// version map has no versioned write for this key this tx, so this is the
-	// first write and commited must be true for storageChange.revert to delete
-	// (not update) the cell.
+	// A value resolved from a cached read or the version map has no versioned
+	// write for this key this tx, so this is the first write and commited must be
+	// true for storageChange.revert to delete (not update) the cell.
 	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
 		commited = true
 	}
@@ -1902,80 +1555,61 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnStorageChange != nil {
 		ibs.tracingHooks.OnStorageChange(addr, key, prev, value)
 	}
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.setState(key, value)
-	}
 	ibs.recordWriteStorage(addr, key, value, prev)
 	return nil
 }
 
+type Storage map[accounts.StorageKey]uint256.Int
+
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	stateObject, err := ibs.GetOrNewStateObject(addr)
+	if _, err := ibs.getOrCreate(addr); err != nil {
+		return err
+	}
+	incarnation, err := ibs.GetIncarnation(addr)
 	if err != nil {
 		return err
 	}
-	if ibs.versionMap != nil {
-		// An incarnation cell wipes storage and code for later transactions: a slot
-		// or code without a newer cell reads as empty, so the code is written again.
-		code, err := ibs.getCode(addr)
-		if err != nil {
-			return err
-		}
-		if code.Len() > 0 {
-			ibs.writeCode(addr, code, false)
-		}
-		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
-		// The incarnation cell does not hide a slot cell of an earlier transaction.
-		for _, key := range ibs.versionMap.StorageKeys(addr) {
-			prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
-			ibs.recordWriteStorage(addr, key, uint256.Int{}, prev)
-		}
-		for key, value := range storage {
-			prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
-			ibs.recordWriteStorage(addr, key, value, prev)
-		}
-		return nil
+	// An incarnation cell wipes storage and code for later transactions: a slot
+	// or code without a newer cell reads as empty, so the code is written again.
+	code, err := ibs.getCode(addr)
+	if err != nil {
+		return err
 	}
-	if stateObject != nil {
-		stateObject.SetStorage(storage)
+	if code.Len() > 0 {
+		ibs.writeCodeCells(addr, code, false)
+	}
+	ibs.recordWriteIncarnation(addr, incarnation)
+	// The incarnation cell does not hide a slot cell of an earlier transaction.
+	for _, key := range ibs.versionMap.StorageKeys(addr) {
+		prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
+		ibs.recordWriteStorage(addr, key, uint256.Int{}, prev)
+	}
+	for key, value := range storage {
+		prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
+		ibs.recordWriteStorage(addr, key, value, prev)
 	}
 	return nil
 }
 
 // SetIncarnation sets incarnation for account if account exists
 func (ibs *IntraBlockState) SetIncarnation(addr accounts.Address, incarnation uint64) error {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SetIncarnation %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
 	}
 
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
+	if _, err := ibs.getOrCreate(addr); err != nil {
 		return err
 	}
-	if stateObject != nil {
-		stateObject.setIncarnation(incarnation)
-		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
-	}
+	ibs.recordWriteIncarnation(addr, incarnation)
 	return nil
 }
 
 func (ibs *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error) {
-	if ibs.versionMap == nil {
-		stateObject, err := ibs.getStateObject(addr, true)
-		if err != nil {
-			return 0, err
-		}
-		if stateObject != nil {
-			return stateObject.data.Incarnation, nil
-		}
-		return 0, nil
-	}
-
 	incarnation, _, _, err := readIncarnation(ibs, addr)
 
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) GetIncarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
 	}
 
@@ -1986,62 +1620,23 @@ func (ibs *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 // false the account balance is burned (pre-EIP-6780/6780 behaviour); when true
 // the balance is left untouched (EIP-8246) and only cleared at finalization if
 // the account ends up empty.
-//
-// The account's state object is still available until the state is committed,
-// getStateObject will return a non-nil account after Suicide.
 func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance bool) (bool, error) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
 	}
-	if ibs.versionMap != nil {
-		return ibs.selfdestructVersioned(addr, preserveBalance)
-	}
-	stateObject, err := ibs.getStateObject(addr, true)
-	if err != nil {
-		return false, err
-	}
-	if stateObject == nil || stateObject.deleted {
-		return false, nil
-	}
-	prevBalance := stateObject.Balance()
-	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, stateObject.createdContract, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
-
-	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
-		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
-	}
-
-	stateObject.markSelfdestructed()
-	stateObject.destructedCreated = stateObject.destructedCreated || stateObject.createdContract
-	stateObject.createdContract = false
-
-	ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
-	ibs.recordWriteSelfDestruct(addr, stateObject.selfdestructed)
-	if preserveBalance && !prevBalance.IsZero() {
-		ibs.recordWriteBalance(addr, prevBalance)
-	} else {
-		stateObject.data.Balance.Clear()
-		ibs.recordWriteBalanceDeleted(addr)
-	}
-
-	// Deliberately no StoragePath=0 writes for the dirty slots: the account
-	// stays alive until end-of-tx, so a re-entry's GetState must still see the
-	// dirty values.
-
-	return true, nil
+	return ibs.selfdestruct(addr, preserveBalance)
 }
 
-// selfdestructVersioned records a self-destruct on the parallel (versionMap)
-// path without materializing a stateObject. An already-materialized stateObject
-// is kept in step for the so.data-based commit paths (genesis FinalizeTx, RPC).
-func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserveBalance bool) (bool, error) {
-	sdW, hadSD := ibs.versionedWrites.GetSelfDestruct(addr)
-	balW, hadBalance := ibs.versionedWrites.GetBalance(addr)
-	incW, hadIncarnation := ibs.versionedWrites.GetIncarnation(addr)
+// selfdestruct records a self-destruct as versioned writes.
+func (ibs *IntraBlockState) selfdestruct(addr accounts.Address, preserveBalance bool) (bool, error) {
+	sdW, hadSD := ibs.writes.GetSelfDestruct(addr)
+	balW, hadBalance := ibs.writes.GetBalance(addr)
+	incW, hadIncarnation := ibs.writes.GetIncarnation(addr)
 	// Destructed earlier in this tx and sent nothing since: every cell below already holds its value.
 	if !preserveBalance && hadSD && sdW.Val && hadBalance && balW.Val.IsZero() && hadIncarnation {
 		return true, nil
 	}
-	base, _, _, err := ibs.versionedAccountBase(addr, true)
+	base, _, _, err := ibs.accountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
@@ -2057,27 +1652,18 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	// self-destruct clears below, so a revert restores them rather than the
 	// cleared value.
 	var prevIncarnation uint64
-	var prevBalanceVersioned uint256.Int
 	if hadIncarnation {
 		prevIncarnation = incW.Val
 	}
 	if hadBalance {
-		prevBalance, prevBalanceVersioned = balW.Val, balW.Val
+		prevBalance = balW.Val
 	}
-	ibs.journal.selfdestructChangeVersioned(addr, prev, prevBalance,
+	ibs.journal.selfdestructChange(addr, prev, prevBalance,
 		!ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey),
-		hadIncarnation, prevIncarnation, hadBalance, prevBalanceVersioned, hadBalance && balW.Deletes())
+		hadIncarnation, prevIncarnation, hadBalance, hadBalance && balW.Deletes())
 
 	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
-	}
-
-	if so, ok := ibs.stateObjects[addr]; ok {
-		so.markSelfdestructed()
-		so.createdContract = false
-		if !preserveBalance {
-			so.data.Balance.Clear()
-		}
 	}
 
 	ibs.recordWriteSelfDestruct(addr, true)
@@ -2106,24 +1692,13 @@ var zeroBalance uint256.Int
 // ContractCreatedInTx reports whether the current transaction created a contract at addr.
 // The marker survives SELFDESTRUCT and is cleared if the creation is rolled back.
 func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
-	if ibs.versionMap != nil {
-		created, _ := ibs.versionedWriteCreateContract(addr)
-		return created
-	}
-	so := ibs.stateObjects[addr]
-	return so != nil && so.newlyCreated && (so.createdContract || so.destructedCreated)
+	created, _ := ibs.ownCreateContract(addr)
+	return created
 }
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
-	stateObject, err := ibs.getStateObject(addr, true)
-	if err != nil {
-		return false, err
-	}
-	if stateObject == nil {
-		return false, nil
-	}
-	if !stateObject.newlyCreated {
+	if !ibs.createdThisTx(addr) {
 		return false, nil
 	}
 	code, err := ibs.GetCode(addr)
@@ -2132,6 +1707,18 @@ func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	}
 	_, delegated := types.ParseDelegation(code)
 	return !delegated, nil
+}
+
+// createdThisTx reports whether this transaction created the account: create
+// is the only writer of an AddressPath cell, and reverting a creation drops or
+// restores that write, so an own address write under a journal-dirty address is
+// exactly the newly-created signal.
+func (ibs *IntraBlockState) createdThisTx(addr accounts.Address) bool {
+	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+		return false
+	}
+	_, ok := ibs.writes.GetAddress(addr)
+	return ok
 }
 
 // SetTransientState sets transient storage for a given account. It
@@ -2146,233 +1733,205 @@ func (ibs *IntraBlockState) GetTransientState(addr accounts.Address, key Transie
 	return ibs.transientStorage.Get(addr, key)
 }
 
-func (ibs *IntraBlockState) stateObjectForAccount(addr accounts.Address, account *accounts.Account) *stateObject {
-	obj := newObject(ibs, addr, account, account)
-	if ibs.noMaterialize {
-		ibs.reconstructCellFlags(obj, addr)
-		return obj
-	}
-	ibs.setStateObject(addr, obj)
-	return obj
-}
-
-func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
-	// A cached object is returned without re-reading the versionMap: the
-	// materializing flows keep so.data in step with the cells on every write, and
-	// the noMaterialize path never populates this cache.
-	if so, ok := ibs.stateObjects[addr]; ok {
-		return so, nil
-	}
-
-	// Load the object from the database.
-	if _, ok := ibs.nilAccounts[addr]; ok {
-		if bi, ok := ibs.balanceInc[addr]; ok && !bi.transferred && ibs.versionMap == nil {
-			return ibs.createObject(addr, nil), nil
-		}
-		return nil, nil
-	}
-
-	account, _, _, err := ibs.getVersionedAccount(addr, false)
-	if err != nil {
-		return nil, err
-	}
-
-	if account != nil {
-		return ibs.stateObjectForAccount(addr, account), nil
-	}
-	if ibs.readAbsent(addr) {
-		return nil, nil
-	}
-
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	readAccount, err := ibs.stateReader.ReadAccountData(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.accountReadDuration += time.Since(readStart)
-		ibs.accountReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
-
-	accountSource := StorageRead
-	accountVersion := ibs.Version()
-
-	if err != nil {
-		// Record so the executor surfaces it operationally rather than continuing
-		// with a wrong value; the serial (non-versioned) account read reaches the DB
-		// here, bypassing refreshAccount and the typed readers that already record.
-		ibs.RecordStateReadError(err)
-		return nil, err
-	}
-
-	if readAccount == nil {
-		if ibs.versionMap != nil {
-			readAccount, accountSource, accountVersion, err = refreshAccount(ibs, addr)
-
-			if readAccount == nil || err != nil {
-				return nil, err
-			}
-
-			destructed, _, _, err := refreshSelfDestruct(ibs, addr)
-
-			if destructed || err != nil {
-				if !ibs.noMaterialize {
-					so := ibs.allocStateObject()
-					so.db = ibs
-					so.address = addr
-					so.selfdestructed = destructed
-					so.deleted = destructed
-					ibs.setStateObject(addr, so)
-				}
-				return nil, err
-			}
-		} else {
-			ibs.nilAccounts[addr] = struct{}{}
-			if bi, ok := ibs.balanceInc[addr]; ok && !bi.transferred {
-				return ibs.createObject(addr, nil), nil
-			}
-			return nil, nil
-		}
-	}
-
-	var code accounts.Code
-
-	if ibs.versionMap != nil {
-		account = readAccount
-
-		// A prior tx may have self-destructed this account while stateReader still
-		// returns the committed value; read SelfDestructPath directly from the
-		// versionMap (versionedReadCore short-circuits on the same flag).
-		if destructed, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.resolved() && destructed {
-			// Only honour if the current tx hasn't already resurrected.
-			localResurrected := false
-			if sdVal, ok := ibs.versionedWriteSelfDestruct(addr); ok {
-				if !sdVal {
-					localResurrected = true
-				}
-			}
-			if !localResurrected {
-				if !ibs.noMaterialize {
-					so := ibs.allocStateObject()
-					so.db = ibs
-					so.address = addr
-					so.selfdestructed = true
-					so.deleted = true
-					ibs.setStateObject(addr, so)
-				}
-				return nil, nil
-			}
-		}
-
-		code, err = refreshCode(ibs, addr)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		account = readAccount
-	}
-
-	if recordRead {
-		ibs.accountRead(addr, account, accountSource, accountVersion)
-	}
-	obj := newObject(ibs, addr, account, account)
-	if code.Bytes != nil {
-		// Code loaded from the version map must carry a matching CodeHash: a stale
-		// hash lets SetCode's revert-to-original optimisation wrongly delete code
-		// writes.
-		obj.code = code
-		if code.Hash != obj.data.CodeHash {
-			obj.data.CodeHash = code.Hash
-			obj.original.CodeHash = code.Hash
-		}
-	}
-	if ibs.noMaterialize {
-		ibs.reconstructCellFlags(obj, addr)
-		return obj, nil
-	}
-	ibs.setStateObject(addr, obj)
-	return obj, nil
-}
-
-func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {
-	if dbg.AssertEnabled && object.arena {
-		// stateObjects lives for the block, an arena slot only for the transaction.
-		panic(fmt.Sprintf("arena slot cached in stateObjects: %x", addr))
-	}
-	if bi, ok := ibs.balanceInc[addr]; ok && !bi.transferred && ibs.versionMap == nil {
-		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
-		bi.transferred = true
-		ibs.journal.balanceIncreaseTransfer(bi)
-	}
-	ibs.stateObjects[addr] = object
-}
-
-// Retrieve a state object or create a new state object if nil.
-func (ibs *IntraBlockState) GetOrNewStateObject(addr accounts.Address) (*stateObject, error) {
-	stateObject, err := ibs.getStateObject(addr, true)
-	if err != nil {
-		return nil, err
-	}
-	if stateObject == nil || stateObject.deleted {
-		stateObject = ibs.createObject(addr, stateObject /* previous */)
-	}
-	return stateObject, nil
-}
-
-// createObject creates a new state object. If there is an existing account with
-// the given address, it is overwritten.
-func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateObject) (newobj *stateObject) {
-	account := &accounts.Account{}
-	var original *accounts.Account
-	if previous == nil {
-		original = &accounts.Account{}
-	} else {
-		original = &previous.original
-	}
-
-	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
-	newobj = newObject(ibs, addr, account, original)
-	newobj.setNonce(0) // sets the object to dirty
-	if previous == nil {
+// create records the creation of addr into the version map and journal.
+// hadPrevious means the account resolved to a live record (a cross-tx-destructed
+// account resolves to nil), so the create is a reset whose fields the journal
+// snapshots for revert rather than a fresh createObjectChange entry.
+func (ibs *IntraBlockState) create(addr accounts.Address, hadPrevious bool) {
+	account := accounts.NewAccount() // Root=empty.RootHash, CodeHash=EmptyCodeHash: newObject's normalized output
+	if !hadPrevious {
 		ibs.journal.createObjectChange(addr)
-	} else {
-		var prevWrites *createWriteSnapshot
-		if ibs.versionMap != nil {
-			prevWrites = ibs.versionedWrites.snapshotCreateFields(addr)
+		ibs.recordCreateCells(addr, &account)
+		return
+	}
+	prevWrites := ibs.writes.snapshotCreateFields(addr)
+	ibs.journal.resetObjectChange(addr, prevWrites)
+	ibs.recordWriteAddress(addr, &account)
+	ibs.recordWriteCodeHash(addr, account.CodeHash)
+	ibs.recordWriteNonce(addr, account.Nonce)
+}
+
+// recordCreateCells records the version-map cells a fresh account's creation
+// emits, without journaling — the caller records the journal entry. Address and code
+// hash are always written (the code-hash write invalidates any stale pre-create
+// GetCodeHash read); the balance too, since a lower tx's removal of the account can be
+// flushed after this tx ran and its deleted balance would then decide it. The nonce is
+// not: readers skip a nonce cell at or below a destruct and the fresh address cell gives
+// nonce 0, so the write is not needed, and a write that depended on such a cell would
+// rest on a read the tx does not record.
+func (ibs *IntraBlockState) recordCreateCells(addr accounts.Address, account *accounts.Account) {
+	ibs.recordWriteAddress(addr, account)
+	ibs.recordWriteCodeHash(addr, account.CodeHash)
+	ibs.recordWriteBalance(addr, account.Balance)
+}
+
+// traceCreateAccount returns the deferred CreateAccount logger; the error and the
+// balance closure are evaluated at defer time.
+func (ibs *IntraBlockState) traceCreateAccount(addr accounts.Address, contractCreation bool, errp *error, balance func() string) func() {
+	return func() {
+		var creatingContract string
+		if contractCreation {
+			creatingContract = " (contract)"
 		}
-		// previous may be built from an account record that lags the cached
-		// object: journal the cache entry (nil when none) so the revert restores
-		// or drops it.
-		ibs.journal.resetObjectChange(addr, ibs.stateObjects[addr], prevWrites)
-	}
-	newobj.newlyCreated = true
-	if !ibs.noMaterialize {
-		ibs.setStateObject(addr, newobj)
-	}
-	ibs.recordWriteAddress(addr, &newobj.data)
-	// Write CodeHashPath so that any stale versionedReads cache entry
-	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
-	// invalidated.  newObject normalises the zero-value CodeHash to
-	// EmptyCodeHash, so this records keccak256("") for a fresh account.
-	ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
-	// Write NoncePath only when a prior incarnation's nonce still sits in the version-map
-	// floor, which a commitment read would otherwise resurrect. A genuinely fresh account
-	// has no floor, so a nonce=0 write there is a net-zero change the BAL wrongly reports.
-	if previous != nil {
-		ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
-	} else if ibs.versionMap != nil {
-		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
-			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+		if *errp != nil {
+			fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, *errp)
+			return
 		}
-		// The balance is written unconditionally: a lower tx's removal of the account can be
-		// flushed after this tx ran, and its deleted balance would then decide the account.
-		ibs.recordWriteBalance(addr, newobj.data.Balance)
+		fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, balance())
 	}
-	return newobj
+}
+
+// createAccount resolves the prior account's lifecycle (existence,
+// self-destruct, carried balance, prior incarnation) from the version map and
+// base reader.
+func (ibs *IntraBlockState) createAccount(addr accounts.Address, contractCreation bool) (err error) {
+	var hadPrevious, prevSelfdestructed bool
+	var prevIncarnation, prevPrevIncarnation uint64
+	var prevBalance uint256.Int
+
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
+		defer ibs.traceCreateAccount(addr, contractCreation, &err, func() string { return prevBalance.String() })()
+	}
+
+	readAccount, _, _, err := ibs.accountBase(addr, true)
+	if err != nil {
+		return err
+	}
+	if readAccount != nil {
+		hadPrevious = true
+		prevIncarnation = readAccount.Incarnation
+		prevPrevIncarnation = readAccount.PrevIncarnation
+		prevBalance = readAccount.Balance
+
+		destructed, _, _, err := refreshSelfDestruct(ibs, addr)
+		if err != nil {
+			return err
+		}
+		_, ownSD := ibs.ownSelfDestruct(addr)
+		// The versionMap may hold a prior tx's SelfDestructPath=true that
+		// readCore short-circuits, so read the versionMap directly.
+		if !destructed {
+			if d, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.resolved() && d {
+				destructed = true
+			}
+		}
+		// A later tx that left the account non-empty revived it after a prior
+		// tx's self-destruct. Check the field cells, as the record lags them.
+		if destructed && !ownSD {
+			if destructed, err = ibs.emptyFromFields(addr, readAccount); err != nil {
+				return err
+			}
+		}
+		prevSelfdestructed = destructed
+	} else if sd, ok := ibs.ownSelfDestruct(addr); ok && sd {
+		// A within-tx create→self-destruct leaves no base record and no cell; treat
+		// the destroyed account as the previous so the resurrect write is emitted.
+		hadPrevious = true
+		prevSelfdestructed = true
+	}
+
+	var prevInc uint64
+	if prevSelfdestructed {
+		prevInc = prevIncarnation
+	}
+	prevInc = max(prevInc, prevPrevIncarnation)
+	// Capture each path's own (source, version) for the synthetic reads stamped
+	// below; inheriting the account-record version would trip the validator on
+	// the recursive AddressPath check.
+	incSource, incVersion := StorageRead, UnknownVersion
+	if inc, res, ok := ibs.versionMap.ReadIncarnation(addr, ibs.txIndex); ok && res.resolved() {
+		incSource = MapRead
+		incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+		if inc > prevInc {
+			prevInc = inc
+		}
+	}
+	balSource, balVersion := StorageRead, UnknownVersion
+	var preTxBalance uint256.Int
+	balWiped := false
+	if !ibs.noConflictDetection {
+		if bal, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.resolved() {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			preTxBalance = bal
+			// A burning destruct at or above the cell wipes the balance. As on the read
+			// path, the zero depends on the destruct, not on the wiped cell.
+			if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed &&
+				sdRes.DepIdx() >= res.DepIdx() && res.ValStatus() == ValueDeleted {
+				preTxBalance.Clear()
+				balWiped = true
+				ibs.reads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
+					Val:        true,
+				})
+			}
+		}
+	}
+	// Carry the live balance over the create (the EVM preserves funds sent to a
+	// not-yet-created address). Normally zero for a self-destructed previous, but a
+	// same-tx credit may have revived the account before this create, so carry a
+	// non-zero revived balance too.
+	var carryBalance uint256.Int
+	carryBalanceValid := hadPrevious && !prevSelfdestructed
+	if hadPrevious {
+		b, _, err := ibs.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		if carryBalanceValid || !b.IsZero() {
+			carryBalance = b
+			carryBalanceValid = true
+		}
+	}
+
+	ibs.create(addr, hadPrevious)
+	if prevSelfdestructed {
+		// The reset-object journal entry marks addr dirty, but that mark is dropped
+		// on revert; this un-journalled increment keeps a resurrected address in
+		// journal.dirties across an intra-tx revert.
+		ibs.journal.dirty(addr)
+	}
+
+	var writeBalance uint256.Int
+	if carryBalanceValid {
+		writeBalance.Set(&carryBalance)
+	} else if !hadPrevious && balSource == MapRead {
+		// This tx already read the account destroyed, so there is no record, but a
+		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
+		writeBalance.Set(&preTxBalance)
+	}
+
+	var incarnation uint64
+	if contractCreation {
+		// Record contract creation so FinalizedWrites does not remove a newly
+		// deployed contract as empty.
+		ibs.recordWriteCreateContract(addr, true)
+		incarnation = prevInc + 1
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
+			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, incarnation)
+		}
+	}
+
+	// Synthetic reads let creation clashes between transactions be detected. The
+	// balance read carries the pre-tx balance (zero without a cell: the account was
+	// absent), since later reads, also after a revert, are served from it. An earlier
+	// internal read is promoted to give the balance write a block-access-list baseline.
+	ibs.MarkAddressAccess(addr, true)
+	if !ibs.noConflictDetection {
+		if vr, seen := ibs.reads.GetBalance(addr); !seen && !balWiped {
+			ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
+		} else if seen && vr.internal {
+			vr.internal = false
+			ibs.reads.SetBalance(addr, vr)
+		}
+		ibs.reads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
+	}
+	ibs.recordWriteBalance(addr, writeBalance)
+	ibs.recordWriteIncarnation(addr, incarnation)
+	if !hadPrevious || prevSelfdestructed {
+		ibs.recordWriteSelfDestruct(addr, false)
+	}
+	return nil
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
@@ -2386,211 +1945,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreation bool) (err error) {
-	var prevInc uint64
-	var previous *stateObject
-
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-		defer func() {
-			var creatingContract string
-			if contractCreation {
-				creatingContract = " (contract)"
-			}
-			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, err)
-			} else {
-				var bal uint256.Int
-				if previous != nil {
-					bal = previous.data.Balance
-				}
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, creatingContract, addr, bal.String())
-			}
-		}()
-	}
-
-	if ibs.versionMap == nil {
-		previous, err = ibs.getStateObject(addr, true)
-		if err != nil {
-			return err
-		}
-	} else {
-		readAccount, _, _, err := ibs.getVersionedAccount(addr, true)
-		if err != nil {
-			return err
-		}
-
-		if readAccount != nil {
-			account := readAccount
-
-			destructed, _, _, err := refreshSelfDestruct(ibs, addr)
-			if err != nil {
-				return err
-			}
-			_, ownSD := ibs.versionedWriteSelfDestruct(addr)
-
-			// Reuse the cached stateObject as `previous` so the selfdestructed flag
-			// and accumulated incarnation carry into the new object's
-			// PrevIncarnation.
-			if !destructed {
-				if so, ok := ibs.stateObjects[addr]; ok && so.selfdestructed {
-					// Accumulated-IBS path (e.g. GenerateChain): the cache marks it
-					// selfdestructed but versionedReadCore returned false via the
-					// so.deleted early exit; reuse the cached object.
-					previous = so
-				} else if ibs.versionMap != nil {
-					// Fresh-IBS worker path: no cache, but the versionMap may hold a
-					// prior tx's SelfDestructPath=true (versionedReadCore short-circuits
-					// it), so read the versionMap directly.
-					if d, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.resolved() && d {
-						destructed = true
-					}
-				}
-			}
-
-			// A later tx that left the account non-empty revived it after a prior
-			// tx's self-destruct. Check the field cells, as the record lags them.
-			if destructed && !ownSD {
-				if destructed, err = ibs.emptyFromVersionedFields(addr, account); err != nil {
-					return err
-				}
-			}
-
-			if previous == nil {
-				previous = newObject(ibs, addr, account, account)
-				previous.selfdestructed = destructed
-			}
-		} else if so, ok := ibs.stateObjects[addr]; ok && so.deleted {
-			// Selfdestructed in an earlier tx this block with no committed base
-			// (created within the block); preserve the deleted object as `previous`
-			// so CommitBlock can still emit DeleteAccount after a REVERT.
-			previous = so
-		} else if so, ok := ibs.stateObjects[addr]; ok {
-			// The serial block builder does not flush per-tx writes to the version
-			// map, so a same-block credit lives only in the cache; reuse it as
-			// `previous` to keep the balance carry-over below.
-			previous = so
-		} else if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
-			// Cache-free parallel path: a within-tx create→self-destruct leaves no
-			// base record and no cached object. Rebuild `previous` as destroyed so
-			// the resurrect write is emitted.
-			previous = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
-			previous.selfdestructed = true
-		}
-	}
-
-	if err != nil {
-		return err
-	}
-	if previous != nil && previous.selfdestructed {
-		prevInc = previous.data.Incarnation
-	} else {
-		prevInc = 0
-	}
-	if previous != nil && prevInc < previous.data.PrevIncarnation {
-		prevInc = previous.data.PrevIncarnation
-	}
-	// Capture each path's own (source, version) for the synthetic reads stamped
-	// below; inheriting the account-record version would trip the validator on
-	// the recursive AddressPath check.
-	incSource, incVersion := StorageRead, UnknownVersion
-	if ibs.versionMap != nil {
-		if inc, res, ok := ibs.versionMap.ReadIncarnation(addr, ibs.txIndex); ok && res.resolved() {
-			incSource = MapRead
-			incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
-			if inc > prevInc {
-				prevInc = inc
-			}
-		}
-	}
-	balSource, balVersion := StorageRead, UnknownVersion
-	var preTxBalance uint256.Int
-	balWiped := false
-	if ibs.versionMap != nil && !ibs.noConflictDetection {
-		if bal, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.resolved() {
-			balSource = MapRead
-			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
-			preTxBalance = bal
-			// A burning destruct at or above the cell wipes the balance. As on the read
-			// path, the zero depends on the destruct, not on the wiped cell.
-			if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed &&
-				sdRes.DepIdx() >= res.DepIdx() && res.ValStatus() == ValueDeleted {
-				preTxBalance.Clear()
-				balWiped = true
-				ibs.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
-					Val:        true,
-				})
-			}
-		}
-	}
-	// Capture the balance BEFORE createObject writes the fresh zero-balance
-	// record: previous.data.Balance can lag an in-block credit or committed
-	// prefund, and reading after createObject would see the just-written zero.
-	var carryBalance uint256.Int
-	carryBalanceValid := previous != nil && !previous.selfdestructed
-	if previous != nil {
-		b, _, err := ibs.getBalance(addr)
-		if err != nil {
-			return err
-		}
-		// Carry the live balance over the create. Normally zero for a self-destructed
-		// previous, but a same-tx credit may have revived the account before this create
-		// (the EVM preserves funds sent to a not-yet-created address), so carry a non-zero
-		// revived balance too.
-		if carryBalanceValid || !b.IsZero() {
-			carryBalance = b
-			carryBalanceValid = true
-		}
-	}
-	newObj := ibs.createObject(addr, previous)
-	if previous != nil && previous.selfdestructed {
-		// The reset-object journal entry marks addr dirty, but that mark is dropped
-		// on revert; this un-journalled increment keeps a resurrected address in
-		// journal.dirties across an intra-tx revert.
-		ibs.journal.dirty(addr)
-	}
-	if carryBalanceValid {
-		newObj.data.Balance.Set(&carryBalance)
-	} else if previous == nil && balSource == MapRead {
-		// This tx already read the account destroyed, so there is no record, but a
-		// prior tx's fee or transfer revived it: carry that recorded pre-tx balance.
-		newObj.data.Balance.Set(&preTxBalance)
-	}
-	newObj.data.PrevIncarnation = prevInc
-
-	if contractCreation {
-		newObj.createdContract = true
-		newObj.data.Incarnation = prevInc + 1
-		// Record contract creation so FinalizedWrites does not remove a newly
-		// deployed contract as empty.
-		ibs.recordWriteCreateContract(addr, true)
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
-		}
-	} else {
-		newObj.selfdestructed = false
-	}
-
-	// Synthetic reads let creation clashes between transactions be detected. The
-	// balance read carries the pre-tx balance (zero without a cell: the account was
-	// absent), since later reads, also after a revert, are served from it. An earlier
-	// internal read is promoted to give the balance write a block-access-list baseline.
-	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil && !ibs.noConflictDetection {
-		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen && !balWiped {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
-		} else if seen && vr.internal {
-			vr.internal = false
-			ibs.versionedReads.SetBalance(addr, vr)
-		}
-		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
-	}
-	ibs.recordWriteBalance(addr, newObj.Balance())
-	ibs.recordWriteIncarnation(addr, newObj.data.Incarnation)
-	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
-		ibs.recordWriteSelfDestruct(addr, false)
-	}
-
-	return nil
+	return ibs.createAccount(addr, contractCreation)
 }
 
 // Snapshot returns an identifier for the current revision of the state.
@@ -2607,7 +1962,7 @@ func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	var traced bool
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TracingAccounts()) {
 		for addr := range ibs.journal.dirties {
-			if ibs.trace || dbg.TraceAccount(addr.Handle()) {
+			if ibs.trace || dbg.TraceAccount(addr.Value()) {
 				traced = true
 				if err == nil {
 					fmt.Printf("%d (%d.%d) Reverting %x, revid: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, revid)
@@ -2640,246 +1995,27 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 	return eip161Enabled && (!isAura || addr != params.SystemAddress)
 }
 
-func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
-	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply — bump the slot-cache stamp
-	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
-	// EIP-8246: a self-destructed account that still holds a balance is reset to
-	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
-	sdPreserveBalance := eip8246 && stateObject.selfdestructed && !stateObject.data.Balance.IsZero()
-	if (stateObject.selfdestructed && !sdPreserveBalance) || (isDirty && emptyRemoval) {
-		balance := stateObject.Balance()
-		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
-		}
-		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
-			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
-				fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v stack=%s\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed, dbg.Stack())
-			}
-		}
-		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
-			return err
-		}
-		stateObject.deleted = true
-	}
-	if sdPreserveBalance {
-		stateObject.data.Nonce = 0
-		stateObject.data.CodeHash = accounts.EmptyCodeHash
-		stateObject.data.Incarnation = 0
-		stateObject.code = accounts.Code{}
-		stateObject.deleted = false
-		if err := stateWriter.CreateContract(addr); err != nil {
-			return err
-		}
-		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
-			return err
-		}
-	} else if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
-		stateObject.deleted = false
-		// A recreate below the original incarnation makes the writer clear the old code
-		// and storage on the account write, so that write must land before the new ones.
-		downRev := stateObject.original.Incarnation > stateObject.data.Incarnation
-		if downRev {
-			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
-				return err
-			}
-		}
-		// Write any contract code associated with the state object; dirtyCode is
-		// set only when code actually changed, so a clear-to-empty must still
-		// write through (empty CodeDomain, consistent with the empty codeHash).
-		if stateObject.dirtyCode {
-			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, stateObject.data.CodeHash, stateObject.code.Bytes); err != nil {
-				return err
-			}
-		}
-		if stateObject.createdContract {
-			if err := stateWriter.CreateContract(addr); err != nil {
-				return err
-			}
-		}
-		if err := stateObject.updateStorage(stateWriter, useBlockOrigin); err != nil {
-			return err
-		}
-		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
-			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
-				fmt.Printf("%d (%d.%d) Update Account Data (%T): %x balance:%d,nonce:%d,codehash:%x\n",
-					stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, stateWriter, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
-			}
-		}
-		if !downRev {
-			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
-				return err
-			}
-		}
-		// In parallel mode only modified fields land in the versionMap WriteSet.
-	}
-	return nil
-}
-
-func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
-	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
-		fmt.Printf("delete: %x\n", addr)
-	}
-	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
-		// Write any contract code associated with the state object
-		if stateObject.code.Bytes != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
-		}
-		if stateObject.createdContract {
-			fmt.Printf("CreateContract: %x\n", addr)
-		}
-		stateObject.printTrie()
-		fmt.Printf("UpdateAccountData: %x, balance=%s, nonce=%d\n", addr, stateObject.data.Balance.String(), stateObject.data.Nonce)
-	}
-}
-
-// FinalizeTx should be called after every transaction.
-func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			if _, err := ibs.getStateObject(addr, true); err != nil {
-				return err
-			}
+// BurnSelfDestructs makes every self-destruct of this state delete its account, also one
+// that ran with balance-preserving (EIP-8246) rules. For genesis only, which finalizes
+// without EIP-8246: a block keeps the balance that EIP-8246 preserves.
+func (ibs *IntraBlockState) BurnSelfDestructs() {
+	for addr, sd := range ibs.writes.SelfDestructs() {
+		if b, ok := ibs.writes.GetBalance(addr); sd.Val && ok && !b.Deletes() {
+			ibs.recordWriteBalanceDeleted(addr)
 		}
 	}
-	for addr := range ibs.journal.dirties {
-		so, exist := ibs.stateObjects[addr]
-		if !exist {
-			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
-			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
-			// it will persist in the journal even though the journal is reverted. In this special circumstance,
-			// it may exist in `ibs.journal.dirties` but not in `ibs.stateObjects`.
-			// Thus, we can safely ignore it here
-			continue
-		}
-
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, ibs.trace, ibs.tracingHooks, false, chainRules.IsAmsterdam); err != nil {
-			return err
-		}
-
-		// EIP-6780 + EIP-7928: SELFDESTRUCT of a same-tx created contract wipes
-		// storage at end-of-tx, so the BAL records dirty slots as reads. Zero the
-		// storage writes so AsBlockAccessList folds them away. Must run before
-		// so.newlyCreated = false.
-		if ibs.versionMap != nil && so.selfdestructed && so.newlyCreated {
-			for key := range so.dirtyStorage {
-				ibs.recordWriteStorage(addr, key, uint256.Int{}, uint256.Int{})
-			}
-		}
-
-		// EIP-8246: a balance-preserving SELFDESTRUCT leaves the account alive. The
-		// block assembler reuses one IBS across txs, so replace the destroyed
-		// object with a clean balance-only one, after the cleanup above that still
-		// needs the selfdestructed marker.
-		if so.selfdestructed && !so.deleted {
-			preserved := accounts.NewAccount()
-			preserved.Balance = so.data.Balance
-			ibs.stateObjects[addr] = newObject(ibs, addr, &preserved, &preserved)
-		}
-
-		so.newlyCreated = false
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	ibs.clearJournalAndRefund()
-	return nil
-}
-
-func (ibs *IntraBlockState) SoftFinalise() {
-	for addr := range ibs.journal.dirties {
-		// On the parallel path a write can be recorded without materializing a
-		// stateObject, so dirtiness comes from the journal, not object existence.
-		// The serial path keeps the object gate: a touched-but-reverted address
-		// lingers in journal.dirties without a stateObject.
-		if _, exist := ibs.stateObjects[addr]; !exist && ibs.versionMap == nil {
-			continue
-		}
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	ibs.clearJournalAndRefund()
-}
-
-// CommitBlock finalizes the state by removing the self destructed objects
-// and clears the journal as well as the refunds.
-func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			if _, err := ibs.getStateObject(addr, true); err != nil {
-				return err
-			}
-		}
-	}
-	return ibs.MakeWriteSet(chainRules, stateWriter)
-}
-
-func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr := range ibs.journal.dirties {
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	for addr, stateObject := range ibs.stateObjects {
-		_, isDirty := ibs.stateObjectsDirty[addr]
-		if dbg.TraceAccount(addr.Handle()) {
-			var updated *uint256.Int
-			if w, ok := ibs.versionedWrites.GetBalance(addr); ok {
-				val := w.Val
-				updated = &val
-			}
-			var dirty string
-			if isDirty {
-				dirty = " (dirty)"
-			}
-			if updated != nil {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s (%d)\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, dirty, stateObject.data.Balance.String(), updated)
-			} else {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, dirty, stateObject.data.Balance.String())
-			}
-		}
-		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) Update Account %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
-		}
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, ibs.trace, ibs.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
-			return err
-		}
-		// EIP-6780 + EIP-7928: SELFDESTRUCT of a same-tx created contract clears
-		// storage at end-of-tx, so the BAL records dirty slots as reads. Zero the
-		// storage writes so AsBlockAccessList folds them away.
-		if ibs.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
-			for key := range stateObject.dirtyStorage {
-				ibs.recordWriteStorage(addr, key, uint256.Int{}, uint256.Int{})
-			}
-		}
-	}
-
-	var reverted []accounts.Address
-
-	ibs.versionedWrites.forEachAddr(func(addr accounts.Address) {
-		if _, isDirty := ibs.stateObjectsDirty[addr]; !isDirty {
-			reverted = append(reverted, addr)
-		}
-	})
-
-	for _, addr := range reverted {
-		ibs.versionMap.DeleteAll(addr, ibs.txIndex)
-		ibs.versionedWrites.deleteAddr(addr)
-	}
-
-	// Invalidate journal because reverting across transactions is not allowed.
-	ibs.clearJournalAndRefund()
-	return nil
 }
 
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
 // returns a detached committable snapshot. The EIP-161 filtering reads pre-tx state,
-// so it returns the IBS state read error, which ResetVersionedIO would clear.
+// so it returns the IBS state read error, which ResetIO would clear.
 func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet, error) {
 	// Publish this tx's cold-read committed origins to the versionMap before EIP-161
 	// composition below reads it (encodeExistingEmptyRemovals builds a versionMap-backed
 	// account view). Every FinalizedWrites caller is covered here, so no read path needs
 	// to remember to publish separately.
 	ibs.PublishOrigins()
-	writes := ibs.versionedWrites.Finalize()
+	writes := ibs.writes.Finalize()
 	var replaced map[accounts.Address]struct{}
 	if chainRules != nil && chainRules.IsAmsterdam {
 		replaced = ibs.publishCreateDestructAsBalances(writes)
@@ -2963,7 +2099,7 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 }
 
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct, replaced map[accounts.Address]struct{}) {
-	if chainRules == nil || ibs.versionMap == nil {
+	if chainRules == nil {
 		return
 	}
 	for addr := range writes.addrs() {
@@ -3027,25 +2163,13 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
-		read, ok := ibs.versionedReads.GetAddress(addr)
+		read, _ := ibs.reads.GetAddress(addr)
 		if (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
 			continue
 		}
-		// With no address read this tx, the tx didn't observe the account's
-		// pre-tx state — which happens when an empty account created earlier in
-		// the block lingers in the IBS (e.g. a coinbase touched by a zero tip).
-		// Fall back to the pre-block base: a loaded account carries a non-zero
-		// CodeHash (EmptyCodeHash for an EOA), so a zero CodeHash means the
-		// account never existed and its created-empty writes are withheld;
-		// otherwise it existed and needs an explicit delete, so keep the writes.
-		if !ok {
-			if so, soOk := ibs.stateObjects[addr]; soOk && so.original.CodeHash != (accounts.CodeHash{}) {
-				continue
-			}
-		}
 		// With no version-map cell the account is absent before and after the tx, so dropping the
 		// writes is exact; a removal stamp would make every later toucher depend on this tx.
-		if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
+		if ibs.versionMap.load(addr) == nil {
 			writes.deleteAddr(addr)
 			continue
 		}
@@ -3061,16 +2185,13 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
 func (ibs *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: ibs.blockNum, TxIndex: ibs.txIndex, Incarnation: ibs.version}
-	io.mergeTx(version, ibs.versionedReads, writes)
+	io.mergeTx(version, ibs.reads, writes)
 }
 
 // FlushWritesToVersionMap publishes the supplied writes to this state's version map.
 func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
-	if ibs.versionMap == nil {
-		return
-	}
 	writes.assertNotArena("flush")
-	ibs.versionMap.FlushVersionedWrites(writes, true)
+	ibs.versionMap.FlushWrites(writes, true)
 }
 
 // WriteFlushedTo hands the current tx's writes, already flushed to the versionMap, to
@@ -3147,15 +2268,6 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 	return nil
 }
 
-func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
-	for addr, stateObject := range ibs.stateObjects {
-		_, isDirty := ibs.stateObjectsDirty[addr]
-		_, isDirty2 := ibs.journal.dirties[addr]
-
-		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
-	}
-}
-
 // SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
@@ -3189,17 +2301,17 @@ func (ibs *IntraBlockState) ResetLogs() {
 	ibs.logs.reset()
 }
 
-// no not lock
+// EndTransaction is the versioned per-transaction boundary: it clears the
+// journal and refund so a later transaction cannot revert this one's changes.
+// The writes stay in the tx write-set; the caller takes them with FinalizedWrites.
+func (ibs *IntraBlockState) EndTransaction() {
+	ibs.clearJournalAndRefund()
+}
+
 func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.journal.Reset()
 	ibs.revisions.reset()
 	ibs.refund = uint64(0)
-	if dbg.AssertEnabled && !ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		// Slots are rewound per transaction, so only the path that caches nothing
-		// may draw them.
-		panic("stateObjectArena not empty with noMaterialize=false")
-	}
-	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
@@ -3219,7 +2331,7 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
 	precompiles []accounts.Address, list types.AccessList,
 ) {
-	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Value()) || !dst.IsNil() && dbg.TraceAccount(dst.Value())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	ibs.txOutputFree = true
@@ -3249,7 +2361,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	// Reset transient storage at the beginning of transaction execution
 	clear(ibs.transientStorage)
-	ibs.versionedReads.access = nil
+	ibs.reads.access = nil
 	ibs.recordAccess = true
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
@@ -3285,13 +2397,6 @@ func (ibs *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 	return addrMod, slotMod
 }
 
-// AddSlotOnlyToAccessList preserves account coldness for EIP-7906 storage lookups.
-func (ibs *IntraBlockState) AddSlotOnlyToAccessList(addr accounts.Address, slot accounts.StorageKey) {
-	if ibs.accessList.AddSlotOnly(addr, slot) {
-		ibs.journal.accessListAddSlotOnlyChange(addr, slot)
-	}
-}
-
 // AddressInAccessList returns true if the given address is in the access list.
 func (ibs *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
 	return ibs.accessList.ContainsAddress(addr)
@@ -3312,20 +2417,20 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if !ibs.recordAccess {
 		return
 	}
-	if ibs.versionedReads.access == nil {
-		ibs.versionedReads.access = make(AccessSet)
+	if ibs.reads.access == nil {
+		ibs.reads.access = make(AccessSet)
 	}
-	if opts, ok := ibs.versionedReads.access[addr]; ok {
+	if opts, ok := ibs.reads.access[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false
-			ibs.versionedReads.access[addr] = opts
+			ibs.reads.access[addr] = opts
 		}
 	} else {
-		ibs.versionedReads.access[addr] = accessOptions{revertable: revertable}
+		ibs.reads.access[addr] = accessOptions{revertable: revertable}
 	}
 }
 
-// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+// StartAccessRecording enables versioned access tracking until ResetIO.
 // Block finalization re-enables it (Prepare only runs for user txs) so that an
 // address touched but left absent — e.g. a zero-amount withdrawal recipient —
 // still reaches the BAL as an access-only entry: its reads are validation-only
@@ -3338,7 +2443,7 @@ func (ibs *IntraBlockState) StartAccessRecording() {
 // access set, used on the NoBAL path (eth_call) where no block access list is built.
 func (ibs *IntraBlockState) StopAccessRecording() {
 	ibs.recordAccess = false
-	ibs.versionedReads.access = nil
+	ibs.reads.access = nil
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
@@ -3347,40 +2452,14 @@ func (ibs *IntraBlockState) StopAccessRecording() {
 // a state read was performed for gas calculation but the operation
 // was rejected (e.g. CALL with value inside STATICCALL).
 func (ibs *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
-	ibs.versionedReads.ScanAddr(addr, func(_ AccountPath, _ accounts.StorageKey, hdr *ReadHeader) {
+	ibs.reads.ScanAddr(addr, func(_ AccountPath, _ accounts.StorageKey, hdr *ReadHeader) {
 		hdr.internal = true
 	})
 }
 
 func (ibs *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
-	_, ok := ibs.versionedReads.access[addr]
+	_, ok := ibs.reads.access[addr]
 	return ok
-}
-
-func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
-	if ibs.versionMap != nil {
-		ibs.MarkAddressAccess(addr, true)
-		if source == WriteSetRead {
-			// A read satisfied by this tx's own earlier write carries no
-			// cross-tx dependency; recording it would make the validator
-			// (floored below the tx's own writes) return None and wrongly
-			// invalidate the tx.
-			return
-		}
-		data := *account
-		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
-		// or the validator non-converges on its recursive AddressPath check.
-		if source == MapRead {
-			if _, res, ok := ibs.versionMap.ReadAddress(addr, ibs.txIndex); !ok || !res.resolved() {
-				source = StorageRead
-				version = UnknownVersion
-			}
-		}
-		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: source, Version: version},
-			Val:        NewAccountView(&data),
-		})
-	}
 }
 
 // recordWriteX helpers record a versioned write at the specified path
@@ -3395,19 +2474,16 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
+	if vw, ok := ibs.writes.GetBalance(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWBalance()
+	vw := ibs.writes.newVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetBalance(addr, vw)
+	ibs.writes.SetBalance(addr, vw)
 	traceWrite(ibs, vw)
 }
 
@@ -3416,167 +2492,139 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 // self-destruct burn so the delete decision rides the write, not the balance value.
 func (ibs *IntraBlockState) recordWriteBalanceDeleted(addr accounts.Address) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
+	if vw, ok := ibs.writes.GetBalance(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = uint256.Int{}
 		vw.valStatus = ValueDeleted
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWBalance()
+	vw := ibs.writes.newVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version(), valStatus: ValueDeleted}
 	vw.Val = uint256.Int{}
-	ibs.versionedWrites.SetBalance(addr, vw)
+	ibs.writes.SetBalance(addr, vw)
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
+func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
+	if vw, ok := ibs.writes.GetNonce(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
-		vw.NonceReason = reason
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWNonce()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
+	vw := ibs.writes.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetNonce(addr, vw)
+	ibs.writes.SetNonce(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
+	if vw, ok := ibs.writes.GetIncarnation(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWIncarnation()
+	vw := ibs.writes.newVWIncarnation()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetIncarnation(addr, vw)
+	ibs.writes.SetIncarnation(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok {
+	if vw, ok := ibs.writes.GetSelfDestruct(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWSelfDestruct()
+	vw := ibs.writes.newVWSelfDestruct()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetSelfDestruct(addr, vw)
+	ibs.writes.SetSelfDestruct(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok {
+	if vw, ok := ibs.writes.GetCreateContract(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWCreateContract()
+	vw := ibs.writes.newVWCreateContract()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetCreateContract(addr, vw)
+	ibs.writes.SetCreateContract(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
+	if vw, ok := ibs.writes.GetCode(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWCode()
+	vw := ibs.writes.newVWCode()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetCode(addr, vw)
+	ibs.writes.SetCode(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetCodeHash(addr); ok {
+	if vw, ok := ibs.writes.GetCodeHash(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWCodeHash()
+	vw := ibs.writes.newVWCodeHash()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetCodeHash(addr, vw)
+	ibs.writes.SetCodeHash(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetCodeSize(addr); ok {
+	if vw, ok := ibs.writes.GetCodeSize(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWCodeSize()
+	vw := ibs.writes.newVWCodeSize()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetCodeSize(addr, vw)
+	ibs.writes.SetCodeSize(addr, vw)
 	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := ibs.versionedWrites.copyAccount(account)
-	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
+	val := ibs.writes.copyAccount(account)
+	if vw, ok := ibs.writes.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWAddress()
+	vw := ibs.writes.newVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
 	vw.Val = val
-	ibs.versionedWrites.SetAddress(addr, vw)
+	ibs.writes.SetAddress(addr, vw)
 	traceWrite(ibs, vw)
 }
 
@@ -3602,21 +2650,18 @@ func storageValueStatus(prev, val uint256.Int) valueStatus {
 // intra-tx oscillation) still classifies against the origin rather than the prior step.
 func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int, prev uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
+	if vw, ok := ibs.writes.GetStorage(addr, key); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
 		vw.valStatus = storageValueStatus(vw.orig, val)
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := ibs.versionedWrites.newVWStorage()
+	vw := ibs.writes.newVWStorage()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version(), valStatus: storageValueStatus(prev, val)}
 	vw.orig = prev
 	vw.Val = val
-	ibs.versionedWrites.SetStorage(addr, key, vw)
+	ibs.writes.SetStorage(addr, key, vw)
 	traceWrite(ibs, vw)
 }
 
@@ -3625,7 +2670,7 @@ func traceWrite[T any](ibs *IntraBlockState, vw *VersionedWrite[T]) {
 		return
 	}
 	hdr := vw.WriteHeader
-	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Handle()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
+	if !(ibs.trace || (dbg.TraceAccount(hdr.Address.Value()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
 		return
 	}
 	fmt.Printf("%d (%d.%d) WRT %x %s: %v (%d.%d)\n", ibs.blockNum, ibs.txIndex, ibs.version,
@@ -3637,17 +2682,14 @@ func traceWrite[T any](ibs *IntraBlockState, vw *VersionedWrite[T]) {
 // write is authoritative (true after a same-tx SD, false after a same-tx recreate);
 // with no own write, the floor's destroyed-and-not-revived verdict applies.
 func (ibs *IntraBlockState) accountLifecycle(addr accounts.Address) (destroyed bool) {
-	if own, ok := ibs.versionedWriteSelfDestruct(addr); ok {
+	if own, ok := ibs.ownSelfDestruct(addr); ok {
 		return own
 	}
 	return ibs.versionMap.IsNetAbsent(addr, ibs.txIndex)
 }
 
-func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (bool, bool) {
-	if ibs.versionMap == nil {
-		return false, false
-	}
-	vw, ok := ibs.versionedWrites.GetSelfDestruct(addr)
+func (ibs *IntraBlockState) ownSelfDestruct(addr accounts.Address) (bool, bool) {
+	vw, ok := ibs.writes.GetSelfDestruct(addr)
 	if !ok {
 		return false, false
 	}
@@ -3657,127 +2699,77 @@ func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 	return vw.Val, true
 }
 
-// versionedWriteCreateContract reports whether this tx's own writes created a
+// ownCreateContract reports whether this tx's own writes created a
 // contract at addr (the CreateContract cell). Guarded by journal.dirties so a
 // stale entry from a reverted create is ignored.
-func (ibs *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) (bool, bool) {
-	if ibs.versionMap == nil {
-		return false, false
-	}
+func (ibs *IntraBlockState) ownCreateContract(addr accounts.Address) (bool, bool) {
 	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
 		return false, false
 	}
-	vw, ok := ibs.versionedWrites.GetCreateContract(addr)
+	vw, ok := ibs.writes.GetCreateContract(addr)
 	if !ok {
 		return false, false
 	}
 	return vw.Val, true
 }
 
-// reconstructCellFlags stamps the transient (uncached) stateObject's
-// create/self-destruct flags from this tx's own versioned-write cells. Under
-// noMaterialize the stateObject is rebuilt on every getStateObject call, so the
-// createdContract / newlyCreated / selfdestructed state that a materialized
-// object would have carried must be recovered from the cells instead.
-func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts.Address) {
-	if obj == nil {
-		return
-	}
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
-		if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok && vw.Val {
-			obj.createdContract = true
-		}
-		// An own AddressPath write means this tx created the account: createObject is
-		// the only writer, and reverting a creation drops or restores the write.
-		if _, ok := ibs.versionedWrites.GetAddress(addr); ok {
-			obj.newlyCreated = true
-		}
-		if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok && vw.Val {
-			obj.selfdestructed = true
-		}
-		// The AddressPath record's CodeHash can lag the Code cells, so seed the code
-		// from this tx's own Code write; otherwise it is refreshed from the
-		// versionMap below. An own write wins even when it clears code, else a
-		// prior-tx delegation would come back.
-		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
-			obj.code = vw.Val
-			obj.data.CodeHash = vw.Val.Hash
-			return
-		}
-	}
-	// An account this tx created has no code until its own Code write.
-	if obj.code.Bytes != nil || obj.newlyCreated {
-		return
-	}
-	code, err := refreshCode(ibs, addr)
-	if err != nil || code.Bytes == nil {
-		return
-	}
-	obj.code = code
-	obj.data.CodeHash = code.Hash
-	obj.original.CodeHash = code.Hash
-}
-
-// versionedWriteHit probes the dirty per-tx write set for a write at
+// writeHit probes the dirty per-tx write set for a write at
 // (addr, path, key) and, when present, populates the corresponding
 // per-typed pointer field on r.  Returns true when a write was found.
 // The non-storage paths share a single non-nil typed field; the storage
 // path uses r.vwStorage.
-func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path AccountPath, key accounts.StorageKey, r *readPathResult) bool {
-	if ibs.versionMap == nil {
-		return false
-	}
+func (ibs *IntraBlockState) writeHit(addr accounts.Address, path AccountPath, key accounts.StorageKey, r *readPathResult) bool {
 	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
 		return false
 	}
 	switch path {
 	case AddressPath:
-		if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
+		if vw, ok := ibs.writes.GetAddress(addr); ok {
 			r.vwAddress = vw
 			return true
 		}
 	case BalancePath:
-		if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
+		if vw, ok := ibs.writes.GetBalance(addr); ok {
 			r.vwBalance = vw
 			return true
 		}
 	case NoncePath:
-		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
+		if vw, ok := ibs.writes.GetNonce(addr); ok {
 			r.vwNonce = vw
 			return true
 		}
 	case IncarnationPath:
-		if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
+		if vw, ok := ibs.writes.GetIncarnation(addr); ok {
 			r.vwIncarnation = vw
 			return true
 		}
 	case SelfDestructPath:
-		if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok {
+		if vw, ok := ibs.writes.GetSelfDestruct(addr); ok {
 			r.vwSelfDestruct = vw
 			return true
 		}
 	case CreateContractPath:
-		if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok {
+		if vw, ok := ibs.writes.GetCreateContract(addr); ok {
 			r.vwCreateContract = vw
 			return true
 		}
 	case CodePath:
-		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
+		if vw, ok := ibs.writes.GetCode(addr); ok {
 			r.vwCode = vw
 			return true
 		}
 	case CodeHashPath:
-		if vw, ok := ibs.versionedWrites.GetCodeHash(addr); ok {
+		if vw, ok := ibs.writes.GetCodeHash(addr); ok {
 			r.vwCodeHash = vw
 			return true
 		}
 	case CodeSizePath:
-		if vw, ok := ibs.versionedWrites.GetCodeSize(addr); ok {
+		if vw, ok := ibs.writes.GetCodeSize(addr); ok {
 			r.vwCodeSize = vw
 			return true
 		}
 	case StoragePath:
-		if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
+		if vw, ok := ibs.writes.GetStorage(addr, key); ok {
 			r.vwStorage = vw
 			return true
 		}
@@ -3815,32 +2807,32 @@ func (ibs *IntraBlockState) Version() Version {
 	}
 }
 
-// VersionedReads returns the in-flight per-path read set.  The returned
+// Reads returns the in-flight per-path read set.  The returned
 // value shares the underlying maps with the IBS; it is handed over at
-// end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
+// end of tx (RecordReads / TxIn), after which ResetIO rebinds
 // the IBS field to a fresh set.
-func (ibs *IntraBlockState) VersionedReads() ReadSet {
-	return ibs.versionedReads
+func (ibs *IntraBlockState) Reads() ReadSet {
+	return ibs.reads
 }
 
-func (ibs *IntraBlockState) ResetVersionedIO() {
-	ibs.versionedReads = ReadSet{}
-	ibs.versionedWrites.recycle()
+func (ibs *IntraBlockState) ResetIO() {
+	ibs.reads = ReadSet{}
+	ibs.writes.recycle()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
 }
 
-// ResetVersionedReads clears tracked versioned reads without affecting writes.
-func (ibs *IntraBlockState) ResetVersionedReads() {
-	ibs.versionedReads = ReadSet{}
+// ResetReads clears tracked reads without affecting writes.
+func (ibs *IntraBlockState) ResetReads() {
+	ibs.reads = ReadSet{}
 }
 
-// VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
+// Writes returns a frozen typed snapshot of this tx's recorded writes.
 // The snapshot logic lives on the write-set itself (WriteSet.Snapshot); this is
 // the IntraBlockState accessor for it.
-func (ibs *IntraBlockState) VersionedWrites() *WriteSet {
-	return ibs.versionedWrites.Snapshot()
+func (ibs *IntraBlockState) Writes() *WriteSet {
+	return ibs.writes.Snapshot()
 }
 
 // recordStorageOrigin / recordAddressOrigin collect a cold committed base cell into the
@@ -3849,24 +2841,21 @@ func (ibs *IntraBlockState) recordStorageOrigin(addr accounts.Address, key accou
 	vw := getVWStorage()
 	vw.WriteHeader = WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}}
 	vw.Val = val
-	ibs.versionedOrigins.SetStorage(addr, key, vw)
+	ibs.origins.SetStorage(addr, key, vw)
 }
 
 func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *accounts.Account) {
 	vw := getVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}}
 	vw.Val = acc
-	ibs.versionedOrigins.SetAddress(addr, vw)
+	ibs.origins.SetAddress(addr, vw)
 }
 
 // PublishOrigins publishes this tx's collected committed-base origins into the versionMap's
 // lock-free origin layer (write-once), so later reads resolve the pre-block base without taking
 // an account's e.mu. The origin is immutable pre-block state, so it lives outside the OCC cells.
 func (ibs *IntraBlockState) PublishOrigins() {
-	if ibs.versionMap == nil {
-		return
-	}
-	ws := &ibs.versionedOrigins
+	ws := &ibs.origins
 	for addr, vw := range ws.address {
 		ibs.versionMap.StoreOriginAccount(addr, vw.Val)
 	}
@@ -3876,134 +2865,4 @@ func (ibs *IntraBlockState) PublishOrigins() {
 		}
 	}
 	ws.ReleaseAndReset()
-}
-
-// Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
-// of the current StateDB.
-func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
-	if writes == nil {
-		return nil
-	}
-	// Deterministic (Address, Path, Key) order: Code/SelfDestruct load the state
-	// object and may record an extra read depending on whether a prior
-	// same-address write already loaded it, which changes the EIP-7928 BAL hash.
-	headers := make([]WriteHeader, 0, writes.Count())
-	for h := range writes.AllHeaders() {
-		headers = append(headers, h)
-	}
-	sortWriteHeaders(headers)
-	for _, hdr := range headers {
-		addr := hdr.Address
-
-		switch hdr.Path {
-		case AddressPath:
-			continue
-		case StoragePath:
-			vw, ok := writes.GetStorage(addr, hdr.Key)
-			if !ok {
-				continue
-			}
-			if err := ibs.setState(addr, hdr.Key, vw.Val, true); err != nil {
-				return err
-			}
-		case BalancePath:
-			vw, ok := writes.GetBalance(addr)
-			if !ok {
-				continue
-			}
-			if err := ibs.SetBalance(addr, vw.Val, hdr.Reason); err != nil {
-				return err
-			}
-		case NoncePath:
-			vw, ok := writes.GetNonce(addr)
-			if !ok {
-				continue
-			}
-			if err := ibs.SetNonce(addr, vw.Val, hdr.NonceReason); err != nil {
-				return err
-			}
-		case IncarnationPath:
-			vw, ok := writes.GetIncarnation(addr)
-			if !ok {
-				continue
-			}
-			if err := ibs.SetIncarnation(addr, vw.Val); err != nil {
-				return err
-			}
-			// Re-emit so the finalize IBS's writes flush to the global versionMap.
-			ibs.recordWriteIncarnation(addr, vw.Val)
-		case CodePath:
-			vwCode, ok := writes.GetCode(addr)
-			if !ok {
-				continue
-			}
-			code := vwCode.Val
-			stateObject, err := ibs.GetOrNewStateObject(addr)
-			if err != nil {
-				return err
-			}
-			// Force-set code bypassing stateObject.SetCode's equality check.
-			// The finalize IBS uses a VersionedStateReader whose ReadSet may
-			// contain the post-write code value (when the worker read the code
-			// after a SetCodeTx modified it), causing SetCode's equality
-			// comparison to incorrectly skip the update and leave dirtyCode unset.
-			ibs.journal.codeChange(addr, stateObject.code.Bytes, stateObject.data.CodeHash, !ibs.hasWrite(addr, CodePath, accounts.NilKey))
-			stateObject.setCode(code)
-			ibs.recordWriteCode(addr, code)
-			ibs.recordWriteCodeHash(addr, code.Hash)
-			ibs.recordWriteCodeSize(addr, code.Len())
-		case CodeHashPath, CodeSizePath:
-			// set by CodePath case above
-		case SelfDestructPath:
-			vw, ok := writes.GetSelfDestruct(addr)
-			if !ok {
-				continue
-			}
-			if vw.Val {
-				// Ensure the state object exists before calling Selfdestruct.
-				// For newly-created accounts (with no pre-block DB entry)
-				// getStateObject returns nil and Selfdestruct silently no-ops, so
-				// materialize the object first to keep the selfdestructed marking.
-				if _, err := ibs.GetOrNewStateObject(addr); err != nil {
-					return err
-				}
-				if _, err := ibs.Selfdestruct(addr, true); err != nil {
-					return err
-				}
-			} else {
-				// SelfDestructPath=false means resurrection this block. createdContract
-				// is not a versioned write path and is lost in the finalize IBS, so
-				// restore it here to ensure CreateContract clears old storage on commit.
-				so, err := ibs.GetOrNewStateObject(addr)
-				if err != nil {
-					return err
-				}
-				if so != nil {
-					so.selfdestructed = false
-					so.createdContract = true
-				}
-				// Re-emit SelfDestructPath=false so the global versionMap reflects the
-				// resurrection; subsequent workers reading SelfDestructPath will see the
-				// updated value and not mistake the account for still being selfdestructed.
-				ibs.recordWriteSelfDestruct(addr, false)
-			}
-		case CreateContractPath:
-			// A same-tx self-destruct dominates the creation marker: skip applying
-			// CreateContract so the account is not resurrected as a live contract.
-			if sw, ok := writes.GetSelfDestruct(addr); ok && sw.Val {
-				continue
-			}
-			// Contract creation: set createdContract flag on the stateObject.
-			so, err := ibs.GetOrNewStateObject(addr)
-			if err != nil {
-				return err
-			}
-			if so != nil {
-				so.createdContract = true
-			}
-		default:
-			return fmt.Errorf("unknown key type: %d", hdr.Path)
-		}
-	}
-	return nil
 }

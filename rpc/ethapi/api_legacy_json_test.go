@@ -76,7 +76,7 @@ func legacyRPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) map[str
 		transactions := make([]any, len(txs))
 		for i, txn := range txs {
 			if fullTx {
-				transactions[i] = NewRPCTransaction(txn, block.Hash(), block.Time(), block.NumberU64(), uint64(i), block.BaseFee())
+				transactions[i] = NewRPCTransaction(txn, block.Hash(), block.Time(), block.NumberU64(), uint64(i), block.BaseFee(), nil, 0)
 			} else {
 				transactions[i] = txn.Hash()
 			}

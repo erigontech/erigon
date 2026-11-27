@@ -60,7 +60,7 @@ func testAlignFilesToStepSize(t *testing.T, merge bool, factor uint64, refsAtBui
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, refsAtBuild)
 	keys := mkAddrs(0x10, 16)
 	writeStepsKeys(t, db, agg, keys, 0, 23)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, merge))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, allIrreversible, merge))
 	agg.WaitForFiles()
 	dirs := agg.Dirs()
 
@@ -101,7 +101,7 @@ func TestAlignFilesToStepSizeIntegratesMergesThatSucceeded(t *testing.T) {
 	const stepSize, factor = uint64(10), uint64(5)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 23)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, allIrreversible, false))
 	agg.WaitForFiles()
 	dirs := agg.Dirs()
 	inputs, err := filepath.Glob(filepath.Join(dirs.SnapIdx, "*-logaddrs.0-1.ef"))
@@ -127,7 +127,7 @@ func TestAlignFilesToStepSizeIntegratesEachMergeOnCompletion(t *testing.T) {
 	const stepSize, factor = uint64(10), uint64(5)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 23)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, unboundedFinalityCtx, false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 23, allIrreversible, false))
 	agg.WaitForFiles()
 	dirs := agg.Dirs()
 	aligned := func() (n int) {

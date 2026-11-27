@@ -138,7 +138,7 @@ type recordingBlockRetire struct {
 
 func (r *recordingBlockRetire) SetWorkers(int) {}
 
-func (r *recordingBlockRetire) BuildFilesInBackground(_ context.Context, _ uint64, _ kv.FinalityContext, _ log.Lvl, _ dbservices.SeederClient, onFinishRetire func() error, _ func()) bool {
+func (r *recordingBlockRetire) BuildFilesInBackground(_ context.Context, _ uint64, _ uint64, _ log.Lvl, _ dbservices.SeederClient, onFinishRetire func() error, _ func()) bool {
 	r.builds++
 	r.onFinishRetire = onFinishRetire
 	return true

@@ -87,14 +87,9 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	require.ErrorContains(t, err, "skipped too many blocks in a row")
 }
 
-// dumpBeaconBlocksRange indexes the segment it just compressed, which is only safe because
-// Compress fsyncs and renames before returning.
-func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
-	ctx := t.Context()
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	dirs := datadir.New(t.TempDir())
-
-	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) (bodylessRoot common.Hash) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		var prevRoot common.Hash
 		// One block every 500 slots keeps skippedInARow below its 1000 limit.
 		for slot := uint64(0); slot < snaptype.CaplinMergeLimit; slot += 500 {
@@ -106,13 +101,27 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
 				return err
 			}
+			prevRoot = root
+			if slot == bodylessSlot {
+				bodylessRoot = root
+				continue
+			}
 			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
 				return err
 			}
-			prevRoot = root
 		}
 		return nil
 	}))
+	return bodylessRoot
+}
+
+// dumpBeaconBlocksRange indexes the segment it just compressed, which is only safe because
+// Compress fsyncs and renames before returning.
+func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
+	ctx := t.Context()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeSparseCanonicalChain(t, db, math.MaxUint64)
 
 	require.NoError(t, dumpBeaconBlocksRange(ctx, db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New()))
 
@@ -133,6 +142,34 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 	require.NoError(t, err)
 	defer idx.Close()
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), idx.KeyCount())
+}
+
+func TestDumpBeaconBlocksRangeFailsOnCanonicalRootWithoutBody(t *testing.T) {
+	for name, tc := range map[string]struct {
+		slot      uint64
+		emptyBody bool
+	}{
+		"first":            {slot: 0},
+		"last":             {slot: snaptype.CaplinMergeLimit - 500},
+		"last, empty body": {slot: snaptype.CaplinMergeLimit - 500, emptyBody: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			dirs := datadir.New(t.TempDir())
+			root := writeSparseCanonicalChain(t, db, tc.slot)
+			if tc.emptyBody {
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(tc.slot, root), []byte{})
+				}))
+			}
+
+			err := dumpBeaconBlocksRange(t.Context(), db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New())
+			require.ErrorContains(t, err, "has no body", "slot %d", tc.slot)
+			files, globErr := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*"))
+			require.NoError(t, globErr)
+			require.Empty(t, files, "slot %d", tc.slot)
+		})
+	}
 }
 
 // Pre-Deneb chains never freeze blobs, so the answer must be 0 regardless of visible segments.
@@ -418,6 +455,87 @@ func TestBeaconSnapshotReaderPropagatesUnavailableExecutionBody(t *testing.T) {
 		bySlot, err := reader.ReadBlockBySlot(t.Context(), tx, slot)
 		require.ErrorIs(t, err, snapshot_format.ErrExecutionBodyNotFound)
 		require.Nil(t, bySlot)
+		return nil
+	}))
+}
+
+func blockWithPayload(t *testing.T, version clparams.StateVersion, slot uint64) *cltypes.SignedBeaconBlock {
+	t.Helper()
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, version)
+	block.Signature = common.Bytes96{1}
+	block.Block.Slot = slot
+	payload := block.Block.Body.ExecutionPayload
+	payload.BlockHash = common.Hash{2}
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1, 2, 3}, {4}})
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	payload.Withdrawals.Append(&cltypes.Withdrawal{Index: 7, Amount: 9})
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{2})
+	return block
+}
+
+func TestReadBlindedBlockBySlotKeepsTheBodyRootOfTheStoredBlock(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const snapshotSlot, dbSlot = 10, limit + 10
+	versions := []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	snapshotWords := map[uint64][]byte{}
+	for i, version := range versions {
+		snapshotWords[snapshotSlot+uint64(i)] = blockSnapshotWord(t, blockWithPayload(t, version, snapshotSlot+uint64(i)))
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, blockWithPayload(t, version, dbSlot+uint64(i)), true)
+		}))
+	}
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, func(slot uint64) []byte { return snapshotWords[slot] })
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for i, version := range versions {
+			for name, slot := range map[string]uint64{"snapshot": snapshotSlot + uint64(i), "db": dbSlot + uint64(i)} {
+				want := blockWithPayload(t, version, slot).SignedBeaconBlockHeader()
+
+				blinded, err := reader.ReadBlindedBlockBySlot(t.Context(), tx, slot)
+				require.NoError(t, err, "%s %s", version, name)
+				require.NotNil(t, blinded, "%s %s", version, name)
+				require.Equal(t, want, blinded.SignedBeaconBlockHeader(), "%s %s", version, name)
+
+				promoted, err := reader.ReadBeaconBlockBodyBySlot(t.Context(), tx, slot)
+				require.NoError(t, err)
+				require.NotEqual(t, want.Header.BodyRoot, promoted.SignedBeaconBlockHeader().Header.BodyRoot,
+					"the promoted block must not hash to the stored body root, or this test proves nothing")
+			}
+		}
+		return nil
+	}))
+}
+
+func TestReadBlindedBlockBySlotWithoutABlindedForm(t *testing.T) {
+	const slot = snaptype.CaplinMergeLimit + 10
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	gloas := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	gloas.Block.Slot = slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, gloas, true)
+	}))
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		blinded, err := reader.ReadBlindedBlockBySlot(t.Context(), tx, slot)
+		require.ErrorIs(t, err, cltypes.ErrGloasCannotBlind)
+		require.Nil(t, blinded)
+
+		blinded, err = reader.ReadBlindedBlockBySlot(t.Context(), tx, slot+1)
+		require.NoError(t, err)
+		require.Nil(t, blinded, "a slot with no block")
 		return nil
 	}))
 }

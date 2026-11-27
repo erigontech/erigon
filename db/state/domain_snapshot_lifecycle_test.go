@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -35,7 +34,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 	t.Parallel()
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CodeDomain} {
 		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+			db, d := testDbAndDomainOfStep(t, cfg, 16)
 			tx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()

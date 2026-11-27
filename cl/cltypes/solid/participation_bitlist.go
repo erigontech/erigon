@@ -140,7 +140,17 @@ func (u *ParticipationBitList) Cap() int {
 	return u.c
 }
 
+func (u *ParticipationBitList) checkLimit(length int) error {
+	if length > u.c {
+		return fmt.Errorf("participation list length exceeds limit: %d > %d", length, u.c)
+	}
+	return nil
+}
+
 func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
+	if err := u.checkLimit(u.l); err != nil {
+		return [32]byte{}, err
+	}
 	depth := GetDepth((uint64(u.c) + 31) / 32)
 	baseRoot := [32]byte{}
 	if u.l == 0 {
@@ -204,14 +214,17 @@ func merkleizeLayers(layer, out []byte, fromDepth, toDepth uint8) error {
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
 // It returns the resulting byte slice.
 func (u *ParticipationBitList) EncodeSSZ(dst []byte) ([]byte, error) {
+	if err := u.checkLimit(u.l); err != nil {
+		return nil, err
+	}
 	return append(dst, u.u[:u.l]...), nil
 }
 
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *ParticipationBitList) DecodeSSZ(dst []byte, _ int) error {
-	if len(dst) > u.c {
-		return fmt.Errorf("participation list length exceeds limit: %d > %d", len(dst), u.c)
+	if err := u.checkLimit(len(dst)); err != nil {
+		return err
 	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)
@@ -264,20 +277,15 @@ func (u *ParticipationBitList) UnmarshalJSON(input []byte) error {
 	// Try spec-compliant format first: array of decimal strings.
 	var list []string
 	if err := json.Unmarshal(input, &list); err == nil {
-		u.l = len(list)
-		if cap(u.u) < u.l+32 {
-			u.u = make([]byte, u.l+32)
-		} else {
-			u.u = u.u[:u.l+32]
-		}
+		values := make([]byte, len(list))
 		for i, s := range list {
 			val, err := strconv.ParseUint(s, 10, 8)
 			if err != nil {
 				return err
 			}
-			u.u[i] = byte(val)
+			values[i] = byte(val)
 		}
-		return nil
+		return u.DecodeSSZ(values, 0)
 	}
 	// Fallback: legacy hex-encoded SSZ format.
 	var hex hexutil.Bytes

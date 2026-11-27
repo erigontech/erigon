@@ -97,12 +97,10 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	dirs := agg.Dirs()
 	generateAccountsFile(t, dirs, []testFileRange{{0, 20}})
 	generateStorageFile(t, dirs, []testFileRange{{0, 20}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 20}})
 	generateCommitmentFile(t, dirs, []testFileRange{{0, 20}})
-	generateCodeFile(t, dirs, []testFileRange{{4, 20}})
+	generateStandaloneIIFile(t, kv.LogAddrIdx, dirs, []testFileRange{{4, 20}}) // retired below step 4, so it stays visible
 	require.NoError(t, agg.OpenFolder(db))
-	at := agg.BeginFilesRo()
-	require.Equal(t, uint64(40), at.d[kv.CodeDomain].files.StartTxNum())
-	at.Close()
 	_, err := agg.StepAlignedEnd(100)
 	require.ErrorContains(t, err, "starts at txNum 40")
 }

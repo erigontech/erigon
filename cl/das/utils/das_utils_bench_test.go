@@ -25,6 +25,9 @@ import (
 )
 
 func BenchmarkRecoverMatrix(b *testing.B) {
+	if err := ckzgReady(); err != nil {
+		b.Fatal(err)
+	}
 	for _, blobCount := range []int{1, 6, 9, 16} {
 		full, half := testMatrix(b, blobCount)
 		for _, tc := range []struct {
