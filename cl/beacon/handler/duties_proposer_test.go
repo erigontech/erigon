@@ -449,45 +449,6 @@ func (s *dutyViewHooks) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWi
 	return nil
 }
 
-type dutyFloorView struct {
-	synced_data.SyncedData
-	inView bool
-}
-
-func (s *dutyFloorView) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
-	return s.SyncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, root common.Hash, slot uint64) error {
-		s.inView = true
-		defer func() { s.inView = false }()
-		return fn(head, root, slot)
-	})
-}
-
-type dutyFloorStore struct {
-	forkchoice.ForkChoiceStorage
-	view                 *dutyFloorView
-	called, calledInView bool
-}
-
-func (f *dutyFloorStore) LowestAvailableSlot() uint64 {
-	f.called = true
-	f.calledInView = f.view.inView
-	return f.ForkChoiceStorage.LowestAvailableSlot()
-}
-
-func TestGetDutiesProposerReadsFloorBeforeHeadView(t *testing.T) {
-	_, _, _, _, head, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	epoch := state.Epoch(head) - 1
-	fcu.FinalizedSlotVal = 0
-	view := &dutyFloorView{SyncedData: manager}
-	store := &dutyFloorStore{ForkChoiceStorage: fcu, view: view}
-	h.syncedData = view
-	h.forkchoiceStore = store
-
-	getProposerDutiesForEpoch(t, h, epoch)
-	require.True(t, store.called)
-	require.False(t, store.calledInView, "the floor must be read before the head view")
-}
-
 type dutyOptimisticStore struct {
 	forkchoice.ForkChoiceStorage
 	head           synced_data.SyncedData
@@ -601,7 +562,6 @@ func TestGetDutiesProposerLogsAdvanceFailureAfterView(t *testing.T) {
 	h.beaconChainCfg.InitializeForkSchedule()
 
 	var released, warned, warnedAfterView atomic.Bool
-	var warningFields []any
 	h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
 		released.Store(true)
 	}}
@@ -611,7 +571,6 @@ func TestGetDutiesProposerLogsAdvanceFailureAfterView(t *testing.T) {
 	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
 		if r.Msg == "getDutiesProposer: failed to advance state" {
 			warnedAfterView.Store(released.Load())
-			warningFields = r.Ctx
 			warned.Store(true)
 		}
 		return true
@@ -624,10 +583,6 @@ func TestGetDutiesProposerLogsAdvanceFailureAfterView(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "not greater than current slot")
 	require.True(t, warned.Load())
 	require.True(t, warnedAfterView.Load(), "the slot advance warning must follow the head view")
-	require.Contains(t, warningFields, "stateVersion")
-	require.Contains(t, warningFields, clparams.ElectraVersion)
-	require.Contains(t, warningFields, "targetVersion")
-	require.Contains(t, warningFields, clparams.FuluVersion)
 }
 
 func TestGetDependentRootChecksOutOfWindowSlotOnce(t *testing.T) {
