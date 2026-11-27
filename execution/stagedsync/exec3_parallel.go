@@ -2632,11 +2632,9 @@ type blockExecutor struct {
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
-	// wakeValidated maps a task to the named re-runs waiting for it to validate.
-	// validatedTasks holds the tasks validated since their last re-exec signal and not
-	// yet committed.
-	wakeValidated  map[int][]*poolTask
-	validatedTasks map[int]bool
+	// wakeValidated maps a task to the named re-runs waiting for it to validate; a waiter
+	// added after that validation waits for the commit, which also drains this queue.
+	wakeValidated map[int][]*poolTask
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2688,7 +2686,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		selfLoopDispatched:  map[int]bool{},
 		wakeAt:              map[int][]*poolTask{},
 		wakeValidated:       map[int][]*poolTask{},
-		validatedTasks:      map[int]bool{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3030,7 +3027,6 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
 	delete(be.wakeValidated, tx)
-	delete(be.validatedTasks, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3040,9 +3036,6 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
-	be.wakeMu.Lock()
-	delete(be.validatedTasks, tx)
-	be.wakeMu.Unlock()
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3077,7 +3070,6 @@ func (be *blockExecutor) finishTask(tx int) {
 // Validated, which a reader continues on.
 func (be *blockExecutor) signalValidated(tx int) {
 	be.wakeMu.Lock()
-	be.validatedTasks[tx] = true
 	waiters := be.wakeValidated[tx]
 	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
@@ -3095,13 +3087,7 @@ func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 	if int(be.committedFrontier.Load()) >= target {
 		return false
 	}
-	// A dependency that survives the writer's validation (a fee recipient's cells stay
-	// provisional) settles only at the writer's commit.
-	if be.validatedTasks[target] {
-		be.wakeAt[target] = append(be.wakeAt[target], pt)
-	} else {
-		be.wakeValidated[target] = append(be.wakeValidated[target], pt)
-	}
+	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
 	return true
 }
 
