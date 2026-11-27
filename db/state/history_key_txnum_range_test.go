@@ -297,3 +297,31 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 		test(t, h, db, txs)
 	})
 }
+
+func TestHistoryKeyTxNumRange_DBOnly_KeyIsPrefixOfNextKey(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	ctx := t.Context()
+
+	test := func(t *testing.T, largeValues bool) {
+		db, h := testDbAndHistory(t, largeValues, logger)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		hc := h.beginForTests()
+		defer hc.Close()
+		writer := hc.NewWriter(db)
+		defer writer.close()
+
+		// "ab" changes only before the range, "abc" changes inside it.
+		require.NoError(t, writer.AddPrevValue([]byte("ab"), 5, []byte{1}))
+		require.NoError(t, writer.AddPrevValue([]byte("abc"), 15, []byte{2}))
+		require.NoError(t, writer.Flush(ctx, tx))
+
+		it, err := hc.HistoryKeyTxNumRange(10, 20, order.Asc, -1, tx)
+		require.NoError(t, err)
+		require.Equal(t, []string{fmt.Sprintf("%x:15", "abc")}, collectKeyTxNumRange(t, it))
+	}
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
