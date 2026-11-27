@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,8 +34,9 @@ type poolTask struct {
 }
 
 type poolWorker struct {
-	w  *exec.WorkerContext
-	tx kv.TemporalTx
+	w     *exec.WorkerContext
+	tx    kv.TemporalTx
+	npOrd int
 }
 
 type taskHeap []*poolTask
@@ -228,6 +230,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	be, tv := pt.be, pt.tv
 	finalExec := be.frontier() >= tv.index-1
+	npTxT0, npHadTx := time.Now(), wk.tx != nil
 	if err := wk.ensureTx(p); err != nil {
 		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, err))
 		return false
@@ -245,7 +248,15 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
-	return pt.afterRun(p, wk.w.RunTxTask(tv), finalExec)
+	if !npHadTx {
+		npCons.rotx.Add(int64(time.Since(npTxT0)))
+		npCons.rotxN.Add(1)
+	}
+	npRunT0 := time.Now()
+	npRes := wk.w.RunTxTask(tv)
+	npCons.task(wk.npOrd, tv.version.Incarnation == 0, time.Since(npRunT0), npRes.ExecutionResult.MaxGasUsed)
+	wk.npOrd++
+	return pt.afterRun(p, npRes, finalExec)
 }
 
 // afterRun decides what follows a run: re-run, publish, or wait for the read target.

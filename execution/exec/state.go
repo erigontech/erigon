@@ -171,7 +171,9 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		readMetrics:  kvmetrics.NewDomainMetrics(),
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
+	npT0 := time.Now()
 	w.ibs = state.New(w.stateReader)
+	npIbs(npT0)
 	w.watchCtx(ctx)
 	return w
 }
@@ -376,11 +378,13 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	npT0 := time.Now()
 	if rw.prevBlockReg != nil {
 		rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
 		rw.ibs.ResetReader(rw.stateReader)
 	}
+	npIbs(npT0)
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -399,7 +403,9 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
+	npT0 := time.Now()
 	rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, reg))
+	npIbs(npT0)
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
@@ -464,4 +470,12 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	return result
+}
+
+// NpIbsNs and NpIbsN sum the wall time and count of worker IntraBlockState Close+New (probe).
+var NpIbsNs, NpIbsN atomic.Int64
+
+func npIbs(t0 time.Time) {
+	NpIbsNs.Add(int64(time.Since(t0)))
+	NpIbsN.Add(1)
 }
