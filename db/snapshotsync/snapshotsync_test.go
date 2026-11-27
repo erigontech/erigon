@@ -1128,6 +1128,18 @@ func TestDownloadNameContainingCaplinUsesLocation(t *testing.T) {
 	checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}, NoCaplin, false, 0, true)
 }
 
+func TestTypedKeepsTransactionIndexes(t *testing.T) {
+	idx := snaptype2.Transactions.IdxFileNames(0, 500_000)
+	require.Len(t, idx, 2)
+	require.True(t, strings.HasSuffix(idx[1], "-transactions-to-block.idx"), idx[1])
+	var items snapcfg.PreverifiedItems
+	for _, name := range append([]string{snaptype2.Transactions.FileName(snaptype.Version{}, 0, 500_000)}, idx...) {
+		items = append(items, snapcfg.PreverifiedItem{Name: name, Hash: name})
+	}
+	typed := snapcfg.Preverified{Items: items}.Typed([]snaptype.Type{snaptype2.Transactions})
+	require.ElementsMatch(t, items, typed.Items)
+}
+
 func TestDownloadTypedCaplinPaths(t *testing.T) {
 	fixtures := []struct {
 		basename string

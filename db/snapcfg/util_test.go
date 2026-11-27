@@ -77,6 +77,13 @@ func TestTypedCaplinDropsUnparseableVersion(t *testing.T) {
 	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
 }
 
+func TestTypedReportsUnparsableCaplinVersion(t *testing.T) {
+	const name = "caplin/archive/v1.1-000000-000100-BlockRoot.seg"
+	kept, drops := Preverified{Items: PreverifiedItems{{Name: name, Hash: "nested"}}}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, []string{name}, drops.unparsableNames)
+}
+
 func TestDroppedNamesReportsUnparseableCaplinEntry(t *testing.T) {
 	items := PreverifiedItems{
 		{Name: "caplin/salt-blocks.txt", Hash: "no-version"},
@@ -332,10 +339,12 @@ func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
 		{Name: "caplin/v1.1-future.0-32.idx-beaconblocks", Hash: "unknown-caplin-state-name"},
 		{Name: "v1.1-future.0-32.idx-beaconblocks", Hash: "unknown-state-name"},
 		{Name: "v1.1-beaconblocks.0-32.idx-backup", Hash: "registered-state-name-hyphenated-extension"},
+		{Name: "caplin/v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-caplin-state-name-overflow"},
+		{Name: "v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-state-name-overflow"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
-	require.Equal(t, 6, drops.unreadable)
+	require.Equal(t, 8, drops.unreadable)
 	require.Equal(t, 6, drops.unparsable)
 	require.Equal(t, []string{
 		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",

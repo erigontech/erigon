@@ -154,19 +154,28 @@ func (d *typeFilterDrops) unparsableItem(name string) {
 	}
 }
 
-func (d *typeFilterDrops) unparsedItem(name string) {
+func (d *typeFilterDrops) unregistered(name string, parsed snaptype.FileInfo) bool {
+	if parsed.Type != nil {
+		return false
+	}
+	if parsed.TypeString == "" && registeredTypeToken(name) {
+		d.unparsableItem(name)
+	} else {
+		d.unreadable++
+	}
+	return true
+}
+
+func registeredTypeToken(name string) bool {
 	_, afterVersion, _ := strings.Cut(filepath.Base(name), "-")
+	afterVersion = strings.TrimSuffix(afterVersion, filepath.Ext(afterVersion))
 	_, afterFrom, _ := strings.Cut(afterVersion, "-")
 	_, typeToken, _ := strings.Cut(afterFrom, "-")
-	typeToken = strings.TrimSuffix(typeToken, filepath.Ext(typeToken))
 	for ext := filepath.Ext(typeToken); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(typeToken) {
 		typeToken = strings.TrimSuffix(typeToken, ext)
 	}
-	if _, registered := snaptype.ParseEnum(typeToken); registered {
-		d.unparsableItem(name)
-		return
-	}
-	d.unreadable++
+	_, registered := snaptype.ParseEnum(typeToken)
+	return registered
 }
 
 // droppedNames returns the names in all that kept no longer contains, capped at
@@ -246,13 +255,8 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		}
 
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
-			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
-			if caplinFile.Type == nil && caplinFile.TypeString != "" {
-				drops.unreadable++
-				continue
-			}
-			if !known || caplinFile.Type == nil {
-				drops.unparsedItem(p.Name)
+			caplinFile, _, _ := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
+			if drops.unregistered(p.Name, caplinFile) {
 				continue
 			}
 
@@ -298,14 +302,10 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			continue
 		}
 		parsed, _, _ := snaptype.ParseFileName("", p.Name)
-		switch {
-		case parsed.TypeString == "":
-			drops.unparsedItem(p.Name)
+		if drops.unregistered(p.Name, parsed) {
 			continue
-		case parsed.Type == nil:
-			drops.unreadable++
-			continue
-		case dot < lastSep || !strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) || !spellsRegisteredName(parsed.Type, parsed.TypeString):
+		}
+		if dot < lastSep || !strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) || !spellsRegisteredName(parsed.Type, parsed.TypeString) {
 			drops.unparsableItem(p.Name)
 			continue
 		}
