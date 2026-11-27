@@ -47,6 +47,9 @@ var DefaultBlockDownload = BlockDownload{
 }
 
 func (b BlockDownload) WithDefaults() BlockDownload {
+	if b == (BlockDownload{}) {
+		return DefaultBlockDownload
+	}
 	defaults := DefaultBlockDownload
 	if b.BlocksBatchSize != 0 {
 		defaults.BlocksBatchSize = b.BlocksBatchSize

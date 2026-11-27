@@ -302,20 +302,43 @@ func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Hea
 }
 
 func TestBackwardBlockDownloader_PartialConfigUsesDefaults(t *testing.T) {
-	headers := newTestHeaderChain(31, nil)
-	logger := testlog.Logger(t, log.LvlCrit)
-	peerTracker := NewPeerTracker(logger, nil)
-	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	bbd := NewBackwardBlockDownloader(
-		logger,
-		&chainServingBbdFetcher{headers: headers},
-		peerTracker,
-		t.TempDir(),
-		WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10}),
-	)
-	feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
-	require.NoError(t, err)
-	require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+	t.Run("partial", func(t *testing.T) {
+		headers := newTestHeaderChain(31, nil)
+		logger := testlog.Logger(t, log.LvlCrit)
+		peerTracker := NewPeerTracker(logger, nil)
+		peerTracker.PeerConnected(PeerIdFromUint64(1))
+		bbd := NewBackwardBlockDownloader(
+			logger,
+			&chainServingBbdFetcher{headers: headers},
+			peerTracker,
+			t.TempDir(),
+			WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10}),
+		)
+		want := p2pcfg.DefaultBlockDownload
+		want.BlocksBatchSize = 10
+		want.InitialHeaderFetchRetries = 0
+		want.HeaderChainBatchFetchRetries = 0
+		want.BodiesBatchFetchRetries = 0
+		require.Equal(t, want, bbd.blockDownload)
+		feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+		require.NoError(t, err)
+		require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+	})
+
+	t.Run("zero", func(t *testing.T) {
+		logger := testlog.Logger(t, log.LvlCrit)
+		peerTracker := NewPeerTracker(logger, nil)
+		bbd := NewBackwardBlockDownloader(
+			logger,
+			&chainServingBbdFetcher{},
+			peerTracker,
+			t.TempDir(),
+			WithBlockDownloadConfig(p2pcfg.BlockDownload{}),
+		)
+		require.Equal(t, p2pcfg.DefaultBlockDownload.InitialHeaderFetchRetries, bbd.blockDownload.InitialHeaderFetchRetries)
+		require.Equal(t, p2pcfg.DefaultBlockDownload.HeaderChainBatchFetchRetries, bbd.blockDownload.HeaderChainBatchFetchRetries)
+		require.Equal(t, p2pcfg.DefaultBlockDownload.BodiesBatchFetchRetries, bbd.blockDownload.BodiesBatchFetchRetries)
+	})
 }
 
 func TestBackwardBlockDownloader_InvalidMaxParallelBodyDownloadsUseDefault(t *testing.T) {
