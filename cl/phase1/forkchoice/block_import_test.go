@@ -17,12 +17,15 @@
 package forkchoice
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
@@ -53,7 +56,7 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 		prepared := preparePostState(postState, block.Block)
 		require.True(t, store.timeMs.CompareAndSwap(storeTimeMs, storeTimeMs+store.beaconCfg.SecondsPerSlot*1000))
 
-		_, err = store.applyBlockImportLocked(block.Block, blockRoot, block.Block.ParentRoot, storeTimeMs, postState, prepared)
+		_, err = store.applyBlockImportLocked(block.Block, blockRoot, common.Hash{}, storeTimeMs, postState, prepared)
 		require.NoError(t, err)
 	}()
 
@@ -61,4 +64,48 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
 	require.Equal(t, common.Hash(blockRoot), store.ProposerBoostRoot())
+}
+
+// update_proposer_boost_root compares the block with the head right before the block is added. The
+// import releases f.mu during the EL call, so a head taken before that call can be stale.
+func TestProposerBoostUsesTheHeadWhenTheBlockIsApplied(t *testing.T) {
+	const blockIndex = 84
+	for _, test := range []struct {
+		name      string
+		duringEL  func(f *ForkChoiceStore)
+		wantBoost bool
+	}{
+		{name: "head unchanged", duringEL: func(*ForkChoiceStore) {}, wantBoost: true},
+		{name: "head moved to another dependent root", duringEL: func(f *ForkChoiceStore) {
+			// A justified root the store does not hold makes the anchor the head.
+			f.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch, Root: common.Hash{0xee}})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blocks, anchor, _ := tests.GetBellatrixRandom()
+			f := newBlockTestStore(t, anchor)
+			slotMs := func(slot uint64) uint64 { return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000 }
+			for _, block := range blocks[:blockIndex] {
+				f.OnTick(slotMs(block.Block.Slot) + 1)
+				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+			}
+			block := blocks[blockIndex]
+			f.OnTick(slotMs(block.Block.Slot) + 100)
+			engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+			f.engine = engine
+
+			onBlockDone := make(chan error, 1)
+			go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+			awaitSignal(t, elEntered, "NewPayload to start")
+			test.duringEL(f)
+			close(releaseEL)
+			require.NoError(t, awaitOnBlock(t, onBlockDone))
+
+			if test.wantBoost {
+				require.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
+			} else {
+				require.Zero(t, f.ProposerBoostRoot())
+			}
+		})
+	}
 }

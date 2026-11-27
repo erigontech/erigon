@@ -111,6 +111,15 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 ) (pendingEnvelopeFound bool, err error) {
 	blockEpoch := f.computeEpochAtSlot(block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
+	// update_proposer_boost_root takes the head right before the block is added. Before Gloas the import
+	// releases f.mu during the EL call, so the head is taken here, before the block enters the tree.
+	if blockVersion < clparams.GloasVersion && f.slotAtTimeMs(storeTimeMs) == block.Slot {
+		head, err := f.headBeforeBlockPreGloasLocked(block.Slot)
+		if err != nil {
+			log.Debug("[OnBlock] head before the block unavailable, no proposer boost", "slot", block.Slot, "err", err)
+		}
+		headBeforeBlock = head
+	}
 	f.updateChildren(block.Slot-1, block.ParentRoot, blockRoot) // parent slot can be innacurate
 	if block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Body.ExecutionPayload.BlockHash)
