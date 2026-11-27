@@ -234,7 +234,7 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
 	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
 	if destructDep != UnknownDep {
-		s.dep = max(s.dep, destructDep)
+		s.recordDep(destructDep)
 	}
 	if state == LifecycleRevived {
 		return outcomeReturnEmpty
@@ -1112,7 +1112,7 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 // read depends on it.
 func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
 	if r.life.createInc < 0 {
-		s.dep = max(s.dep, r.life.createdAt)
+		s.recordDep(r.life.createdAt)
 	}
 	hdr.Source = MapRead
 	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
