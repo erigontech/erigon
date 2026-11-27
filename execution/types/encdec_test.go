@@ -724,10 +724,20 @@ func TestReceiptForStorageRoundTrip(t *testing.T) {
 	emptyLog := tr.RandReceipt()
 	emptyLog.Logs = Logs{{Address: tr.RandAddress()}}
 
-	for i, r := range []*Receipt{tr.RandReceipt(), failed, success, noLogs, emptyLog} {
+	postState := tr.RandReceipt()
+	postState.PostState = tr.RandBytes(32)
+
+	longLists := tr.RandReceipt()
+	longLists.Logs = nil
+	for range 20 {
+		longLists.Logs = append(longLists.Logs, &Log{Address: tr.RandAddress(), Topics: []common.Hash{tr.RandHash(), tr.RandHash(), tr.RandHash(), tr.RandHash()}, Data: tr.RandBytes(100)})
+	}
+
+	for i, r := range []*Receipt{tr.RandReceipt(), failed, success, noLogs, emptyLog, {}, postState, longLists} {
 		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
 			var buf bytes.Buffer
 			require.NoError(t, (*ReceiptForStorage)(r).EncodeRLP(&buf))
+			require.Equal(t, reflectStoredReceiptRLP(t, r), buf.Bytes())
 
 			var dec ReceiptForStorage
 			require.NoError(t, rlp.DecodeBytes(buf.Bytes(), &dec))
@@ -748,4 +758,23 @@ func TestReceiptForStorageRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+func reflectStoredReceiptRLP(t *testing.T, r *Receipt) []byte {
+	logs := make([]rlpStorageLog, len(r.Logs))
+	for i, l := range r.Logs {
+		logs[i] = rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data}
+	}
+	enc, err := rlp.EncodeToBytes(&storedReceiptRLP{
+		Type:              r.Type,
+		PostStateOrStatus: r.statusEncoding(),
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		FirstLogIndex:     r.FirstLogIndexWithinBlock,
+		Logs:              logs,
+		TransactionIndex:  r.TransactionIndex,
+		ContractAddress:   r.ContractAddress,
+		GasUsed:           r.GasUsed,
+	})
+	require.NoError(t, err)
+	return enc
 }

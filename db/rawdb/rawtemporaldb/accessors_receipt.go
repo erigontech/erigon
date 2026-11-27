@@ -110,7 +110,7 @@ func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txN
 
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
 		w.rlpEncodeBuf.Reset()
-		if err := rlp.Encode(&w.rlpEncodeBuf, storageReceipt); err != nil {
+		if err := storageReceipt.EncodeRLP(&w.rlpEncodeBuf); err != nil {
 			return fmt.Errorf("ReceiptWriter.Append: encode: %w", err)
 		}
 		toWrite = w.rlpEncodeBuf.Bytes()

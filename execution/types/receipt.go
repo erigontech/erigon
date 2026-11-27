@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -477,51 +476,50 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
 
-	s := storedReceiptScratchPool.Get().(*storedReceiptScratch)
-	defer s.release()
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	return r.encodeStorage(w, b[:])
+}
 
-	s.logs = slices.Grow(s.logs[:0], len(r.Logs))
+func (r *ReceiptForStorage) encodeStorage(w io.Writer, b []byte) error {
+	status := (*Receipt)(r).statusEncoding()
+	logsSize := 0
 	for _, l := range r.Logs {
-		s.logs = append(s.logs, rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+		logsSize += l.encodingSize()
 	}
-	s.rec = storedReceiptRLP{
-		Type:              r.Type,
-		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		FirstLogIndex:     r.FirstLogIndexWithinBlock,
-
-		Logs:             s.logs,
-		GasUsed:          r.GasUsed,
-		ContractAddress:  r.ContractAddress,
-		TransactionIndex: r.TransactionIndex,
+	size := rlp.U64Len(uint64(r.Type)) + rlp.StringLen(status) + rlp.U64Len(r.CumulativeGasUsed) +
+		rlp.U64Len(uint64(r.FirstLogIndexWithinBlock)) + rlp.ListLen(logsSize) +
+		rlp.U64Len(uint64(r.TransactionIndex)) + 1 + length.Addr + rlp.U64Len(r.GasUsed)
+	if err := rlp.EncodeListPrefix(size, w, b); err != nil {
+		return err
 	}
-	return rlp.Encode(w, &s.rec)
-}
-
-// storedReceiptScratch keeps the reflection encoder's input off the heap: the
-// encoder needs an addressable struct and a log slice, and a receipt is encoded
-// once per transaction executed.
-type storedReceiptScratch struct {
-	rec  storedReceiptRLP
-	logs []rlpStorageLog
-}
-
-var storedReceiptScratchPool = sync.Pool{New: func() any { return new(storedReceiptScratch) }}
-
-// maxPooledLogs bounds what one pooled scratch keeps alive; a receipt with an
-// outlier log count is not worth pinning its backing array in the pool.
-const maxPooledLogs = 1024
-
-// release drops the borrowed topic and data slices so a pooled scratch never
-// keeps a receipt's logs alive.
-func (s *storedReceiptScratch) release() {
-	if cap(s.logs) > maxPooledLogs {
-		s.logs = nil
-	} else {
-		clear(s.logs)
+	if err := rlp.EncodeU64(uint64(r.Type), w, b); err != nil {
+		return err
 	}
-	s.rec = storedReceiptRLP{}
-	storedReceiptScratchPool.Put(s)
+	if err := rlp.EncodeString(status, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(r.CumulativeGasUsed, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(uint64(r.FirstLogIndexWithinBlock), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix(logsSize, w, b); err != nil {
+		return err
+	}
+	for _, l := range r.Logs {
+		if err := l.encodeRLP(w, b); err != nil {
+			return err
+		}
+	}
+	if err := rlp.EncodeU64(uint64(r.TransactionIndex), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(r.ContractAddress[:], w, b); err != nil {
+		return err
+	}
+	return rlp.EncodeU64(r.GasUsed, w, b)
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
