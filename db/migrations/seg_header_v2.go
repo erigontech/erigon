@@ -17,6 +17,7 @@
 package migrations
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -117,12 +118,10 @@ func detectionSawData(d *seg.Decompressor) (saw bool) {
 	return false
 }
 
-// checkReadableMaxWords bounds the validation read so the migration stays fast on
-// large snapshot sets while still exercising the decompression path.
-const checkReadableMaxWords = 2_000
-
-// checkReadable reads a bounded prefix of d with the given compression, recovering
-// the decompressor's panic into an error if the words don't decode.
+// checkReadable reads every word of d with the given compression and compares it with
+// the full decode, which is right for every word: an uncompressed word is a word
+// without patterns. A word read as uncompressed may not panic, it may only lose sync,
+// so a panic alone does not prove the guess. A panic is returned as an error.
 func checkReadable(d *seg.Decompressor, fc seg.FileCompression) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -130,13 +129,19 @@ func checkReadable(d *seg.Decompressor, fc seg.FileCompression) (err error) {
 		}
 	}()
 	r := seg.NewReader(d.MakeGetter(), fc)
+	full := d.MakeGetter()
 	r.Reset(0)
+	full.Reset(0)
 	// buf must stay a private heap scratch: Next may return an mmap-backed slice
 	// for an uncompressed word, so feeding its return back as the next buffer
 	// would make Next memmove into read-only mmap → SIGBUS on mixed-compression files.
 	buf := make([]byte, 0, 4096)
-	for i := 0; i < checkReadableMaxWords && r.HasNext(); i++ {
-		_, _ = r.Next(buf[:0])
+	var want []byte
+	for i := 0; r.HasNext(); i++ {
+		want, _ = full.Next(want[:0])
+		if got, _ := r.Next(buf[:0]); !bytes.Equal(got, want) {
+			return fmt.Errorf("not readable as compression=%v: word %d differs", fc, i)
+		}
 	}
 	return nil
 }

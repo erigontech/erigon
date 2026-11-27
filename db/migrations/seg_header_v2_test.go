@@ -18,6 +18,7 @@ package migrations
 
 import (
 	"context"
+	"math/rand/v2"
 	"path/filepath"
 	"testing"
 
@@ -168,4 +169,26 @@ func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
 
 	require.NoError(t, upgradeSegFileToV2(path, log.New()))
 	require.Equal(t, pairs, readBackPairs(t, path))
+}
+
+func TestUpgradeSegHeadersV2_LatePatternsAbort(t *testing.T) {
+	rnd := rand.New(rand.NewPCG(1, 2))
+	var pairs [][2]string
+	for range 2_000 {
+		k, v := make([]byte, 32), make([]byte, 32)
+		for i := range k {
+			k[i], v[i] = byte(rnd.Uint32()), byte(rnd.Uint32())
+		}
+		pairs = append(pairs, [2]string{string(k), string(v)})
+	}
+	pairs = append(pairs, manyPairs()...)
+	path := filepath.Join(t.TempDir(), "v1.0-storage.0-1024.kv")
+	writeV1SegFile(t, path, seg.CompressKeys, pairs)
+
+	require.Error(t, upgradeSegFileToV2(path, log.New()))
+
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
 }
