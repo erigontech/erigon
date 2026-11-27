@@ -185,17 +185,19 @@ func TestBlobStoreEarliestStoredSlot(t *testing.T) {
 	defer db.Close()
 	bs := NewBlobStore(db, afero.NewMemMapFs())
 
-	empty, err := bs.EarliestStoredSlot()
+	empty, found, err := bs.EarliestStoredSlot()
 	require.NoError(t, err)
 	require.Zero(t, empty)
+	require.False(t, found)
 
 	root := common.Hash{1}
 	slot := uint64(3*subdivisionSlot + 1)
 	require.NoError(t, bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{testSidecar(slot, 0, 1)}))
 
-	earliest, err := bs.EarliestStoredSlot()
+	earliest, found, err := bs.EarliestStoredSlot()
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), earliest)
+	require.True(t, found)
 }
 
 func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {

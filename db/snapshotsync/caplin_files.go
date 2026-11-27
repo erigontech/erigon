@@ -32,53 +32,53 @@ func CaplinFiles(items snapcfg.PreverifiedItems, retention clparams.CaplinRetent
 		return snapcfg.PreverifiedItems{}, nil
 	}
 	if retention.Mode == clparams.CaplinPruneModeArchive {
-		return filterCaplinFiles(items, clparams.CaplinRetentionFloors{}, func(_ caplinFile, _ clparams.CaplinRetentionFloors) bool { return true }), nil
+		return filterCaplinFiles(items, clparams.CaplinRetentionFloors{}, func(_ CaplinFile, _ clparams.CaplinRetentionFloors) bool { return true }), nil
 	}
 	floors, err := retention.Floors(beaconCfg, headSlot)
 	if err != nil {
 		return nil, err
 	}
 	keepState := retention.States.Kind != clparams.CaplinFloorDistance || retention.States.Value != 0
-	return filterCaplinFiles(items, floors, func(file caplinFile, floors clparams.CaplinRetentionFloors) bool {
-		switch file.family {
-		case caplinBlocks:
-			return file.to > floors.Blocks
-		case caplinSidecars:
-			return file.to > floors.Sidecars
-		case caplinStates:
+	return filterCaplinFiles(items, floors, func(file CaplinFile, floors clparams.CaplinRetentionFloors) bool {
+		switch file.Family {
+		case CaplinBlocks:
+			return file.To > floors.Blocks
+		case CaplinSidecars:
+			return file.To > floors.Sidecars
+		case CaplinStates:
 			if !keepState {
 				return false
 			}
-			return file.stateEvents || file.to > floors.States
+			return file.StateEvents || file.To > floors.States
 		default:
 			return false
 		}
 	}), nil
 }
 
-type caplinFileFamily uint8
+type CaplinFileFamily uint8
 
 const (
-	caplinBlocks caplinFileFamily = iota
-	caplinSidecars
-	caplinStates
+	CaplinBlocks CaplinFileFamily = iota
+	CaplinSidecars
+	CaplinStates
 )
 
-type caplinFile struct {
-	family      caplinFileFamily
-	from        uint64
-	to          uint64
-	stateEvents bool
+type CaplinFile struct {
+	Family      CaplinFileFamily
+	From        uint64
+	To          uint64
+	StateEvents bool
 }
 
-func filterCaplinFiles(items snapcfg.PreverifiedItems, floors clparams.CaplinRetentionFloors, keep func(caplinFile, clparams.CaplinRetentionFloors) bool) snapcfg.PreverifiedItems {
+func filterCaplinFiles(items snapcfg.PreverifiedItems, floors clparams.CaplinRetentionFloors, keep func(CaplinFile, clparams.CaplinRetentionFloors) bool) snapcfg.PreverifiedItems {
 	result := make(snapcfg.PreverifiedItems, 0, len(items))
 	for _, item := range items {
 		info, _, ok := snaptype.ParseFileName("", item.Name)
 		if !ok {
 			continue
 		}
-		file, ok := caplinFileInfo(item.Name, info)
+		file, ok := CaplinFileInfo(item.Name, info)
 		if ok && keep(file, floors) {
 			result = append(result, item)
 		}
@@ -86,20 +86,20 @@ func filterCaplinFiles(items snapcfg.PreverifiedItems, floors clparams.CaplinRet
 	return result
 }
 
-func caplinFileInfo(name string, info snaptype.FileInfo) (caplinFile, bool) {
+func CaplinFileInfo(name string, info snaptype.FileInfo) (CaplinFile, bool) {
 	if info.Type != nil {
 		switch info.Type.Enum() {
 		case snaptype.BeaconBlocks.Enum():
-			return caplinFile{family: caplinBlocks, from: info.From, to: info.To}, true
+			return CaplinFile{Family: CaplinBlocks, From: info.From, To: info.To}, true
 		case snaptype.BlobSidecars.Enum():
-			return caplinFile{family: caplinSidecars, from: info.From, to: info.To}, true
+			return CaplinFile{Family: CaplinSidecars, From: info.From, To: info.To}, true
 		}
 		if info.Type.Enum() >= snaptype.MinCaplinStateEnum && info.Type.Enum() < snaptype.MaxCaplinEnum {
-			return caplinFile{family: caplinStates, from: info.From, to: info.To, stateEvents: info.Type.Enum() == snaptype.StateEvents.Enum()}, true
+			return CaplinFile{Family: CaplinStates, From: info.From, To: info.To, StateEvents: info.Type.Enum() == snaptype.StateEvents.Enum()}, true
 		}
 	}
-	if isBlobSidecarFile(name) && info.TypeString == snaptype.CaplinIndexes.BlobSidecarSlot.Name {
-		return caplinFile{family: caplinSidecars, from: info.From, to: info.To}, true
+	if IsBlobSidecarFile(name) && info.TypeString == snaptype.CaplinIndexes.BlobSidecarSlot.Name {
+		return CaplinFile{Family: CaplinSidecars, From: info.From, To: info.To}, true
 	}
-	return caplinFile{}, false
+	return CaplinFile{}, false
 }

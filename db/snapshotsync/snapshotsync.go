@@ -96,6 +96,12 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
+// IsBlobSidecarFile matches blob sidecar segments and their index, which is named after
+// the index (blocksidecars), not the segment type.
+func IsBlobSidecarFile(name string) bool {
+	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+}
+
 // isBlobSidecarFile matches blob sidecar segments and their index, which is named after
 // the index (blocksidecars), not the segment type.
 func isBlobSidecarFile(name string) bool {

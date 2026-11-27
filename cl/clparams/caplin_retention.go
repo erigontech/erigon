@@ -36,20 +36,11 @@ const (
 )
 
 func (m CaplinPruneMode) String() string {
-	switch m {
-	case CaplinPruneModeArchive:
-		return "archive"
-	case CaplinPruneModePruned:
-		return "pruned"
-	case CaplinPruneModeSpec:
-		return "spec"
-	case CaplinPruneModeMinimal:
-		return "minimal"
-	case CaplinPruneModeTip:
-		return "tip"
-	default:
-		return "unknown"
+	names := [...]string{"spec", "archive", "pruned", "minimal", "tip"}
+	if int(m) < len(names) {
+		return names[m]
 	}
+	return "unknown"
 }
 
 func ParseCaplinPruneMode(value string) (CaplinPruneMode, error) {
@@ -138,18 +129,11 @@ const (
 )
 
 func (s CaplinRetentionSource) String() string {
-	switch s {
-	case CaplinRetentionSourceDefault:
-		return "default"
-	case CaplinRetentionSourceNewFlags:
-		return "new flags"
-	case CaplinRetentionSourceLegacyExact:
-		return "legacy exact"
-	case CaplinRetentionSourceLegacyInexact:
-		return "legacy inexact"
-	default:
-		return "unknown"
+	names := [...]string{"default", "new flags", "legacy exact", "legacy inexact"}
+	if int(s) < len(names) {
+		return names[s]
 	}
+	return "unknown"
 }
 
 type StoredSlot struct {
@@ -185,19 +169,22 @@ const (
 )
 
 func (a CaplinRetentionAction) String() string {
-	switch a {
-	case CaplinRetentionActionStore:
-		return "store"
-	case CaplinRetentionActionKeep:
-		return "keep"
-	case CaplinRetentionActionRefuse:
-		return "refuse"
-	default:
-		return "unknown"
+	names := [...]string{"store", "keep", "refuse"}
+	if int(a) < len(names) {
+		return names[a]
 	}
+	return "unknown"
 }
 
 func ParseCaplinRetention(mode, distance, sidecars, states string, set ...bool) (CaplinRetention, error) {
+	return parseCaplinRetention(mode, distance, sidecars, states, false, set...)
+}
+
+func ParseCaplinRetentionWithSlots(mode, distance, sidecars, states string, set ...bool) (CaplinRetention, error) {
+	return parseCaplinRetention(mode, distance, sidecars, states, true, set...)
+}
+
+func parseCaplinRetention(mode, distance, sidecars, states string, allowSlots bool, set ...bool) (CaplinRetention, error) {
 	if len(set) != 0 && len(set) != 3 {
 		return CaplinRetention{}, fmt.Errorf("invalid Caplin retention flag state")
 	}
@@ -205,15 +192,16 @@ func ParseCaplinRetention(mode, distance, sidecars, states string, set ...bool) 
 	if err != nil {
 		return CaplinRetention{}, err
 	}
+	retention := CaplinRetention{Mode: pruneMode}
 	values := []struct {
 		name  string
 		value string
+		dst   *CaplinRetentionFloor
 	}{
-		{name: "distance", value: distance},
-		{name: "sidecars", value: sidecars},
-		{name: "states", value: states},
+		{name: "distance", value: distance, dst: &retention.Blocks},
+		{name: "sidecars", value: sidecars, dst: &retention.Sidecars},
+		{name: "states", value: states, dst: &retention.States},
 	}
-	retention := CaplinRetention{Mode: pruneMode}
 	knobSet := func(index int, value string) bool {
 		if len(set) == 3 {
 			return set[index]
@@ -228,17 +216,12 @@ func ParseCaplinRetention(mode, distance, sidecars, states string, set ...bool) 
 		}
 		return retention, nil
 	}
-	retention.Blocks, err = parseCaplinFloor(distance, "distance")
-	if err != nil {
-		return CaplinRetention{}, err
-	}
-	retention.Sidecars, err = parseCaplinFloor(sidecars, "sidecars")
-	if err != nil {
-		return CaplinRetention{}, err
-	}
-	retention.States, err = parseCaplinFloor(states, "states")
-	if err != nil {
-		return CaplinRetention{}, err
+	for _, knob := range values {
+		floor, err := parseCaplinFloor(knob.value, knob.name, allowSlots)
+		if err != nil {
+			return CaplinRetention{}, err
+		}
+		*knob.dst = floor
 	}
 	return retention, nil
 }
@@ -270,7 +253,7 @@ func ResolveRetention(stored CaplinRetention, storedFound bool, requested Caplin
 		if err != nil {
 			return CaplinRetention{}, CaplinRetentionActionRefuse, err
 		}
-		if retentionFloorBelow(requestedFloors, storedFloors) {
+		if CaplinRetentionMovesAwayFromTip(requestedFloors, storedFloors) {
 			return CaplinRetention{}, CaplinRetentionActionRefuse, fmt.Errorf("caplin retention request moves away from the stored regime: %s", CaplinRetentionHint(normalizedRequested, oldest, currentSlot, beaconCfg, nodeBinary, datadir))
 		}
 		return normalizedRequested, CaplinRetentionActionStore, nil
@@ -300,7 +283,7 @@ func ResolveRetention(stored CaplinRetention, storedFound bool, requested Caplin
 	return normalizedRequested, CaplinRetentionActionStore, nil
 }
 
-func retentionFloorBelow(requested, stored CaplinRetentionFloors) bool {
+func CaplinRetentionMovesAwayFromTip(requested, stored CaplinRetentionFloors) bool {
 	return requested.Blocks < stored.Blocks || requested.Sidecars < stored.Sidecars || requested.States < stored.States
 }
 
@@ -414,13 +397,14 @@ func (r CaplinRetention) Normalize(beaconCfg *BeaconChainConfig) (CaplinRetentio
 		if err != nil {
 			return CaplinRetention{}, err
 		}
+		spec := CaplinRetention{
+			Mode:     CaplinPruneModeSpec,
+			Blocks:   CaplinDistanceFloor(blockMin),
+			Sidecars: CaplinDistanceFloor(sidecarMin),
+			States:   CaplinDistanceFloor(0),
+		}
 		if r.Mode == CaplinPruneModeSpec {
-			return CaplinRetention{
-				Mode:     CaplinPruneModeSpec,
-				Blocks:   CaplinDistanceFloor(blockMin),
-				Sidecars: CaplinDistanceFloor(sidecarMin),
-				States:   CaplinDistanceFloor(0),
-			}, nil
+			return spec, nil
 		}
 		normalized := CaplinRetention{
 			Mode:     CaplinPruneModePruned,
@@ -430,12 +414,6 @@ func (r CaplinRetention) Normalize(beaconCfg *BeaconChainConfig) (CaplinRetentio
 		}
 		if normalized.Blocks.Kind == CaplinFloorAll && normalized.Sidecars.Kind == CaplinFloorAll && normalized.States.Kind == CaplinFloorAll {
 			return CaplinRetention{Mode: CaplinPruneModeArchive, Blocks: CaplinAllFloor(), Sidecars: CaplinAllFloor(), States: CaplinAllFloor()}, nil
-		}
-		spec := CaplinRetention{
-			Mode:     CaplinPruneModeSpec,
-			Blocks:   CaplinDistanceFloor(blockMin),
-			Sidecars: CaplinDistanceFloor(sidecarMin),
-			States:   CaplinDistanceFloor(0),
 		}
 		if normalized.Blocks == spec.Blocks && normalized.Sidecars == spec.Sidecars && normalized.States == spec.States {
 			return spec, nil
@@ -471,13 +449,20 @@ func caplinBlockRetentionMinimum(beaconCfg *BeaconChainConfig) uint64 {
 	return max(beaconCfg.MinEpochsForBlockRequests(), caplinSidecarRetentionMinimum(beaconCfg))
 }
 
-func parseCaplinFloor(value, name string) (CaplinRetentionFloor, error) {
+func parseCaplinFloor(value, name string, allowSlots bool) (CaplinRetentionFloor, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
 		return CaplinDistanceFloor(0), nil
 	}
 	if value == "all" {
 		return CaplinAllFloor(), nil
+	}
+	if allowSlots && strings.HasPrefix(value, "slot:") {
+		slot, err := strconv.ParseUint(strings.TrimPrefix(value, "slot:"), 10, 64)
+		if err != nil {
+			return CaplinRetentionFloor{}, fmt.Errorf("invalid --caplin.prune.%s value %q: expected slot number", name, value)
+		}
+		return CaplinSlotFloor(slot), nil
 	}
 	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
@@ -509,15 +494,12 @@ func (r CaplinRetention) Floors(beaconCfg *BeaconChainConfig, headSlot uint64) (
 	if err := validateDistance(r.Sidecars, sidecarMin, "--caplin.prune.sidecars"); err != nil {
 		return CaplinRetentionFloors{}, err
 	}
-	if err := validateDistance(r.States, 0, "--caplin.prune.states"); err != nil {
-		return CaplinRetentionFloors{}, err
-	}
 
 	headEpoch := headSlot / beaconCfg.SlotsPerEpoch
 	floors := CaplinRetentionFloors{
-		Blocks:   floorSlot(r.Blocks, headEpoch, blockMin, beaconCfg.SlotsPerEpoch),
-		Sidecars: floorSlot(r.Sidecars, headEpoch, sidecarMin, beaconCfg.SlotsPerEpoch),
-		States:   floorSlot(r.States, headEpoch, 0, beaconCfg.SlotsPerEpoch),
+		Blocks:   floorSlot(r.Blocks, headEpoch, beaconCfg.SlotsPerEpoch),
+		Sidecars: floorSlot(r.Sidecars, headEpoch, beaconCfg.SlotsPerEpoch),
+		States:   floorSlot(r.States, headEpoch, beaconCfg.SlotsPerEpoch),
 	}
 	floors.Blocks = roundDown(floors.Blocks, snaptype.CaplinMergeLimit)
 	floors.Sidecars = roundDown(floors.Sidecars, snaptype.CaplinMergeLimit)
@@ -541,7 +523,7 @@ func validateDistance(floor CaplinRetentionFloor, minimum uint64, flag string) e
 	return nil
 }
 
-func floorSlot(floor CaplinRetentionFloor, headEpoch, minimum, slotsPerEpoch uint64) uint64 {
+func floorSlot(floor CaplinRetentionFloor, headEpoch, slotsPerEpoch uint64) uint64 {
 	switch floor.Kind {
 	case CaplinFloorAll:
 		return 0
@@ -549,9 +531,6 @@ func floorSlot(floor CaplinRetentionFloor, headEpoch, minimum, slotsPerEpoch uin
 		return floor.Value
 	case CaplinFloorDistance:
 		distance := floor.Value
-		if distance == 0 && minimum > 0 {
-			distance = minimum
-		}
 		if distance >= headEpoch {
 			return 0
 		}
@@ -562,9 +541,6 @@ func floorSlot(floor CaplinRetentionFloor, headEpoch, minimum, slotsPerEpoch uin
 }
 
 func roundDown(value, unit uint64) uint64 {
-	if unit == 0 {
-		return value
-	}
 	return value / unit * unit
 }
 
@@ -597,14 +573,7 @@ func LegacyRetention(cfg CaplinConfig, beaconCfg *BeaconChainConfig) (CaplinRete
 	}
 	if blocksAll && sidecarsAll && cfg.ArchiveStates {
 		retention.Mode = CaplinPruneModeArchive
-		retention.Blocks = CaplinAllFloor()
-		retention.Sidecars = CaplinAllFloor()
-		retention.States = CaplinAllFloor()
 	}
-	if !blocksAll && !sidecarsAll && !cfg.ArchiveStates && cfg.ColumnKeepSlots == 0 && cfg.BlobsArchiveFromSlot == 0 {
-		retention = CaplinRetention{Mode: CaplinPruneModeSpec}
-	}
-
 	mapped := cfg
 	normalized, err := retention.Normalize(beaconCfg)
 	if err != nil {
@@ -696,8 +665,8 @@ func ApplyCaplinRetentionRestrictions(cfg *CaplinConfig) error {
 }
 
 func applyPrunedRetention(r CaplinRetention, beaconCfg *BeaconChainConfig, cfg *CaplinConfig) error {
-	blockMin := caplinBlockRetentionMinimum(beaconCfg)
 	sidecarMin := caplinSidecarRetentionMinimum(beaconCfg)
+	blockMin := caplinBlockRetentionMinimum(beaconCfg)
 	blockDistance, blocksAll, err := finiteRetentionDistance(r.Blocks, blockMin, "--caplin.prune.distance")
 	if err != nil {
 		return err
@@ -705,9 +674,20 @@ func applyPrunedRetention(r CaplinRetention, beaconCfg *BeaconChainConfig, cfg *
 	if r.Blocks.Kind == CaplinFloorSlot {
 		return fmt.Errorf("caplin prune distance is available in a later version")
 	}
-	sidecarDistance, sidecarsAll, sidecarSlot, err := sidecarRetention(r.Sidecars, sidecarMin, "--caplin.prune.sidecars")
-	if err != nil {
-		return err
+	var sidecarDistance, sidecarSlot uint64
+	var sidecarsAll bool
+	switch r.Sidecars.Kind {
+	case CaplinFloorAll:
+		sidecarsAll = true
+	case CaplinFloorSlot:
+		sidecarSlot = r.Sidecars.Value
+	case CaplinFloorDistance:
+		sidecarDistance = r.Sidecars.Value
+		if sidecarDistance < sidecarMin {
+			return fmt.Errorf("--caplin.prune.sidecars must be at least %d epochs", sidecarMin)
+		}
+	default:
+		return fmt.Errorf("invalid caplin prune sidecars floor")
 	}
 	if err := validateCaplinNesting(blockDistance, blocksAll, r.Sidecars, sidecarDistance, r.States); err != nil {
 		return err
@@ -748,9 +728,6 @@ func finiteRetentionDistance(floor CaplinRetentionFloor, minimum uint64, flag st
 		return 0, false, nil
 	}
 	distance := floor.Value
-	if distance == 0 {
-		distance = minimum
-	}
 	if distance < minimum {
 		return 0, false, fmt.Errorf("%s must be at least %d epochs", flag, minimum)
 	}
@@ -758,26 +735,6 @@ func finiteRetentionDistance(floor CaplinRetentionFloor, minimum uint64, flag st
 		return distance, false, fmt.Errorf("caplin prune %s is available in a later version", strings.TrimPrefix(flag, "--caplin.prune."))
 	}
 	return distance, false, nil
-}
-
-func sidecarRetention(floor CaplinRetentionFloor, minimum uint64, flag string) (uint64, bool, uint64, error) {
-	if floor.Kind == CaplinFloorAll {
-		return 0, true, 0, nil
-	}
-	if floor.Kind == CaplinFloorSlot {
-		return 0, false, floor.Value, nil
-	}
-	if floor.Kind != CaplinFloorDistance {
-		return 0, false, 0, fmt.Errorf("invalid caplin prune sidecars floor")
-	}
-	distance := floor.Value
-	if distance == 0 {
-		distance = minimum
-	}
-	if distance < minimum {
-		return 0, false, 0, fmt.Errorf("%s must be at least %d epochs", flag, minimum)
-	}
-	return distance, false, 0, nil
 }
 
 func validateCaplinNesting(blockDistance uint64, blocksAll bool, sidecar CaplinRetentionFloor, sidecarDistance uint64, states CaplinRetentionFloor) error {

@@ -120,9 +120,9 @@ func TestOldestStoredSources(t *testing.T) {
 		}))
 
 		blobStorage := blob_storage_mock_services.NewMockBlobStorage(gomock.NewController(t))
-		blobStorage.EXPECT().EarliestStoredSlot().Return(uint64(84), nil)
+		blobStorage.EXPECT().EarliestStoredSlot().Return(uint64(84), true, nil)
 		columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
-		columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(120), nil)
+		columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(120), true, nil)
 		stored, err := OldestStored(t.Context(), db, nil, nil, blobStorage, columnStorage)
 
 		require.NoError(t, err)

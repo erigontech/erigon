@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -103,24 +104,27 @@ func ReadHighestCustodyGroupCount(tx kv.Tx) (uint64, error) {
 }
 
 const (
-	caplinRetentionValueVersion  byte = 1
-	caplinRetentionValueLength        = 29
-	caplinRetentionModeSpec      byte = 1
-	caplinRetentionModeArchive   byte = 2
-	caplinRetentionModePruned    byte = 3
-	caplinRetentionModeMinimal   byte = 4
-	caplinRetentionModeTip       byte = 5
-	caplinRetentionFloorDistance byte = 1
-	caplinRetentionFloorSlot     byte = 2
-	caplinRetentionFloorAll      byte = 3
+	caplinRetentionValueVersion byte = 1
+	caplinRetentionValueLength  int  = 29
 )
+
+var caplinRetentionModes = [...]clparams.CaplinPruneMode{
+	clparams.CaplinPruneModeSpec,
+	clparams.CaplinPruneModeArchive,
+	clparams.CaplinPruneModePruned,
+	clparams.CaplinPruneModeMinimal,
+	clparams.CaplinPruneModeTip,
+}
+
+var caplinRetentionFloorKinds = [...]clparams.CaplinFloorKind{
+	clparams.CaplinFloorDistance,
+	clparams.CaplinFloorSlot,
+	clparams.CaplinFloorAll,
+}
 
 var caplinRetentionKey = []byte("CaplinRetention")
 
 func WriteCaplinRetention(tx kv.RwTx, r clparams.CaplinRetention) error {
-	if err := validateCaplinRetention(r); err != nil {
-		return err
-	}
 	mode, err := encodeCaplinRetentionMode(r.Mode)
 	if err != nil {
 		return err
@@ -172,82 +176,37 @@ func ReadCaplinRetention(tx kv.Tx) (clparams.CaplinRetention, bool, error) {
 		floor.Kind = kind
 		floor.Value = binary.BigEndian.Uint64(value[offset+1:])
 	}
-	if err := validateCaplinRetention(retention); err != nil {
-		return clparams.CaplinRetention{}, false, err
-	}
 	return retention, true, nil
 }
 
-func validateCaplinRetention(r clparams.CaplinRetention) error {
-	if _, err := encodeCaplinRetentionMode(r.Mode); err != nil {
-		return err
-	}
-	for _, floor := range []clparams.CaplinRetentionFloor{r.Blocks, r.Sidecars, r.States} {
-		if _, err := encodeCaplinRetentionFloorKind(floor.Kind); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func encodeCaplinRetentionMode(mode clparams.CaplinPruneMode) (byte, error) {
-	switch mode {
-	case clparams.CaplinPruneModeSpec:
-		return caplinRetentionModeSpec, nil
-	case clparams.CaplinPruneModeArchive:
-		return caplinRetentionModeArchive, nil
-	case clparams.CaplinPruneModePruned:
-		return caplinRetentionModePruned, nil
-	case clparams.CaplinPruneModeMinimal:
-		return caplinRetentionModeMinimal, nil
-	case clparams.CaplinPruneModeTip:
-		return caplinRetentionModeTip, nil
-	default:
+	index := slices.Index(caplinRetentionModes[:], mode)
+	if index < 0 {
 		return 0, fmt.Errorf("invalid Caplin retention mode: %d", mode)
 	}
+	return byte(index + 1), nil
 }
 
 func decodeCaplinRetentionMode(mode byte) (clparams.CaplinPruneMode, error) {
-	switch mode {
-	case caplinRetentionModeSpec:
-		return clparams.CaplinPruneModeSpec, nil
-	case caplinRetentionModeArchive:
-		return clparams.CaplinPruneModeArchive, nil
-	case caplinRetentionModePruned:
-		return clparams.CaplinPruneModePruned, nil
-	case caplinRetentionModeMinimal:
-		return clparams.CaplinPruneModeMinimal, nil
-	case caplinRetentionModeTip:
-		return clparams.CaplinPruneModeTip, nil
-	default:
+	if mode == 0 || int(mode) > len(caplinRetentionModes) {
 		return 0, fmt.Errorf("invalid Caplin retention mode byte: %d", mode)
 	}
+	return caplinRetentionModes[mode-1], nil
 }
 
 func encodeCaplinRetentionFloorKind(kind clparams.CaplinFloorKind) (byte, error) {
-	switch kind {
-	case clparams.CaplinFloorDistance:
-		return caplinRetentionFloorDistance, nil
-	case clparams.CaplinFloorSlot:
-		return caplinRetentionFloorSlot, nil
-	case clparams.CaplinFloorAll:
-		return caplinRetentionFloorAll, nil
-	default:
+	index := slices.Index(caplinRetentionFloorKinds[:], kind)
+	if index < 0 {
 		return 0, fmt.Errorf("invalid Caplin retention floor kind: %d", kind)
 	}
+	return byte(index + 1), nil
 }
 
 func decodeCaplinRetentionFloorKind(kind byte) (clparams.CaplinFloorKind, error) {
-	switch kind {
-	case caplinRetentionFloorDistance:
-		return clparams.CaplinFloorDistance, nil
-	case caplinRetentionFloorSlot:
-		return clparams.CaplinFloorSlot, nil
-	case caplinRetentionFloorAll:
-		return clparams.CaplinFloorAll, nil
-	default:
+	if kind == 0 || int(kind) > len(caplinRetentionFloorKinds) {
 		return 0, fmt.Errorf("invalid Caplin retention floor kind byte: %d", kind)
 	}
+	return caplinRetentionFloorKinds[kind-1], nil
 }
 
 var custodyRaiseSlotKey = []byte("CustodyRaiseSlot")

@@ -874,9 +874,10 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	b := newBucketStore(t, fs)
 
-	slot, err := b.earliestStoredSlot(b.holdsSidecar)
+	slot, found, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
+	require.False(t, found)
 
 	makeBuckets(t, fs, "1/sub", "2", "3", "5", "07")
 	require.NoError(t, afero.WriteFile(fs, "2/root_0"+tmpSuffix, []byte{1}, 0o644))
@@ -885,9 +886,10 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
 
-	slot, err = b.earliestStoredSlot(b.holdsSidecar)
+	slot, found, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
+	require.True(t, found)
 }
 
 func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing.T) {
@@ -898,14 +900,16 @@ func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing
 	for i := range 3 * listBatch {
 		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
 	}
-	slot, err := b.earliestStoredSlot(b.holdsSidecar)
+	slot, found, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
+	require.False(t, found)
 
 	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
-	slot, err = b.earliestStoredSlot(b.holdsSidecar)
+	slot, found, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(4*subdivisionSlot), slot)
+	require.True(t, found)
 }
 
 type openFailingFs struct {
@@ -927,9 +931,10 @@ func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
 
-	slot, err := b.earliestStoredSlot(b.holdsSidecar)
+	slot, found, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
+	require.True(t, found)
 }
 
 func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *testing.T) {
@@ -938,6 +943,6 @@ func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *tes
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
 
-	_, err := b.earliestStoredSlot(b.holdsSidecar)
+	_, _, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.ErrorIs(t, err, os.ErrPermission)
 }

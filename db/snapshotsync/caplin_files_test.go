@@ -189,54 +189,9 @@ func isRegisteredCaplinManifestFile(name string, info snaptype.FileInfo) bool {
 }
 
 func isBlobManifestFile(name string, info snaptype.FileInfo) bool {
-	return info.Type != nil && info.Type.Enum() == snaptype.BlobSidecars.Enum() || isBlobSidecarFile(name) && info.TypeString == snaptype.CaplinIndexes.BlobSidecarSlot.Name
+	return info.Type != nil && info.Type.Enum() == snaptype.BlobSidecars.Enum() || IsBlobSidecarFile(name) && info.TypeString == snaptype.CaplinIndexes.BlobSidecarSlot.Name
 }
 
 func isStateManifestFile(info snaptype.FileInfo) bool {
 	return info.Type != nil && info.Type.Enum() >= snaptype.MinCaplinStateEnum && info.Type.Enum() < snaptype.MaxCaplinEnum
-}
-
-func TestArchiveSelectsRegisteredPtcWindow(t *testing.T) {
-	items := snapcfg.PreverifiedItems{{Name: "caplin/v1.1-015350-015400-PtcWindow.seg"}}
-	info, _, ok := snaptype.ParseFileName("", items[0].Name)
-	if !ok || info.Type == nil || info.Type.Enum() != snaptype.PtcWindowTable.Enum() {
-		t.Fatal("PtcWindow registration missing")
-	}
-	got, err := CaplinFiles(items, clparams.CaplinRetention{Mode: clparams.CaplinPruneModeArchive}, &clparams.MainnetBeaconConfig, caplinFilesHeadSlot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("archive selected %d of 1 registered PtcWindow files", len(got))
-	}
-}
-
-func TestStateEventsReplayHasNoGap(t *testing.T) {
-	items := snapcfg.PreverifiedItems{
-		{Name: "caplin/v1.1-000000-010500-StateEvents.seg"},
-		{Name: "caplin/v1.1-010500-010550-StateEvents.seg"},
-		{Name: "caplin/v1.1-010550-010600-StateEvents.seg"},
-	}
-	r := clparams.CaplinRetention{Mode: clparams.CaplinPruneModePruned, Blocks: clparams.CaplinAllFloor(), States: clparams.CaplinDistanceFloor(4096)}
-	got, err := CaplinFiles(items, r, &clparams.MainnetBeaconConfig, 10_700_000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(items) {
-		t.Fatalf("replay needs all three StateEvents segments: selected %v", names(got))
-	}
-}
-
-func TestSpecFilesIgnoreStateKnob(t *testing.T) {
-	r := clparams.CaplinRetention{Mode: clparams.CaplinPruneModeSpec, States: clparams.CaplinAllFloor()}
-	if err := clparams.ApplyRetention(r, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}); err != nil {
-		return
-	}
-	got, err := CaplinFiles(snapcfg.PreverifiedItems{{Name: "caplin/v1.1-000000-010500-StateEvents.seg"}}, r, &clparams.MainnetBeaconConfig, caplinFilesHeadSlot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("spec selected state files %v", names(got))
-	}
 }

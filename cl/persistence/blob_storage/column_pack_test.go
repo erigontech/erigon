@@ -689,10 +689,11 @@ func TestEarliestStoredSlotCountsABucketHoldingOnlyAPack(t *testing.T) {
 	require.NoError(t, afero.WriteFile(handles, tempFile, []byte{1}, 0o644))
 	require.NoError(t, h.storage.WriteColumnSidecars(t.Context(), looseRoot, 0, createTestDataColumnSidecar(looseSlot, 0)))
 
-	earliest, err := h.storage.EarliestStoredSlot()
+	earliest, found, err := h.storage.EarliestStoredSlot()
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), earliest)
+	require.True(t, found)
 	olderBinaryHolds, err := h.storage.(*dataColumnStorageImpl).holdsSidecar("3")
 	require.NoError(t, err)
 	require.False(t, olderBinaryHolds)
@@ -714,10 +715,11 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		flipPackMagic(t, mem, badSlot, badRoot)
 		writePack(t, mem, goodSlot, goodRoot)
 
-		earliest, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
+		earliest, found, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		require.Equal(t, uint64(5*subdivisionSlot), earliest)
+		require.True(t, found)
 	})
 
 	t.Run("a corrupt pack alone holds nothing", func(t *testing.T) {
@@ -725,10 +727,11 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		writePack(t, mem, badSlot, badRoot)
 		flipPackMagic(t, mem, badSlot, badRoot)
 
-		earliest, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
+		earliest, found, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		require.Zero(t, earliest)
+		require.False(t, found)
 	})
 
 	t.Run("an unreadable pack is skipped for a later bucket", func(t *testing.T) {
@@ -736,17 +739,18 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		writePack(t, mem, badSlot, badRoot)
 		writePack(t, mem, goodSlot, goodRoot)
 
-		earliest, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, badRoot)}).storage.EarliestStoredSlot()
+		earliest, found, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, badRoot)}).storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		require.Equal(t, uint64(5*subdivisionSlot), earliest)
+		require.True(t, found)
 	})
 
 	t.Run("an unreadable pack alone returns its error", func(t *testing.T) {
 		mem := afero.NewMemMapFs()
 		writePack(t, mem, badSlot, badRoot)
 
-		_, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, badRoot)}).storage.EarliestStoredSlot()
+		_, _, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, badRoot)}).storage.EarliestStoredSlot()
 
 		require.ErrorIs(t, err, os.ErrPermission)
 	})
@@ -760,10 +764,11 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, unreadableRoot.String()+packSuffix, infos[0].Name(), "the unreadable pack comes first in directory order")
 
-		earliest, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, unreadableRoot)}).storage.EarliestStoredSlot()
+		earliest, found, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, unreadableRoot)}).storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		require.Equal(t, uint64(3*subdivisionSlot), earliest)
+		require.True(t, found)
 	})
 
 	t.Run("a corrupt pack found by the scan drops the cached columns", func(t *testing.T) {
@@ -775,7 +780,7 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		require.Equal(t, []uint64{0, 1, 2, 3}, saved)
 		flipPackMagic(t, mem, badSlot, badRoot)
 
-		_, err = storage.EarliestStoredSlot()
+		_, _, err = storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		exists, err := storage.ColumnSidecarExists(t.Context(), badSlot, badRoot, 1)
@@ -801,10 +806,11 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 			require.NoError(t, afero.WriteFile(mem, "3/packs/"+name+".pack", packBytes, 0o644))
 		}
 
-		earliest, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
+		earliest, found, err := newBatchHarness(t, mem).storage.EarliestStoredSlot()
 
 		require.NoError(t, err)
 		require.Zero(t, earliest)
+		require.False(t, found)
 	})
 }
 

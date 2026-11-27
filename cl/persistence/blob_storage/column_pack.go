@@ -267,12 +267,8 @@ func (s *dataColumnStorageImpl) openPack(slot uint64, root common.Hash) (*pack, 
 	return pk, err
 }
 
-func (s *dataColumnStorageImpl) EarliestStoredSlot() (uint64, error) {
+func (s *dataColumnStorageImpl) EarliestStoredSlot() (uint64, bool, error) {
 	return s.earliestStoredSlot(s.holdsColumn)
-}
-
-func (s *dataColumnStorageImpl) EarliestStoredSlotWithPresence() (uint64, bool, error) {
-	return s.earliestStoredSlotWithPresence(s.holdsColumn)
 }
 
 func (s *dataColumnStorageImpl) holdsColumn(bucket string) (bool, error) {

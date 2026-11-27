@@ -37,6 +37,7 @@ type (
 func OldestStored(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, stateSnapshots *snapshotsync.CaplinStateSnapshots, blobStorage blob_storage.BlobStorage, columnStorage blob_storage.DataColumnStorage) (clparams.OldestStoredResult, error) {
 	result := clparams.OldestStoredResult{StateTables: make(map[string]clparams.StoredSlot)}
 	var tx kv.Tx
+	tables := make(map[string]struct{})
 	if db != nil {
 		var err error
 		tx, err = db.BeginRo(ctx)
@@ -44,6 +45,13 @@ func OldestStored(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.Capli
 			return result, err
 		}
 		defer tx.Rollback()
+		names, err := tx.ListTables()
+		if err != nil {
+			return result, err
+		}
+		for _, name := range names {
+			tables[name] = struct{}{}
+		}
 	}
 
 	if snapshots != nil {
@@ -53,7 +61,7 @@ func OldestStored(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.Capli
 		view.Close()
 	}
 
-	blockRows, err := firstTableSlot(tx, kv.BeaconBlocks, 8, func(key []byte) uint64 {
+	blockRows, err := firstTableSlot(tx, tables, kv.BeaconBlocks, 8, func(key []byte) uint64 {
 		return binary.BigEndian.Uint64(key)
 	})
 	if err != nil {
@@ -82,7 +90,7 @@ func OldestStored(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.Capli
 		if stateView != nil {
 			stored = lowestVisibleSlot(stateView.VisibleSegments(table))
 		}
-		rows, err := firstTableSlot(tx, table, 4, base_encoding.Decode64FromBytes4)
+		rows, err := firstTableSlot(tx, tables, table, 4, base_encoding.Decode64FromBytes4)
 		if err != nil {
 			return result, err
 		}
@@ -102,13 +110,10 @@ func OldestStored(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.Capli
 }
 
 func lowestVisibleSlot(segments []*snapshotsync.VisibleSegment) StoredSlot {
-	result := StoredSlot{}
-	for _, segment := range segments {
-		if segment != nil {
-			result = lowerStoredSlot(result, StoredSlot{Slot: segment.From(), Holds: true})
-		}
+	if len(segments) == 0 {
+		return StoredSlot{}
 	}
-	return result
+	return StoredSlot{Slot: segments[0].From(), Holds: true}
 }
 
 func lowerStoredSlot(left, right StoredSlot) StoredSlot {
@@ -118,42 +123,28 @@ func lowerStoredSlot(left, right StoredSlot) StoredSlot {
 	return right
 }
 
-func addHotSlot(stored StoredSlot, source interface{ EarliestStoredSlot() (uint64, error) }) (StoredSlot, error) {
+func addHotSlot(stored StoredSlot, source interface{ EarliestStoredSlot() (uint64, bool, error) }) (StoredSlot, error) {
 	if source == nil {
 		return stored, nil
 	}
-	if sourceWithPresence, ok := source.(interface {
-		EarliestStoredSlotWithPresence() (uint64, bool, error)
-	}); ok {
-		slot, found, err := sourceWithPresence.EarliestStoredSlotWithPresence()
-		if err != nil {
-			return stored, err
-		}
-		if !found {
-			return stored, nil
-		}
-		return lowerStoredSlot(stored, StoredSlot{Slot: slot, Holds: true}), nil
-	}
-	slot, err := source.EarliestStoredSlot()
+	slot, found, err := source.EarliestStoredSlot()
 	if err != nil {
 		return stored, err
 	}
-	if slot == 0 {
+	if !found {
 		return stored, nil
 	}
 	return lowerStoredSlot(stored, StoredSlot{Slot: slot, Holds: true}), nil
 }
 
-func firstTableSlot(tx kv.Tx, table string, keyLength int, decode func([]byte) uint64) (StoredSlot, error) {
+func firstTableSlot(tx kv.Tx, tables map[string]struct{}, table string, keyLength int, decode func([]byte) uint64) (StoredSlot, error) {
 	if tx == nil {
 		return StoredSlot{}, nil
 	}
-	cursor, err := tx.Cursor(table)
-	if err != nil {
-		return StoredSlot{}, fmt.Errorf("open %s cursor: %w", table, err)
+	if _, ok := tables[table]; !ok {
+		return StoredSlot{}, nil
 	}
-	defer cursor.Close()
-	key, _, err := cursor.First()
+	key, err := kv.FirstKey(tx, table)
 	if err != nil {
 		return StoredSlot{}, fmt.Errorf("read first %s key: %w", table, err)
 	}

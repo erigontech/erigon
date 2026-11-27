@@ -216,7 +216,7 @@ func newCgcTestPeerDasWithClock(t *testing.T, db kv.RwDB, localNode *enode.Local
 	clock.EXPECT().GetCurrentSlot().DoAndReturn(currentSlot).AnyTimes()
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().PruneBelow(gomock.Any()).Return(nil).AnyTimes()
-	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(150), nil).AnyTimes()
+	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(150), true, nil).AnyTimes()
 	state := peerdasstate.NewPeerDasState(&beaconConfig, &networkConfig)
 	state.SetLocalNodeID(localNode)
 	return NewPeerDas(nil, &beaconConfig, &clparams.CaplinConfig{}, columnStorage, nil, nil, localNode.ID(), clock, state, gossipManager, nil, db), state

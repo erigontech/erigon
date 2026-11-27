@@ -233,12 +233,7 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 // cannot be read is skipped, since its sidecars cannot be served either, but when no readable
 // bucket holds a sidecar the first read error is returned, so an unreadable store is not
 // mistaken for an empty one.
-func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (uint64, error) {
-	slot, _, err := b.earliestStoredSlotWithPresence(holds)
-	return slot, err
-}
-
-func (b *bucketStore) earliestStoredSlotWithPresence(holds func(dir string) (bool, error)) (uint64, bool, error) {
+func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (uint64, bool, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
 		return 0, false, err
