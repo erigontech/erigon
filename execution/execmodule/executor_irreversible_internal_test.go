@@ -74,7 +74,6 @@ func TestProcessFrozenBlocksBuildsNoFilesOverBatchChangesets(t *testing.T) {
 		return stages.SaveStageProgress(tx, stages.Execution, head)
 	}
 	sync := stagedsync.New(
-		rawdbv3.TxNums,
 		ethconfig.Sync{MaxReorgDepth: maxReorgDepth, AlwaysGenerateChangesets: true},
 		[]*stagedsync.Stage{
 			{ID: stages.Snapshots, Forward: noop, Unwind: noopUnwind},

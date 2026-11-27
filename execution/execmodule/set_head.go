@@ -88,7 +88,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	// Check if we can unwind that far back
-	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
+	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 	if err != nil {
 		return fmt.Errorf("failed to check minimum unwindable block: %w", err)
 	}

@@ -918,7 +918,6 @@ func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	return res
 }
 func (at *AggregatorRoTx) Files(domain kv.Domain) VisibleFiles { return at.d[domain].Files() }
-func (at *AggregatorRoTx) ValueFilesEndTxNum() uint64          { return at.visible.maxValueEnd }
 func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.StepSize() }
 
 func (a *Aggregator) Files() []string {
@@ -1820,7 +1819,6 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 	visibleEnd   uint64                          // every list is cut here; below filesEnd means a gap
 	filesEnd     uint64                          // dirtyFilesEndTxNumMinimax when this generation was built
-	maxValueEnd  uint64                          // greatest exclusive end of a retained domain .kv file
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // mappings detached when the next generation was published
@@ -1861,7 +1859,6 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			if d == nil {
 				continue
 			}
-			next.maxValueEnd = max(next.maxValueEnd, d.valueFilesEnd)
 			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
 			if !d.Enabled || a.unalignedDomain[id] {
 				continue

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
@@ -1178,40 +1177,4 @@ func testRandomReorgs(t *testing.T, config *chain.Config, seed uint64) {
 	for _, blocks := range sides {
 		insertAndSwitchTo(t, m, blocks)
 	}
-}
-
-func TestForkchoiceWithMissingTipChangesetKeepsCanonicalHead(t *testing.T) {
-	ctx := t.Context()
-	m, canonical, side := newReorgChains(t, 4, 3)
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, canonical.Blocks[:3]))
-	m.ExecModule.WaitIdle(ctx)
-	status, err := m.InsertBlocks(ctx, side.Blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	tip := canonical.Blocks[2]
-	missing := dbutils.BlockBodyKey(tip.NumberU64(), tip.Hash())
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		value, err := tx.GetOne(kv.ChangeSets3, missing)
-		require.NoError(t, err)
-		require.NotEmpty(t, value)
-		return tx.Delete(kv.ChangeSets3, missing)
-	}))
-	_, forkchoiceErr := m.UpdateForkChoice(ctx, side.TopBlock.Header())
-	m.ExecModule.WaitIdle(ctx)
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-		require.Equal(t, tip.Hash(), rawdb.ReadHeadBlockHash(tx), "a failed unwind must keep the canonical tip")
-		return nil
-	}))
-	require.Error(t, forkchoiceErr)
-
-	// Extending the canonical tip needs no unwind. Leave its changeset missing
-	// so retrying the rejected unwind would fail on this forkchoice.
-	insertAndSwitchTo(t, m, canonical.Blocks[3:])
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
-		value, err := tx.GetOne(kv.ChangeSets3, missing)
-		require.NoError(t, err)
-		require.Empty(t, value, "extension must not need to repair the failed unwind")
-		return nil
-	}))
 }

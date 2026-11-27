@@ -429,7 +429,7 @@ func NewInMemoryExecution(
 	logger log.Logger,
 	readAheader *exec.BlockReadAheader,
 ) *stagedsync.Sync {
-	return stagedsync.New(blockReader.TxnumReader(),
+	return stagedsync.New(
 		cfg.Sync,
 		stagedsync.StateStages(
 			ctx,

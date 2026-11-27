@@ -29,35 +29,15 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-type (
-	filesAheadTx   struct{ kv.TemporalTx }
-	filesAheadView struct{ kv.FreezeInfo }
-)
-
-func (tx filesAheadTx) FreezeInfo() kv.FreezeInfo { return filesAheadView{tx.TemporalTx.FreezeInfo()} }
-func (filesAheadView) ValueFilesEndTxNum() uint64 { return 100 }
-
-func TestUnwindToReportsUnknownSnapshotBoundary(t *testing.T) {
-	_, tx := temporaltest.NewTestTx(t)
-	require.NoError(t, changeset.WriteDiffSet(tx, 1, common.Hash{1}, &changeset.StateChangeSet{}))
-	sync := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, nil, nil, nil, log.New(), stages.ModeApplyingBlocks)
-	err := sync.UnwindTo(1, ForkChoice, filesAheadTx{tx})
-	require.ErrorIs(t, err, commitmentdb.ErrBehindCommitment)
-	require.False(t, sync.HasUnwindPoint())
-}
-
 func TestNewKeepsMissingUnwindStagesAsNil(t *testing.T) {
 	headerStage := &Stage{ID: stages.Headers}
-	state := New(rawdbv3.TxNums,
+	state := New(
 		ethconfig.Defaults.Sync,
 		[]*Stage{headerStage},
 		UnwindOrder{stages.Bodies, stages.Headers},
@@ -71,7 +51,7 @@ func TestNewKeepsMissingUnwindStagesAsNil(t *testing.T) {
 
 func TestNewKeepsMissingPruneStagesAsNil(t *testing.T) {
 	headerStage := &Stage{ID: stages.Headers}
-	state := New(rawdbv3.TxNums,
+	state := New(
 		ethconfig.Defaults.Sync,
 		[]*Stage{headerStage},
 		nil,
@@ -111,7 +91,7 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
@@ -151,7 +131,7 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
@@ -191,7 +171,7 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
@@ -209,7 +189,7 @@ func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
 		flow = append(flow, s.ID)
 		return nil
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*Stage{
+	state := New(ethconfig.Defaults.Sync, []*Stage{
 		{ID: stages.Headers, Forward: forward},
 		{
 			ID:      stages.Bodies,
@@ -273,7 +253,7 @@ func TestFailedRunUnwindDoesNotLeakIntoNextRun(t *testing.T) {
 					}
 					return unwindErr
 				}
-				state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*Stage{
+				state := New(ethconfig.Defaults.Sync, []*Stage{
 					{ID: stages.Headers, Forward: forward},
 					{ID: stages.Bodies, Forward: forward, Unwind: fail},
 				}, UnwindOrder{stages.Bodies}, nil, log.New(), tc.mode)
@@ -325,7 +305,7 @@ func TestNoInterruptReturnsTheBadBlockOfASucceededUnwind(t *testing.T) {
 			Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error { return nil },
 		}
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers), stage(stages.Bodies)},
+	state := New(ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers), stage(stages.Bodies)},
 		UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
 	_, tx := temporaltest.NewTestTx(t)
 	for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
@@ -393,7 +373,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
@@ -471,7 +451,7 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
@@ -499,11 +479,9 @@ func TestUnwind(t *testing.T) {
 	// check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
-	unwindPoint := uint64(100)
-	require.NoError(t, state.UnwindTo(unwindPoint, UnwindReason{}, tx))
+	_ = state.UnwindTo(100, UnwindReason{}, tx)
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
-	require.Equal(t, &unwindPoint, state.PrevUnwindPoint())
 
 	expectedFlow = []stages.SyncStage{
 		unwindOf(stages.Senders), unwindOf(stages.Bodies), unwindOf(stages.Headers),
@@ -561,7 +539,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
@@ -617,12 +595,12 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
 
-	state = New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
 
@@ -675,14 +653,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
-	state = New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
 
@@ -693,8 +671,6 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 }
 
 func TestSyncInterruptLongUnwind(t *testing.T) {
-	// interrupt a stage that is too big to fit in one batch,
-	// so the db is in inconsitent state, so we have to restart with that
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	interrupted := false
@@ -754,12 +730,13 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(rawdbv3.TxNums, ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	assert.ErrorIs(t, err, errInterrupted)
 
-	require.NoError(t, state.UnwindTo(500, StagedUnwind, nil))
+	// The caller can retry the interrupted unwind by requesting the same target.
+	require.NoError(t, state.UnwindTo(500, StagedUnwind, tx))
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
 

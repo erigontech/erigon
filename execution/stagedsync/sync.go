@@ -28,16 +28,15 @@ import (
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type Sync struct {
 	cfg             ethconfig.Sync
-	txNumsReader    rawdbv3.TxNumsReader
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
@@ -142,13 +141,22 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
-	if temporalTx, ok := tx.(kv.TemporalTx); ok {
-		earliestBlock, err := rawtemporaldb.CanUnwindToBlockNum(temporalTx, s.txNumsReader)
-		if err != nil {
-			return err
-		}
-		if unwindPoint < earliestBlock {
-			return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, earliestBlock)
+	if tx != nil {
+		if ttx, ok := tx.(kv.TemporalTx); ok {
+			// protect from too far unwind
+			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx)
+			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
+			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
+			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
 		}
 	}
 
@@ -185,7 +193,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(txNumsReader rawdbv3.TxNumsReader, cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
 	unwindStages := make([]*Stage, len(unwindOrder))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -212,7 +220,6 @@ func New(txNumsReader rawdbv3.TxNumsReader, cfg ethconfig.Sync, stagesList []*St
 
 	return &Sync{
 		cfg:          cfg,
-		txNumsReader: txNumsReader,
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
@@ -242,13 +249,6 @@ func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error
 	return nil
 }
 
-// CancelUnwind drops pending work while retaining the last completed unwind point.
-func (s *Sync) CancelUnwind() {
-	s.unwindPoint = nil
-	s.unwindReason = UnwindReason{}
-}
-
-// RunUnwind executes one request; failure discards it instead of queuing a retry.
 func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return s.runUnwind(false, sd, tx)
 }
@@ -260,7 +260,8 @@ func (s *Sync) runUnwind(initialCycle bool, sd *execctx.SharedDomains, tx kv.Tem
 	// The request is consumed even on failure: the caller's tx is rolled back,
 	// and a reused Sync must not replay this unwind or resume at the failed stage.
 	defer func() {
-		s.CancelUnwind()
+		s.unwindPoint = nil
+		s.unwindReason = UnwindReason{}
 		s.currentStage = 0
 	}()
 	for _, stage := range s.unwindOrder {

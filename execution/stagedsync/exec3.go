@@ -723,27 +723,32 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
 	}
-	if blockNumber <= s.BlockNumber {
+	minBlockNum := s.BlockNumber
+	if blockNumber <= minBlockNum {
 		return nil
 	}
 
-	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx, cfg.blockReader.TxnumReader())
+	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return err
 	}
-	// Recovery must undo at least the block with the wrong root.
-	if blockNumber <= unwindToLimit {
-		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, blockNumber-1, unwindToLimit)
-	}
+	minBlockNum = max(minBlockNum, unwindToLimit)
 
-	// Aim halfway back to narrow down where the state root diverged. Rewind at
-	// least one block to make progress and cap each jump to limit re-execution.
-	minBlockNum := max(s.BlockNumber, unwindToLimit)
+	// Binary search, but not too deep
 	jump := min(maxUnwindJumpAllowance, max(1, (blockNumber-minBlockNum)/2))
 	unwindTo := blockNumber - jump
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+
+	// protect from too far unwind
+	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
+	}
+	logger.Warn("Unwinding due to incorrect root hash", "to", allowedUnwindTo)
 	if u != nil {
-		if err := u.UnwindTo(unwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
+		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
 			return err
 		}
 	}

@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -696,20 +695,6 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 	return target, !(target > 0 && target <= execProgress)
 }
 
-func resolveExecUnwindTarget(tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, progress, distance uint64) (uint64, error) {
-	if distance > progress {
-		return 0, errors.New("cannot unwind past 0")
-	}
-	target, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(progress-distance, tx, txNums)
-	if err != nil {
-		return 0, err
-	}
-	if target >= progress {
-		return 0, fmt.Errorf("%w: execution is at block %d, earliest unwind target is %d", stagedsync.ErrTooDeepUnwind, progress, target)
-	}
-	return target, nil
-}
-
 // resetWithoutChaindata lets `stage_exec --reset` run on a datadir without a DB in its
 // own chaindata: there is no execution state to reset, so it only clears the
 // pending-reset marker that a commitment convert left. An integration tool never
@@ -763,6 +748,17 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
+	var s *stagedsync.StageState
+	_ = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		s = stage(sync, tx, stages.Execution)
+		return nil
+	})
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
+	}
+
+	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	genesis := readGenesis(chain)
@@ -773,6 +769,22 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
 		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+
+	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			if err != nil {
+				return err
+			}
+			unwind = s.BlockNumber - minUnwindableBlockNum
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
@@ -785,18 +797,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}()
 
-	s, err := sync.StageState(stages.Execution, tx, !chainTipMode, false)
-	if err != nil {
-		return err
-	}
-	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-
 	if unwind > 0 {
-		target, err := resolveExecUnwindTarget(tx, br.TxnumReader(), s.BlockNumber, unwind)
-		if err != nil {
-			return err
-		}
-		u := sync.NewUnwindState(stages.Execution, target, s.BlockNumber, true, false)
+		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 		if err != nil {
 			return err
@@ -813,7 +815,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	execProgress := s.BlockNumber
+	var sendersProgress, execProgress uint64
+
+	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return err
+	}
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
 		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
@@ -828,8 +834,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 	}
-	sendersProgress, err := stages.GetStageProgress(tx, stages.Senders)
-	if err != nil {
+	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
 
@@ -846,7 +851,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	temporalDB := db.(*temporal.DB)
 	agg := temporalDB.Agg().(*dbstate.Aggregator)
 
-	// Each forward batch opens its own write transaction. Release the writer first.
+	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
+	// then collate+prune (which also kicks background file building). Release the
+	// read tx first — MDBX allows one writer.
 	tx.Rollback()
 	tx = nil
 
@@ -1391,7 +1398,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
-	sync := stagedsync.New(blockReader.TxnumReader(), cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
+	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }
 

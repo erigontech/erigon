@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
@@ -846,40 +845,6 @@ func newExecutedTransferChain(t *testing.T, opts ...execmoduletester.Option) (*e
 	// TxNums.Last are now both at block 10.
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
 	return m, chainPack
-}
-
-func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
-	m, chainPack := newExecutedTransferChain(t, execmoduletester.WithStepSize(8))
-	m.ExecModule.Drain()
-	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	agg.WaitForFiles()
-	require.NoError(t, agg.BuildFiles2(t.Context(), m.DB, 0, 3, math.MaxUint64, false))
-	agg.WaitForFiles()
-	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-		require.Equal(t, uint64(24), tx.Debug().TxNumsInFiles(kv.AccountsDomain))
-		return nil
-	}))
-	truncateTxNumsBelowCommitment(t, m, false, false)
-	parent, tip := chainPack.Headers[5], chainPack.Headers[6]
-	for _, step := range []struct {
-		name       string
-		head       *types.Header
-		wantStatus execmodule.ExecutionStatus
-	}{
-		{"advance the index", tip, execmodule.ExecutionStatusTooFarAway},
-		{"resend the indexed tip", tip, execmodule.ExecutionStatusTooFarAway},
-		{"request the tip's parent", parent, execmodule.ExecutionStatusReorgTooDeep},
-	} {
-		result, err := m.UpdateForkChoice(t.Context(), step.head)
-		require.NoError(t, err, step.name)
-		require.Equal(t, step.wantStatus, result.Status, step.name)
-		require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-			indexedTip, _, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(t, err, step.name)
-			require.Equal(t, tip.Number.Uint64(), indexedTip, "%s: indexed tip", step.name)
-			return nil
-		}), step.name)
-	}
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {

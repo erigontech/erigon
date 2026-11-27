@@ -369,30 +369,21 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
-	var needsUnwind bool
-	if unwindTarget < lastCanonicalBlock {
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
-		if err != nil && !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+	needsUnwind := unwindTarget < lastCanonicalBlock
+	if needsUnwind {
+		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+		if err != nil {
 			return nil, nil, err
 		}
-		// Until the last transaction in the state files is indexed, every indexed
-		// unwind target is too old. While state is ahead, re-sending the indexed
-		// tip can return TooFarAway again without unwinding. A higher head on the
-		// same chain can extend the index.
-		needsUnwind = err == nil && unwindTarget >= minUnwindableBlock
-		canSkipUnwindForResentTip := isDomainAheadOfBlocks &&
-			canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
-		if !needsUnwind && !canSkipUnwindForResentTip {
-			if err != nil {
-				e.logger.Warn("reorg target below unindexed snapshot boundary", "unwindTarget", unwindTarget, "err", err)
-			} else {
-				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			}
+		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+		if unwindTarget < minUnwindableBlock && !resentTipAheadOfState {
+			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil, nil
 		}
+		needsUnwind = unwindTarget >= minUnwindableBlock
 	}
 	var unwindPoint *uint64
 	if needsUnwind {
@@ -482,8 +473,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if restoreStateChanges != nil {
 			restoreStateChanges()
 		}
-		// A sync cycle can yield with an unwind pending and then fail to commit.
-		e.pipelineExecutor.Sync().CancelUnwind()
 		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()
 	})

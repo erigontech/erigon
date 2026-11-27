@@ -206,15 +206,23 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	defer mxState3Unwind.ObserveDuration(t)
 
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
-	// Each executed block in the range needs a changeset, even if it is empty.
-	// Skipping a missing record could leave state changes from an unwound block.
+	// collect and merge diffsets of blocks [dropStateFromBlockNum, u.CurrentBlockNumber]
 	for currentBlock := u.CurrentBlockNumber; currentBlock >= dropStateFromBlockNum; currentBlock-- {
 		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
 		if !found {
-			return fmt.Errorf("missing diffset for executed block %d (%s)", currentBlock, executedHash)
+			if changeSet == nil {
+				// this handles the edge case where we're traversing backwards from
+				// the current block and we've not found the first diff yet it just
+				// means the current block(s) has not been processed yet so has no
+				// state.  This can only happen at the start of the traversal once
+				// one processed block has been found there should be diffsets for
+				// all previous blocks
+				continue
+			}
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, executedHash)
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys
@@ -563,12 +571,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	// would flush stale branch data that doesn't match the unwound state.
 	doms.ResetPendingUpdates()
 
-	earliestBlock, err := rawtemporaldb.CanUnwindToBlockNum(rwTx, cfg.blockReader.TxnumReader())
+	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
 		return err
 	}
-	if u.UnwindPoint < earliestBlock {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, earliestBlock)
+	if !ok {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
 	var accumulator *shards.Accumulator
