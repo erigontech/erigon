@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -56,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -296,6 +298,24 @@ func TestRecordingStateCodeReadAfterRevertedWrite(t *testing.T) {
 			require.Equal(t, []hexutil.Bytes{code}, collectAccessedState(recorded, witnessModeCanonical).SortedCodes)
 		})
 	}
+}
+
+func TestWitnessReplayRevertsCodeWrites(t *testing.T) {
+	replay := &witnessStateless{t: trie.NewInMemoryTrie(nil), codeUpdates: make(map[common.Hash][]byte)}
+	ibs := state.NewVersionedBlock(replay)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+
+	code := accounts.NewCode([]byte{byte(vm.STOP)})
+	outer := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(common.Address{1}), code.Bytes, tracing.CodeChangeContractCreation))
+	inner := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(common.Address{2}), code.Bytes, tracing.CodeChangeContractCreation))
+
+	ibs.RevertToSnapshot(inner, nil)
+	require.Equal(t, code.Bytes, replay.codeUpdates[code.Hash.Value()])
+	ibs.RevertToSnapshot(outer, nil)
+	require.Empty(t, replay.codeUpdates)
 }
 
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
@@ -920,6 +940,51 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+func TestCanonicalWitnessReplaysCodeDeployedInTransaction(t *testing.T) {
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.EnableHistoricalCommitment()
+
+	key, err := crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000001")
+	require.NoError(t, err)
+	factory, existing := common.Address{0xa1}, common.Address{0xb1}
+	runtimeCode := program.New().Sstore(1, 42).Op(vm.STOP).Bytes()
+	initcode := program.New().ReturnData(runtimeCode).Bytes()
+	factoryCode := program.New().Mstore(initcode, 0).
+		Push(len(initcode)).Push(0).Push(0).Op(vm.CREATE, vm.POP).
+		Call(nil, existing, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()
+	genesis := &types.Genesis{
+		Config:   chain.TestChainBerlinConfig,
+		GasLimit: 10_000_000,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: big.NewInt(common.Ether)},
+			factory:                               {Nonce: 1, Code: factoryCode},
+			existing:                              {Nonce: 1, Code: runtimeCode},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	witnessBenchEnableHistory(t, m)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.AddTx(witnessBenchSignedCall(t, b, key, factory, nil))
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+
+	mode := "canonical"
+	block := pack.Blocks[0]
+	at := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
+	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	stored, err := eth.GetStorageAt(t.Context(), existing, "0x1", &at)
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x2a"), stored)
+	witness, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), at, &mode)
+	require.NoError(t, err)
+	require.NotContains(t, witness.Codes, hexutil.Bytes(runtimeCode))
+	root, err := ReplayExecutionWitness(witness, block, m.ChainConfig, m.Engine)
+	require.NoError(t, err)
+	require.Equal(t, block.Root(), root)
 }
 
 func TestWitnessParentForAuRaGasLimit(t *testing.T) {

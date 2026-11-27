@@ -335,16 +335,21 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	return h
 }
 
-func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
-	if codeHash == accounts.EmptyCodeHash {
+func recordCodeWrite[T any](writes map[common.Hash]T, code accounts.Code, value T) func() {
+	if code.IsEmpty() {
 		return nil
 	}
-	hash := codeHash.Value()
-	if _, exists := s.createdCodeHashes[hash]; exists {
+	hash := code.Hash.Value()
+	// Reverting a duplicate write must keep the code from the first write.
+	if _, exists := writes[hash]; exists {
 		return nil
 	}
-	s.createdCodeHashes[hash] = struct{}{}
-	return func() { delete(s.createdCodeHashes, hash) }
+	writes[hash] = value
+	return func() { delete(writes, hash) }
+}
+
+func (s *RecordingState) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.createdCodeHashes, code, struct{}{})
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -2088,6 +2093,10 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 		fmt.Printf("[TRACE-S] DeleteAccount %s\n", addr.Hex())
 	}
 	return nil
+}
+
+func (s *witnessStateless) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.codeUpdates, code, code.Bytes)
 }
 
 func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
