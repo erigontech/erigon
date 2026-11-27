@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/snappypool"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // maxSSZObjectSize leaves room for beacon-state growth while rejecting corrupt lengths before allocation.
@@ -40,6 +41,10 @@ const maxSSZObjectSize = 1 << 30 // 1 GiB
 
 func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
+}
+
+func getBeaconStateTempFilename(blockRoot common.Hash) string {
+	return getBeaconStateFilename(blockRoot) + ".tmp"
 }
 
 // getEnvelopeFilename returns the filename for execution payload envelopes.
@@ -92,42 +97,23 @@ func (f *forkGraphDisk) decodeBeaconStateFile(blockRoot common.Hash) (bs *state.
 
 	sr := snappypool.Reader(file)
 	defer snappypool.PutReader(sr)
-	// Read the version
-	v := []byte{0}
-	if _, err := sr.Read(v); err != nil {
+	var version [1]byte
+	if _, err := io.ReadFull(sr, version[:]); err != nil {
 		return nil, nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
-	// Read the length
-	lengthBytes := make([]byte, 8)
-	var n int
-	n, err = io.ReadFull(sr, lengthBytes)
-	if err != nil {
+	var lengthBytes [8]byte
+	if _, err := io.ReadFull(sr, lengthBytes[:]); err != nil {
 		return nil, nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
-	if n != 8 {
-		return nil, nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
-	}
-
-	length := binary.BigEndian.Uint64(lengthBytes)
+	length := binary.BigEndian.Uint64(lengthBytes[:])
 	if length > maxSSZObjectSize {
 		return nil, nil, fmt.Errorf("corrupt beacon state file: length %d exceeds max %d, root: %x", length, maxSSZObjectSize, blockRoot)
 	}
-	if length > uint64(cap(f.sszBuffer)) {
-		f.sszBuffer = make([]byte, length)
-	} else {
-		f.sszBuffer = f.sszBuffer[:length]
-	}
-	n, err = io.ReadFull(sr, f.sszBuffer)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
-	}
-	f.sszBuffer = f.sszBuffer[:n]
 	bs = state.New(f.beaconCfg)
-
-	if err = bs.BeaconState.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
-		return nil, nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
+	if err = bs.BeaconState.DecodeCanonicalSSZFrom(sr, int(length), int(version[0])); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d", err, blockRoot, length)
 	}
-	decodedStateSizeHistogram.Observe(float64(len(f.sszBuffer)))
+	decodedStateSizeHistogram.Observe(float64(length))
 
 	// Try to read the persisted previousStateRoot (appended after SSZ data).
 	// This is needed for GLOAS where the execution payload envelope modifies
@@ -142,7 +128,19 @@ func (f *forkGraphDisk) decodeBeaconStateFile(blockRoot common.Hash) (bs *state.
 	return
 }
 
-// dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
+// fullWriter turns a short write without an error into io.ErrShortWrite, which snappy.Writer does not check.
+type fullWriter struct{ w io.Writer }
+
+func (w fullWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	return n, err
+}
+
+// DumpBeaconStateOnDisk streams a beacon state to disk in ssz snappy format.
+// The file is written under a temporary name and renamed, so a failed dump keeps the previous file.
 func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
@@ -154,46 +152,55 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return nil
 	}
 	f.lastDumpedRoot, f.lastDumpedSlot = common.Hash{}, 0
-	done := false
-	// Truncate and then grow the buffer to the size of the state.
-	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
-	if err != nil {
-		return
-	}
-	version := bs.Version()
 
-	dumpedFile, err := f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	filename := getBeaconStateFilename(blockRoot)
+	tempFilename := getBeaconStateTempFilename(blockRoot)
+	dumpedFile, err := f.fs.OpenFile(tempFilename, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
 		return err
 	}
+	closed, renamed := false, false
 	defer func() {
-		err = errors.Join(err, dumpedFile.Close())
-		if done && err == nil {
-			f.lastDumpedRoot = blockRoot
-			f.lastDumpedSlot = slot
+		if !closed {
+			err = errors.Join(err, dumpedFile.Close())
+		}
+		if !renamed {
+			_ = f.fs.Remove(tempFilename)
 		}
 	}()
 
-	sw := snappypool.Writer(dumpedFile)
+	if err := f.writeBeaconState(dumpedFile, blockRoot, bs); err != nil {
+		return err
+	}
+	closed = true
+	if err := dumpedFile.Close(); err != nil {
+		return err
+	}
+	if err := f.fs.Rename(tempFilename, filename); err != nil {
+		return err
+	}
+	renamed = true
+	f.lastDumpedRoot, f.lastDumpedSlot = blockRoot, slot
+	return nil
+}
+
+func (f *forkGraphDisk) writeBeaconState(file io.Writer, blockRoot common.Hash, bs *state.CachingBeaconState) error {
+	sw := snappypool.Writer(fullWriter{file})
 	defer snappypool.PutWriter(sw)
 
-	// First write the hard fork version
-	if _, err := sw.Write([]byte{byte(version)}); err != nil {
-		log.Error("failed to write hard fork version", "err", err)
+	length := bs.EncodingSizeSSZ()
+	var header [9]byte
+	header[0] = byte(bs.Version())
+	binary.BigEndian.PutUint64(header[1:], uint64(length))
+	if _, err := sw.Write(header[:]); err != nil {
+		log.Error("failed to write state header", "err", err)
 		return err
 	}
-	// Second write the length
-	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := sw.Write(length); err != nil {
-		log.Error("failed to write length", "err", err)
+	if err := bs.EncodeSSZTo(sw); err != nil {
+		log.Error("failed to write ssz state", "err", err)
 		return err
 	}
-	// Lastly dump the state
-	if _, err := sw.Write(f.sszBuffer); err != nil {
-		log.Error("failed to write ssz buffer", "err", err)
-		return err
-	}
+	metrics.NewHistTimer("encode_ssz_beacon_state_size").Observe(float64(length))
 	// A skipped-slot state root differs from the latest block header's state root.
 	var stateRootToWrite common.Hash
 	if bs.Version() >= clparams.GloasVersion && bs.LatestBlockHeader().Slot < bs.Slot() {
@@ -208,13 +215,11 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		log.Error("failed to write previousStateRoot", "err", err)
 		return err
 	}
-	if err = sw.Flush(); err != nil {
+	if err := sw.Flush(); err != nil {
 		log.Error("failed to flush snappy writer", "err", err)
 		return err
 	}
-
-	done = true
-	return
+	return nil
 }
 
 // HasEnvelope reports cached envelope availability for a retained root.
