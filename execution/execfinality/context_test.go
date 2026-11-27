@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -36,174 +37,82 @@ func newFinalityTestDB(t *testing.T) kv.TemporalRwDB {
 	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func TestContextBoundaries(t *testing.T) {
+func TestIrreversibleBlock(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		headBlockNum      uint64
 		finalisedBlockNum uint64
 		maxReorgDepth     uint64
 		initialCycle      bool
-		pruneTo           uint64
-		retireTo          uint64
+		want              uint64
 	}{
-		{
-			name:              "tip uses finality",
-			headBlockNum:      1_000,
-			finalisedBlockNum: 100,
-			maxReorgDepth:     96,
-			pruneTo:           100,
-			retireTo:          100,
-		},
-		{
-			name:              "initial cycle uses reorg depth",
-			headBlockNum:      1_000,
-			finalisedBlockNum: 100,
-			maxReorgDepth:     96,
-			initialCycle:      true,
-			pruneTo:           904,
-			retireTo:          904,
-		},
-		{
-			name:          "missing finality uses reorg depth",
-			headBlockNum:  1_000,
-			maxReorgDepth: 96,
-			pruneTo:       904,
-			retireTo:      904,
-		},
-		{
-			name:              "finalised genesis uses reorg depth",
-			headBlockNum:      1_000,
-			finalisedBlockNum: 0,
-			maxReorgDepth:     96,
-			pruneTo:           904,
-			retireTo:          904,
-		},
-		{
-			name:          "head inside reorg window",
-			headBlockNum:  96,
-			maxReorgDepth: 96,
-		},
+		{name: "tip uses finality", headBlockNum: 1_000, finalisedBlockNum: 100, maxReorgDepth: 96, want: 99},
+		{name: "initial cycle uses reorg depth", headBlockNum: 1_000, finalisedBlockNum: 100, maxReorgDepth: 96, initialCycle: true, want: 903},
+		{name: "missing finality uses reorg depth", headBlockNum: 1_000, maxReorgDepth: 96, want: 903},
+		{name: "head inside reorg window", headBlockNum: 96, maxReorgDepth: 96, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var ctx kv.FinalityContext = NewContext(tc.headBlockNum, tc.finalisedBlockNum, tc.maxReorgDepth, tc.initialCycle, rawdbv3.TxNums)
-			require.Equal(t, tc.pruneTo, ctx.PruneToBlockNum())
-			require.Equal(t, tc.retireTo, ctx.RetireToBlockNum())
+			require.Equal(t, tc.want, IrreversibleBlock(tc.headBlockNum, tc.finalisedBlockNum, tc.maxReorgDepth, tc.initialCycle))
 		})
 	}
 }
 
 func TestResolveUsesTransactionVisibleExecutionProgress(t *testing.T) {
-	db := newFinalityTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	const finalisedBlockNum = uint64(100)
+	_, tx := temporaltest.NewTestTx(t)
 	finalisedHash := common.Hash{0x01}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1_000))
-	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, finalisedBlockNum))
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, 100))
 	rawdb.WriteForkchoiceFinalized(tx, finalisedHash)
-	ctx, err := Resolve(tx, 96, true, rawdbv3.TxNums)
+	block, err := Resolve(tx, 96, true)
 	require.NoError(t, err)
-	require.Equal(t, uint64(904), ctx.PruneToBlockNum())
-	require.Equal(t, uint64(904), ctx.RetireToBlockNum())
+	require.Equal(t, uint64(903), block)
+	block, err = Resolve(tx, 96, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(99), block)
 }
 
 func TestResolveWithoutFinalisedBlockUsesMaxReorgDepth(t *testing.T) {
-	db := newFinalityTestDB(t)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := temporaltest.NewTestTx(t)
 	finalisedHash := common.Hash{0x01}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 100))
 	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, 1_000))
 	rawdb.WriteForkchoiceFinalized(tx, finalisedHash)
-	ctx, err := Resolve(tx, 96, false, rawdbv3.TxNums, WithoutFinalisedBlock())
+	block, err := Resolve(tx, 96, false, WithoutFinalisedBlock())
 	require.NoError(t, err)
-	require.Equal(t, uint64(4), ctx.PruneToBlockNum())
-	require.Equal(t, uint64(4), ctx.RetireToBlockNum())
+	require.Equal(t, uint64(3), block)
 }
 
-func TestContextReadyForCollationUsesTransactionVisibleTxNums(t *testing.T) {
-	for _, tc := range []struct {
-		name              string
-		headBlockNum      uint64
-		finalisedBlockNum uint64
-		maxReorgDepth     uint64
-		initialCycle      bool
-		stepLastTxNum     uint64
-		ready             bool
-	}{
-		{
-			name:              "finality includes boundary",
-			headBlockNum:      20,
-			finalisedBlockNum: 12,
-			maxReorgDepth:     5,
-			stepLastTxNum:     12,
-			ready:             true,
-		},
-		{
-			name:              "finality excludes after boundary",
-			headBlockNum:      20,
-			finalisedBlockNum: 12,
-			maxReorgDepth:     5,
-			stepLastTxNum:     13,
-		},
-		{
-			name:              "initial cycle includes before reorg window",
-			headBlockNum:      20,
-			finalisedBlockNum: 12,
-			maxReorgDepth:     5,
-			initialCycle:      true,
-			stepLastTxNum:     14,
-			ready:             true,
-		},
-		{
-			name:              "initial cycle excludes reorg window",
-			headBlockNum:      20,
-			finalisedBlockNum: 12,
-			maxReorgDepth:     5,
-			initialCycle:      true,
-			stepLastTxNum:     15,
-		},
-		{
-			name:          "head inside reorg window",
-			headBlockNum:  5,
-			maxReorgDepth: 5,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			db := newFinalityTestDB(t)
-			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				for blockNum := uint64(0); blockNum <= tc.headBlockNum; blockNum++ {
-					if err := rawdbv3.TxNums.Append(tx, blockNum, blockNum); err != nil {
-						return err
-					}
-				}
-				return nil
-			}))
-			ctx := NewContext(tc.headBlockNum, tc.finalisedBlockNum, tc.maxReorgDepth, tc.initialCycle, rawdbv3.TxNums)
-			finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ready, err := ctx.ReadyForCollation(t.Context(), db, tc.stepLastTxNum)
-			require.NoError(t, err)
-			require.Equal(t, tc.finalisedBlockNum, finalisedBlockNum)
-			require.Equal(t, tc.stepLastTxNum, lastBlockInStep)
-			require.Equal(t, tc.headBlockNum, lastBlockInDB)
-			require.Equal(t, tc.headBlockNum, lastTxInDB)
-			require.Equal(t, tc.ready, ready)
-		})
+// A block that still has a changeset can be unwound, so the irreversible txnum stops below it; the blocks before it
+// still go into files, also when a time-bounded delete stopped there.
+func TestIrreversibleTxNumStopsBelowABlockWithAChangeset(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	for blockNum := uint64(0); blockNum <= 20; blockNum++ {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
 	}
+	txNum, err := IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), txNum, "no changesets: the irreversible block's last txnum")
+
+	for blockNum := uint64(8); blockNum <= 20; blockNum++ {
+		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}), []byte{1}))
+	}
+	txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), txNum)
 }
 
 // snapshotTxNums resolves a txnum from a full-range table, the way the block-snapshot
 // backed index does for blocks chaindata no longer covers.
 type snapshotTxNums struct{ maxTxNumByBlock map[uint64]uint64 }
 
-func (snapshotTxNums) MaxTxNum(context.Context, kv.Tx, kv.Cursor, uint64) (uint64, bool, error) {
-	return 0, false, nil
+func (s snapshotTxNums) MaxTxNum(_ context.Context, _ kv.Tx, _ kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	txNum, ok := s.maxTxNumByBlock[blockNum]
+	return txNum, ok, nil
 }
 
 func (s snapshotTxNums) BlockNumber(_ context.Context, _ kv.Tx, txNum uint64) (uint64, bool, error) {
 	for blockNum, maxTxNum := range s.maxTxNumByBlock {
-		if txNum <= maxTxNum {
+		if txNum == maxTxNum {
 			return blockNum, true, nil
 		}
 	}
@@ -230,92 +139,24 @@ func txNumWindowDB(t *testing.T) kv.TemporalRwDB {
 	return db
 }
 
-// Blocks downloaded to tip with execution far behind: the step ends below the table's
-// floor, which the chaindata search answers with the floor rather than the real block.
-// The snapshot-backed reader names it, so the step collates.
-func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) {
+// Blocks downloaded to tip with execution far behind: the irreversible block is below the
+// table's floor. The snapshot-backed reader names its txnum; chaindata alone must not answer
+// with the latest txnum, which would open collation for every step.
+func TestIrreversibleTxNumBelowTheTxNumWindow(t *testing.T) {
 	const (
-		headBlockNum  = uint64(20_899_437)
-		stepLastTxNum = uint64(2_400_000_000)
-		stepLastBlock = uint64(20_000_000)
+		irreversibleBlock = uint64(20_000_000)
+		irreversibleTxNum = uint64(2_400_000_000)
 	)
-
 	db := txNumWindowDB(t)
-	reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{stepLastBlock: stepLastTxNum}})
-	ctx := NewContext(headBlockNum, 25_837_750, 96, true, reader)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{irreversibleBlock: irreversibleTxNum}})
+		txNum, err := IrreversibleTxNum(t.Context(), tx, reader, irreversibleBlock)
+		require.NoError(t, err)
+		require.Equal(t, irreversibleTxNum, txNum)
 
-	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
-	require.NoError(t, err)
-	require.Equal(t, stepLastBlock, lastBlockInStep, "must resolve the real block, not the table floor")
-	require.True(t, ready, "a step below the reorg window must collate")
-}
-
-// The same shape one step later, with the step boundary inside the reorg window. Naming
-// the real block is what keeps the gate working here: a shortcut past the table floor
-// would open it for every step, since on this node every executed txnum is below it.
-func TestContextReadyForCollationStillGatesStepsBelowTheTxNumWindow(t *testing.T) {
-	const (
-		headBlockNum  = uint64(20_899_437)
-		stepLastTxNum = uint64(2_574_609_374)
-		stepLastBlock = uint64(20_899_424)
-	)
-
-	db := txNumWindowDB(t)
-	reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{stepLastBlock: stepLastTxNum}})
-	ctx := NewContext(headBlockNum, 25_837_750, 96, true, reader)
-
-	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
-	require.NoError(t, err)
-	require.Equal(t, stepLastBlock, lastBlockInStep)
-	require.False(t, ready, "a step inside the reorg window stays gated")
-}
-
-// A synced node also prunes MaxTxNum down to a recent window. There chaindata covers the
-// step, so the default reader resolves it and nothing changes.
-func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T) {
-	db := newFinalityTestDB(t)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for _, e := range []struct{ blockNum, maxTxNum uint64 }{
-			{0, 1}, {25_472_999, 3_630_627_978}, {25_473_000, 3_630_628_100}, {25_473_001, 3_630_628_300},
-		} {
-			if err := rawdbv3.TxNums.Append(tx, e.blockNum, e.maxTxNum); err != nil {
-				return err
-			}
-		}
+		txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, irreversibleBlock)
+		require.NoError(t, err)
+		require.Zero(t, txNum, "an unknown block collates nothing")
 		return nil
 	}))
-
-	ctx := NewContext(25_473_001, 25_473_000, 96, false, rawdbv3.TxNums)
-	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, 3_630_628_100)
-	require.NoError(t, err)
-	require.Equal(t, uint64(25_473_000), lastBlockInStep)
-	require.True(t, ready)
-
-	_, lastBlockInStep, _, _, ready, err = ctx.ReadyForCollation(t.Context(), db, 3_630_628_300)
-	require.NoError(t, err)
-	require.Equal(t, uint64(25_473_001), lastBlockInStep)
-	require.False(t, ready, "step above the finalised head stays gated")
-}
-
-// txRecordingIndex records the tx the reader is handed.
-type txRecordingIndex struct{ tx kv.Tx }
-
-func (txRecordingIndex) MaxTxNum(context.Context, kv.Tx, kv.Cursor, uint64) (uint64, bool, error) {
-	return 0, false, nil
-}
-
-func (i *txRecordingIndex) BlockNumber(_ context.Context, tx kv.Tx, _ uint64) (uint64, bool, error) {
-	i.tx = tx
-	return 0, false, nil
-}
-
-// A snapshot-backed reader reads block files, which only a temporal tx pins a view for.
-func TestContextReadyForCollationResolvesStepsOnATemporalTx(t *testing.T) {
-	temporalDB := newFinalityTestDB(t)
-	index := &txRecordingIndex{}
-	ctx := NewContext(25_473_001, 25_473_000, 96, false, rawdbv3.TxNums.WithCustomReadTxNumFunc(index))
-
-	_, _, _, _, _, err := ctx.ReadyForCollation(t.Context(), temporalDB, 3_630_628_100)
-	require.NoError(t, err)
-	require.Implements(t, (*kv.TemporalTx)(nil), index.tx)
 }

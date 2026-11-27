@@ -129,7 +129,7 @@ func (t *Trie) Process(
 			t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
 			defer func() { t.ctx = inner }()
 		}
-		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
+		sorted = func(items []feedEntry) error { return traceCollapsesDeletes(t.ctx, items, t.collapseTracer) }
 	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
 		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
@@ -148,7 +148,7 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 	inner, rootBefore, deferredBefore, deferUpdatesBefore := t.ctx, bytes.Clone(t.root), t.deferred, t.deferUpdates
 	t.ctx, t.deferred, t.deferUpdates = cache, nil, true
 	root, err := t.round(ctx, nil, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapses(cache, items, tracer) })
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapsesDeletes(cache, items, tracer) })
 	})
 	t.ctx, t.root, t.deferred, t.deferUpdates = inner, rootBefore, deferredBefore, deferUpdatesBefore
 	return root, err

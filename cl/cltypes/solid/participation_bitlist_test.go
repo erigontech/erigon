@@ -54,7 +54,7 @@ func TestParticipationBitListCopyTo(t *testing.T) {
 	require := require.New(t)
 
 	source := solid.NewParticipationBitList(5, 10)
-	target := solid.NewParticipationBitList(0, 0)
+	target := solid.NewParticipationBitList(0, 10)
 
 	source.CopyTo(target)
 
@@ -274,6 +274,39 @@ func TestParticipationBitListHashSSZSmallCapacity(t *testing.T) {
 			root, err := appendAll(solid.NewParticipationBitList(0, limit), values).HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, sha256ListRoot(values, limit), root, "limit %d length %d", limit, length)
+		}
+	}
+}
+
+func TestParticipationBitListRejectsOverLimit(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	for _, limit := range []int{1, 32, 64} {
+		for _, length := range []int{limit + 1, 3 * limit} {
+			t.Run(fmt.Sprintf("%d/%d", limit, length), func(t *testing.T) {
+				bitList := appendAll(solid.NewParticipationBitList(0, limit), randomParticipation(rng, length))
+				wantErr := fmt.Sprintf("participation list length exceeds limit: %d > %d", length, limit)
+				_, err := bitList.HashSSZ()
+				require.EqualError(t, err, wantErr)
+				_, err = bitList.EncodeSSZ(nil)
+				require.EqualError(t, err, wantErr)
+			})
+		}
+	}
+}
+
+func TestParticipationBitListAcceptsLimit(t *testing.T) {
+	rng := rand.New(rand.NewSource(4))
+	for _, limit := range []int{1, 32, 64} {
+		for _, length := range []int{0, limit} {
+			t.Run(fmt.Sprintf("%d/%d", limit, length), func(t *testing.T) {
+				values := randomParticipation(rng, length)
+				bitList := appendAll(solid.NewParticipationBitList(0, limit), values)
+				encoded, err := bitList.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.True(t, bytes.Equal(values, encoded), "limit %d length %d: encoded %d bytes", limit, length, len(encoded))
+				_, err = bitList.HashSSZ()
+				require.NoError(t, err)
+			})
 		}
 	}
 }
