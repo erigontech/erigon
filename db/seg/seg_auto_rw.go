@@ -101,6 +101,9 @@ func (g *Reader) MadvSequential() MadvDisabler {
 }
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
+
+// Compression is the word-level compression Next applies: the file header's for V2+ files.
+func (g *Reader) Compression() FileCompression { return g.c }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {

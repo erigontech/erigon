@@ -240,7 +240,6 @@ func convertCommitmentFileV3(
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 		reader := seg.NewReader(view.MakeGetter(), srcCompression)
-		keysCompressed, valsCompressed := srcCompression.Has(seg.CompressKeys), srcCompression.Has(seg.CompressVals)
 		batch := kvBatchPool.Get().(*kvBatch)
 		batch.reset()
 		send := func() error {
@@ -262,12 +261,12 @@ func convertCommitmentFileV3(
 		}
 		seen := make(map[string]struct{}, len(fold.cur)+len(fold.prev))
 		for reader.HasNext() {
-			k := readOwned(reader, batch, keysCompressed)
+			k := readOwned(reader, batch, true)
 			if !reader.HasNext() {
 				return fmt.Errorf("truncated at key %x", k)
 			}
 			n := read.Add(1)
-			v := readOwned(reader, batch, valsCompressed)
+			v := readOwned(reader, batch, false)
 			if folded, ok := fold.cur[string(k)]; ok {
 				v = folded
 				seen[string(k)] = struct{}{}
@@ -424,7 +423,11 @@ func convertCommitmentFileV3(
 	return delta, ki, nil
 }
 
-func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
+func readOwned(reader *seg.Reader, batch *kvBatch, isKey bool) []byte {
+	compressed := reader.Compression().Has(seg.CompressVals)
+	if isKey {
+		compressed = reader.Compression().Has(seg.CompressKeys)
+	}
 	if !compressed {
 		word, _ := reader.Next(nil)
 		return word
