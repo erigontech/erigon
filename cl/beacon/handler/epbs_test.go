@@ -38,6 +38,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -2851,6 +2852,33 @@ func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 
 	_, err := handler.PostEthV1ValidatorDutiesPtc(httptest.NewRecorder(), request)
 	require.NoError(t, err)
+}
+
+func TestPostPtcDutiesCountsTrailingBytesAgainstLimit(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	previousHeadForkEpoch := headState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousHeadForkEpoch })
+	headState.BeaconConfig().GloasForkEpoch = 0
+	headState.SetVersion(clparams.GloasVersion)
+	publishPtcDutiesHead(t, syncedData, headState, common.Hash{})
+	post := func(size int) error {
+		const value = `["1"]`
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/ptc/5", strings.NewReader(value+strings.Repeat(" ", size-len(value))))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("epoch", "5")
+		request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
+		_, err := handler.PostEthV1ValidatorDutiesPtc(httptest.NewRecorder(), request)
+		return err
+	}
+
+	require.NoError(t, post(maxEpbsJSONSize))
+
+	err := post(maxEpbsJSONSize + 1)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+	require.ErrorContains(t, err, "request body too large")
 }
 
 func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
