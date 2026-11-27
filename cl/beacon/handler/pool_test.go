@@ -25,6 +25,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -521,20 +522,29 @@ func TestPostPoolBodyLimits(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			post := func(size int64) *httptest.ResponseRecorder {
-				// Leading padding makes the decoder read the whole body before the value ends.
-				body := append(bytes.Repeat([]byte(" "), int(size)-len(tc.body)), tc.body...)
+			pad := func(size int64) []byte { return bytes.Repeat([]byte(" "), int(size)-len(tc.body)) }
+			post := func(body []byte) *httptest.ResponseRecorder {
 				resp := httptest.NewRecorder()
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
 				req.Header.Set("Eth-Consensus-Version", tc.version)
 				tc.post(resp, req)
 				return resp
 			}
-			resp := post(tc.limit)
-			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
-			resp = post(tc.limit + 1)
-			require.Equal(t, http.StatusBadRequest, resp.Code)
-			require.Contains(t, resp.Body.String(), "request body too large")
+			for _, padding := range []struct {
+				name string
+				body func(size int64) []byte
+			}{
+				{name: "leading", body: func(size int64) []byte { return slices.Concat(pad(size), tc.body) }},
+				{name: "trailing", body: func(size int64) []byte { return slices.Concat(tc.body, pad(size)) }},
+			} {
+				t.Run(padding.name, func(t *testing.T) {
+					resp := post(padding.body(tc.limit))
+					require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+					resp = post(padding.body(tc.limit + 1))
+					require.Equal(t, http.StatusBadRequest, resp.Code)
+					require.Contains(t, resp.Body.String(), "request body too large")
+				})
+			}
 		})
 	}
 }
