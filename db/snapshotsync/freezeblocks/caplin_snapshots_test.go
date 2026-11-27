@@ -87,7 +87,7 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	require.ErrorContains(t, err, "skipped too many blocks in a row")
 }
 
-func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) {
+func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) (bodylessRoot common.Hash) {
 	t.Helper()
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		var prevRoot common.Hash
@@ -103,6 +103,7 @@ func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) {
 			}
 			prevRoot = root
 			if slot == bodylessSlot {
+				bodylessRoot = root
 				continue
 			}
 			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
@@ -111,6 +112,7 @@ func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) {
 		}
 		return nil
 	}))
+	return bodylessRoot
 }
 
 // dumpBeaconBlocksRange indexes the segment it just compressed, which is only safe because
@@ -154,10 +156,8 @@ func TestDumpBeaconBlocksRangeFailsOnCanonicalRootWithoutBody(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			dirs := datadir.New(t.TempDir())
-			writeSparseCanonicalChain(t, db, tc.slot)
+			root := writeSparseCanonicalChain(t, db, tc.slot)
 			if tc.emptyBody {
-				var root common.Hash
-				binary.BigEndian.PutUint64(root[:], tc.slot+1)
 				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 					return tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(tc.slot, root), []byte{})
 				}))
