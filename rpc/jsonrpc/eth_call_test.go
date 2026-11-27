@@ -2496,8 +2496,8 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}, nil), types.ErrBlobTxnPreCancun)
 	})
 
-	t.Run("empty but present blob hash list before Cancun is rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, []common.Hash{}, nil), types.ErrBlobTxnPreCancun)
+	t.Run("empty but present blob hash list before Cancun is rejected for the missing hashes", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{}, nil), types.ErrBlobTxnEmptyBlobs)
 	})
 
 	t.Run("blob fee cap without blob hashes before Cancun is rejected for the missing hashes", func(t *testing.T) {

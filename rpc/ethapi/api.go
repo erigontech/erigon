@@ -365,6 +365,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	msg.SetDynamicFeeArgs(args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil)
 
 	if args.BlobVersionedHashes != nil {
+		if len(args.BlobVersionedHashes) == 0 {
+			return nil, types.ErrBlobTxnEmptyBlobs
+		}
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
 	} else if args.MaxFeePerBlobGas != nil {
 		return nil, ErrBlobFeeCapWithoutBlobHashes
