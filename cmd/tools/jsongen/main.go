@@ -171,7 +171,7 @@ func (x *%[2]s) %[5]s(s *jsonstream.Stream) error {
 // error does, and stops the run rather than generating from types that will not build.
 func load() (*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
-		packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}
+		packages.NeedTypesInfo}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
@@ -180,7 +180,9 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if missingWhatThisWrites(e.Msg) {
+		// Imports come from export data, so go list also compiles this package. Its compile
+		// errors repeat, without a position, what type-checking the source reports.
+		if missingWhatThisWrites(e.Msg) || e.Kind == packages.ListError && strings.HasPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n") {
 			continue
 		}
 		content, err := os.ReadFile(positionFile(e.Pos))
