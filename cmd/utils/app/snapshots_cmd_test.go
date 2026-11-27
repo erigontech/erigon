@@ -31,6 +31,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
@@ -41,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -1115,11 +1119,49 @@ func TestDUCollect_WorksWithoutChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Equal(t, "unknown", result.Chain)
 	require.Len(t, result.Estimates, 4)
+	require.Nil(t, result.Caplin)
 	require.NoFileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+}
+
+func TestDUCollect_CaplinBreakdown(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	writeChainMetadata(t, t.Context(), chainDB, networkname.Mainnet, 1)
+	chainDB.Close()
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers)
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)), bytes.Repeat([]byte{'b'}, 11), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, snaptype.BlobSidecars.FileName(version.V1_1, 0, 100)), bytes.Repeat([]byte{'s'}, 13), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, snaptype.StateEvents.FileName(version.V1_1, 0, 100)), bytes.Repeat([]byte{'t'}, 17), 0o644))
+	caplinDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dirs.CaplinIndexing).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	require.NoError(t, caplinDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteCaplinRetention(tx, clparams.CaplinRetention{Mode: clparams.CaplinPruneModeSpec})
+	}))
+	caplinDB.Close()
+
+	result, err := duCollect(t.Context(), dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, int64(41), result.CaplinBytes)
+	require.NotNil(t, result.Caplin)
+	require.Equal(t, "spec", result.Caplin.Regime)
+
+	var human bytes.Buffer
+	duFormatHuman(&human, result, false)
+	require.Contains(t, human.String(), "beacon blocks")
+	require.Contains(t, human.String(), "blob sidecars")
+	require.Contains(t, human.String(), "caplin rows are not governed by --prune.mode")
+
+	var encoded bytes.Buffer
+	require.NoError(t, duFormatJSON(&encoded, result))
+	var decoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded.Bytes(), &decoded))
+	require.Contains(t, decoded, "caplin")
 }
 
 func duTestDatadirWithBlocks(t *testing.T, ranges ...[2]uint64) datadir.Dirs {
@@ -1136,7 +1178,7 @@ func TestDUCollect_BrokenBlockSegmentOmitsEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000})
 	require.NoError(t, os.Truncate(filepath.Join(dirs.Snap, snaptype.SegmentFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Headers)), 3))
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
 	require.Equal(t, uint64(500_000), result.BlockRange[1])
@@ -1146,7 +1188,7 @@ func TestDUCollect_BodiesIndexGapOmitsEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000}, [2]uint64{1_000_000, 1_500_000})
 	require.NoError(t, dir2.RemoveFile(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Enums.Bodies.String()))))
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
 }
@@ -1155,7 +1197,7 @@ func TestDUCollect_UnindexedLeadingBodiesOmitEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000})
 	require.NoError(t, dir2.RemoveFile(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Bodies.String()))))
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
 }
@@ -1164,7 +1206,7 @@ func TestDUCollect_HeadersBeyondBodiesOmitEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000})
 	duWriteSegment(t, dirs.Snap, 500_000, 1_000_000, snaptype2.Enums.Headers)
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
 }
@@ -1174,7 +1216,7 @@ func TestDUCollect_UndecodableBodiesOmitEstimates(t *testing.T) {
 	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers)
 	duWriteSegmentWord(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies, []byte{1})
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
 	require.Equal(t, uint64(500_000), result.BlockRange[1])
@@ -1183,7 +1225,7 @@ func TestDUCollect_UndecodableBodiesOmitEstimates(t *testing.T) {
 func TestDUCollect_IndexedBlocksKeepEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000})
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.Len(t, result.Estimates, 4)
 }
@@ -1220,7 +1262,7 @@ func TestDUCollect_UnnamedChainIsUnknown(t *testing.T) {
 	}))
 	db.Close()
 
-	result, err := duCollect(context.Background(), dirs, log.New())
+	result, err := duCollect(context.Background(), dirs, log.New(), false)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.ConfiguredMode)
 	require.Equal(t, "unknown", result.Chain)
@@ -1326,6 +1368,32 @@ func TestDUFormatHuman(t *testing.T) {
 	require.True(t, strings.Contains(out, "last 100.000"), "should show history description")
 }
 
+func TestDUFormatHuman_CaplinBreakdownReplacesTotal(t *testing.T) {
+	result := duResult{
+		Chain: "mainnet",
+		Caplin: &antiquary.CaplinDuResult{
+			Chain:        "mainnet",
+			Regime:       "spec",
+			RegimeStored: true,
+			Rows: []antiquary.CaplinDuRow{{
+				Family:  "beacon blocks",
+				Tier:    "cold",
+				Files:   1,
+				Bytes:   42,
+				HasData: true,
+			}},
+		},
+	}
+
+	var buf bytes.Buffer
+	duFormatHuman(&buf, result, false)
+	out := buf.String()
+
+	require.NotContains(t, out, "is on top of every mode above")
+	require.Contains(t, out, "caplin rows are not governed by --prune.mode")
+	require.Contains(t, out, "beacon blocks")
+}
+
 func TestDUFormatHuman_ConfiguredMode(t *testing.T) {
 	t.Run("from chaindata", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -1389,6 +1457,22 @@ func TestDUFormatJSON(t *testing.T) {
 	require.Equal(t, 200, decoded.Categories[duCatDomains].Files)
 	require.Len(t, decoded.Estimates, 1)
 	require.Equal(t, "archive", decoded.Estimates[0].Mode)
+}
+
+func TestDUFormatJSON_CaplinBreakdown(t *testing.T) {
+	result := duResult{
+		Chain:       "mainnet",
+		CaplinBytes: 42,
+		Caplin:      &antiquary.CaplinDuResult{Chain: "mainnet", Regime: "spec"},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, duFormatJSON(&buf, result))
+
+	var decoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded))
+	require.Contains(t, decoded, "caplin")
+	require.Contains(t, decoded, "caplin_bytes")
 }
 
 func TestDUFormatJSON_EmptyResult(t *testing.T) {
@@ -1914,4 +1998,56 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasState)
 	require.False(t, broken)
+}
+
+func TestDuStandaloneBreakdown(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	require.NoError(t, os.Mkdir(dirs.Snap, 0o700))
+	name := snaptype.BlobSidecars.FileName(version.V1_1, 0, 10_000)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte("hoodi"), 0o600))
+	r, err := duCollect(t.Context(), dirs, log.New(), false)
+	require.NoError(t, err)
+	if r.Caplin == nil {
+		t.Fatalf("caplin_bytes = %d, caplin breakdown absent", r.CaplinBytes)
+	}
+}
+
+func TestDuVerboseCaplinTables(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	writeChainMetadata(t, t.Context(), chainDB, networkname.Gnosis, 100)
+	chainDB.Close()
+	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dirs.CaplinIndexing).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(2_000_000, common.Hash{1}), []byte{1}); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteCaplinRetention(tx, clparams.CaplinRetention{Mode: clparams.CaplinPruneModeSpec})
+	}))
+	var want int
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		names, err := tx.ListTables()
+		want = len(names)
+		return err
+	}))
+	db.Close()
+
+	out, err := os.CreateTemp(t.TempDir(), "report")
+	require.NoError(t, err)
+	defer out.Close()
+	stdout := os.Stdout
+	os.Stdout = out
+	defer func() { os.Stdout = stdout }()
+	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
+	require.NoError(t, app.Run(t.Context(), []string{"erigon", "seg", "du", "--datadir", dirs.DataDir, "-v", "--json"}))
+	data, err := os.ReadFile(out.Name())
+	require.NoError(t, err)
+	var r duResult
+	require.NoError(t, json.Unmarshal(data, &r))
+	require.NotNil(t, r.Caplin)
+	require.Equal(t, uint64(1_470_000), r.Caplin.Floors.Blocks)
+	if got := len(r.Caplin.MDBX.Tables); got != want {
+		t.Fatalf("-v returned %d of %d Caplin tables", got, want)
+	}
 }

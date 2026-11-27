@@ -102,12 +102,6 @@ func IsBlobSidecarFile(name string) bool {
 	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
 }
 
-// isBlobSidecarFile matches blob sidecar segments and their index, which is named after
-// the index (blocksidecars), not the segment type.
-func isBlobSidecarFile(name string) bool {
-	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
-}
-
 // BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
 type BlobRetention struct {
 	SnapshotDir string
@@ -127,7 +121,7 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, er
 	}
 	var tip uint64
 	for _, p := range items {
-		if !isBlobSidecarFile(p.Name) {
+		if !IsBlobSidecarFile(p.Name) {
 			continue
 		}
 		if info, _, ok := snaptype.ParseFileName("", p.Name); ok {
@@ -153,7 +147,7 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, er
 // skipBlobDownload reports whether a preverified file is a blob segment or index the node does
 // not download: every one when blobs are not archived, else those below floor.
 func skipBlobDownload(name string, blobs bool, floor uint64) bool {
-	return isBlobSidecarFile(name) && (!blobs || blobSegmentBelow(name, floor))
+	return IsBlobSidecarFile(name) && (!blobs || blobSegmentBelow(name, floor))
 }
 
 // blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
@@ -680,7 +674,7 @@ func SnapshotsToDownload(
 	}
 
 	for _, p := range preverifiedBlockSnapshots.Items {
-		isCaplinFile := strings.Contains(p.Name, "beaconblocks") || isBlobSidecarFile(p.Name) || strings.Contains(p.Name, "caplin")
+		isCaplinFile := strings.Contains(p.Name, "beaconblocks") || IsBlobSidecarFile(p.Name) || strings.Contains(p.Name, "caplin")
 		if caplin == NoCaplin && isCaplinFile {
 			continue
 		}

@@ -2,6 +2,7 @@ package snapcfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -9,6 +10,25 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 )
+
+func PreverifiedItemsForDatadir(dirs *datadir.Dirs, chainName string) (PreverifiedItems, error) {
+	data, err := os.ReadFile(dirs.PreverifiedPath())
+	if err == nil {
+		items, err := ParseToml(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse manifest: %w", err)
+		}
+		return items, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	cfg, ok := KnownCfg(chainName)
+	if !ok {
+		return nil, fmt.Errorf("config for chain %q is not known", chainName)
+	}
+	return cfg.Preverified.Items, nil
+}
 
 // Loads preverified from locations other than just remote. Usually for utility commands that want
 // to test different preverified sources.
