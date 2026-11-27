@@ -308,7 +308,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			return err
 		}
 		if payloadSkipped {
-			if err := sn.AddWord(nil); err != nil {
+			if _, err := w.Write(nil); err != nil {
 				return err
 			}
 			continue
