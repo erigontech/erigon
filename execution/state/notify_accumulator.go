@@ -70,10 +70,10 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return rs.notifyAccumulatorSerial(accumulator, roTx, blockWrites)
 	}
 	chunks := make([]notifyChunk, workers)
-	step := (len(blockWrites) + len(chunks) - 1) / len(chunks)
+	n := len(blockWrites)
 	var wg sync.WaitGroup
 	for k := range chunks {
-		wg.Go(func() { chunks[k].collect(rs.domains, blockWrites[k*step:min((k+1)*step, len(blockWrites))]) })
+		wg.Go(func() { chunks[k].collect(rs.domains, blockWrites[k*n/workers:(k+1)*n/workers]) })
 	}
 	wg.Wait()
 	entries := 0

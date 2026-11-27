@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"os"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -503,4 +504,20 @@ func TestNotifyAccumulatorLargeBlockKeepsOrderAndFinalValues(t *testing.T) {
 		require.Equal(t, wantAction, change.Action, "entry %d", n)
 		require.Equal(t, enc, change.Data, "entry %d", n)
 	}
+}
+
+func TestNotifyAccumulatorChunksStayInsideTheBlock(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1024))
+	tx, seedDomains := setup2CacheTest(t)
+	rs := state.NewStateV3Buffered(state.NewStateV3(seedDomains, false, log.New()))
+	empty := newWS().build()
+	writes := make([]state.WriteSetView, 1024*512+1)
+	for i := range writes {
+		writes[i] = empty
+	}
+	accumulator := shards.NewAccumulator()
+	var hdr types.Header
+	hdr.Number.SetUint64(1)
+	accumulator.StartChange(&hdr, nil, false)
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
 }
