@@ -120,6 +120,6 @@ func TestRefreshDuringCleanupKeepsValidatorAttached(t *testing.T) {
 		wg.Go(func() { params.GetValidators() })
 		wg.Wait()
 
-		require.Len(t, params.GetValidators(), validators)
+		require.Equal(t, validators, len(params.GetValidators()))
 	}
 }
