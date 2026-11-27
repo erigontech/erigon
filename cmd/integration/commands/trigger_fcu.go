@@ -41,7 +41,6 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		ctx := cmd.Context()
 		dirs := datadir.New(datadirCli)
 		jwt := filepath.Join(dirs.DataDir, "jwt.hex")

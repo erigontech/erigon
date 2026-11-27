@@ -50,12 +50,10 @@ var rootCmd = &cobra.Command{
 			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
-	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		defer debug.Exit()
-	},
 }
 
 func RootCommand() *cobra.Command {
+	cobra.OnFinalize(debug.Exit)
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	return rootCmd
 }

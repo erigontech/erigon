@@ -103,7 +103,6 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-			defer debug.Exit()
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
@@ -115,13 +114,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			go kv.CollectTableSizesPeriodically(ctx, db, dbcfg.ChainDB, logger)
-			if err := stageFn(db, ctx, logger); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil // graceful shutdown
-				}
-				return err
-			}
-			return nil
+			return stageFn(db, ctx, logger)
 		},
 	}
 }
@@ -163,7 +156,6 @@ var cmdPrintTableSizes = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -213,20 +205,13 @@ var cmdPrintMigrations = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
 			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
-		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return printAppliedMigrations(migrationsDB, cmd.Context(), logger)
 	},
 }
 
@@ -236,20 +221,13 @@ var cmdRemoveMigration = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
 			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
-		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return removeMigration(migrationsDB, cmd.Context())
 	},
 }
 
@@ -259,7 +237,6 @@ var cmdRunMigrations = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		if isDefaultChaindata(chaindata, datadirCli) {
 			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
 				return fmt.Errorf("apply migrations: %w", err)

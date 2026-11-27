@@ -62,7 +62,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -81,17 +80,11 @@ Examples:
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, builderConfig, ctx, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return err
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil
-				}
 				return err
 			}
 		}
@@ -104,7 +97,6 @@ var loopExecCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -113,13 +105,7 @@ var loopExecCmd = &cobra.Command{
 		if unwind == 0 {
 			unwind = 1
 		}
-		if err := loopExec(db, ctx, unwind, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return loopExec(db, ctx, unwind, logger)
 	},
 }
 

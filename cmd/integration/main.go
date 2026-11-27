@@ -17,6 +17,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -30,7 +32,7 @@ func main() {
 	rootCmd := commands.RootCommand()
 	ctx, _ := common.RootContext()
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Println(err)
 		os.Exit(1)
 	}

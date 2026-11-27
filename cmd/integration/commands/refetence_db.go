@@ -51,15 +51,7 @@ var cmdMdbxTopDup = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
-		err := mdbxTopDup(ctx, chaindata, bucket, logger)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return mdbxTopDup(ctx, chaindata, bucket, logger)
 	},
 }
 
@@ -70,18 +62,10 @@ var cmdCompareBucket = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		_ = debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
-		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
 	},
 }
 
@@ -92,18 +76,10 @@ var cmdCompareStates = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		_ = debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
-		err := compareStates(ctx, chaindata, referenceChaindata)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return compareStates(ctx, chaindata, referenceChaindata)
 	},
 }
 
@@ -114,17 +90,12 @@ var cmdMdbxToMdbx = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 
 		if toChaindata == "" {
 			return errors.New("--chaindata.to is required: it names the db to copy --chaindata into")
 		}
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-		err := backup.Kv2kv(ctx, from, to, nil, logger)
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return err
+		return backup.Kv2kv(ctx, from, to, nil, logger)
 	},
 }
 
@@ -135,12 +106,7 @@ var cmdFToMdbx = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
-		err := fToMdbx(ctx, logger, toChaindata)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
+		return fToMdbx(ctx, logger, toChaindata)
 	},
 }
 

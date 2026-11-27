@@ -130,7 +130,6 @@ var printCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 
 		dirs, l, err := datadir.New(datadirCli).MustFlock()
 		if err != nil {
@@ -182,7 +181,6 @@ var distributionCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 
 		dirs, l, err := datadir.New(datadirCli).MustFlock()
 		if err != nil {
@@ -453,7 +451,6 @@ var duplicatesCmd = &cobra.Command{
 	Short: "Report keys whose history has consecutive duplicate (redundant) values, per domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 
 		if dupSamples < 0 {
 			return fmt.Errorf("--samples must be >= 0, got %d", dupSamples)

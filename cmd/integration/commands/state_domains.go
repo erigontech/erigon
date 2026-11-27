@@ -64,7 +64,6 @@ var readDomains = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -110,13 +109,7 @@ var readDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := requestDomains(stateDb, ctx, readFromDomain, addrs, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return requestDomains(stateDb, ctx, readFromDomain, addrs, logger)
 	},
 }
 

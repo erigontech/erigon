@@ -205,7 +205,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -284,7 +283,6 @@ var cmdCommitmentVerify = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		return commitmentVerify(ctx, logger)
 	},
 }
@@ -325,7 +323,6 @@ var cmdCommitmentRebuild = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		// The rebuild writes a file per shard and per merge; in-memory existence filters and hash indexes of those files grow the heap until the run ends.
 		statecfg.Schema.CommitmentDomain.ExistenceFilter = statecfg.ExistenceFilterRandom
@@ -487,20 +484,13 @@ var cmdCommitmentPrint = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
-		if err := printCommitment(db, cmd.Context()); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return printCommitment(db, cmd.Context())
 	},
 }
 
@@ -605,7 +595,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			return errors.New("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 		}
@@ -742,7 +731,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		return visualizeCommitmentFiles(args)
 	},
 }
@@ -761,16 +749,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		ctx := cmd.Context()
 
-		if err := benchLookup(ctx, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return benchLookup(ctx, logger)
 	},
 }
 
@@ -788,16 +769,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		ctx := cmd.Context()
 
-		if err := benchHistoryLookup(ctx, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return benchHistoryLookup(ctx, logger)
 	},
 }
 

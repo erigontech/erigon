@@ -17,9 +17,7 @@
 package commands
 
 import (
-	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -47,7 +45,6 @@ var cmdResetState = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -62,30 +59,18 @@ var cmdResetState = &cobra.Command{
 		defer sn.Close()
 
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return err
 		}
 
 		dirs := datadir.New(datadirCli)
 		br, _ := blocksIO(db, logger)
 		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return err
 		}
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) })
 	},
 }
 
@@ -94,7 +79,6 @@ var cmdClearBadBlocks = &cobra.Command{
 	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
