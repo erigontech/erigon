@@ -96,25 +96,27 @@ func (f *fundedPrefix) covers(mt *metaTxn) bool {
 	return !mt.keyedNonce && mt.TxnSlot.Nonce >= f.start && mt.TxnSlot.Nonce < f.end
 }
 
-// batchFundedPrefix returns the sender's funded prefix for a batch of additions and records it in prefixes
-// at the first call. addLocked calls it before the batch changes any of the sender's transactions, so the
-// prefix is what the balance covers when the batch starts, whichever candidates the batch rejects. A
-// transaction that the batch adds, or funds with a cheaper replacement, is not covered; neither can be
-// pending before the batch ends.
-func (p *TxPool) batchFundedPrefix(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, senderID uint64) (*fundedPrefix, error) {
-	if prefix := prefixes[senderID]; prefix != nil {
-		return prefix, nil
+// batchFundedPrefixes records the funded prefix of each sender in a batch of additions before the batch
+// changes any transaction or reservation, so each prefix is what the balance covers when the batch starts.
+// A transaction that the batch adds, or funds with a cheaper replacement or a released reservation, is not
+// covered; none of them can be pending before the batch ends.
+func (p *TxPool) batchFundedPrefixes(cacheView kvcache.CacheView, txns TxnSlots) (map[uint64]*fundedPrefix, error) {
+	prefixes := make(map[uint64]*fundedPrefix)
+	for _, txn := range txns.Txns {
+		if prefixes[txn.SenderID] != nil {
+			continue
+		}
+		senderNonce, balance, _, err := p.senders.info(cacheView, txn.SenderID)
+		if err != nil {
+			return nil, err
+		}
+		// As in onSenderStateChange, frame reservations come out of the balance first.
+		reserved := p.frameReservations[p.senders.senderID2Addr[txn.SenderID]].cost
+		prefix := p.newFundedPrefix(txn.SenderID, senderNonce, unreservedFunds(balance, reserved))
+		prefix.balance = balance
+		prefixes[txn.SenderID] = prefix
 	}
-	senderNonce, balance, _, err := p.senders.info(cacheView, senderID)
-	if err != nil {
-		return nil, err
-	}
-	// As in onSenderStateChange, frame reservations come out of the balance first.
-	reserved := p.frameReservations[p.senders.senderID2Addr[senderID]].cost
-	prefix := p.newFundedPrefix(senderID, senderNonce, unreservedFunds(balance, reserved))
-	prefix.balance = balance
-	prefixes[senderID] = prefix
-	return prefix, nil
+	return prefixes, nil
 }
 
 // keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement

@@ -819,6 +819,44 @@ func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
 	require.Equal(t, PendingSubPool, pool.byHash[string(replacement.IDHash[:])].currentSubPool)
 }
 
+// A batch protects what the payer's balance covers when the batch starts, also after another sender's
+// replacement releases a reservation of the payer earlier in the batch.
+func TestFramePoolReplacementBatchCountsFundsAtItsStart(t *testing.T) {
+	ctx, pool, payer := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	sponsored := common.Address{2}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, payer, sponsored)
+	change.ChangeBatch[0].BlockHeight = 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	frame := framePoolSlotWithNonce(t, sponsored, 0, 1, common.GWei)
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sponsored, true, frame)[0])
+	slot := func(nonce, feeCap, cost uint64, id byte) *TxnSlot {
+		txn := newTestTxnSlot(nonce, 0, 1, feeCap, 21_000)
+		txn.Txn.GetValue().SetUint64(cost - 21_000*feeCap)
+		txn.IDHash[0] = id
+		return txn
+	}
+	quarter := uint64(common.Ether / 4)
+	// Together they cost the whole balance, so the frame's reservation leaves nonce 1 unfunded.
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, slot(0, 10, quarter, 1))[0])
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, slot(1, 10, 3*quarter, 2))[0])
+	payerID, _ := pool.senders.getID(payer)
+	require.Equal(t, QueuedSubPool, pool.all.get(payerID, 1).currentSubPool)
+
+	// Replacing the frame releases the reservation, which would fund nonce 1. The costlier replacement of
+	// nonce 0 still fits, because nonce 1 was not funded when the batch started.
+	release := newTestTxnSlot(0, 0, 2*common.GWei, 2*common.GWei, 21_000)
+	release.IDHash[0] = 3
+	var txns TxnSlots
+	txns.Append(release, sponsored[:], true)
+	txns.Append(slot(0, 11, 3*quarter, 4), payer[:], true)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Empty(t, pool.frameReservations)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+}
+
 func TestFramePoolReservationExcludesReplacedOrdinary(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether

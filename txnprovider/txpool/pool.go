@@ -569,7 +569,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return frames, err
 	}
-	p.restoreFramesLocked(cacheView, block, unwindFrames)
+	p.restoreFramesLocked(block, unwindFrames)
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, cells)
@@ -2049,10 +2049,13 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	// Refresh senders after inserting the batch so their nonce-chain and balance
 	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
-	prefixes := make(map[uint64]*fundedPrefix)
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	installed := make([]*metaTxn, len(newTxns.Txns))
 	announcements := Announcements{}
+	prefixes, err := p.batchFundedPrefixes(cacheView, newTxns)
+	if err != nil {
+		return announcements, discardReasons, err
+	}
 	for i, txn := range newTxns.Txns {
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
@@ -2064,7 +2067,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(cacheView, prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -2116,14 +2119,17 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
 	sendersWithActivity := map[uint64]struct{}{}
-	prefixes := make(map[uint64]*fundedPrefix)
 	announcements := Announcements{}
+	prefixes, err := p.batchFundedPrefixes(cacheView, newTxns)
+	if err != nil {
+		return announcements, err
+	}
 	for i, txn := range newTxns.Txns {
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(cacheView, prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -2229,7 +2235,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fundedPrefix, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(prefixes map[uint64]*fundedPrefix, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
@@ -2282,16 +2288,10 @@ func (p *TxPool) addLocked(cacheView kvcache.CacheView, prefixes map[uint64]*fun
 		}
 	}
 
-	// Record the sender's funded prefix before the batch changes any of its transactions.
-	prefix, err := p.batchFundedPrefix(cacheView, prefixes, mt.TxnSlot.SenderID)
-	if err != nil {
-		p.logger.Warn("[txpool] addLocked: sender info", "err", err)
-		return txpoolcfg.ErrGetSenderInfo
-	}
 	if found != nil {
-		// Checked last: an accepted replacement is already counted in the prefix, so no later check
-		// may reject it.
-		if !p.keepsSenderFunded(prefix, mt.TxnSlot, found) {
+		// Checked last: an accepted replacement is already counted in the sender's funded prefix, so no
+		// later check may reject it.
+		if !p.keepsSenderFunded(prefixes[mt.TxnSlot.SenderID], mt.TxnSlot, found) {
 			return txpoolcfg.InsufficientFunds
 		}
 		p.removeFromSubPool(found, "add")
@@ -3407,7 +3407,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	}
 
 	immediate, frames := p.splitRestoredTxns(restored)
-	*parked = p.restoreFramesLocked(cacheView, p.lastSeenBlock.Load(), frames)
+	*parked = p.restoreFramesLocked(p.lastSeenBlock.Load(), frames)
 	if header != nil {
 		// Expired roots must not occupy a sender's frame slot while validation is unavailable.
 		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)
