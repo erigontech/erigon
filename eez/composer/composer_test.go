@@ -1532,7 +1532,7 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
 		{name: "a height L1 settled waits for derivation", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a block no longer canonical", substitute: follower.ErrNotCanonical, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
-		{name: "a stale parent", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a stale parent waits for the next trigger", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a substitution failing", substitute: errors.New("chain busy"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 	} {

@@ -613,7 +613,10 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 		// batch is disposed of by what ran.
 		c.ledger.ReinsertFailed(p)
 		return
-	case err != nil && !errors.Is(err, follower.ErrNotCanonical) && !errors.Is(err, follower.ErrStaleParent):
+	case err != nil && !errors.Is(err, follower.ErrNotCanonical):
+		// Derivation moving the head between the rollback and the sibling
+		// (ErrStaleParent) may have settled the block after all: the next
+		// trigger finds it below safe, or replaced.
 		c.ledger.ReinsertFailed(p)
 		return
 	}
