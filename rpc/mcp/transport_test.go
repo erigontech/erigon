@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net/http"
@@ -189,6 +190,31 @@ func TestListenAndServeTakesRequestsUpToTheRPCLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode, "a 5 MiB request is below the 32 MiB JSON-RPC limit")
+
+	sseReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/sse", nil)
+	require.NoError(t, err)
+	sseResp, err := client.Do(sseReq)
+	require.NoError(t, err)
+	defer sseResp.Body.Close()
+	var endpoint string
+	lines := bufio.NewScanner(sseResp.Body)
+	for lines.Scan() {
+		if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+			endpoint = data
+			break
+		}
+	}
+	require.NotEmpty(t, endpoint, "the SSE stream must advertise its message endpoint")
+	if !strings.HasPrefix(endpoint, "http") {
+		endpoint = "http://" + addr + endpoint
+	}
+	msgReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(initBody))
+	require.NoError(t, err)
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgResp, err := client.Do(msgReq)
+	require.NoError(t, err)
+	require.NoError(t, msgResp.Body.Close())
+	require.Less(t, msgResp.StatusCode, 300, "a 5 MiB SSE message is below the 32 MiB JSON-RPC limit")
 
 	cancel()
 	require.NoError(t, <-done)
