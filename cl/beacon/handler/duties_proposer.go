@@ -269,7 +269,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalProposerMissingRootStatus(), errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -301,10 +301,10 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalProposerMissingRootStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
-func (a *ApiHandler) historicalProposerMissingRootStatus() int {
+func (a *ApiHandler) historicalDutiesMissingRootStatus() int {
 	if !a.stateReader.ArchiveStates() {
 		return http.StatusBadRequest
 	}

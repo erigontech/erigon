@@ -844,15 +844,18 @@ func TestHistoricalDutiesWithoutArchive(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, path, body string
 		root                     bool
+		progress                 uint64
 		want                     int
 	}{
-		{"attester", http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`, false, http.StatusBadRequest},
-		{"proposer missing genesis root", http.MethodGet, "/eth/v1/validator/duties/proposer/0", "", false, http.StatusBadRequest},
-		{"proposer v2 missing genesis root", http.MethodGet, "/eth/v2/validator/duties/proposer/0", "", false, http.StatusBadRequest},
-		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, http.StatusBadRequest},
-		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, http.StatusBadRequest},
-		{"proposer with root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", true, http.StatusBadRequest},
-		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, http.StatusBadRequest},
+		{"attester", http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`, false, 0, http.StatusBadRequest},
+		{"attester missing genesis root", http.MethodPost, "/eth/v1/validator/duties/attester/0", `["0"]`, false, 128, http.StatusBadRequest},
+		{"attester missing root", http.MethodPost, "/eth/v1/validator/duties/attester/3", `["0"]`, false, 128, http.StatusBadRequest},
+		{"proposer missing genesis root", http.MethodGet, "/eth/v1/validator/duties/proposer/0", "", false, 0, http.StatusBadRequest},
+		{"proposer v2 missing genesis root", http.MethodGet, "/eth/v2/validator/duties/proposer/0", "", false, 0, http.StatusBadRequest},
+		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, 0, http.StatusBadRequest},
+		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, 0, http.StatusBadRequest},
+		{"proposer with root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", true, 0, http.StatusBadRequest},
+		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, 0, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -865,6 +868,11 @@ func TestHistoricalDutiesWithoutArchive(t *testing.T) {
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 				if err := tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey); err != nil {
 					return err
+				}
+				if tc.progress != 0 {
+					if err := state_accessors.SetStateProcessingProgress(tx, tc.progress); err != nil {
+						return err
+					}
 				}
 				for slot := uint64(0); slot <= 95; slot++ {
 					if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
