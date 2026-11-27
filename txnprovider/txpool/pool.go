@@ -152,7 +152,7 @@ type TxPool struct {
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
-	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
+	deletedTxns             []*metaTxn                       // rows to delete and unused sender IDs to release at the next flush
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -2083,7 +2083,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if err := p.validateTxns(batch.txns, cacheView, batch.preparedCells); err != nil {
 				return err
 			}
-			announcements, err := p.addTxns(cacheView, batch.txns, batch.preparedCells)
+			announcements, err := p.addTxns(cacheView, batch.txns, batch.preparedCells, false)
 			if len(sources) != 0 {
 				p.kickKZGOffenders(ctx, batch.txns)
 			}
@@ -2114,8 +2114,11 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
-// The caller holds the pool lock, so the block number and pending fees stay stable for the batch.
-func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells blobCells) (Announcements, error) {
+// addTxns records insertion results in input order. The caller holds the pool lock,
+// so the block number and pending fees stay stable for the batch. On reload, addTxns
+// queues rows rejected at insertion for deletion. discardLocked queues rows for
+// transactions evicted later.
+func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells blobCells, fromDB bool) (Announcements, error) {
 	blockNum := p.lastSeenBlock.Load()
 	// Refresh senders after inserting the batch so their nonce-chain and balance
 	// checks account for all accepted transactions in the batch.
@@ -2129,7 +2132,7 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 		if found := p.byHash[string(txn.IDHash[:])]; found != nil && (a.local || a.reason == txpoolcfg.NotSet) {
 			a.reason = txpoolcfg.DuplicateHash
 			// A local resubmission can help the pooled transaction propagate again.
-			if a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
+			if !fromDB && a.local && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
@@ -2150,6 +2153,10 @@ func (p *TxPool) addTxns(cacheView kvcache.CacheView, txns []txnAdmission, cells
 		}
 		mt := newMetaTxn(txn, a.local, blockNum)
 		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+			if fromDB {
+				mt.TxnSlot = &TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}
+				p.deletedTxns = append(p.deletedTxns, mt)
+			}
 			a.reason = reason
 			continue
 		}
@@ -3488,7 +3495,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		txns = append(txns, txnAdmission{txn: txn, local: isLocalTx})
 	}
 
-	if _, err := p.addTxns(cacheView, txns, cells); err != nil {
+	if _, err := p.addTxns(cacheView, txns, cells, true); err != nil {
 		return err
 	}
 

@@ -126,6 +126,17 @@ func TestCaplinBlocksidecarsAlias(t *testing.T) {
 	}
 }
 
+func TestParseEnumRegisteredIndexes(t *testing.T) {
+	for _, typ := range allSnapshotTypes() {
+		for _, index := range typ.Indexes() {
+			parsed, ok := snaptype.ParseEnum(index.Name)
+			if !ok || parsed != typ.Enum() {
+				t.Errorf("index %s of %s = (%d, %t), want (%d, true)", index.Name, typ.Name(), parsed, ok, typ.Enum())
+			}
+		}
+	}
+}
+
 func TestRegisterCaplinTypePanicsOutsideCaplinRange(t *testing.T) {
 	defer func() {
 		r := recover()

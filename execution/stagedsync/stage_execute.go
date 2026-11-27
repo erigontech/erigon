@@ -633,7 +633,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		// The prune is off, but blocks in state files can not be unwound, and a step goes into files only after its
 		// blocks' changesets are gone.
 		if cfg.blockReader != nil {
-			end, err := keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+			end, err := keptChangesetsFrom(ctx, tx, cfg.blockReader, s.RetireToBlock)
 			if err != nil {
 				return err
 			}
@@ -684,14 +684,14 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
-	blockPruneTo := s.IrreversibleBlock + 1 // the prune is exclusive
+	blockPruneTo := s.RetireToBlock + 1 // the prune is exclusive
 	// Blocks in state files can not be unwound, so their changesets go in every mode, also those an older build
 	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
 	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
 	// collated lose theirs.
 	var changesetsPruneTo uint64
 	if cfg.syncCfg.AlwaysGenerateChangesets {
-		changesetsPruneTo, err = keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+		changesetsPruneTo, err = keptChangesetsFrom(ctx, tx, cfg.blockReader, s.RetireToBlock)
 	} else {
 		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
 		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
@@ -793,27 +793,27 @@ func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 
 // keptChangesetsFrom is the first block that keeps its changeset when changesets are kept for deep unwinds: the
 // blocks in state files, and in the steps about to be collated, lose theirs.
-func keptChangesetsFrom(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+func keptChangesetsFrom(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, retireToBlock uint64) (uint64, error) {
 	if !producesStateFiles(blockReader) {
 		return blocksInFilesEnd(ctx, tx, blockReader)
 	}
-	return collatableStepsEnd(ctx, tx, blockReader, irreversibleBlock)
+	return collatableStepsEnd(ctx, tx, blockReader, retireToBlock)
 }
 
 // collatableStepsEnd is the block after the visible state files and after the steps not yet in them whose
-// blocks all reach no higher than irreversibleBlock.
-func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+// blocks all reach no higher than retireToBlock.
+func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, retireToBlock uint64) (uint64, error) {
 	end, err := blocksInFilesEnd(ctx, tx, blockReader)
 	if err != nil {
 		return 0, err
 	}
 	txNumsReader := blockReader.TxnumReader()
-	irreversibleTxNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, irreversibleBlock)
+	collateToTxNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, retireToBlock)
 	if err != nil || !ok {
 		return end, err
 	}
 	stepSize := tx.Debug().StepSize()
-	stepsEnd := (irreversibleTxNum + 1) / stepSize * stepSize
+	stepsEnd := (collateToTxNum + 1) / stepSize * stepSize
 	if stepsEnd <= tx.Debug().TxNumsInFiles(kv.StateDomains...) {
 		return end, nil
 	}

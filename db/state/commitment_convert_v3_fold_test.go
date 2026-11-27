@@ -47,7 +47,7 @@ func TestFoldCommitmentV3BoundsRangeBacklog(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, collateAll))
 
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(2))
 	defer state.SetCommitmentV3FoldRangesForTest(state.SetCommitmentV3FoldRangesForTest(ranges))

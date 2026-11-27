@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
 
 type failingHistoryStartTx struct {
 	kv.RwTx
@@ -265,7 +265,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 			require.NoError(t, rwTtx.Commit())
 		}()
 	}
-	require.NoError(t, temporalDb.BuildFiles(3, allIrreversible))
+	require.NoError(t, temporalDb.BuildFiles(3, collateAll))
 
 	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)

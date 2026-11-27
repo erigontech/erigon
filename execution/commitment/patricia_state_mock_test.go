@@ -154,7 +154,6 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 		ms.mu.RUnlock()
 	}
 	if !ok {
-		ms.t.Logf("GetStorage not found key [%x]", plainKey)
 		u := new(Update)
 		u.Flags = DeleteUpdate
 		return u, nil

@@ -39,6 +39,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snaptype"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -173,6 +174,42 @@ func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropp
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
+	versioned, drops := p.typed(types)
+	if drops.unparsable > 0 {
+		log.Root().Warn("Preverified list has entries the type filter could not parse",
+			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
+	}
+	if drops.outOfWindow > 0 {
+		log.Root().Info("Preverified list has entries outside the versions this binary supports",
+			"count", drops.outOfWindow)
+	}
+	if len(p.Items) != len(versioned) {
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Debug("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
+			"unreadable", drops.unreadable, "superseded", drops.superseded,
+			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
+			"names", strings.Join(names, ","))
+	} else {
+		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
+	}
+	p.Items = versioned
+	return p
+}
+
+func spellsRegisteredName(t snaptype.Type, name string) bool {
+	if name == t.Name() {
+		return true
+	}
+	for _, idx := range t.Indexes() {
+		if name == idx.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilterDrops) {
 	var bestVersions btree.Map[string, PreverifiedItem]
 	var keptVersions btree.Map[string, snaptype.Version]
 	var drops typeFilterDrops
@@ -193,14 +230,14 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if strings.HasPrefix(p.Name, "caplin") {
-			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
+			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
 			if !known || caplinFile.Type == nil {
 				drops.unreadable++
 				continue
 			}
 
-			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, datadir.SnapCaplinDir+"/"))
 			if err != nil {
 				drops.unparsableItem(p.Name)
 				continue
@@ -213,7 +250,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 				drops.outOfWindow++
 				continue
 			}
-			if !keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion) {
+			if !keepNewest(&bestVersions, &keptVersions, datadir.SnapCaplinDir+"/"+name, p, caplinVersion) {
 				drops.superseded++
 			}
 			continue
@@ -254,8 +291,19 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			idxIndex = 1
 			typeName = "transactions"
 		}
-		if strings.Contains(name, "blocksidecars") {
-			typeName = "blobsidecars"
+		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
+		switch _, registered := snaptype.ParseEnum(typeName); {
+		case parsedOK && parsed.Type != nil && strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) && spellsRegisteredName(parsed.Type, parsed.TypeString):
+			typeName = parsed.Type.Name()
+		case parsedOK && parsed.Type != nil:
+			drops.unparsableItem(p.Name)
+			continue
+		case parsed.TypeString != "":
+			drops.unreadable++
+			continue
+		case registered:
+			drops.unparsableItem(p.Name)
+			continue
 		}
 
 		for _, typ := range types {
@@ -309,26 +357,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
-	if drops.unparsable > 0 {
-		log.Root().Warn("Preverified list has entries the type filter could not parse",
-			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
-	}
-	if drops.outOfWindow > 0 {
-		log.Root().Info("Preverified list has entries outside the versions this binary supports",
-			"count", drops.outOfWindow)
-	}
-	if len(p.Items) != len(versioned) {
-		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
-		log.Root().Debug("Preverified list reduced after applying type filter",
-			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
-			"unreadable", drops.unreadable, "superseded", drops.superseded,
-			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
-			"names", strings.Join(names, ","))
-	} else {
-		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
-	}
-	p.Items = versioned
-	return p
+	return versioned, drops
 }
 
 func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {
@@ -469,7 +498,10 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		if info == nil {
 			continue
 		}
-		if strings.Contains(info.Name(), "caplin") {
+		if strings.HasPrefix(info.Name(), datadir.SnapCaplinDir+"/") {
+			continue
+		}
+		if info.Type == nil {
 			continue
 		}
 

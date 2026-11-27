@@ -99,7 +99,8 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 // isBlobSidecarFile matches blob sidecar segments and their index, which is named after
 // the index (blocksidecars), not the segment type.
 func isBlobSidecarFile(name string) bool {
-	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	info, _, ok := snaptype.ParseFileName("", name)
+	return ok && info.Type != nil && info.Type.Enum() == snaptype.BlobSidecars.Enum()
 }
 
 // BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
@@ -674,11 +675,11 @@ func SnapshotsToDownload(
 	}
 
 	for _, p := range preverifiedBlockSnapshots.Items {
-		isCaplinFile := strings.Contains(p.Name, "beaconblocks") || isBlobSidecarFile(p.Name) || strings.Contains(p.Name, "caplin")
-		if caplin == NoCaplin && isCaplinFile {
+		caplinFile := strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") || snaptype.IsCaplinBlockOrBlobFile(p.Name)
+		if caplin == NoCaplin && caplinFile {
 			continue
 		}
-		if caplin == OnlyCaplin && !isCaplinFile {
+		if caplin == OnlyCaplin && !caplinFile {
 			continue
 		}
 
@@ -688,7 +689,7 @@ func SnapshotsToDownload(
 		if skipBlobDownload(p.Name, blobs, blobFloor) {
 			continue
 		}
-		if !caplinState && strings.Contains(p.Name, "caplin/") {
+		if !caplinState && strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
 			continue
 		}
 		if headerchain &&
@@ -891,14 +892,14 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 		return false // toBlock filtering is not enabled
 	}
 	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
-	if !ok {
-		return true
-	}
-	if strings.HasPrefix(name, "salt") {
+	if ok && strings.HasPrefix(name, "salt") {
 		return false // not applicable
 	}
-	if strings.HasPrefix(name, "caplin/") {
+	if strings.HasPrefix(name, datadir.SnapCaplinDir+"/") && (ok || fileInfo.TypeString != "") {
 		return false // not applicable, caplin files are slot-based
+	}
+	if !ok {
+		return true
 	}
 	if stateFile {
 		return kv.Step(fileInfo.To) > toStep

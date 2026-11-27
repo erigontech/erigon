@@ -37,7 +37,7 @@ func newFinalityTestDB(t *testing.T) kv.TemporalRwDB {
 	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func TestIrreversibleBlock(t *testing.T) {
+func TestRetireToBlock(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		headBlockNum      uint64
@@ -52,7 +52,7 @@ func TestIrreversibleBlock(t *testing.T) {
 		{name: "head inside reorg window", headBlockNum: 96, maxReorgDepth: 96, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, IrreversibleBlock(tc.headBlockNum, tc.finalisedBlockNum, tc.maxReorgDepth, tc.initialCycle))
+			require.Equal(t, tc.want, RetireToBlock(tc.headBlockNum, tc.finalisedBlockNum, tc.maxReorgDepth, tc.initialCycle))
 		})
 	}
 }
@@ -82,21 +82,21 @@ func TestResolveWithoutFinalisedBlockUsesMaxReorgDepth(t *testing.T) {
 	require.Equal(t, uint64(3), block)
 }
 
-// A block that still has a changeset can be unwound, so the irreversible txnum stops below it; the blocks before it
+// A block that still has a changeset can be unwound, so the collate txnum stops below it; the blocks before it
 // still go into files, also when a time-bounded delete stopped there.
-func TestIrreversibleTxNumStopsBelowABlockWithAChangeset(t *testing.T) {
+func TestCollateToTxNumStopsBelowABlockWithAChangeset(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)
 	for blockNum := uint64(0); blockNum <= 20; blockNum++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
 	}
-	txNum, err := IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
+	txNum, err := CollateToTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), txNum, "no changesets: the irreversible block's last txnum")
+	require.Equal(t, uint64(12), txNum, "no changesets: the last txnum of retireToBlock")
 
 	for blockNum := uint64(8); blockNum <= 20; blockNum++ {
 		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}), []byte{1}))
 	}
-	txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
+	txNum, err = CollateToTxNum(t.Context(), tx, rawdbv3.TxNums, 12)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), txNum)
 }
@@ -139,22 +139,22 @@ func txNumWindowDB(t *testing.T) kv.TemporalRwDB {
 	return db
 }
 
-// Blocks downloaded to tip with execution far behind: the irreversible block is below the
+// Blocks downloaded to tip with execution far behind: retireToBlock is below the
 // table's floor. The snapshot-backed reader names its txnum; chaindata alone must not answer
 // with the latest txnum, which would open collation for every step.
-func TestIrreversibleTxNumBelowTheTxNumWindow(t *testing.T) {
+func TestCollateToTxNumBelowTheTxNumWindow(t *testing.T) {
 	const (
-		irreversibleBlock = uint64(20_000_000)
-		irreversibleTxNum = uint64(2_400_000_000)
+		retireToBlock  = uint64(20_000_000)
+		collateToTxNum = uint64(2_400_000_000)
 	)
 	db := txNumWindowDB(t)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{irreversibleBlock: irreversibleTxNum}})
-		txNum, err := IrreversibleTxNum(t.Context(), tx, reader, irreversibleBlock)
+		reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{retireToBlock: collateToTxNum}})
+		txNum, err := CollateToTxNum(t.Context(), tx, reader, retireToBlock)
 		require.NoError(t, err)
-		require.Equal(t, irreversibleTxNum, txNum)
+		require.Equal(t, collateToTxNum, txNum)
 
-		txNum, err = IrreversibleTxNum(t.Context(), tx, rawdbv3.TxNums, irreversibleBlock)
+		txNum, err = CollateToTxNum(t.Context(), tx, rawdbv3.TxNums, retireToBlock)
 		require.NoError(t, err)
 		require.Zero(t, txNum, "an unknown block collates nothing")
 		return nil

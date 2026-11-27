@@ -47,3 +47,8 @@ func init() {
 func IsCaplinType(t Enum) bool {
 	return t >= MinCaplinEnum && t < MaxCaplinEnum
 }
+
+func IsCaplinBlockOrBlobFile(name string) bool {
+	info, _, ok := ParseFileName("", name)
+	return ok && info.Type != nil && (info.Type.Enum() == BeaconBlocks.Enum() || info.Type.Enum() == BlobSidecars.Enum())
+}
