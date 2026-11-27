@@ -752,3 +752,28 @@ func TestCallBlockRewardSystemCallHashError(t *testing.T) {
 	require.True(t, called)
 	require.ErrorIs(t, err, readErr)
 }
+
+func TestCallBlockRewardSystemCallParentHash(t *testing.T) {
+	contract := common.HexToAddress("0xc0de")
+	code := []byte{byte(vm.PUSH1), 1, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	generated, err := m.GenerateChain(3, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	api := newTraceApiForTest(m)
+	block := generated.Blocks[2]
+	api._blockReader = hideHeaderBlockReader{FullBlockReader: m.BlockReader, blockNumber: block.NumberU64() - 1}
+	var result []byte
+	_, _, err = api.callBlock(t.Context(), tx, block, nil, m.ChainConfig, nil, func(syscall protocolrules.SystemCall) error {
+		var err error
+		result, err = syscall(accounts.InternAddress(contract), nil)
+		return err
+	})
+	require.NoError(t, err)
+	require.Len(t, result, 32)
+	require.Equal(t, block.ParentHash(), common.BytesToHash(result))
+}
