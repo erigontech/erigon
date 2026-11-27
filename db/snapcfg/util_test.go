@@ -141,6 +141,16 @@ func TestTypedKeepsCaplinTypedEntries(t *testing.T) {
 	require.Equal(t, items, typed.Items)
 }
 
+func TestTypedKeepsRegisteredBlobIndexOnly(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-000000-000050-blocksidecars.idx"},
+		{Name: "v1.1-000000-000050-blocksidecars-extra.idx"},
+	}
+
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+	require.Equal(t, PreverifiedItems{{Name: "v1.1-000000-000050-blocksidecars.idx"}}, typed.Items)
+}
+
 func TestNameToParts(t *testing.T) {
 	type args struct {
 		name string
@@ -257,6 +267,16 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 			require.Empty(t, typed.Items)
 		})
 	}
+}
+
+func TestMergeLimitSkipsUnregisteredStateType(t *testing.T) {
+	cfg := newCfg("mainnet", Preverified{Items: PreverifiedItems{
+		{Name: "domain/v1.0-caplin.0-32.seg"},
+	}})
+
+	require.NotPanics(t, func() {
+		require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum+1, 0))
+	})
 }
 
 func TestSetTomlRejectsMalformedToml(t *testing.T) {

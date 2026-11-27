@@ -1181,7 +1181,7 @@ func TestDownloadTypedCaplinPaths(t *testing.T) {
 		{name: header, mode: OnlyCaplin, toBlock: 0, want: false},
 		{name: header, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
 		{name: "caplin/salt-blocks.txt", mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
-		{name: "caplin/erigondb.toml", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/erigondb.toml", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: false},
 		{name: "caplin/v1.0-accounts.0-32.kv", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
 	}
 	for _, tc := range cases {
@@ -1193,6 +1193,20 @@ func TestDownloadTypedCaplinPaths(t *testing.T) {
 			checkDownloadDecision(t, items, tc.mode, tc.caplinState, tc.toBlock, tc.want)
 		})
 	}
+}
+
+func TestDownloadMalformedRootBlobSidecarIsRejected(t *testing.T) {
+	const name = "v1.1-bad-000050-blobsidecars.seg"
+	items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+	typed := items.Typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, typed.Items)
+
+	got, err := SnapshotsToDownload(
+		context.Background(), "test", false, true, true, BlobRetention{}, prune.ArchiveMode, NoCaplin,
+		nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1, typed, 0, 0,
+	)
+	require.NoError(t, err)
+	require.Empty(t, got)
 }
 
 func TestDownloadBareCaplinState(t *testing.T) {

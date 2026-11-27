@@ -1023,6 +1023,7 @@ func TestDUUnknownCaplinArchiveBytes(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, name), make([]byte, 64), 0o644))
 	files, err := duWalkSnapshots(dirs)
 	require.NoError(t, err)
+	require.Equal(t, int64(64), duCaplinBytes(files))
 	estimates, err := duTestEstimates(t, files, dirs.Snap, 0)
 	require.NoError(t, err)
 	require.Equal(t, "archive", estimates[0].Mode)
@@ -1034,18 +1035,31 @@ func TestDUUnknownCaplinArchiveBytes(t *testing.T) {
 func TestDUUnknownCaplinSubcategory(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	const name = "v1.1-000000-000100-beaconblocks-extra.seg"
+	const caplinName = "v1.1-000000-000050-BlockProposers.seg"
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), make([]byte, 64), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, caplinName), make([]byte, 64), 0o644))
 
 	files, err := duWalkSnapshots(dirs)
 	require.NoError(t, err)
+	caplinSubcategories := duAggregateSubcategories(files)
+	require.Equal(t, int64(64), caplinSubcategories[duCatCaplin]["BlockProposers"].Bytes)
+	require.Equal(t, 1, caplinSubcategories[duCatCaplin]["BlockProposers"].Files)
+	var foundRoot, foundCaplin bool
 	for _, file := range files {
 		if file.Name == name {
+			foundRoot = true
 			require.Equal(t, duCatBlocks, file.Category)
-			require.Equal(t, "beaconblocks-extra", file.Subcategory)
-			return
+			require.Empty(t, file.Subcategory)
+		}
+		if file.Name == caplinName {
+			foundCaplin = true
+			require.Equal(t, duCatCaplin, file.Category)
+			require.Equal(t, "BlockProposers", file.Subcategory)
+			require.Equal(t, int64(64), file.Size)
 		}
 	}
-	t.Fatalf("missing %s", name)
+	require.True(t, foundRoot)
+	require.True(t, foundCaplin)
 }
 
 func TestDUComputeEstimates_CountsUnparseableStateFilesInEveryMode(t *testing.T) {

@@ -314,7 +314,7 @@ type FileInfo struct {
 	name, Path, Ext string
 	Type            Type
 
-	CaplinTypeString string // part of file-name - without version, range, ext
+	CaplinTypeString string // canonical type name for Caplin files
 	TypeString       string
 }
 

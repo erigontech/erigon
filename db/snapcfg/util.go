@@ -255,8 +255,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			idxIndex = 1
 			typeName = "transactions"
 		}
-		if strings.Contains(name, "blocksidecars") {
-			typeName = "blobsidecars"
+		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
+		if parsedOK && parsed.Type != nil {
+			typeName = parsed.Type.Name()
+		} else if _, registered := snaptype.ParseEnum(typeName); registered {
+			continue
 		}
 
 		for _, typ := range types {
@@ -471,6 +474,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 			continue
 		}
 		if strings.HasPrefix(info.Name(), datadir.SnapCaplinDir+"/") {
+			continue
+		}
+		if info.Type == nil {
 			continue
 		}
 

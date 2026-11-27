@@ -3760,6 +3760,9 @@ type duFileInfo struct {
 func duClassifyFile(dir, name string) string {
 	lname := strings.ToLower(name)
 	ldir := strings.ToLower(dir)
+	if strings.EqualFold(ldir, datadir.SnapCaplinDir) {
+		return duCatCaplin
+	}
 
 	// rcache files live in domain/, history/, or idx/
 	if strings.Contains(lname, "rcache") {
@@ -3782,8 +3785,6 @@ func duClassifyFile(dir, name string) string {
 		return duCatInvIdx
 	case "accessor":
 		return duCatAccessors
-	case "caplin":
-		return duCatCaplin
 	}
 
 	// Files directly under snapshots/ — only known segment extensions are block segments.
@@ -3856,8 +3857,10 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 			if ok {
 				fi.From = parsed.From
 				fi.To = parsed.To
+				fi.Subcategory = parsed.TypeString
+			} else if sd.path == dirs.SnapCaplin {
+				fi.Subcategory = parsed.TypeString
 			}
-			fi.Subcategory = parsed.TypeString
 
 			files = append(files, fi)
 		}
