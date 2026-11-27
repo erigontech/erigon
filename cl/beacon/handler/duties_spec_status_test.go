@@ -946,7 +946,7 @@ func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) 
 	h.beaconChainCfg.CapellaForkEpoch = 0
 	h.beaconChainCfg.DenebForkEpoch = 0
 	h.beaconChainCfg.ElectraForkEpoch = 0
-	h.beaconChainCfg.FuluForkEpoch = 3
+	h.beaconChainCfg.FuluForkEpoch = 0
 	fcu.FinalizedSlotVal = 127
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		for slot := uint64(0); slot <= 63; slot++ {
@@ -963,9 +963,25 @@ func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) 
 	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, h.beaconChainCfg)
 	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
 	h.caplinStateSnapshots = dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
-	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v2/validator/duties/proposer/3", "")
+	path := "/eth/v2/validator/duties/proposer/3"
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
 	require.Equal(t, http.StatusInternalServerError, status, body)
 	require.Contains(t, body, "dependent root not found")
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 63, common.Hash{1})
+	}))
+	status, body = dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 96")
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(63)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 63)
+	}))
+	status, body = dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 64")
 }
 
 func TestHistoricalAttesterStateHistoryEligibility(t *testing.T) {

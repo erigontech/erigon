@@ -340,7 +340,7 @@ func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) erro
 }
 
 func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
-	if err := readiness.check(slot, slot, table); err != nil && table != kv.BlockRoot {
+	if err := readiness.check(slot, slot, table); err != nil && table != kv.BlockRoot && table != kv.EpochData {
 		return nil, err
 	}
 	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
