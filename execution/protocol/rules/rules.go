@@ -22,6 +22,7 @@ package rules
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -221,6 +222,11 @@ func DefaultBlockPostValidation(header *types.Header,
 
 	var bloom types.Bloom
 	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
+	npT0 := time.Now()
+	var npBloom time.Duration
+	defer func() {
+		logger.Info("[np-split] post", "blk", header.Number.Uint64(), "n", len(receipts), "bloom", npBloom, "rootAndBloom", time.Since(npT0))
+	}()
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
@@ -228,6 +234,7 @@ func DefaultBlockPostValidation(header *types.Header,
 				bloom.Or(&r.Bloom)
 			}
 		}
+		npBloom = time.Since(npT0)
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != header.ReceiptHash {
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
