@@ -199,17 +199,21 @@ type closedConn struct {
 
 func (closedConn) IsClosed() bool { return true }
 
-// closingNetwork still lists the connections of a closing peer, as libp2p does until it removes them.
+// closingNetwork still lists the connections of a closing peer, as libp2p does until it removes them. With
+// outboundOnly, only the outbound connections of the peer are closing, as after the remote closes them.
 type closingNetwork struct {
 	network.Network
-	closing peer.ID
+	closing      peer.ID
+	outboundOnly bool
 }
 
 func (n closingNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
 	conns := n.Network.ConnsToPeer(pid)
 	if pid == n.closing {
-		for i := range conns {
-			conns[i] = closedConn{conns[i]}
+		for i, c := range conns {
+			if !n.outboundOnly || c.Stat().Direction == network.DirOutbound {
+				conns[i] = closedConn{c}
+			}
 		}
 	}
 	return conns
