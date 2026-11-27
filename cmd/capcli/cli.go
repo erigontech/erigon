@@ -828,7 +828,6 @@ var errNoStateRoot = errors.New("no state root found")
 
 type beaconRoot struct {
 	hash common.Hash
-	set  bool
 }
 
 func (r *beaconRoot) UnmarshalJSON(b []byte) error {
@@ -842,7 +841,9 @@ func (r *beaconRoot) UnmarshalJSON(b []byte) error {
 	if err := r.hash.UnmarshalText([]byte(*s)); err != nil {
 		return err
 	}
-	r.set = true
+	if r.hash == (common.Hash{}) {
+		return errNoStateRoot
+	}
 	return nil
 }
 
@@ -862,7 +863,7 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if !response.Data.Root.set || response.Data.Root.hash == (common.Hash{}) {
+	if response.Data.Root.hash == (common.Hash{}) {
 		return common.Hash{}, errNoStateRoot
 	}
 	return response.Data.Root.hash, nil
