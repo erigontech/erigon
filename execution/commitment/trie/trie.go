@@ -515,7 +515,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
 			if preserveAccountNode {
-				removeNodeEntirely = len(key) == keyStart || (matchlen < len(n.Key) && keyStart+matchlen == len(key)-1)
+				removeNodeEntirely = matchlen < len(n.Key) && keyStart+matchlen == len(key)-1
 			}
 
 			if removeNodeEntirely {
@@ -674,6 +674,9 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		return
 
 	default:
+		if _, ok := n.(*HashNode); ok && prefixExhausted {
+			return true, nil
+		}
 		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
 }

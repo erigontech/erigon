@@ -62,7 +62,7 @@ func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
 		{name: "missing prefix", prefix: []byte("a"), kept: []string{"b", "c"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tr := New(common.Hash{})
+			tr := newEmpty()
 			value := []byte{1}
 			for _, key := range tc.removed {
 				tr.Update([]byte(key), value)
@@ -71,6 +71,7 @@ func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
 				tr.Update([]byte(key), value)
 			}
 
+			tr.Hash()
 			require.NotPanics(t, func() { tr.DeleteSubtree(tc.prefix) })
 
 			for _, key := range tc.removed {
@@ -80,8 +81,35 @@ func TestTrieDeleteSubtree_PrefixBoundary(t *testing.T) {
 			for _, key := range tc.kept {
 				requireValue(t, tr, []byte(key), value)
 			}
-			if len(tc.kept) == 0 {
-				require.Equal(t, empty.RootHash, tr.Hash())
+			want := newEmpty()
+			for _, key := range tc.kept {
+				want.Update([]byte(key), value)
+			}
+			require.Equal(t, want.Hash(), tr.Hash())
+		})
+	}
+}
+
+func TestTrieDeleteSubtree_UnresolvedHash(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		root   Node
+		prefix []byte
+		panics bool
+	}{
+		{name: "root", root: &HashNode{hash: make([]byte, 32)}},
+		{name: "extension boundary", root: NewShortNode([]byte{6, 1}, &HashNode{hash: make([]byte, 32)}), prefix: []byte("a")},
+		{name: "prefix continues", root: NewShortNode([]byte{6, 1}, &HashNode{hash: make([]byte, 32)}), prefix: []byte("ab"), panics: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewInMemoryTrie(tc.root)
+			before := tr.Hash()
+			if tc.panics {
+				require.Panics(t, func() { tr.DeleteSubtree(tc.prefix) })
+				require.Equal(t, before, tr.Hash())
+			} else {
+				require.NotPanics(t, func() { tr.DeleteSubtree(tc.prefix) })
+				require.Equal(t, newEmpty().Hash(), tr.Hash())
 			}
 		})
 	}
@@ -121,6 +149,7 @@ func TestTrieDeleteSubtree_AccountAtPrefix(t *testing.T) {
 			}
 			tr.UpdateAccount(tc.prefix, account)
 			require.NoError(t, tr.UpdateAccountCode(tc.prefix, code))
+			tr.Hash()
 
 			tr.DeleteSubtree(tc.prefix)
 
