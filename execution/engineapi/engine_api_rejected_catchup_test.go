@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -141,13 +142,10 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		restartArgs := args
 		state := clState
 		restartArgs.DataDir, restartArgs.NoEmptyBlock1, restartArgs.MockClState = dir, true, &state
-		started := make(chan struct{}, 1)
+		var firstStartupCommit common.Ready
 		restartArgs.StateTransitionObserver = func(_ context.Context, point execmodule.StateTransitionPoint) {
 			if point == execmodule.StateTransitionStartupCommitComplete {
-				select {
-				case started <- struct{}{}:
-				default:
-				}
+				firstStartupCommit.Set()
 			}
 		}
 		node, err := engineapitester.InitialiseEngineApiTester(ctx, restartArgs)
@@ -158,7 +156,7 @@ func TestEngineApiRejectedCatchupRestarts(t *testing.T) {
 		defer cancel()
 		// Wait for startup to acquire the execution semaphore before waiting for its release.
 		select {
-		case <-started:
+		case <-firstStartupCommit.On():
 		case <-waitCtx.Done():
 			t.Fatalf("waiting for the first startup commit: %v", waitCtx.Err())
 		}

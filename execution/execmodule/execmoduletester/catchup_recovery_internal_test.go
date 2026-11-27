@@ -19,6 +19,7 @@ package execmoduletester
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,10 +117,10 @@ func testRejectedCatchupRetry(t *testing.T, accepted int) {
 	withWrongGasUsed := func(block *types.Block) *types.Block {
 		header := block.Header()
 		header.GasUsed++
-		return types.NewBlockFromNetwork(header, block.Body(), block.BlockAccessListSidecar())
+		return block.WithSeal(header)
 	}
 	badTip := withWrongGasUsed(chain.TopBlock)
-	proposal := append([]*types.Block(nil), chain.Blocks[accepted:]...)
+	proposal := slices.Clone(chain.Blocks[accepted:])
 	proposal[len(proposal)-1] = badTip
 	status, err := m.InsertBlocks(ctx, proposal)
 	require.NoError(t, err)

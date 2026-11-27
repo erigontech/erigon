@@ -154,21 +154,17 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	if bad != nil {
 		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, bad.number, bad.hash, bad.err))
-		invalidBlock := errors.Is(bad.err, rules.ErrInvalidBlock)
-		if invalidBlock {
-			bad.err = &RejectedBlockError{Number: bad.number, Hash: bad.hash, Err: bad.err}
+		recoveryErr := bad.err
+		unwindReason := OperationalErr(recoveryErr)
+		if errors.Is(recoveryErr, rules.ErrInvalidBlock) {
+			recoveryErr = &RejectedBlockError{Number: bad.number, Hash: bad.hash, Err: recoveryErr}
+			unwindReason = BadBlock(bad.hash, recoveryErr)
 		}
 		if cfg.badBlockHalt {
-			return bad.err
+			return recoveryErr
 		}
 		if to > s.BlockNumber {
-			unwindReason := OperationalErr(bad.err)
-			if invalidBlock {
-				unwindReason = BadBlock(bad.hash, bad.err)
-			}
-			if err := u.UnwindTo(bad.number-1, unwindReason, tx); err != nil {
-				return err
-			}
+			return u.UnwindTo(bad.number-1, unwindReason, tx)
 		}
 		return nil
 	}
