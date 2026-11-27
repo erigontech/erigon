@@ -1,8 +1,9 @@
 name: EEZ devnet images
 
-# Builds eez-node, eez-proof-signer and eez-deploy at one eez-rollup0 commit
+# Builds eez-node, eez-proof-signer and eez-deploy at an eez-rollup0 commit
 # and pushes them to ghcr.io/erigontech, tagged with that commit, for
-# eez-devnet.yml to pull. eez-rollup0 publishes no images; building them
+# eez-devnet.yml to pull: on push at both of its pins, on dispatch at the
+# commit given. eez-rollup0 publishes no images; building them
 # inside Docker keeps the Rust toolchain off Erigon's runners.
 #
 # A push runs it when this file changes, which is how a new ROLLUP0_REF gets
@@ -21,8 +22,10 @@ on:
         required: true
         type: string
 
+# The pins of eez-devnet.yml.
 env:
   ROLLUP0_REF: bf80de50fff74a549f1c34e07dbf66a9d27a28d3
+  QUORUM_ROLLUP0_REF: 4e806552a2abe1f8eca50e3a0ce5a0c32ddda5af
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,13 +40,21 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        pin: ${{ fromJSON(inputs.rollup0-ref && '["input"]' || '["ROLLUP0_REF","QUORUM_ROLLUP0_REF"]') }}
     steps:
       - name: Select the eez-rollup0 commit
         id: ref
         env:
           INPUT_REF: ${{ inputs.rollup0-ref }}
+          PIN: ${{ matrix.pin }}
         run: |
-          ref="${INPUT_REF:-$ROLLUP0_REF}"
+          case $PIN in
+            input) ref="$INPUT_REF" ;;
+            *) ref="${!PIN}" ;;
+          esac
           [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "rollup0-ref must be a full commit hash" >&2; exit 1; }
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 

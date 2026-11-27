@@ -68,7 +68,7 @@ func TestRetry(t *testing.T) {
 	t.Run("start passed", func(t *testing.T) {
 		a := &attempts{script: func(int, context.Context) ([]byte, error) { return proof, nil }}
 		_, err := retry(t.Context(), time.Now().Add(-time.Millisecond), time.Second, a.run)
-		require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+		require.ErrorIs(t, err, ErrTooLate)
 		require.Zero(t, a.n)
 	})
 	t.Run("silent prover", func(t *testing.T) {

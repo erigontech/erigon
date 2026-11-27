@@ -92,6 +92,20 @@ func TestLedger(t *testing.T) {
 		_, ok = l.TakeFailed(5)
 		require.True(t, ok)
 	})
+	t.Run("a rolled-out batch is no longer known superseded", func(t *testing.T) {
+		l := NewLedger[int]()
+		begin(l, 10, 0xa)
+		l.ResolveBelowCursor(10)
+		p, ok := l.PartialToDispose(10)
+		require.True(t, ok)
+		require.True(t, l.ClaimPartial(p.Height, p.Post, nil, true))
+		_, ok = l.Repend(10, posting(0xa))
+		require.True(t, ok)
+		l.MarkSettled(10, posting(0xa))
+		out := l.TakeFinalized(10)
+		require.Len(t, out, 1)
+		require.False(t, out[0].Superseded, "settled again by its own posting")
+	})
 	t.Run("finality hands out only landed postings as landed", func(t *testing.T) {
 		landed := func(f func(l *Ledger[int])) bool {
 			l := NewLedger[int]()
@@ -99,7 +113,7 @@ func TestLedger(t *testing.T) {
 			f(l)
 			l.ResolveBelowCursor(10)
 			if p, ok := l.PartialToDispose(10); ok {
-				require.True(t, l.ClaimPartial(p.Height, p.Post, nil))
+				require.True(t, l.ClaimPartial(p.Height, p.Post, nil, false))
 			}
 			out := l.TakeFinalized(10)
 			require.Len(t, out, 1)
@@ -138,7 +152,7 @@ func TestLedger(t *testing.T) {
 		require.False(t, swept.SlotSkipped)
 		_, ok = l.PartialToDispose(10)
 		require.True(t, ok, "a failed disposal retries")
-		require.True(t, l.ClaimPartial(10, posting(0xa), nil))
+		require.True(t, l.ClaimPartial(10, posting(0xa), nil, false))
 		_, ok = l.PartialToDispose(10)
 		require.False(t, ok, "disposed once")
 	})
@@ -181,7 +195,7 @@ func TestLedger(t *testing.T) {
 		failed, ok := l.TakeFailed(0)
 		require.True(t, ok)
 		require.Equal(t, posting(0xb), failed.Post)
-		require.False(t, l.ClaimPartial(10, posting(0xa), nil), "taken")
+		require.False(t, l.ClaimPartial(10, posting(0xa), nil, false), "taken")
 	})
 	t.Run("a partial settlement waits for derivation", func(t *testing.T) {
 		l := NewLedger[int]()
@@ -329,7 +343,7 @@ func TestLedgerInvariants(t *testing.T) {
 							break
 						}
 						release(p.Txs)
-						require.True(t, l.ClaimPartial(p.Height, p.Post, p.Txs))
+						require.True(t, l.ClaimPartial(p.Height, p.Post, p.Txs, false))
 					}
 				}
 			case 4:

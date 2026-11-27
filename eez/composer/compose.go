@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/stateless"
@@ -87,7 +85,10 @@ type effects struct {
 	held       []*Held
 	outbound   []protocol.ExecutionEntry
 	deliveries []*Delivery
-	txs        []types.Transaction
+	// owners are the held transactions the deliveries are made for, one
+	// per delivery.
+	owners []*Held
+	txs    []types.Transaction
 	// anchor is the L1 block the transactions were simulated on, the parent
 	// of the one the bundle aims at.
 	anchor common.Hash
@@ -112,7 +113,11 @@ type effects struct {
 // next slot, in the count. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target, ts uint64) *effects {
 	k := &composition{c: c, ctx: ctx, fx: &effects{}}
-	if !k.pop(c.x.MaxTxs) {
+	queued := c.x.Pool.Len()
+	k.pop(c.x.MaxTxs)
+	c.logger.Info("[eez] held transactions drained", "event", "eez.composer.sync_slot.drain",
+		"cursor", cursor, "parent", parent.Number.Uint64(), "pool", queued, "drained", len(k.rest), "max", c.x.MaxTxs)
+	if len(k.rest) == 0 {
 		return nil
 	}
 	fx := k.fx
@@ -168,10 +173,14 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 	switch {
 	case err == nil:
 	case full(err):
-		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", "eez.composer.compose.full",
+		event := "eez.composer.sync_slot.gas_budget_cut"
+		if errors.Is(err, ErrFull) {
+			event = "eez.composer.sync_slot.block_gas_cut"
+		}
+		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", event,
 			"composed", len(fx.held), "waiting", waiting, "reason", err)
 	default:
-		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
+		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.phase2.transient",
 			"composed", len(fx.held), "waiting", waiting, "err", err)
 	}
 	deferred := k.deferred
@@ -187,7 +196,7 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		return nil
 	}
 	fx.projected, fx.targetGas = k.gas.projected, k.gas.target
-	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.composed", "held", len(fx.held), "outbound", len(fx.outbound),
+	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.sync_slot.built", "held", len(fx.held), "outbound", len(fx.outbound),
 		"inbound", len(fx.deliveries), "txs", len(fx.txs), "waiting", waiting, "postingGas", fx.projected)
 	return fx
 }
@@ -226,7 +235,11 @@ func (c *Composer) postEffects(ctx context.Context, e emission, sync *types.Head
 	}
 	c.logger.Warn("[eez] composed Sync block not posted, it will be replaced", "event", "eez.composer.effects.failed",
 		"sync", e.sync, "err", err)
-	watch := c.ledger.Begin(Posted[*Held]{Height: e.sync, Terminal: sync, Txs: e.fx.held})
+	var culprit *Held
+	if r, ok := errors.AsType[*refusal](err); ok {
+		culprit = r.culprit
+	}
+	watch := c.ledger.Begin(Posted[*Held]{Height: e.sync, Terminal: sync, Txs: e.fx.held, Culprit: culprit})
 	c.ledger.Report(e.sync, common.Hash{}, watch, Failed, !owed(err))
 	if unproven := (*missingWitness)(nil); errors.As(err, &unproven) {
 		// Rebuilt, the block's witness is captured again.
@@ -252,14 +265,71 @@ func owed(err error) bool {
 	return !ok
 }
 
-// refused reports a prover's refusal of a window, which the same window
-// meets again.
-func refused(err error) bool {
-	switch status.Code(err) {
-	case codes.OK, codes.Unknown, codes.Canceled:
-		return false
+// refusal is the provers' refusal of a composition for culprit, one of its
+// held transactions.
+type refusal struct {
+	culprit *Held
+	err     error
+}
+
+func (e *refusal) Error() string { return e.err.Error() }
+func (e *refusal) Unwrap() error { return e.err }
+
+// errUnresolved reports a refused effect no held transaction made.
+var errUnresolved = errors.New("no held transaction made the effect")
+
+// culprit returns the held transaction r names in the request proving
+// batch, whose terminal block is terminal: an outbound one by its index and
+// hash in terminal, an inbound one by the index and hash of its entry in
+// batch, anchor first, then the outbound entries.
+func (fx *effects) culprit(r prove.Refused, terminal *types.Block, batch *protocol.ProofSystemBatch) (*Held, error) {
+	if r.Outbound {
+		txs := terminal.Transactions()
+		if int(r.Index) >= len(txs) {
+			return nil, fmt.Errorf("transaction %d of %d", r.Index, len(txs))
+		}
+		if h := txs[r.Index].Hash(); h != r.Hash {
+			return nil, fmt.Errorf("transaction %d is %x", r.Index, h)
+		}
+		for _, h := range fx.held {
+			if h.Direction == Outbound && h.Hash == r.Hash {
+				return h, nil
+			}
+		}
+		return nil, errUnresolved
 	}
-	return !prove.Retryable(err)
+	if int(r.Index) >= len(batch.Entries) {
+		return nil, fmt.Errorf("entry %d of %d", r.Index, len(batch.Entries))
+	}
+	h, err := protocol.ExecutionEntryHash(&batch.Entries[r.Index])
+	switch {
+	case err != nil:
+		return nil, err
+	case h != r.Hash:
+		return nil, fmt.Errorf("entry %d is %x", r.Index, h)
+	}
+	if i := int(r.Index) - 1 - len(fx.outbound); i >= 0 && i < len(fx.owners) {
+		return fx.owners[i], nil
+	}
+	return nil, errUnresolved
+}
+
+// refused returns err, the provers' refusal of e's window naming r, as a
+// refusal for the held transaction r names, or as it is when r does not
+// match the request.
+func (c *Composer) refused(err error, r prove.Refused, e emission, terminal *types.Block, batch *protocol.ProofSystemBatch) error {
+	culprit, cerr := e.fx.culprit(r, terminal, batch)
+	switch {
+	case errors.Is(cerr, errUnresolved):
+		c.logger.Error("[eez] refused effect matches no held transaction, all are charged", "event", "eez.composer.prover.actionable_unresolved",
+			"sync", e.sync, "refused", r)
+		return err
+	case cerr != nil:
+		c.logger.Error("[eez] refused effect does not match the request, all are charged", "event", "eez.composer.prover.actionable_invalid",
+			"sync", e.sync, "refused", r, "err", cerr)
+		return err
+	}
+	return &refusal{culprit: culprit, err: err}
 }
 
 func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.Header) error {
@@ -313,14 +383,16 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: e.cursor + 1, To: e.sync, Block: c.windowBlock,
 		L1Parent: e.fx.anchor, Time: sync.Time,
 	}
-	sig, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
+	atts, err := c.prover.ProveBy(ctx, w2, start, c.cfg.Proof)
 	if err != nil {
-		if !refused(err) {
+		if !prove.Charged(err) {
 			err = nodeFault(err)
+		} else if r, ok := prove.Refusal(err); ok {
+			err = c.refused(err, r, e, block, batch)
 		}
 		return fmt.Errorf("prove %d..%d: %w", e.cursor+1, e.sync, err)
 	}
-	batch.Proofs = [][]byte{sig}
+	attach(batch, atts)
 	input, err := protocol.EncodePostAndVerifyBatch(batch)
 	if err != nil {
 		return err
@@ -339,7 +411,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 		}
 		bundle = append(bundle, trigger)
 	}
-	c.send(e.cursor, sync, batch, bundle, e.target, e.fx.held)
+	c.send(emitEffects, e.cursor, sync, batch, bundle, e.target, e.fx.held)
 	return nil
 }
 

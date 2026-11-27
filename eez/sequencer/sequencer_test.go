@@ -1152,9 +1152,13 @@ func TestLiveTickKeepsTheGridEmpty(t *testing.T) {
 // chunkProver attests any window, recording its bounds.
 type chunkProver struct{ windows [][2]uint64 }
 
-func (p *chunkProver) ProveBy(_ context.Context, w *prove.Window, _ time.Time, _ time.Duration) ([]byte, error) {
+func (p *chunkProver) ProveBy(_ context.Context, w *prove.Window, _ time.Time, _ time.Duration) ([]prove.Attestation, error) {
 	p.windows = append(p.windows, [2]uint64{w.From, w.To})
-	return bytes.Repeat([]byte{0x11}, 65), nil
+	atts := make([]prove.Attestation, 0, len(w.Batch.ProofSystems))
+	for _, ps := range w.Batch.ProofSystems {
+		atts = append(atts, prove.Attestation{ProofSystem: ps, Proof: bytes.Repeat([]byte{0x11}, 65)})
+	}
+	return atts, nil
 }
 
 // chunkPoster signs postings and sends them nowhere.
@@ -1199,7 +1203,7 @@ func TestFullCatchupSettlesInChunks(t *testing.T) {
 	require.NoError(t, err)
 	prover := &chunkProver{}
 	c := composer.New(composer.Config{
-		Batcher: &composer.Batcher{RollupID: cc.L2.(*config.L2Config).RollupID, ProofSystem: common.Address{0xab}, Signer: types.LatestSignerForChainID(cc.ChainID)},
+		Batcher: &composer.Batcher{RollupID: cc.L2.(*config.L2Config).RollupID, ProofSystems: []common.Address{{0xab}}, Signer: types.LatestSignerForChainID(cc.ChainID)},
 		K:       k, MaxBlocks: composer.GridCap(300, k), MaxGas: composer.MaxPostBatchGas, Proof: time.Second,
 	}, h.chain, noWitnesses{}, prover, &chunkPoster{key: key},
 		&composer.Observer{Node: idleL1{}, Every: time.Millisecond, Logger: log.New()},

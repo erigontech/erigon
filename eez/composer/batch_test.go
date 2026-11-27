@@ -54,7 +54,7 @@ func window(t *testing.T, name string) ([]*types.Block, *protocol.ProofSystemBat
 }
 
 func devnetBatcher(proofSystem common.Address) *Batcher {
-	return &Batcher{RollupID: 1, ProofSystem: proofSystem, Signer: types.LatestSignerForChainID(uint256.NewInt(6290))}
+	return &Batcher{RollupID: 1, ProofSystems: []common.Address{proofSystem}, Signer: types.LatestSignerForChainID(uint256.NewInt(6290))}
 }
 
 // TestAnchorBatchOfRecordedWindows is T-CMP-4 for anchor-only batches: from
@@ -297,4 +297,16 @@ func TestBatchRefuses(t *testing.T) {
 			require.ErrorContains(t, err, c.want)
 		})
 	}
+}
+
+// TestBatchSelectsEveryProofSystem: a batch is built selecting each of the
+// configured proof systems, in order.
+func TestBatchSelectsEveryProofSystem(t *testing.T) {
+	blocks, mined, _ := window(t, "captured-devnet-anchor-402")
+	b := devnetBatcher(common.Address{0xa})
+	b.ProofSystems = []common.Address{{0xa}, {0xb}, {0xc}}
+	got, err := b.AnchorBatch(mined.Entries[0].RollupUpdates[0].CurrentRoot, blocks)
+	require.NoError(t, err)
+	require.Equal(t, b.ProofSystems, got.ProofSystems)
+	require.Equal(t, []uint64{0, 1, 2}, got.RollupIDsWithProofSystems[0].ProofSystemIndexes)
 }

@@ -23,8 +23,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/post"
@@ -58,7 +61,7 @@ func TestDecide(t *testing.T) {
 		want         emission
 	}{
 		{"steady", 0, 8, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8, target: post.Target{Block: target, Time: ts}}},
-		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8}},
+		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8, target: post.Target{Block: target}}},
 		{"empty", 0, 8, sequencer.ModeEmpty, 0, false, emission{}},
 		{"in flight", 0, 8, sequencer.ModeSteady, target, true, emission{}},
 		{"cap", 4, 12, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 4, sync: 12, target: post.Target{Block: target, Time: ts}}},
@@ -155,9 +158,12 @@ type testProver struct {
 	err    error
 	// before runs as a session begins.
 	before func()
+	// attesting, when set, are the proof systems that attest, else all of
+	// the batch's.
+	attesting []common.Address
 }
 
-func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]byte, error) {
+func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]prove.Attestation, error) {
 	if p.before != nil {
 		p.before()
 	}
@@ -181,7 +187,18 @@ func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Ti
 	if got.witnessErr != nil {
 		return nil, got.witnessErr
 	}
-	return bytes.Clone(testProof), p.err
+	if p.err != nil {
+		return nil, p.err
+	}
+	attesting := p.attesting
+	if attesting == nil {
+		attesting = w.Batch.ProofSystems
+	}
+	var atts []prove.Attestation
+	for _, ps := range attesting {
+		atts = append(atts, prove.Attestation{ProofSystem: ps, Proof: append(bytes.Clone(testProof), ps[0])})
+	}
+	return atts, nil
 }
 
 type testPoster struct {
@@ -301,7 +318,7 @@ func newHarness(t *testing.T, chain *testChain, maxBlocks uint64, node Receipts)
 		node = quiet{}
 	}
 	cfg := Config{
-		Batcher: &Batcher{RollupID: 1, ProofSystem: common.Address{0xab}, Signer: testSigner},
+		Batcher: &Batcher{RollupID: 1, ProofSystems: []common.Address{{0xab}}, Signer: testSigner},
 		K:       4, MaxBlocks: maxBlocks, MaxGas: MaxPostBatchGas, Proof: time.Second, Slack: 100 * time.Millisecond,
 	}
 	obs := &Observer{Node: node, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
@@ -339,7 +356,7 @@ func (h *harness) requireWindow(t *testing.T, i int, from, to uint64, target pos
 	u := p.batch.Entries[0].RollupUpdates[0]
 	require.Equal(t, h.chain.blocks[from-1].Hash(), u.CurrentRoot)
 	require.Equal(t, h.chain.blocks[to].Hash(), u.NewRoot)
-	require.Equal(t, [][]byte{testProof}, p.batch.Proofs)
+	require.Equal(t, [][]byte{append(bytes.Clone(testProof), 0xab)}, p.batch.Proofs)
 	input, err := protocol.EncodePostAndVerifyBatch(p.batch)
 	require.NoError(t, err)
 	require.Equal(t, input, h.poster.inputs[i])
@@ -378,7 +395,7 @@ func TestComposerCatchup(t *testing.T) {
 	h := newHarness(t, newTestChain(t, 8), 8, nil)
 	before := time.Now()
 	h.slot(t, 8, 50, sequencer.ModeCatchup)
-	h.requireWindow(t, 0, 1, 8, post.Target{})
+	h.requireWindow(t, 0, 1, 8, post.Target{Block: 50})
 	p := h.prover.proven[0]
 	require.Zero(t, p.per)
 	require.WithinRange(t, p.start, before.Add(time.Second), time.Now().Add(time.Second))
@@ -407,7 +424,7 @@ func TestComposerChunk(t *testing.T) {
 }
 
 // TestComposerFallsBackToAChunk: an anchor over the gas limit gives way to
-// the largest chunk within it, unpinned.
+// the largest chunk within it, unpinned at the slot's L1 block.
 func TestComposerFallsBackToAChunk(t *testing.T) {
 	chain := newTestChain(t, 12, 9, 10, 11)
 	h := newHarness(t, chain, 12, nil)
@@ -419,7 +436,7 @@ func TestComposerFallsBackToAChunk(t *testing.T) {
 	require.Len(t, h.targets(t), 1)
 	p := h.prover.proven[0]
 	require.Equal(t, [2]uint64{1, 8}, [2]uint64{p.from, p.to})
-	require.Equal(t, post.Target{}, h.targets(t)[0])
+	require.Equal(t, post.Target{Block: 50}, h.targets(t)[0])
 	require.Equal(t, h.c.cfg.MaxGas, h.poster.gas[0])
 }
 
@@ -943,81 +960,108 @@ func TestComposerReleasesSettledTransactions(t *testing.T) {
 	require.Empty(t, pool.inFlight)
 }
 
-// TestComposerRequeuesRolledOutTransactions: a settled batch an L1 reorg
-// rolls out, which derivation never confirmed, is watched again with its
+// TestComposerRequeuesRolledOutTransactions: a settlement an L1 reorg rolls
+// out, whether derivation had confirmed it or not, is watched again with its
 // transactions reserved; once its posting has left L1 for good, recovery
-// requeues them.
+// requeues them uncharged for the next drain to revalidate.
 func TestComposerRequeuesRolledOutTransactions(t *testing.T) {
-	node := &rolling{}
-	node.head.Store(1)
-	h := newHarness(t, newTestChain(t, 8), 8, node)
-	pool := NewHeldPool()
-	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
-	tx := held(addr(0xa), 0, Inbound, 1)
-	require.NoError(t, pool.Push(tx, 0))
-	h.cursor.Store(5)
-	h.c.RecoverFailed(t.Context())
-	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
-	h.c.ledger.MarkSettled(8, common.Hash{0xf})
-	h.cursor.Store(4)
-	h.c.RecoverFailed(t.Context())
-	r, ok := h.resolution(8)
-	require.True(t, ok)
-	require.Equal(t, Pending, r, "watched again")
-	require.Eventually(t, func() bool {
-		node.head.Add(1)
-		h.c.RecoverFailed(t.Context())
-		_, ok := h.resolution(8)
-		return !ok
-	}, 5*time.Second, time.Millisecond)
-	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt), "requeued")
+	for _, confirmed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("confirmed=%v", confirmed), func(t *testing.T) {
+			node := &rolling{}
+			node.head.Store(1)
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+			in, out := held(addr(0xa), 0, Inbound, 1), held(addr(0xb), 0, Outbound, 2)
+			require.NoError(t, pool.Push(in, 0))
+			require.NoError(t, pool.Push(out, 0))
+			h.cursor.Store(5)
+			h.c.RecoverFailed(t.Context())
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+			h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			if confirmed {
+				h.cursor.Store(8)
+				h.c.RecoverFailed(t.Context())
+			}
+			h.cursor.Store(4)
+			h.c.RecoverFailed(t.Context())
+			r, ok := h.resolution(8)
+			require.True(t, ok)
+			require.Equal(t, Pending, r, "watched again")
+			require.Eventually(t, func() bool {
+				node.head.Add(1)
+				h.c.RecoverFailed(t.Context())
+				_, ok := h.resolution(8)
+				return !ok
+			}, 5*time.Second, time.Millisecond)
+			require.True(t, pool.Holds(out.Hash), "never a plain transaction once composed")
+			require.Equal(t, []*Held{in, out}, pool.PopN(math.MaxInt))
+			require.Zero(t, in.Attempts+out.Attempts)
+		})
+	}
 }
 
 // TestComposerDisposesOfPartialTransactions: once derivation passes a batch
-// L1 kept part of, the triggers L1 has are spent and let go; the rest return
-// to the pool, and only the one where L1 stopped is charged.
+// L1 kept part of, the outbound transactions in its rebuilt block and the
+// triggers L1 has are spent and let go; the rest return to the pool, and
+// only the one where L1 stopped is charged.
 func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		attempts uint32 // of the first trigger
+		attempts uint32 // of the first unspent outbound transaction
 		lookup   error
-		// spentFirst has the first trigger run on L1.
-		spentFirst bool
-		allSpent   bool
+		allSpent bool
+		// settler is the posting derivation recorded for the height, none
+		// when zero.
+		settler common.Hash
 		// queued are the transactions back in the pool, with their attempts.
 		queued map[common.Hash]uint32
 		kept   bool // the batch waits for the next call
 	}{
-		{name: "the rest requeued, the first unspent charged", queued: map[common.Hash]uint32{{2}: 1, {4}: 0, {5}: 0}},
-		{name: "the charge evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
-		{name: "none charged behind a spent trigger", spentFirst: true, queued: map[common.Hash]uint32{{4}: 0, {5}: 0}},
-		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{5}: 0}, kept: true},
-		{name: "every trigger spent", allSpent: true, queued: map[common.Hash]uint32{{5}: 0}},
+		{name: "the rest requeued, the first unspent charged", settler: common.Hash{0xf}, queued: map[common.Hash]uint32{{2}: 1, {4}: 0}},
+		{name: "the charge evicts the chain", settler: common.Hash{0xf}, attempts: 2, queued: map[common.Hash]uint32{{4}: 0}},
+		{name: "another posting's settlement charges none", settler: common.Hash{0xe}, attempts: 2, queued: map[common.Hash]uint32{{2}: 2, {4}: 0}},
+		{name: "no settlement record charges none", attempts: 2, queued: map[common.Hash]uint32{{2}: 2, {4}: 0}},
+		{name: "a lookup failing", settler: common.Hash{0xf}, lookup: errors.New("node down"), queued: map[common.Hash]uint32{}, kept: true},
+		{name: "every transaction spent", settler: common.Hash{0xf}, allSpent: true, queued: map[common.Hash]uint32{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
 			node := &triggers{landed: map[common.Hash]bool{}, failed: c.lookup}
-			h := newHarness(t, newTestChain(t, 8), 8, node)
+			h := newHarness(t, chain, 8, node)
+			if c.settler != (common.Hash{}) {
+				h.c.Settlements(settlements(deriver.Record{TxHash: c.settler, LastL2Block: 8}))
+			}
 			pool := NewHeldPool()
 			h.c.Recover(pool, nil)
-			cut := held(addr(0xb), 0, Inbound, 2)
+			// a's outbound transaction ran: it is in the block derivation rebuilt.
+			ran := held(addr(0xa), 0, Outbound, 1)
+			ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+			cut := held(addr(0xb), 0, Outbound, 2)
 			cut.Attempts = c.attempts
-			behind := held(addr(0xb), 1, Inbound, 5)
+			behind := held(addr(0xb), 1, Outbound, 5)
 			landed, dropped := held(addr(0xc), 0, Inbound, 3), held(addr(0xd), 0, Inbound, 4)
 			node.landed[landed.Hash] = true
-			if c.spentFirst {
-				node.landed[cut.Hash] = true
-			}
 			if c.allSpent {
+				cut, behind = held(addr(0xb), 0, Inbound, 2), nil
 				node.landed[cut.Hash], node.landed[dropped.Hash] = true, true
 			}
-			for _, tx := range []*Held{cut, behind, landed, dropped} {
-				require.NoError(t, pool.Push(tx, 0))
+			for _, tx := range []*Held{ran, cut, behind, landed, dropped} {
+				if tx != nil {
+					require.NoError(t, pool.Push(tx, 0))
+				}
 			}
 			txs := pool.PopN(math.MaxInt)
-			// b's second transaction missed the batch: it waits in the pool.
-			pool.PushFront([]*Held{behind})
-			txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
-			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: txs})
+			if behind != nil {
+				// b's second transaction missed the batch: it waits in the pool.
+				pool.PushFront([]*Held{behind})
+				txs = slices.DeleteFunc(txs, func(tx *Held) bool { return tx == behind })
+				c.queued = maps.Clone(c.queued)
+				if c.attempts < maxAttempts-1 || c.settler != (common.Hash{0xf}) {
+					c.queued[behind.Hash] = 0
+				}
+			}
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: txs})
 			h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
 			h.cursor.Store(8)
 
@@ -1034,6 +1078,7 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 				}
 				h.c.ledger.mu.Unlock()
 				require.Contains(t, spent, landed.Hash, "kept for a reorg")
+				require.Contains(t, spent, ran.Hash, "kept for a reorg")
 				require.Equal(t, c.allSpent, slices.Contains(spent, dropped.Hash), "only what ran is kept")
 			}
 			got := map[common.Hash]uint32{}
@@ -1050,12 +1095,57 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	}
 }
 
+// TestComposerRestartsADisposalDerivationMoved: a settlement derivation
+// replaces, or rolls out, while disposal reads what ran leaves the batch for
+// the next call, the pool untouched.
+func TestComposerRestartsADisposalDerivationMoved(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		move func(h *harness, settler *atomic.Pointer[deriver.Record])
+	}{
+		{name: "the settlement replaced", move: func(_ *harness, settler *atomic.Pointer[deriver.Record]) {
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8})
+		}},
+		{name: "the settlement rolled out", move: func(h *harness, _ *atomic.Pointer[deriver.Record]) { h.cursor.Store(7) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			node := &triggers{landed: map[common.Hash]bool{}}
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			var settler atomic.Pointer[deriver.Record]
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8})
+			h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+				r := settler.Load()
+				return *r, n <= r.LastL2Block
+			})
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			ran, cut := held(addr(0xa), 0, Inbound, 1), held(addr(0xb), 0, Inbound, 2)
+			node.landed[ran.Hash] = true
+			require.NoError(t, pool.Push(ran, 0))
+			require.NoError(t, pool.Push(cut, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+			h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+			h.cursor.Store(8)
+			var once sync.Once
+			node.read = func() { once.Do(func() { c.move(h, &settler) }) }
+
+			h.c.RecoverFailed(t.Context())
+			r, ok := h.resolution(8)
+			require.True(t, ok)
+			require.Equal(t, SettledPartial, r)
+			require.Zero(t, pool.Len())
+			require.Zero(t, cut.Attempts)
+		})
+	}
+}
+
 // TestComposerDisposesOfAPartialBatchLedByOutbound: the outbound
 // transaction leading a partial batch, in the block derivation rebuilt, ran;
 // L1 stopped at the first unspent trigger.
 func TestComposerDisposesOfAPartialBatchLedByOutbound(t *testing.T) {
 	chain := newTestChain(t, 8, 8)
 	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8}))
 	pool := NewHeldPool()
 	h.c.Recover(pool, nil)
 	out, cut := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2)
@@ -1254,6 +1344,30 @@ func TestComposerSettlementBackInThePool(t *testing.T) {
 	}
 }
 
+// TestComposerSettlementLeftL1IsFree: the held transactions of a settlement
+// whose posting L1 dropped are watched again, and return to the pool
+// uncharged once it has left L1 for good.
+func TestComposerSettlementLeftL1IsFree(t *testing.T) {
+	chain := newTestChain(t, 8)
+	node := &rolling{}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	tx := held(addr(0xa), 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{tx}, pool.PopN(math.MaxInt))
+	require.Zero(t, tx.Attempts)
+}
+
 // TestComposerDisposesOfPartialSettlements: derivation passing a partial
 // settlement settles it, and finality ends it.
 func TestComposerDisposesOfPartialSettlements(t *testing.T) {
@@ -1268,25 +1382,67 @@ func TestComposerDisposesOfPartialSettlements(t *testing.T) {
 }
 
 // TestComposerAuditsFinality: a finalized settlement's posting is looked up
-// on L1 before it leaves the ledger.
+// on L1 before it leaves the ledger; one missing returns the settlement's
+// transactions to the pool. Until then a settled outbound transaction stays
+// held, as an L2 rewind may return it to the rollup's pool.
 func TestComposerAuditsFinality(t *testing.T) {
-	chain := newTestChain(t, 8)
-	node := newLanding(t, chain.blocks[8].Hash())
-	h := newHarness(t, chain, 8, node)
-	h.slot(t, 8, 50, sequencer.ModeSteady)
-	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
-	before := node.asked.Load()
+	for _, gone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gone=%v", gone), func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
+			node := newLanding(t, chain.blocks[8].Hash())
+			h := newHarness(t, chain, 8, node)
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			out := held(addr(0xa), 0, Outbound, 1)
+			out.Hash = chain.blocks[8].Transactions()[0].Hash()
+			require.NoError(t, pool.Push(out, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+			h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.True(t, pool.Holds(out.Hash), "settled, not final")
+			before := node.asked.Load()
+			node.gone.Store(gone)
+			h.final.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.Empty(t, h.c.ledger.entries)
+			require.Eventually(t, func() bool { return node.asked.Load() > before }, 5*time.Second, time.Millisecond)
+			h.c.Close()
+			require.Equal(t, gone, pool.Holds(out.Hash))
+			require.Equal(t, gone, pool.Len() == 1)
+		})
+	}
+}
+
+// TestComposerForgetsAFinalizedBatchThatNeverLanded: a batch derivation
+// passed without a verdict on its posting is not looked for at finality;
+// what ran of it is final in the block derivation built.
+func TestComposerForgetsAFinalizedBatchThatNeverLanded(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
 	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.True(t, pool.Holds(out.Hash), "ran, not final")
 	h.final.Store(8)
 	h.c.RecoverFailed(t.Context())
+	h.c.Close()
 	require.Empty(t, h.c.ledger.entries)
-	require.Eventually(t, func() bool { return node.asked.Load() > before }, 5*time.Second, time.Millisecond)
+	require.False(t, pool.Holds(out.Hash), "final")
+	require.Zero(t, pool.Len())
 }
 
 // triggers is an L1 on which the held transactions in landed have receipts.
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
+	// read, when set, runs on each receipt read.
+	read func()
 	// mu guards asked: recovery reads receipts concurrently.
 	mu    sync.Mutex
 	asked []common.Hash
@@ -1302,6 +1458,9 @@ func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error
 	l.mu.Lock()
 	l.asked = append(l.asked, h)
 	l.mu.Unlock()
+	if l.read != nil {
+		l.read()
+	}
 	if l.failed != nil {
 		return nil, l.failed
 	}
@@ -1420,14 +1579,19 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		queued   map[common.Hash]uint32
 		replaced bool
 		kept     bool // the failure stays for the next trigger
+		// culprit names the transaction the provers refused the batch for.
+		culprit common.Hash
 	}{
 		{name: "requeued, charged", queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a refused transaction goes with its chain, the rest free", culprit: common.Hash{1}, queued: map[common.Hash]uint32{{3}: 0}, replaced: true},
+		{name: "a refused transaction goes alone, the rest free", attempts: 2, culprit: common.Hash{3}, queued: map[common.Hash]uint32{{1}: 2, {2}: 0}, replaced: true},
+		{name: "a refused trigger that landed leaves its chain", landed: true, culprit: common.Hash{1}, queued: map[common.Hash]uint32{{2}: 0, {3}: 0}, replaced: true},
 		{name: "a skipped slot is free", skipped: true, queued: map[common.Hash]uint32{{1}: 0, {2}: 0, {3}: 0}, replaced: true},
 		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
 		{name: "a height L1 settled waits for derivation", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a block no longer canonical", substitute: follower.ErrNotCanonical, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
-		{name: "a stale parent", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a stale parent waits for the next trigger", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a substitution failing", substitute: errors.New("chain busy"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 	} {
@@ -1452,7 +1616,13 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 			if c.landed {
 				node.landed[txA.Hash] = true
 			}
-			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch})
+			var culprit *Held
+			for _, tx := range inBatch {
+				if tx.Hash == c.culprit {
+					culprit = tx
+				}
+			}
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: culprit})
 			h.c.ledger.MarkFailed(8, common.Hash{0xf}, c.skipped)
 
 			h.c.RecoverFailed(t.Context())
@@ -1507,19 +1677,668 @@ func TestComposerDisposesOfAFailedBatchL1Settled(t *testing.T) {
 
 // TestComposerDisposesOfAFailedOutboundBatchL1Settled: a failed batch whose
 // height L1 settled after all is disposed of by what ran, as a partial one:
-// an outbound transaction not in the settled block waits again.
+// an outbound transaction not in the settled block waits again, charged
+// only when the composer's own posting settled the height.
 func TestComposerDisposesOfAFailedOutboundBatchL1Settled(t *testing.T) {
-	chain := newTestChain(t, 8)
-	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	for _, c := range []struct {
+		name     string
+		settler  common.Hash
+		attempts uint32
+	}{
+		{name: "its own posting", settler: common.Hash{0xf}, attempts: 1},
+		{name: "another posting", settler: common.Hash{0xe}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8)
+			h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+			h.c.Settlements(settlements(deriver.Record{TxHash: c.settler, LastL2Block: 8}))
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+			out := held(addr(0xa), 0, Outbound, 1)
+			require.NoError(t, pool.Push(out, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+			h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+			h.c.RecoverFailed(t.Context())
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
+			require.Equal(t, c.attempts, out.Attempts, "where L1 stopped")
+		})
+	}
+}
+
+// TestComposerEjectsAnOutboundCulprit: an outbound transaction the provers
+// refused a batch for is evicted with the rest of its chain; composed, it
+// stays held, so the sequencer never takes it as a plain transaction.
+func TestComposerEjectsAnOutboundCulprit(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
 	pool := NewHeldPool()
-	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
-	out := held(addr(0xa), 0, Outbound, 1)
-	require.NoError(t, pool.Push(out, 0))
-	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for n := range uint64(3) {
+		require.NoError(t, pool.Push(held(addr(0xa), n, Outbound, byte(n+1)), 0))
+	}
+	require.NoError(t, pool.Push(held(addr(0xb), 0, Outbound, 9), 0))
+	inBatch := pool.PopN(2)
+	pool.Composed(inBatch, 8)
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: inBatch[1]})
 	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
 	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []common.Hash{{1}, {9}}, hashes(pool.PopN(math.MaxInt)))
+	require.Zero(t, inBatch[0].Attempts)
+	require.True(t, pool.Holds(common.Hash{2}))
+	require.False(t, pool.Holds(common.Hash{3}), "never in a Sync block")
+}
+
+// senders is an L1 on which each posting in from has a receipt from its
+// sender.
+type senders struct {
+	from map[common.Hash]common.Address
+}
+
+func (s senders) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
+func (senders) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
+
+func (s senders) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	from, ok := s.from[h]
+	if !ok {
+		return nil, nil
+	}
+	return &l1.Receipt{Status: 1, From: from}, nil
+}
+
+func (senders) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
+
+// logLines is a log sink safe for the composer's goroutines.
+type logLines struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logLines) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logLines) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+func captureLogs(c *Composer) *logLines {
+	lines := &logLines{}
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(lines, log.TerminalFormatNoColor()))
+	c.logger = logger
+	return lines
+}
+
+// settlements is derivation's index: each record settles up to its last block.
+func settlements(records ...deriver.Record) func(uint64) (deriver.Record, bool) {
+	return func(n uint64) (deriver.Record, bool) {
+		for _, r := range records {
+			if n <= r.LastL2Block {
+				return r, true
+			}
+		}
+		return deriver.Record{}, false
+	}
+}
+
+// TestComposerAttributesSettlements: each settlement derivation passes is
+// logged as this composer's, by the posting it recorded or by its poster's
+// address for a posting from before a restart, or as another poster's,
+// which an error reports unless external batches are expected.
+func TestComposerAttributesSettlements(t *testing.T) {
+	for _, expect := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expect=%v", expect), func(t *testing.T) {
+			other := common.Address{0xe}
+			node := senders{from: map[common.Hash]common.Address{{0xe}: other}}
+			h := newHarness(t, newTestChain(t, 12), 12, node)
+			poster := crypto.PubkeyToAddress(h.poster.key.PublicKey)
+			node.from[common.Hash{0xd}] = poster
+			h.c.cfg.Poster, h.c.cfg.ExpectExternal = poster, expect
+			h.c.Settlements(settlements(
+				deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 4},
+				deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8},
+				deriver.Record{TxHash: common.Hash{0xd}, LastL2Block: 12},
+			))
+			lines := captureLogs(h.c)
+			h.c.RecoverFailed(t.Context())
+			h.c.ledger.Begin(Posted[*Held]{Height: 4, Post: common.Hash{0xf}})
+			h.c.ledger.MarkSettled(4, common.Hash{0xf})
+			h.cursor.Store(12)
+			h.c.RecoverFailed(t.Context())
+			h.c.Close()
+			out := lines.String()
+			require.Equal(t, 2, strings.Count(out, "event=eez.composer.batch.confirmed"), out)
+			require.Contains(t, out, "to=4")
+			require.Contains(t, out, "to=12")
+			if expect {
+				require.Regexp(t, `INFO.*event=eez.composer.batch.external .*to=8`, out)
+				require.NotContains(t, out, "external.unexpected")
+			} else {
+				require.Regexp(t, `EROR.*event=eez.composer.batch.external.unexpected .*to=8`, out)
+			}
+		})
+	}
+}
+
+// TestComposerAuditsASupersededPosting: a finalized height another poster
+// settled is no reorg: the posting it superseded is not looked for.
+func TestComposerAuditsASupersededPosting(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	node := &triggers{landed: map[common.Hash]bool{}}
+	h := newHarness(t, chain, 8, node)
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8}))
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	// The rival's block carries the outbound transaction.
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
+	h.cursor.Store(8)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	require.Empty(t, h.c.ledger.entries)
+	require.NotContains(t, lines.String(), "finality_audit.rolled_out")
+	require.Zero(t, pool.Len())
+	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
+}
+
+// TestComposerAuditsASettlementReplaced: an L1 reorg that replaces a
+// settlement with a rival's at the same height moves no cursor; at
+// finality, of the composer's transactions those the final block holds are
+// final and the others return to the pool, whether its posting left L1 or
+// landed again without the settlement. A batch disposed of against a first
+// rival, its block holding kept, is decided by a second rival's, which holds
+// none. A block that cannot be read returns them all.
+func TestComposerAuditsASettlementReplaced(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// landed has the composer's posting settle the height first.
+		landed bool
+		// back lands the posting again after the reorg.
+		back bool
+		// unread leaves the final block unreadable.
+		unread bool
+		// resent has omitted sent again and drained by a later batch before
+		// finality, settled when settledAgain: that copy keeps its hold.
+		resent, settledAgain bool
+		// requeued lists the transactions back in the pool, kept and
+		// omitted.
+		requeued func(kept, omitted *Held) []*Held
+	}{
+		{name: "the posting left L1", landed: true, requeued: func(_, o *Held) []*Held { return []*Held{o} }},
+		{name: "the posting back without the settlement", landed: true, back: true, requeued: func(_, o *Held) []*Held { return []*Held{o} }},
+		{name: "a second rival", requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
+		{name: "the final block unreadable", landed: true, unread: true, requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
+		{name: "a later copy in flight", landed: true, resent: true, requeued: func(*Held, *Held) []*Held { return nil }},
+		{name: "a later copy settled", landed: true, resent: true, settledAgain: true, requeued: func(*Held, *Held) []*Held { return nil }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
+			node := &triggers{landed: map[common.Hash]bool{}}
+			h := newHarness(t, chain, 8, node)
+			var settler atomic.Pointer[deriver.Record]
+			first := common.Hash{0xf}
+			if !c.landed {
+				first = common.Hash{0xe}
+			}
+			settler.Store(&deriver.Record{TxHash: first, LastL2Block: 8})
+			h.c.Settlements(func(n uint64) (deriver.Record, bool) { return settlements(*settler.Load())(n) })
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			kept := held(addr(0xa), 0, Outbound, 1)
+			kept.Hash = chain.blocks[8].Transactions()[0].Hash()
+			omitted := held(addr(0xb), 0, Outbound, 2)
+			require.NoError(t, pool.Push(kept, 0))
+			require.NoError(t, pool.Push(omitted, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(2)})
+			if c.landed {
+				h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			}
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			if c.landed {
+				require.True(t, pool.Holds(omitted.Hash), "settled, held until final")
+			}
+			// The reorg: a rival's block at height 8, holding kept alone, or,
+			// replacing the first rival's, nothing.
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xd}, LastL2Block: 8})
+			if !c.landed {
+				require.True(t, pool.Holds(kept.Hash), "ran in the first rival's block")
+				h.chain.blocks[8] = types.NewBlockWithHeader(chain.header(8), nil)
+			}
+			if c.back {
+				node.mu.Lock()
+				node.landed[common.Hash{0xf}] = true
+				node.mu.Unlock()
+			}
+			if c.unread {
+				h.chain.head = 7
+			}
+			if c.resent {
+				again := held(addr(0xb), 0, Outbound, 2)
+				require.NoError(t, pool.Push(again, 0))
+				require.Equal(t, []*Held{again}, pool.PopN(1))
+				if c.settledAgain {
+					pool.Release([]*Held{again})
+				}
+			}
+			h.final.Store(8)
+			h.c.RecoverFailed(t.Context())
+			h.c.Close()
+			want := c.requeued(kept, omitted)
+			require.ElementsMatch(t, want, pool.PopN(math.MaxInt))
+			if c.resent {
+				require.True(t, pool.Holds(omitted.Hash), "the later copy keeps its hold")
+				pool.Drop([]*Held{omitted})
+				require.True(t, pool.Holds(omitted.Hash), "dropping the old copy leaves the later one's hold")
+			}
+			if !slices.Contains(want, kept) {
+				require.False(t, pool.Holds(kept.Hash), "final in the rival's block")
+			}
+		})
+	}
+}
+
+// TestComposerAuditsAPostingSupersededAndPruned: a posting another poster
+// superseded is not looked for at finality, when derivation has pruned the
+// settlement that superseded it.
+func TestComposerAuditsAPostingSupersededAndPruned(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	node := &triggers{landed: map[common.Hash]bool{}}
+	h := newHarness(t, chain, 8, node)
+	var pruned atomic.Bool
+	rival := settlements(deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8})
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+		if pruned.Load() {
+			return deriver.Record{}, false
+		}
+		return rival(n)
+	})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
 	h.cursor.Store(8)
 	h.c.RecoverFailed(t.Context())
+	pruned.Store(true)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	require.Empty(t, h.c.ledger.entries)
+	require.NotContains(t, lines.String(), "finality_audit.rolled_out")
+	require.Zero(t, pool.Len())
+	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
+}
+
+// TestComposerAttributesPastPrunedSettlements: settlements derivation pruned
+// before they were attributed are skipped, not waited for; those L1
+// finalized after are no longer watched for replacement.
+func TestComposerAttributesPastPrunedSettlements(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{}})
+	var from atomic.Uint64
+	all := settlements(
+		deriver.Record{TxHash: common.Hash{0x4}, LastL2Block: 4},
+		deriver.Record{TxHash: common.Hash{0x8}, LastL2Block: 8},
+		deriver.Record{TxHash: common.Hash{0xc}, LastL2Block: 12},
+	)
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+		if n < from.Load() {
+			return deriver.Record{}, false
+		}
+		return all(n)
+	})
+	h.c.ledger.Begin(Posted[*Held]{Height: 12, Post: common.Hash{0xc}})
+	lines := captureLogs(h.c)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	from.Store(9)
+	h.cursor.Store(12)
+	h.c.RecoverFailed(t.Context())
+	require.Len(t, h.c.attributed, 1)
+	h.final.Store(12)
+	h.c.RecoverFailed(t.Context())
+	require.Empty(t, h.c.attributed)
+	h.c.Close()
+	out := lines.String()
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+}
+
+// TestComposerReleasesItsOwnSettlementQuietly: a batch derivation passed
+// before its verdict, settled whole by its own posting, is no partial one.
+func TestComposerReleasesItsOwnSettlementQuietly(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+	h.c.Settlements(settlements(deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8}))
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	out.Hash = chain.blocks[8].Transactions()[0].Hash()
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
+	lines := captureLogs(h.c)
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	r, _ := h.resolution(8)
+	require.Equal(t, Settled, r)
+	require.NotContains(t, lines.String(), "recovery.settled_partial")
+	require.NotContains(t, lines.String(), "recovery.nonce_burned")
+	require.True(t, pool.Holds(out.Hash), "settled, not final")
+}
+
+// TestComposerEvents: a slot logs its invocation, and each posting its kind
+// as dispatched and its verdict as observed.
+func TestComposerEvents(t *testing.T) {
+	t.Run("anchor", func(t *testing.T) {
+		chain := newTestChain(t, 8)
+		h := newHarness(t, chain, 8, newLanding(t, chain.blocks[8].Hash()))
+		lines := captureLogs(h.c)
+		h.slot(t, 8, 50, sequencer.ModeSteady)
+		require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+		h.c.Close()
+		out := lines.String()
+		require.Regexp(t, `event=eez.composer.sync_slot.invoked .*mode=steady`, out)
+		require.Regexp(t, `event=eez.composer.phase1.bundle.dispatched .*to=8`, out)
+		require.Regexp(t, `INFO.*event=eez.composer.bundle.observed .*verdict=settled`, out)
+	})
+	t.Run("refused", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+		lines := captureLogs(h.c)
+		pool := NewHeldPool()
+		h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+		for n := range uint64(3) {
+			require.NoError(t, pool.Push(held(addr(0xa), n, Inbound, byte(n+1)), 0))
+		}
+		inBatch := pool.PopN(2)
+		h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch, Culprit: inBatch[0]})
+		h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+		h.c.RecoverFailed(t.Context())
+		out := lines.String()
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_ejected .*nonce=0`, out)
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_in_flight_evicted .*nonce=1`, out)
+		require.Regexp(t, `EROR.*event=eez.composer.prover.poison_queued_evicted .*nonce=2`, out)
+		require.Empty(t, pool.PopN(math.MaxInt))
+	})
+	t.Run("chunk", func(t *testing.T) {
+		h := newHarness(t, newTestChain(t, 12, 2, 8), 8, nil)
+		lines := captureLogs(h.c)
+		h.slot(t, 12, 50, sequencer.ModeSteady)
+		h.targets(t)
+		h.c.Close()
+		require.Regexp(t, `event=eez.composer.emission.historical_chunk .*to=4`, lines.String())
+	})
+}
+
+// TestComposerRollsOutADisposedPartialBatch: the rest of a disposed partial
+// batch requeues in drain order; the transactions that ran stay held until
+// an L1 reorg rolls the batch out, and once its posting has left L1 for
+// good recovery requeues exactly them, uncharged.
+func TestComposerRollsOutADisposedPartialBatch(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	ran := held(addr(0xa), 0, Outbound, 1)
+	ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+	cut, landed := held(addr(0xb), 0, Outbound, 2), held(addr(0xc), 0, Inbound, 3)
+	dropped := held(addr(0xd), 0, Inbound, 4)
+	node := &reorged{landed: map[common.Hash]bool{landed.Hash: true}}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for _, tx := range []*Held{ran, cut, landed, dropped} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.cursor.Store(5)
+	h.c.RecoverFailed(t.Context())
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt)})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{cut, dropped}, pool.PopN(math.MaxInt))
+	require.True(t, pool.Holds(ran.Hash), "ran, not final")
+	node.dropped.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{ran, landed}, pool.PopN(math.MaxInt))
+	require.Zero(t, ran.Attempts+landed.Attempts)
+}
+
+// TestComposerRollsOutARefusedPartialBatch: the culprit a refused batch was
+// disposed of with is done with: once an L1 reorg rolls the batch out,
+// recovery requeues what ran and evicts nothing, the culprit's sender
+// having sent its nonce again since.
+func TestComposerRollsOutARefusedPartialBatch(t *testing.T) {
+	chain := newTestChain(t, 8, 8)
+	ran := held(addr(0xa), 0, Outbound, 1)
+	ran.Hash = chain.blocks[8].Transactions()[0].Hash()
+	culprit := held(addr(0xb), 0, Outbound, 2)
+	node := &reorged{landed: map[common.Hash]bool{}}
+	node.head.Store(1)
+	h := newHarness(t, chain, 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	for _, tx := range []*Held{ran, culprit} {
+		require.NoError(t, pool.Push(tx, 0))
+	}
+	h.cursor.Store(5)
+	h.c.RecoverFailed(t.Context())
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(math.MaxInt), Culprit: culprit})
+	h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	require.Zero(t, pool.Len(), "the culprit ejected")
+	again := held(addr(0xb), 0, Outbound, 3)
+	require.NoError(t, pool.Push(again, 0))
+	node.dropped.Store(true)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	require.Eventually(t, func() bool {
+		node.head.Add(1)
+		h.c.RecoverFailed(t.Context())
+		_, ok := h.resolution(8)
+		return !ok
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []*Held{ran, again}, pool.PopN(math.MaxInt))
+	require.Zero(t, ran.Attempts+again.Attempts)
+}
+
+// reorged is a rolling L1 on which the transactions in landed have
+// receipts until an L1 reorg drops them.
+type reorged struct {
+	rolling
+	landed  map[common.Hash]bool
+	dropped atomic.Bool
+}
+
+func (r *reorged) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	if !r.dropped.Load() && r.landed[h] {
+		return &l1.Receipt{Status: 1}, nil
+	}
+	return nil, nil
+}
+
+// TestComposerKeepsAPartialBatchItCannotRead: a partial batch whose rebuilt
+// block cannot be read waits for the next call.
+func TestComposerKeepsAPartialBatchItCannotRead(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	require.NoError(t, pool.Push(held(addr(0xa), 0, Outbound, 1), 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 9, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettledPartial(9, common.Hash{0xf})
+	h.cursor.Store(9)
+	h.c.RecoverFailed(t.Context())
+	r, _ := h.resolution(9)
+	require.Equal(t, SettledPartial, r)
+	require.Zero(t, pool.Len())
+}
+
+// TestComposerEjectsARefusedCulpritL1Settled: a batch the provers refused
+// whose height L1 settled after all ejects its culprit unless the culprit
+// ran; the rest requeue uncharged, the batch never having been posted.
+func TestComposerEjectsARefusedCulpritL1Settled(t *testing.T) {
+	for _, ran := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ran=%v", ran), func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
+			h := newHarness(t, chain, 8, &triggers{landed: map[common.Hash]bool{}})
+			pool := NewHeldPool()
+			h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, follower.ErrBelowSafe })
+			innocent, culprit := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Outbound, 2)
+			if ran {
+				culprit.Hash = chain.blocks[8].Transactions()[0].Hash()
+			}
+			behind := held(addr(0xb), 1, Outbound, 3)
+			for _, tx := range []*Held{innocent, culprit, behind} {
+				require.NoError(t, pool.Push(tx, 0))
+			}
+			inBatch := pool.PopN(2)
+			pool.Composed(inBatch, 8)
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: inBatch, Culprit: culprit})
+			h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+			h.c.RecoverFailed(t.Context())
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			want := []*Held{innocent}
+			if ran {
+				want = append(want, behind)
+			}
+			require.Equal(t, want, pool.PopN(math.MaxInt))
+			require.Zero(t, innocent.Attempts)
+			pool.mu.Lock()
+			defer pool.mu.Unlock()
+			require.Equal(t, ran, pool.settled[culprit.Hash] != nil, "a culprit that ran stays held until final")
+			_, tombed := pool.discarded[culprit.Hash]
+			require.Equal(t, !ran, tombed)
+			_, tombed = pool.discarded[behind.Hash]
+			require.False(t, tombed, "never composed")
+		})
+	}
+}
+
+// TestComposerAuditFailureRequeues: a finality audit that cannot read L1
+// returns the settlement's transactions to the pool, where the drain drops
+// those whose nonces are spent.
+func TestComposerAuditFailureRequeues(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{failed: errors.New("node down")})
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	out := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.final.Store(8)
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
 	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
-	require.Equal(t, uint32(1), out.Attempts, "where L1 stopped")
+}
+
+// TestComposerPostsTheQuorum: a batch sized for every configured proof
+// system is posted with those that attested, in order.
+func TestComposerPostsTheQuorum(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, nil)
+	a, b, c := common.Address{0xa}, common.Address{0xb}, common.Address{0xc}
+	h.c.cfg.Batcher.ProofSystems = []common.Address{a, b, c}
+	h.prover.attesting = []common.Address{a, c}
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	require.Len(t, h.targets(t), 1)
+	posted, err := protocol.DecodePostAndVerifyBatch(h.poster.inputs[0])
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{a, c}, posted.ProofSystems)
+	require.Equal(t, []uint64{0, 1}, posted.RollupIDsWithProofSystems[0].ProofSystemIndexes)
+	require.Equal(t, [][]byte{append(bytes.Clone(testProof), 0xa), append(bytes.Clone(testProof), 0xc)}, posted.Proofs)
+}
+
+// TestComposerAttributesEachSettlementOnce: a settlement is attributed once,
+// when derivation has passed all of it; those before the first call are
+// not.
+func TestComposerAttributesEachSettlementOnce(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{}})
+	h.c.Settlements(settlements(
+		deriver.Record{TxHash: common.Hash{0x4}, LastL2Block: 4},
+		deriver.Record{TxHash: common.Hash{0x8}, LastL2Block: 8},
+		deriver.Record{TxHash: common.Hash{0xc}, LastL2Block: 12},
+	))
+	for _, height := range []uint64{4, 8, 12} {
+		h.c.ledger.Begin(Posted[*Held]{Height: height, Post: common.Hash{byte(height)}})
+	}
+	lines := captureLogs(h.c)
+	for _, cursor := range []uint64{4, 6, 12, 12} {
+		h.cursor.Store(cursor)
+		h.c.RecoverFailed(t.Context())
+	}
+	h.c.Close()
+	out := lines.String()
+	require.NotContains(t, out, "event=eez.composer.batch.confirmed to=4 ", "before the first call")
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=8 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+}
+
+// TestComposerAttributesReplacedSettlements: a settlement an L1 reorg
+// replaced, the cursor never seen to move back, is attributed again with
+// those after it; one unchanged is not. A settlement missing below the
+// cursor, derivation retreating before it moves the cursor back, is not
+// taken for final.
+func TestComposerAttributesReplacedSettlements(t *testing.T) {
+	other := common.Address{0xe}
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{{0xe}: other, {0xf}: other}})
+	ours := []deriver.Record{
+		{TxHash: common.Hash{0x4}, LastL2Block: 4, L1Block: 9, L1BlockHash: common.Hash{0x09}},
+		{TxHash: common.Hash{0x8}, LastL2Block: 8, L1Block: 10, L1BlockHash: common.Hash{0x0a}},
+		{TxHash: common.Hash{0xc}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x0b}},
+	}
+	var index atomic.Pointer[[]deriver.Record]
+	index.Store(&ours)
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) { return settlements(*index.Load()...)(n) })
+	for _, r := range ours[1:] {
+		h.c.ledger.Begin(Posted[*Held]{Height: r.LastL2Block, Post: r.TxHash})
+	}
+	lines := captureLogs(h.c)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	h.cursor.Store(12)
+	h.c.RecoverFailed(t.Context())
+	// A reorg of L1 block 11: another poster settles the same height.
+	replaced := []deriver.Record{ours[0], ours[1], {TxHash: common.Hash{0xe}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x1b}}}
+	index.Store(&replaced)
+	h.c.RecoverFailed(t.Context())
+	// A reorg of L1 blocks 10 and 11, seen with the cursor not yet moved back.
+	retreated := ours[:1]
+	index.Store(&retreated)
+	h.c.RecoverFailed(t.Context())
+	// Derived again: another poster settles up to 10 first.
+	deeper := []deriver.Record{
+		ours[0],
+		{TxHash: common.Hash{0xf}, LastL2Block: 10, L1Block: 10, L1BlockHash: common.Hash{0x2a}},
+		{TxHash: common.Hash{0xe}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x2b}},
+	}
+	index.Store(&deeper)
+	h.c.RecoverFailed(t.Context())
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	out := lines.String()
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=8 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.external.unexpected to=10 "), out)
+	require.Equal(t, 2, strings.Count(out, "event=eez.composer.batch.external.unexpected to=12 "), out)
 }

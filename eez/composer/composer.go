@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -57,9 +58,9 @@ type Witnesses interface {
 	Get(ctx context.Context, number uint64, hash common.Hash) (json.RawMessage, error)
 }
 
-// Prover attests settlement windows.
+// Prover gathers the attestations of settlement windows.
 type Prover interface {
-	ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]byte, error)
+	ProveBy(ctx context.Context, w *prove.Window, start time.Time, per time.Duration) ([]prove.Attestation, error)
 }
 
 // Poster signs postings and sends them to L1.
@@ -87,6 +88,10 @@ type Config struct {
 	// that stops answering does not hold block production; zero is
 	// DefaultL1Read.
 	L1Read time.Duration
+	// Poster is the address the composer posts from; ExpectExternal
+	// reports settlements from other posters as expected, not as errors.
+	Poster         common.Address
+	ExpectExternal bool
 }
 
 // Composer settles the sequencer's blocks on L1 with anchor-only batches:
@@ -118,6 +123,14 @@ type Composer struct {
 	pending emission
 	// last is the cursor RecoverFailed saw last.
 	last uint64
+	// settlement returns derivation's settlement covering a block. Once
+	// attributing, attributed holds the settlements attributed that
+	// derivation keeps, oldest first, and attributedTo the block
+	// attribution resumes after when none is left.
+	settlement   func(number uint64) (deriver.Record, bool)
+	attributed   []deriver.Record
+	attributedTo uint64
+	attributing  bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -146,6 +159,12 @@ func New(cfg Config, chain Chain, witnesses Witnesses, prover Prover, poster Pos
 // Sync block.
 func (c *Composer) Recover(pool *HeldPool, substitute func(ctx context.Context, failed *types.Header) (*types.Header, error)) {
 	c.pool, c.substitute = pool, substitute
+}
+
+// Settlements sets derivation's index of settlements, which attributes
+// each one derivation passes to its poster.
+func (c *Composer) Settlements(settlement func(number uint64) (deriver.Record, bool)) {
+	c.settlement = settlement
 }
 
 // Close stops the observers.
@@ -179,7 +198,9 @@ type emission struct {
 // decide returns the posting of the Sync slot at sync on cursor: none while
 // a batch is in flight; a chunk when the backlog exceeds MaxBlocks, which an
 // empty slot posts too; else an anchor, unpinned in a catch-up slot. target
-// is the L1 block the sequencer aims the slot at, zero for any.
+// is the L1 block the sequencer aims the slot at, zero for any. A catch-up
+// anchor aims at target too: an idle builder bids on no bundle queued before
+// its block's building started, as one for a later block is.
 func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, inFlight bool) emission {
 	switch {
 	case inFlight:
@@ -189,7 +210,7 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 	case mode == sequencer.ModeEmpty:
 		return emission{}
 	case mode == sequencer.ModeCatchup:
-		return emission{kind: emitAnchor, cursor: cursor, sync: sync}
+		return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target}}
 	}
 	return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target, Time: ts}}
 }
@@ -200,6 +221,7 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 // its transactions.
 func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) sequencer.Composed {
 	c.abandon()
+	c.logger.Info("[eez] Sync slot", "event", "eez.composer.sync_slot.invoked", "timestamp", ts, "mode", mode, "target", target)
 	cursor := c.settle(ctx)
 	sync := parent.Number.Uint64() + 1
 	at, inFlight := c.ledger.Blocking(cursor)
@@ -208,7 +230,7 @@ func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 		if sync-cursor > 2*c.cfg.MaxBlocks {
 			lvl = log.LvlWarn
 		}
-		c.logger.Log(lvl, "[eez] batch in flight, Sync slot posts nothing", "event", "eez.composer.settlement.backlog",
+		c.logger.Log(lvl, "[eez] batch in flight, Sync slot posts nothing", "event", "eez.composer.sync_slot.bundle_in_flight",
 			"sync", sync, "cursor", cursor, "inFlight", at)
 	}
 	c.pending = c.decide(cursor, sync, ts, target, mode, inFlight)
@@ -249,14 +271,14 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 		if e.target.Time != 0 {
 			start, per = time.Unix(int64(e.target.Time), 0).Add(-c.cfg.Slack-c.cfg.Proof), c.cfg.Proof
 		}
-		err := c.post(ctx, e.cursor, sync, e.target, start, per)
+		err := c.post(ctx, emitAnchor, e.cursor, sync, e.target, start, per)
 		if err == nil {
 			return
 		}
 		errors.As(err, &unproven)
 		c.logger.Warn("[eez] anchor batch not posted, posting a chunk", "event", "eez.composer.anchor.failed",
 			"cursor", e.cursor, "sync", e.sync, "err", err)
-		e.cursor, e.target = c.cursor(), post.Target{}
+		e.cursor, e.target = c.cursor(), post.Target{Block: e.target.Block}
 	}
 	if err := c.chunk(ctx, e.cursor, e.sync, e.target); err != nil {
 		if unproven == nil {
@@ -328,7 +350,7 @@ func (c *Composer) chunk(ctx context.Context, cursor, sync uint64, target post.T
 	if lo == len(ends) {
 		return fmt.Errorf("no empty grid block above cursor %d within the gas limit", cursor)
 	}
-	return c.postBlocks(ctx, cursor, blocks[:ends[lo]-cursor], target, time.Now().Add(c.cfg.Proof), 0)
+	return c.postBlocks(ctx, emitChunk, cursor, blocks[:ends[lo]-cursor], target, time.Now().Add(c.cfg.Proof), 0)
 }
 
 // fits reports whether the anchor-only batch of blocks posts within the gas
@@ -356,8 +378,9 @@ func (c *Composer) blocks(ctx context.Context, cursor, to uint64) ([]*types.Bloc
 }
 
 // post proves, signs and sends the anchor-only batch of cursor+1..terminal,
-// proving with start and per as ProveBy takes them, and watches it.
-func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Header, target post.Target, start time.Time, per time.Duration) error {
+// an anchor or a chunk by kind, proving with start and per as ProveBy takes
+// them, and watches it.
+func (c *Composer) post(ctx context.Context, kind emitKind, cursor uint64, terminal *types.Header, target post.Target, start time.Time, per time.Duration) error {
 	blocks, err := c.blocks(ctx, cursor, terminal.Number.Uint64())
 	if err != nil {
 		return err
@@ -365,12 +388,12 @@ func (c *Composer) post(ctx context.Context, cursor uint64, terminal *types.Head
 	if last := blocks[len(blocks)-1].Hash(); last != terminal.Hash() {
 		return fmt.Errorf("block %d is %x, not the terminal %x", terminal.Number.Uint64(), last, terminal.Hash())
 	}
-	return c.postBlocks(ctx, cursor, blocks, target, start, per)
+	return c.postBlocks(ctx, kind, cursor, blocks, target, start, per)
 }
 
 // postBlocks proves, signs and sends the anchor-only batch of blocks, the
 // chain from the cursor's child, and watches it.
-func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*types.Block, target post.Target, start time.Time, per time.Duration) error {
+func (c *Composer) postBlocks(ctx context.Context, kind emitKind, cursor uint64, blocks []*types.Block, target post.Target, start time.Time, per time.Duration) error {
 	terminal := blocks[len(blocks)-1].Header()
 	to := terminal.Number.Uint64()
 	// The window's blocks are canonical, so the first one's parent is the cursor.
@@ -390,11 +413,11 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 		return err
 	}
 	w := &prove.Window{RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: cursor + 1, To: to, Block: c.windowBlock}
-	sig, err := c.prover.ProveBy(ctx, w, start, per)
+	atts, err := c.prover.ProveBy(ctx, w, start, per)
 	if err != nil {
 		return fmt.Errorf("prove %d..%d: %w", cursor+1, to, err)
 	}
-	batch.Proofs = [][]byte{sig}
+	attach(batch, atts)
 	input, err := protocol.EncodePostAndVerifyBatch(batch)
 	if err != nil {
 		return err
@@ -408,14 +431,21 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	if err != nil {
 		return err
 	}
-	c.send(cursor, terminal, batch, []types.Transaction{tx}, target, nil)
+	c.send(kind, cursor, terminal, batch, []types.Transaction{tx}, target, nil)
 	return nil
+}
+
+// dispatched names the event of a sent posting of kind.
+var dispatched = map[emitKind]string{
+	emitAnchor:  "eez.composer.phase1.bundle.dispatched",
+	emitChunk:   "eez.composer.emission.historical_chunk",
+	emitEffects: "eez.composer.bundle.dispatched",
 }
 
 // send records the posting bundle[0] of batch, cursor+1..terminal, carrying
 // held, then sends bundle for target and watches it, off the sequencer's
 // goroutine: a builder that hangs holds the verdict, not the chain.
-func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.ProofSystemBatch, bundle []types.Transaction, target post.Target, held []*Held) {
+func (c *Composer) send(kind emitKind, cursor uint64, terminal *types.Header, batch *protocol.ProofSystemBatch, bundle []types.Transaction, target post.Target, held []*Held) {
 	to, hash := terminal.Number.Uint64(), bundle[0].Hash()
 	judged := *batch
 	judged.CallData, judged.Proofs = nil, nil
@@ -431,13 +461,13 @@ func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.P
 		case err != nil:
 			// A bundle the builder refused may be refused for what it holds.
 			c.ledger.Report(to, hash, watch, Failed, !errors.Is(err, post.ErrBundleRefused))
-			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
+			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.bundle.observe_failed", "to", to, "post", hash, "err", err)
 			return
 		default:
-			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
-				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(held))
+			c.logger.Info("[eez] batch posted", "event", dispatched[kind], "from", cursor+1, "to", to, "post", hash,
+				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(bundle)-1)
 		}
-		c.observe(to, hash, watch, batch, terminal, sent)
+		c.observe(to, hash, watch, batch, terminal, sent, false)
 	})
 }
 
@@ -456,14 +486,23 @@ func (c *Composer) anchor(ctx context.Context, first *types.Block) (*types.Heade
 }
 
 // observe records the verdict of watch, a watch of hash, the posting of
-// batch, sent as sent, whose terminal block is terminal.
-func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent) {
+// batch, sent as sent, whose terminal block is terminal. A failure is not
+// owed to the batch's transactions when free, or when the slot it was
+// pinned to went missed.
+func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *protocol.ProofSystemBatch, terminal *types.Header, sent post.Sent, free bool) {
 	verdict, err := c.observer.Watch(c.ctx, hash, batch, terminal.Hash(), sent)
 	if err != nil {
 		return
 	}
-	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && c.missed(sent))
-	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
+	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && (free || c.missed(sent)))
+	lvl := log.LvlInfo
+	switch verdict {
+	case SettledPartial:
+		lvl = log.LvlWarn
+	case Failed:
+		lvl = log.LvlError
+	}
+	c.logger.Log(lvl, "[eez] batch verdict", "event", "eez.composer.bundle.observed", "to", to, "post", hash, "verdict", verdict)
 }
 
 // block returns block n, failing when it is not canonical: the follower may
@@ -533,18 +572,17 @@ func plain(in []hexutil.Bytes) [][]byte {
 func (c *Composer) RecoverFailed(ctx context.Context) {
 	c.settle(ctx)
 	if p, ok := c.ledger.TakeFailed(c.last); ok {
-		c.logger.Warn("[eez] batch failed on L1, the next Sync slot posts again", "event", "eez.composer.batch.failed",
-			"to", p.Height, "post", p.Post, "txs", len(p.Txs))
-		if len(p.Txs) > 0 {
+		if len(p.Txs) == 0 {
+			c.logger.Warn("[eez] batch failed on L1, the next Sync slot posts again", "event", "eez.composer.batch.failed",
+				"to", p.Height, "post", p.Post)
+		} else {
+			c.logger.Warn("[eez] batch failed on L1, its Sync block is replaced", "event", "eez.composer.recovery.rolled_back",
+				"to", p.Height, "post", p.Post, "txs", len(p.Txs))
 			c.recoverHeld(ctx, p)
 		}
 	}
 	for _, p := range c.ledger.TakeFinalized(c.finalized()) {
-		// Derivation passing a posting that never landed confirms the height,
-		// not the posting.
-		if p.Landed {
-			c.wg.Go(func() { c.audit(p) })
-		}
+		c.wg.Go(func() { c.audit(p) })
 	}
 }
 
@@ -556,7 +594,7 @@ const maxAttempts = 3
 // go, the rest go back to the front of the pool.
 func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	// An outbound transaction lands in the Sync block replaced.
-	landed, err := c.landed(ctx, bundled(p.Txs))
+	landed, _, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		c.ledger.ReinsertFailed(p)
 		return
@@ -568,7 +606,10 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 		// batch is disposed of by what ran.
 		c.ledger.ReinsertFailed(p)
 		return
-	case err != nil && !errors.Is(err, follower.ErrNotCanonical) && !errors.Is(err, follower.ErrStaleParent):
+	case err != nil && !errors.Is(err, follower.ErrNotCanonical):
+		// Derivation moving the head between the rollback and the sibling
+		// (ErrStaleParent) may have settled the block after all: the next
+		// trigger finds it below safe, or replaced.
 		c.ledger.ReinsertFailed(p)
 		return
 	}
@@ -580,15 +621,44 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 		}
 		keep = append(keep, tx)
 	}
+	c.burned(spent)
 	c.pool.Release(spent)
-	if !p.SlotSkipped {
+	switch {
+	case p.Culprit != nil && landed[p.Culprit.Hash]:
+		// The refused trigger ran on L1 anyway: its nonce is spent, the
+		// rest of its chain stands.
+	case p.Culprit != nil:
+		keep = c.eject(keep, p.Culprit)
+	case !p.SlotSkipped:
 		keep = c.charge(c.pool, keep)
 	}
 	c.pool.PushFront(keep)
 }
 
-// charge counts a failed attempt against each of charged, by default all
-// of txs, and returns those of txs left: one at maxAttempts is evicted from
+// eject evicts culprit, the transaction the provers refused a batch for,
+// and the rest of its nonce chain, among txs, the batch's recovered
+// transactions, and in the pool. The others of txs are returned uncharged:
+// the refusal is not theirs.
+func (c *Composer) eject(txs []*Held, culprit *Held) []*Held {
+	in := func(tx *Held) bool { return tx.chainKey() == culprit.chainKey() && tx.Nonce >= culprit.Nonce }
+	rest := slices.DeleteFunc(slices.Clone(txs), in)
+	c.logger.Error("[eez] held transaction evicted: the provers refused its batch for it", "event", "eez.composer.prover.poison_ejected",
+		"hash", culprit.Hash, "sender", culprit.Sender, "direction", culprit.Direction, "nonce", culprit.Nonce, "retrying", len(rest))
+	for _, tx := range txs {
+		if tx != culprit && in(tx) {
+			c.logger.Error("[eez] held transaction evicted behind a refused one", "event", "eez.composer.prover.poison_in_flight_evicted",
+				"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce, "gapAt", culprit.Nonce)
+		}
+	}
+	for _, tx := range c.pool.Evict(culprit.Sender, culprit.Direction, culprit.Nonce) {
+		c.logger.Error("[eez] queued transaction evicted behind a refused one", "event", "eez.composer.prover.poison_queued_evicted",
+			"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce, "gapAt", culprit.Nonce)
+	}
+	return rest
+}
+
+// charge counts a failed attempt against each of charged, by default all of
+// txs, and returns those of txs left: one at maxAttempts is evicted from
 // pool with the rest of its nonce chain.
 func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held {
 	type root struct {
@@ -616,18 +686,23 @@ func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held
 	}
 	for _, r := range roots {
 		evicted := pool.Evict(r.sender, r.direction, r.nonce)
-		c.logger.Error("[eez] held transaction evicted after failed bundles", "event", "eez.composer.recovery.evicted",
-			"sender", r.sender, "direction", r.direction, "nonce", r.nonce, "queued", len(evicted))
+		c.logger.Error("[eez] held transaction evicted after failed bundles", "event", "eez.composer.recovery.poison_evicted",
+			"sender", r.sender, "direction", r.direction, "nonce", r.nonce)
+		if len(evicted) > 0 {
+			c.logger.Error("[eez] held transactions evicted behind it", "event", "eez.composer.recovery.nonce_chain_evicted",
+				"sender", r.sender, "direction", r.direction, "nonce", r.nonce, "queued", len(evicted))
+		}
 	}
 	return keep
 }
 
 // settle applies derivation's cursor to the ledger and returns it. A
 // settlement whose posting left L1, rolled out by an L1 reorg that moved the
-// cursor back or dropped before derivation saw it, is watched again: back
-// in the node's pool, the posting may land again on the nonce the next
-// posting would take. One derivation has yet to see fails once L1 includes
-// its posting again without the settlement.
+// cursor back or dropped before derivation saw it, is watched again with
+// its transactions reserved: back in the node's pool, the posting may land
+// again on the nonce the next posting would take; if it does not, recovery
+// requeues them uncharged. One derivation has yet to see fails, uncharged,
+// once L1 includes its posting again without the settlement.
 func (c *Composer) settle(ctx context.Context) uint64 {
 	cursor := c.cursor()
 	if cursor < c.last {
@@ -636,6 +711,7 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		}
 	}
 	c.last = cursor
+	c.attribute(cursor)
 	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
 	defer cancel()
 	for _, p := range c.ledger.SettledAbove(cursor) {
@@ -656,10 +732,6 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		p, ok := c.ledger.PartialToDispose(cursor)
 		if !ok {
 			break
-		}
-		if len(p.Txs) == 0 {
-			c.ledger.ClaimPartial(p.Height, p.Post, nil)
-			continue
 		}
 		if !c.disposePartial(ctx, p) {
 			break
@@ -683,7 +755,7 @@ func (c *Composer) rewatch(p Posted[*Held]) {
 	c.logger.Warn("[eez] settled batch's posting left L1, watching it again", "event", "eez.composer.batch.rolled_out", "to", p.Height, "post", p.Post)
 	c.wg.Go(func() {
 		if from, ok := c.head(); ok {
-			c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Block: from, Pooled: true})
+			c.observe(p.Height, p.Post, watch, p.Batch, p.Terminal, post.Sent{Block: from, Pooled: true}, true)
 		}
 	})
 }
@@ -706,6 +778,117 @@ func (c *Composer) head() (uint64, bool) {
 	}
 }
 
+// attribute logs the poster of each settlement derivation passed up to
+// cursor since the last call: this composer, by the posting its ledger
+// recorded or, for one posted before a restart, by its address; else
+// another poster, an error unless ExpectExternal. A settlement an L1 reorg
+// replaced is attributed again with those after it, whether or not the
+// cursor was seen to move back. Settlements before the first call are not
+// attributed.
+func (c *Composer) attribute(cursor uint64) {
+	if c.settlement == nil {
+		return
+	}
+	if !c.attributing {
+		c.attributing, c.attributedTo = true, cursor
+		return
+	}
+	n := c.unreplaced(cursor) + 1
+	// A settlement derivation has yet to pass whole waits for a later call.
+	for n <= cursor {
+		r, ok := c.settlement(n)
+		if !ok {
+			// Derivation prunes final settlements: attribution resumes at
+			// the first it keeps.
+			m := n + 1
+			for ; m <= cursor; m++ {
+				if _, ok := c.settlement(m); ok {
+					break
+				}
+			}
+			if m > cursor {
+				break
+			}
+			n = m
+			continue
+		}
+		if r.LastL2Block > cursor {
+			break
+		}
+		n = r.LastL2Block + 1
+		c.attributed = append(c.attributed, r)
+		if c.ledger.Posts(r.LastL2Block, r.TxHash) {
+			c.confirmed(r)
+			continue
+		}
+		c.wg.Go(func() { c.attributeAfar(r) })
+	}
+}
+
+// unreplaced drops from attributed the settlements L1 finalized and those
+// derivation no longer holds as attributed, and returns the block
+// attribution resumes after. A reorg replaces the latest settlements: the
+// last one held as attributed, so are those before it. Finality, not a
+// settlement missing below the cursor, marks one final: derivation drops
+// those a reorg retreats from before it moves the cursor back.
+func (c *Composer) unreplaced(cursor uint64) uint64 {
+	finalized := c.finalized()
+	for len(c.attributed) > 0 && c.attributed[0].LastL2Block <= finalized {
+		c.attributedTo, c.attributed = c.attributed[0].LastL2Block, c.attributed[1:]
+	}
+	for len(c.attributed) > 0 {
+		r := c.attributed[len(c.attributed)-1]
+		if now, ok := c.settlement(r.LastL2Block); ok && now == r && r.LastL2Block <= cursor {
+			return r.LastL2Block
+		}
+		c.attributed = c.attributed[:len(c.attributed)-1]
+	}
+	c.attributedTo = min(c.attributedTo, cursor)
+	return c.attributedTo
+}
+
+// attributeAfar attributes r, a settlement the ledger did not post, by the
+// sender of its posting.
+func (c *Composer) attributeAfar(r deriver.Record) {
+	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
+	defer cancel()
+	receipt, err := c.observer.Node.Receipt(ctx, r.TxHash)
+	switch {
+	case err != nil || receipt == nil:
+		c.logger.Warn("[eez] settlement's poster unknown", "event", "eez.composer.batch.unattributed", "to", r.LastL2Block, "post", r.TxHash, "err", err)
+	case receipt.From == c.cfg.Poster:
+		c.confirmed(r)
+	case c.cfg.ExpectExternal:
+		c.logger.Info("[eez] another poster settled the chain", "event", "eez.composer.batch.external",
+			"to", r.LastL2Block, "post", r.TxHash, "poster", receipt.From, "l1Block", r.L1Block)
+	default:
+		c.logger.Error("[eez] another poster settled the chain, which no composer expects", "event", "eez.composer.batch.external.unexpected",
+			"to", r.LastL2Block, "post", r.TxHash, "poster", receipt.From, "l1Block", r.L1Block)
+	}
+}
+
+func (c *Composer) confirmed(r deriver.Record) {
+	c.logger.Info("[eez] settlement confirmed", "event", "eez.composer.batch.confirmed", "to", r.LastL2Block, "post", r.TxHash, "l1Block", r.L1Block)
+}
+
+// superseded reports whether another posting than p's settled its height.
+func (c *Composer) superseded(p Posted[*Held]) bool {
+	if c.settlement == nil {
+		return false
+	}
+	r, ok := c.settlement(p.Height)
+	return ok && r.TxHash != p.Post
+}
+
+// burned logs txs, whose nonces a failed or partial batch spent: they do
+// not return to the pool, and one that reverted must be sent again.
+func (c *Composer) burned(txs []*Held) {
+	for _, tx := range txs {
+		c.logger.Warn("[eez] held transaction's nonce spent, not requeued", "event", "eez.composer.recovery.nonce_burned",
+			"hash", tx.Hash, "sender", tx.Sender, "direction", tx.Direction, "nonce", tx.Nonce)
+	}
+}
+
 // release ends the reservations of txs, which a batch settled.
 func (c *Composer) release(txs []*Held) {
 	if c.pool != nil && len(txs) > 0 {
@@ -713,47 +896,112 @@ func (c *Composer) release(txs []*Held) {
 	}
 }
 
-// audit checks that the posting of a finalized settlement is on L1: one
-// missing means a reorg the follower did not see.
+// audit settles the transactions of p, a batch whose height L1 finalized.
+// A posting of the composer's that landed and is no longer on L1, which no
+// other settlement superseded, is a reorg the follower did not see: all of
+// p returns to the pool for the next drain to revalidate, as it does when L1
+// or the chain cannot be read. Otherwise the final chain decides, whichever
+// posting settled the height and whatever a reorg made of the settlement
+// since it was confirmed: what the block at its height holds, and the
+// triggers L1 has, ran and are final; the rest returns to the pool.
 func (c *Composer) audit(p Posted[*Held]) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
 	defer cancel()
-	r, err := c.observer.Node.Receipt(ctx, p.Post)
-	switch {
-	case err != nil:
-		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)
-	case r == nil:
-		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post)
+	requeue := func(event, msg string, args ...any) {
+		c.logger.Error(msg, append([]any{"event", event, "to", p.Height, "post", p.Post, "held", len(p.Txs)}, args...)...)
+		if c.pool != nil {
+			c.pool.Requeue(p.Txs)
+		}
 	}
+	if p.Landed {
+		r, err := c.observer.Node.Receipt(ctx, p.Post)
+		switch {
+		case err != nil:
+			requeue("eez.composer.finality_audit.check_failed", "[eez] finality audit failed, its transactions are requeued", "err", err)
+			return
+		case r == nil && !p.Superseded && !c.superseded(p):
+			requeue("eez.composer.finality_audit.rolled_out", "[eez] finalized settlement's posting is not on L1")
+			return
+		}
+	}
+	if c.pool == nil || len(p.Txs) == 0 {
+		return
+	}
+	spent, _, err := c.ranAt(ctx, p.Txs, p.Height)
+	if err != nil {
+		requeue("eez.composer.finality_audit.check_failed", "[eez] finality audit failed, its transactions are requeued", "err", err)
+		return
+	}
+	var ran, rest []*Held
+	for _, tx := range p.Txs {
+		if spent[tx.Hash] {
+			ran = append(ran, tx)
+		} else {
+			rest = append(rest, tx)
+		}
+	}
+	if len(rest) > 0 {
+		c.logger.Warn("[eez] finalized height left transactions out, requeued", "event", "eez.composer.finality_audit.requeued",
+			"to", p.Height, "post", p.Post, "requeued", len(rest))
+		c.pool.Requeue(rest)
+	}
+	c.pool.Forget(ran)
+}
+
+// ranAt reports which of txs ran in the batch settled at height: the
+// outbound ones the block derivation rebuilt there holds, the triggers L1
+// has a receipt of; and whether one of those triggers reverted.
+func (c *Composer) ranAt(ctx context.Context, txs []*Held, height uint64) (map[common.Hash]bool, bool, error) {
+	spent, reverted, err := c.landed(ctx, bundled(txs))
+	if err != nil {
+		return nil, false, err
+	}
+	if slices.ContainsFunc(txs, func(tx *Held) bool { return tx.Direction == Outbound }) {
+		b, err := c.block(ctx, height)
+		if err != nil {
+			return nil, false, err
+		}
+		rebuilt := make(map[common.Hash]bool, len(b.Transactions()))
+		for _, t := range b.Transactions() {
+			rebuilt[t.Hash()] = true
+		}
+		for _, tx := range txs {
+			if tx.Direction == Outbound {
+				spent[tx.Hash] = rebuilt[tx.Hash]
+			}
+		}
+	}
+	return spent, reverted, nil
 }
 
 // receiptReads bounds the receipt reads a recovery runs at once.
 const receiptReads = 16
 
-// landed reports which of txs have an L1 receipt, read receiptReads at a
-// time, all within one L1Read: the sequencer waits on L1 for one L1Read at
-// most, and a node answering each read in time is not held to all of them.
-func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]bool, error) {
+// landed reports which of txs have an L1 receipt, and whether one of those
+// reverted, read receiptReads at a time, all within one L1Read: the
+// sequencer waits on L1 for one L1Read at most, and a node answering each
+// read in time is not held to all of them.
+func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]bool, bool, error) {
 	rctx, cancel := context.WithTimeout(ctx, c.cfg.L1Read)
 	defer cancel()
 	g, gctx := errgroup.WithContext(rctx)
 	g.SetLimit(receiptReads)
-	has := make([]bool, len(txs))
+	has, failed := make([]bool, len(txs)), make([]bool, len(txs))
 	for i, tx := range txs {
 		g.Go(func() error {
 			r, err := c.observer.Node.Receipt(gctx, tx.Hash)
-			has[i] = r != nil
+			has[i], failed[i] = r != nil, r != nil && r.Status != 1
 			return err
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make(map[common.Hash]bool, len(txs))
 	for i, tx := range txs {
 		out[tx.Hash] = has[i]
 	}
-	return out, nil
+	return out, slices.Contains(failed, true), nil
 }
 
 // bundled returns the transactions of txs a bundle carries to L1: an
@@ -766,6 +1014,15 @@ func bundled(txs []*Held) []*Held {
 		}
 	}
 	return out
+}
+
+// settledBy returns derivation's settlement record covering block n, if it
+// holds one.
+func (c *Composer) settledBy(n uint64) (deriver.Record, bool) {
+	if c.settlement == nil {
+		return deriver.Record{}, false
+	}
+	return c.settlement(n)
 }
 
 // partialCulprit returns the transaction where L1 stopped a partial batch of
@@ -792,27 +1049,19 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // disposePartial disposes of p, a batch L1 kept part of, by what ran: the
 // outbound transactions in the block derivation rebuilt at its height and
 // the triggers L1 has are spent and let go, kept with p for a later reorg;
-// the rest return to the pool, the one where L1 stopped charged. False
-// leaves p for the next call, a read having failed.
+// the rest return to the pool, the one where L1 stopped charged when the
+// composer's own posting settled the batch: another posting, or a
+// settlement record derivation no longer holds, names no culprit. A batch
+// the provers refused was never posted: its culprit, unless it ran, is
+// ejected instead, and no other is charged. A batch its own posting settled
+// whole, derivation passing it before its verdict, is only released. False
+// leaves p for the next call, a read having failed or derivation having
+// replaced or rolled out the settlement during the reads.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
-	spent, err := c.landed(ctx, bundled(p.Txs))
+	settler, derived := c.settledBy(p.Height)
+	spent, reverted, err := c.ranAt(ctx, p.Txs, p.Height)
 	if err != nil {
 		return false
-	}
-	if slices.ContainsFunc(p.Txs, func(tx *Held) bool { return tx.Direction == Outbound }) {
-		b, err := c.block(ctx, p.Height)
-		if err != nil {
-			return false
-		}
-		rebuilt := make(map[common.Hash]bool, len(b.Transactions()))
-		for _, t := range b.Transactions() {
-			rebuilt[t.Hash()] = true
-		}
-		for _, tx := range p.Txs {
-			if tx.Direction == Outbound {
-				spent[tx.Hash] = rebuilt[tx.Hash]
-			}
-		}
 	}
 	var ran, rest []*Held
 	for _, tx := range p.Txs {
@@ -822,18 +1071,35 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 			rest = append(rest, tx)
 		}
 	}
+	if now, ok := c.settledBy(p.Height); c.cursor() < p.Height || ok != derived || now != settler {
+		return false
+	}
+	own := derived && settler.TxHash == p.Post
 	// A reorg during the reads may have taken the batch and requeued it.
-	if !c.ledger.ClaimPartial(p.Height, p.Post, ran) {
+	if !c.ledger.ClaimPartial(p.Height, p.Post, ran, derived && !own) {
 		return true
 	}
-	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
+	if own && len(rest) == 0 && !reverted {
+		// Derivation passed the batch before its verdict: it settled whole.
+		c.release(ran)
+		return true
+	}
+	var culprit *Held
+	if p.Culprit == nil && own {
+		culprit = partialCulprit(p.Txs, spent)
+	}
+	charged := common.Hash{}
 	if culprit != nil {
 		charged = culprit.Hash
 	}
 	c.logger.Info("[eez] partial settlement disposed of", "event", "eez.composer.recovery.settled_partial",
 		"to", p.Height, "post", p.Post, "txs", len(p.Txs), "spent", len(ran), "charged", charged)
+	c.burned(ran)
 	c.release(ran)
-	if culprit != nil {
+	switch {
+	case p.Culprit != nil && !spent[p.Culprit.Hash]:
+		rest = c.eject(rest, p.Culprit)
+	case culprit != nil:
 		rest = c.charge(c.pool, rest, culprit)
 	}
 	if len(rest) > 0 {

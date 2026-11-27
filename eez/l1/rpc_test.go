@@ -301,7 +301,7 @@ func (p *posting) GetTransactionReceipt(_ context.Context, hash common.Hash) (ma
 		return nil, nil
 	}
 	return map[string]any{
-		"status": "0x1", "blockNumber": "0x11", "transactionIndex": "0x2", "transactionHash": hash,
+		"status": "0x1", "blockNumber": "0x11", "transactionIndex": "0x2", "transactionHash": hash, "from": poster,
 		"logs": []map[string]any{{
 			"address": poster, "topics": []common.Hash{{5}}, "data": "0x0102", "blockNumber": "0x11",
 			"transactionHash": hash, "transactionIndex": "0x2", "blockHash": common.Hash{6}, "logIndex": "0x7", "removed": false,
@@ -362,7 +362,7 @@ func TestRPCPosting(t *testing.T) {
 
 	receipt, err := r.Receipt(ctx, common.Hash{4})
 	require.NoError(t, err)
-	require.Equal(t, &l1.Receipt{Status: 1, BlockNumber: 0x11, TxIndex: 2, Logs: []*types.Log{{
+	require.Equal(t, &l1.Receipt{Status: 1, BlockNumber: 0x11, TxIndex: 2, From: poster, Logs: []*types.Log{{
 		Address: poster, Topics: []common.Hash{{5}}, Data: []byte{1, 2}, BlockNumber: 0x11,
 		TxHash: common.Hash{4}, TxIndex: 2, BlockHash: common.Hash{6}, Index: 7,
 	}}}, receipt)

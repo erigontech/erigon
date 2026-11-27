@@ -255,6 +255,7 @@ func TestNewHeadSigner(t *testing.T) {
 func TestStopHooksRegisterTogether(t *testing.T) {
 	stack, err := node.New(t.Context(), &nodecfg.Config{}, log.New())
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = stack.Close() })
 	var stopped []int
 	hooks := []node.Lifecycle{&onStop{func() { stopped = append(stopped, 1) }}, &onStop{func() { stopped = append(stopped, 2) }}}
 	for _, h := range hooks {

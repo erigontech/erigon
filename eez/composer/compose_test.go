@@ -25,6 +25,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -260,7 +261,7 @@ var (
 
 // registerL1Proxy deploys and registers on L1 the proxy of a, a rollup
 // account: EEZL2's code, the manager's here, refuses to create it.
-func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) {
+func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) common.Address {
 	t.Helper()
 	header := &types.Header{Number: *uint256.NewInt(100), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
 	src := NewSource(chain.TestChainOsakaConfig, header, f.l1.m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, protocol.EEZL2Address, 0)
@@ -270,6 +271,7 @@ func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) {
 	require.NoError(t, err)
 	f.l1.m.deploy(p, f.l1.m.code[senderProxy])
 	f.l1.m.set(protocol.EEZL2Address, protocol.ProxyKey(p), proxyWord(a, 1))
+	return p
 }
 
 // holdOut holds a rollup transaction of l2Key's, of nonce, calling to.
@@ -537,7 +539,7 @@ func TestComposeWaitsForALighterWindow(t *testing.T) {
 	heavy := func(t *testing.T, f *crossFixture) (chain *testChain, window, alone uint64) {
 		chain = newTestChain(t, 8, 1, 2, 3, 4, 5, 6, 7, 8)
 		f.c.chain = chain
-		f.c.cfg.Batcher = &Batcher{RollupID: 1, ProofSystem: f.c.cfg.Batcher.ProofSystem, Signer: testSigner}
+		f.c.cfg.Batcher = &Batcher{RollupID: 1, ProofSystems: f.c.cfg.Batcher.ProofSystems, Signer: testSigner}
 		sync := types.CopyHeader(f.w.sync.Header())
 		sync.ParentHash = chain.blocks[8].Hash()
 		f.c.x.Header = func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
@@ -883,8 +885,9 @@ func TestComposedSyncBlockWithoutAWitness(t *testing.T) {
 	require.True(t, p.SlotSkipped)
 }
 
-// TestComposedSyncBlockFailureCharges: a composition the prover refuses
-// fails charged; one it cannot reach fails uncharged.
+// TestComposedSyncBlockFailureCharges: a composition the prover refuses,
+// or cannot prove within its retries, fails charged; one whose proof the
+// node stops or whose attestation the node cannot check fails uncharged.
 func TestComposedSyncBlockFailureCharges(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -902,8 +905,12 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		{name: "a refused proof", err: status.Error(codes.InvalidArgument, "window refused")},
 		{name: "a batch the batcher refuses", rollup: 2},
 		{name: "a posting over its gas", maxGas: 900_000},
-		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down"), skipped: true},
+		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down")},
+		{name: "a proof past its deadline", err: status.Error(codes.DeadlineExceeded, "too late")},
+		{name: "a proof too late to start", err: prove.ErrTooLate, skipped: true},
 		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
+		{name: "an UNKNOWN the prover sent", err: &prove.SentError{Status: status.New(codes.Unknown, "prover failed")}},
+		{name: "a CANCELLED the prover sent", err: &prove.SentError{Status: status.New(codes.Canceled, "prover stopping")}},
 		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
 		{name: "an anchor header unread", unread: true, skipped: true},
 		{name: "a witness that does not execute", witnesses: emptyWitness{}, skipped: true},
@@ -941,6 +948,209 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 		})
 	}
 }
+
+// TestComposedSyncBlockRefusedForOne: a refusal naming one effect fails the
+// batch on that held transaction once the name matches the request: an
+// outbound transaction by its index and hash in the Sync block, an inbound
+// one by its batch entry's. Any other name, or a member's the quorum does
+// not agree on, fails it on all.
+func TestComposedSyncBlockRefusedForOne(t *testing.T) {
+	f := newCrossFixture(t)
+	entryHash := func(i int) common.Hash {
+		h, err := protocol.ExecutionEntryHash(&f.w.batch.Entries[i])
+		require.NoError(t, err)
+		return h
+	}
+	refused := func(r prove.Refused) error {
+		return &prove.RefusedError{Refused: r, Status: status.New(codes.FailedPrecondition, "effect refused")}
+	}
+	load := f.w.sync.Transactions()[0].Hash()
+	for _, c := range []struct {
+		name string
+		err  func(first, second, trigger *Held) error
+		want func(first, second, trigger *Held) *Held
+		// event is logged for a name that does not match the request.
+		event string
+	}{
+		{
+			name: "an outbound transaction",
+			err: func(first, _, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 1, Hash: first.Hash})
+			},
+			want: func(first, _, _ *Held) *Held { return first },
+		},
+		{
+			name: "a later outbound transaction",
+			err: func(_, second, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 3, Hash: second.Hash})
+			},
+			want: func(_, second, _ *Held) *Held { return second },
+		},
+		{
+			name: "an inbound transaction",
+			err:  func(_, _, _ *Held) error { return refused(prove.Refused{Index: 3, Hash: entryHash(3)}) },
+			want: func(_, _, trigger *Held) *Held { return trigger },
+		},
+		{
+			name: "a quorum's refusal",
+			err: func(first, _, _ *Held) error {
+				return &prove.QuorumError{Threshold: 2, Usable: 2, Refused: &prove.Refused{Outbound: true, Index: 1, Hash: first.Hash}}
+			},
+			want: func(first, _, _ *Held) *Held { return first },
+		},
+		{
+			name: "a member's refusal the quorum does not agree on",
+			err: func(first, _, _ *Held) error {
+				return &prove.QuorumError{Threshold: 2, Usable: 3, Failures: []prove.MemberFailure{
+					{ProofSystem: common.Address{1}, Err: refused(prove.Refused{Outbound: true, Index: 1, Hash: first.Hash})},
+					{ProofSystem: common.Address{2}, Err: status.Error(codes.InvalidArgument, "window refused")},
+				}}
+			},
+		},
+		{
+			name: "a hash not at the index", event: "actionable_invalid",
+			err: func(_, second, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 1, Hash: second.Hash})
+			},
+		},
+		{
+			name: "an index past the block", event: "actionable_invalid",
+			err: func(first, _, _ *Held) error {
+				return refused(prove.Refused{Outbound: true, Index: 9, Hash: first.Hash})
+			},
+		},
+		{
+			name: "a load transaction", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Outbound: true, Index: 0, Hash: load}) },
+		},
+		{
+			name: "an outbound entry", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 1, Hash: entryHash(1)}) },
+		},
+		{
+			name: "the anchor entry", event: "actionable_unresolved",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 0, Hash: entryHash(0)}) },
+		},
+		{
+			name: "an entry hash not at the index", event: "actionable_invalid",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 3, Hash: entryHash(2)}) },
+		},
+		{
+			name: "an entry past the batch", event: "actionable_invalid",
+			err: func(_, _, _ *Held) error { return refused(prove.Refused{Index: 4, Hash: entryHash(3)}) },
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newCrossFixture(t)
+			trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+			first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
+			comp, prover, _, chain := f.poster(t, nil)
+			lines := captureLogs(comp)
+			prover.err = c.err(first, second, trigger)
+			composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+			require.Len(t, composed.Txs, 5)
+			sync := f.sealed(t, composed.Txs)
+			chain[sync.NumberU64()] = sync
+			comp.SyncCommitted(t.Context(), sync.Header())
+			p, ok := comp.ledger.TakeFailed(0)
+			require.True(t, ok)
+			require.False(t, p.SlotSkipped)
+			var want *Held
+			if c.want != nil {
+				want = c.want(first, second, trigger)
+			}
+			require.Equal(t, want, p.Culprit)
+			if c.event != "" {
+				require.Regexp(t, `EROR.*event=eez.composer.prover.`+c.event, lines.String())
+			} else {
+				require.NotContains(t, lines.String(), "eez.composer.prover.actionable")
+			}
+		})
+	}
+}
+
+// TestEffectsCulprit: a refused inbound entry resolves to the held
+// transaction its delivery was made for, however many deliveries each made.
+func TestEffectsCulprit(t *testing.T) {
+	out, first, second := held(addr(0xa), 0, Outbound, 1), held(addr(0xb), 0, Inbound, 2), held(addr(0xc), 0, Inbound, 3)
+	fx := &effects{held: []*Held{out, first, second}, outbound: make([]protocol.ExecutionEntry, 1), owners: []*Held{first, first, second}}
+	batch := &protocol.ProofSystemBatch{}
+	for i := range 5 {
+		batch.Entries = append(batch.Entries, protocol.ExecutionEntry{
+			RollupUpdates: []protocol.RollupUpdate{}, L2ToL1Calls: []protocol.CrossChainCall{}, ExpectedL1ToL2Calls: []protocol.ExpectedCall{},
+			DestinationRollupID: 1, ReturnData: []byte{byte(i)},
+		})
+	}
+	hash := func(i int) common.Hash {
+		h, err := protocol.ExecutionEntryHash(&batch.Entries[i])
+		require.NoError(t, err)
+		return h
+	}
+	for _, c := range []struct {
+		index uint32
+		hash  common.Hash
+		want  *Held
+		err   error
+	}{
+		{index: 2, hash: hash(2), want: first},
+		{index: 3, hash: hash(3), want: first},
+		{index: 4, hash: hash(4), want: second},
+		{index: 1, hash: hash(1), err: errUnresolved},
+		{index: 0, hash: hash(0), err: errUnresolved},
+		{index: 3, hash: hash(4)},
+		{index: 5, hash: hash(4)},
+	} {
+		got, err := fx.culprit(prove.Refused{Index: c.index, Hash: c.hash}, nil, batch)
+		switch {
+		case c.want != nil:
+			require.NoError(t, err, "entry %d", c.index)
+			require.Same(t, c.want, got, "entry %d", c.index)
+		case c.err != nil:
+			require.ErrorIs(t, err, c.err, "entry %d", c.index)
+		default:
+			require.Error(t, err, "entry %d", c.index)
+			require.NotErrorIs(t, err, errUnresolved, "entry %d", c.index)
+		}
+	}
+}
+
+// TestComposedEntriesNameTheirTrigger: a trigger making two deliveries owns
+// both of their entries in the batch, the next trigger the entry after
+// them; each resolves by its index and hash.
+func TestComposedEntriesNameTheirTrigger(t *testing.T) {
+	f := newCrossFixture(t)
+	f.l2.deploy(l2Sink, []byte{0x60, 0x20, 0x5f, 0xf3})
+	sink := f.registerL1Proxy(t, l2Sink)
+	// The recorded source, given calldata, forwards it as recorded and then
+	// calls the sink; given none, it calls the sink alone.
+	forwarded := slices.Concat([]byte{0x36, 0x5f, 0x5f, 0x37, 0x60, 0x20, 0x5f, 0x36, 0x5f, 0x34}, push20(crossProxy), []byte{0x5a, 0xf1, 0x50})
+	skip := byte(5 + len(forwarded))
+	f.l1.m.deploy(f.call.Source, slices.Concat([]byte{0x36, 0x15, 0x60, skip, 0x57}, forwarded, []byte{0x5b}, callTo(sink), []byte{0x60, 0x20, 0x5f, 0xf3}))
+	first := f.hold(t, 0, f.call.Source, f.call.Data)
+	second := f.hold(t, 1, f.call.Source, nil)
+	lines := captureLogs(f.c)
+	fx := f.compose(t)
+	require.NotNil(t, fx, lines.String())
+	owners := []*Held{first, first, second}
+	require.Len(t, fx.deliveries, len(owners), lines.String())
+	require.Equal(t, owners, fx.owners)
+	batch := &protocol.ProofSystemBatch{Entries: []protocol.ExecutionEntry{{ReturnData: []byte{}}}}
+	batch.Entries = append(batch.Entries, fx.outbound...)
+	for _, d := range fx.deliveries {
+		batch.Entries = append(batch.Entries, inboundEntry(d.Sidecar))
+	}
+	for i, want := range owners {
+		index := 1 + len(fx.outbound) + i
+		h, err := protocol.ExecutionEntryHash(&batch.Entries[index])
+		require.NoError(t, err)
+		got, err := fx.culprit(prove.Refused{Index: uint32(index), Hash: h}, nil, batch)
+		require.NoError(t, err, "entry %d", index)
+		require.Same(t, want, got, "entry %d", index)
+	}
+}
+
+// l2Sink returns a zero word to any call.
+var l2Sink = common.HexToAddress("0xb000000000000000000000000000000000000004")
 
 // holdOutbound holds the window's recorded outbound transaction i.
 func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
@@ -1000,6 +1210,7 @@ func TestComposedWindowPosts(t *testing.T) {
 	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
 	first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
 	c, prover, poster, chain := f.poster(t, nil)
+	lines := captureLogs(c)
 	composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
 	require.Len(t, composed.Txs, 5)
 	sync := f.sealed(t, composed.Txs)
@@ -1026,6 +1237,9 @@ func TestComposedWindowPosts(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return len(bundles()) == 1 }, 5*time.Second, time.Millisecond)
 	require.Equal(t, []common.Hash{poster.txs[0].Hash(), trigger.Hash}, bundles()[0])
+	dispatched := regexp.MustCompile(`event=eez.composer.bundle.dispatched .*triggers=(\d+)`)
+	require.Eventually(t, func() bool { return dispatched.MatchString(lines.String()) }, 5*time.Second, time.Millisecond)
+	require.Equal(t, "1", dispatched.FindStringSubmatch(lines.String())[1], "the outbound transactions are no triggers")
 	c.ledger.mu.Lock()
 	e := c.ledger.entries[sync.NumberU64()]
 	c.ledger.mu.Unlock()
@@ -1062,7 +1276,11 @@ func TestComposeOutboundRefuses(t *testing.T) {
 			f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
 			require.Nil(t, f.compose(t))
 			require.Contains(t, buf.String(), c.err)
-			require.Equal(t, 1, strings.Count(buf.String(), "eez.composer.poison"), "evicted once, with its chain")
+			event := "event=eez.composer.cc_compose.poison_eviction_completed"
+			if strings.HasPrefix(c.err, ErrMultiCall.Error()) {
+				event = "event=eez.composer.cc_compose.outbound_multicall_unsupported"
+			}
+			require.Equal(t, 1, strings.Count(buf.String(), event), "evicted once, with its chain")
 			require.Zero(t, f.pool.Len())
 			f.pool.mu.Lock()
 			defer f.pool.mu.Unlock()
@@ -1071,13 +1289,14 @@ func TestComposeOutboundRefuses(t *testing.T) {
 	}
 	t.Run("a spent nonce", func(t *testing.T) {
 		f := newCrossFixture(t)
-		f.holdOut(t, 0, outboundProxies[1], 0, nil)
+		stale := f.holdOut(t, 0, outboundProxies[1], 0, nil)
 		next := f.holdOut(t, 1, outboundProxies[1], 0, nil)
 		f.l2.accounts[crypto.PubkeyToAddress(f.l2Key.PublicKey)].Nonce = 1
 		fx := f.compose(t)
 		require.NotNil(t, fx)
 		require.Equal(t, []*Held{next}, fx.held)
 		require.Len(t, fx.txs, 2)
+		require.False(t, f.pool.Holds(stale.Hash), "never composed, it is let go")
 	})
 }
 
@@ -1716,4 +1935,18 @@ func TestComposeOutboundWaitsOnANonceGap(t *testing.T) {
 	require.Nil(t, f.compose(t))
 	require.Equal(t, uint32(1), h.Deferred)
 	require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt), "not evicted")
+}
+
+// TestComposeDrainEvent: each composition logs the pool it drained from
+// and what it took, at most MaxTxs.
+func TestComposeDrainEvent(t *testing.T) {
+	f := newCrossFixture(t)
+	for n := range uint64(3) {
+		f.hold(t, n, f.call.Source, f.call.Data)
+	}
+	f.c.x.MaxTxs = 2
+	lines := captureLogs(f.c)
+	f.compose(t)
+	require.Regexp(t, `event=eez.composer.sync_slot.drain .*pool=3 drained=2`, lines.String())
+	require.Equal(t, 1, f.pool.Len(), "the third waits")
 }

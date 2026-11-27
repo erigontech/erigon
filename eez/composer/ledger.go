@@ -71,6 +71,12 @@ type Posted[T any] struct {
 	SlotSkipped bool
 	// Landed reports a posting whose receipt showed it settling.
 	Landed bool
+	// Culprit, when set, is the one of Txs the provers refused the batch
+	// for.
+	Culprit T
+	// Superseded reports a batch another posting settled: no posting of it
+	// is looked for at finality.
+	Superseded bool
 }
 
 type entry[T any] struct {
@@ -162,6 +168,13 @@ func (l *Ledger[T]) find(height uint64, post common.Hash) *entry[T] {
 	return nil
 }
 
+// Posts reports whether post is the posting of the batch at height.
+func (l *Ledger[T]) Posts(height uint64, post common.Hash) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.find(height, post) != nil
+}
+
 // MarkSettled records that L1 settled post's batch.
 func (l *Ledger[T]) MarkSettled(height uint64, post common.Hash) {
 	l.mu.Lock()
@@ -218,7 +231,7 @@ func (e *entry[T]) mark(r Resolution, slotSkipped bool) {
 
 // PartialToDispose returns the lowest SettledPartial batch at or below
 // cursor, left in place until ClaimPartial: derivation has rebuilt its
-// block, whose nonces show which transactions ran.
+// block, which shows which transactions ran.
 func (l *Ledger[T]) PartialToDispose(cursor uint64) (Posted[T], bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -234,15 +247,18 @@ func (l *Ledger[T]) PartialToDispose(cursor uint64) (Posted[T], bool) {
 }
 
 // ClaimPartial settles post's partial batch, keeping spent, the
-// transactions that ran; false when a reorg or a rebuild took it first.
-func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T) bool {
+// transactions that ran, and whether another posting settled it; false
+// when a reorg or a rebuild took it first. The disposal dealt with its
+// culprit: a later roll-out recovers spent alone.
+func (l *Ledger[T]) ClaimPartial(height uint64, post common.Hash, spent []T, superseded bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	e := l.find(height, post)
 	if e == nil {
 		return false
 	}
-	e.Txs, e.resolution, e.confirmed = spent, Settled, true
+	var none T
+	e.Txs, e.Culprit, e.resolution, e.confirmed, e.Superseded = spent, none, Settled, true, superseded
 	return true
 }
 
@@ -274,25 +290,26 @@ func (l *Ledger[T]) SettledAbove(cursor uint64) []Posted[T] {
 }
 
 // Unsettle turns post's Settled batch, unconfirmed by derivation, to
-// Failed: L1 dropped the block that settled it.
+// Failed, not owing to its transactions: L1 includes its posting again
+// without the settlement.
 func (l *Ledger[T]) Unsettle(height uint64, post common.Hash) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && e.resolution == Settled && !e.confirmed {
-		e.resolution, e.Landed = Failed, false
+		e.resolution, e.Landed, e.SlotSkipped = Failed, false, true
 		return true
 	}
 	return false
 }
 
 // Repend turns post's Settled or SettledPartial batch back to Pending and
-// returns its new watch: L1 dropped the block that settled it, and the
-// posting may land again.
+// returns its new watch: L1 dropped the block that settled it, the posting
+// may land again, and what settled the height is unknown again.
 func (l *Ledger[T]) Repend(height uint64, post common.Hash) (uint64, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if e := l.find(height, post); e != nil && (e.resolution == Settled || e.resolution == SettledPartial) {
-		e.resolution, e.confirmed, e.Landed = Pending, false, false
+		e.resolution, e.confirmed, e.Landed, e.Superseded = Pending, false, false, false
 		l.watches++
 		e.watch = l.watches
 		return e.watch, true

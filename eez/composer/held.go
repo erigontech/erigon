@@ -66,6 +66,9 @@ type Held struct {
 	// sync is the committed Sync block that last held it, whose replacement
 	// returns it to the rollup's pool; zero for none.
 	sync uint64
+	// seq orders the copies of a hash by when the pool took them: the
+	// latest one owns the hash's hold.
+	seq uint64
 }
 
 // NonceError refuses a transaction whose nonce does not extend its sender's
@@ -105,6 +108,9 @@ type reservation struct {
 	slots int
 	cost  uint256.Int
 	sync  uint64
+	// owner is the transaction the reservation is for: a copy of it sent
+	// again after it left the pool has its own.
+	owner *Held
 }
 
 // tomb records an outbound transaction discarded after a committed Sync
@@ -158,6 +164,12 @@ type HeldPool struct {
 	// committed Sync block held them: a replaced Sync block may have returned
 	// them to the rollup's pool. Kept until Prune.
 	discarded map[common.Hash]tomb
+	// settled are the outbound transactions of settlements L1 has yet to
+	// finalize, which an L2 rewind may return to the rollup's pool, each
+	// with the copy whose settlement holds it.
+	settled map[common.Hash]*Held
+	// pushed counts the transactions taken, for Held.seq.
+	pushed uint64
 }
 
 // replaceBump is the percentage a replacement raises both fees by.
@@ -178,7 +190,7 @@ func minReplacement(fee *uint256.Int) uint256.Int {
 
 // NewHeldPool returns an empty pool.
 func NewHeldPool() *HeldPool {
-	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}, slots: maxHeldSlots, discarded: map[common.Hash]tomb{}}
+	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}, slots: maxHeldSlots, discarded: map[common.Hash]tomb{}, settled: map[common.Hash]*Held{}}
 }
 
 // Push admits tx, whose sender has nonce onChain on its network: the next
@@ -230,7 +242,7 @@ func (p *HeldPool) push(tx *Held, onChain uint64, balance *uint256.Int) error {
 		}
 		p.tomb(queued.Hash, k, queued.Nonce, queued.sync)
 		delete(p.byHash, queued.Hash)
-		p.byHash[tx.Hash] = true
+		p.admit(tx)
 		p.txs[i] = tx
 		return nil
 	}
@@ -247,9 +259,16 @@ func (p *HeldPool) push(tx *Held, onChain uint64, balance *uint256.Int) error {
 	if err := p.funds(k, onChain, common.Hash{}, tx, balance); err != nil {
 		return err
 	}
-	p.byHash[tx.Hash] = true
+	p.admit(tx)
 	p.txs = append(p.txs, tx)
 	return nil
+}
+
+// admit marks tx queued, the latest copy of its hash.
+func (p *HeldPool) admit(tx *Held) {
+	p.pushed++
+	tx.seq = p.pushed
+	p.byHash[tx.Hash] = true
 }
 
 // funds checks that balance, when set, covers the upfront cost of k's chain
@@ -319,14 +338,38 @@ func (tx *Held) chainKey() chainKey { return chainKey{tx.Sender, tx.Direction} }
 func (p *HeldPool) PushFront(recovered []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pushFront(recovered)
+}
+
+// Requeue returns txs, of a settlement the final chain did not keep them
+// in, to the front as PushFront does. One sent again since and in flight or
+// settled belongs to that copy, which keeps it.
+func (p *HeldPool) Requeue(txs []*Held) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	own := make([]*Held, 0, len(txs))
+	for _, tx := range txs {
+		if p.heldByLater(tx) {
+			p.unsettle(tx)
+			continue
+		}
+		own = append(own, tx)
+	}
+	p.pushFront(own)
+}
+
+func (p *HeldPool) pushFront(recovered []*Held) {
 	conflict := p.replaced(recovered)
 	front := make([]*Held, 0, len(recovered))
 	for _, tx := range recovered {
-		delete(p.inFlight, tx.Hash)
+		p.unreserve(tx)
 		if n, ok := conflict[tx.chainKey()]; ok && tx.Nonce >= n {
+			// Its ledger entry is gone: nothing would forget it as settled.
+			p.unsettle(tx)
 			p.tomb(tx.Hash, tx.chainKey(), tx.Nonce, tx.sync)
 			continue
 		}
+		p.unsettle(tx)
 		if p.resubmitted(tx) {
 			continue
 		}
@@ -395,16 +438,64 @@ func (p *HeldPool) Reserve(txs []*Held) {
 		if p.resubmitted(tx) {
 			continue
 		}
-		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync}
+		if p.heldByLater(tx) {
+			p.unsettle(tx)
+			continue
+		}
+		p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync, tx}
 	}
 }
 
-// Release ends the reservations of txs, whose batch settled.
+// heldByLater reports whether a copy of tx sent again since holds its
+// hash, in flight or settled.
+func (p *HeldPool) heldByLater(tx *Held) bool {
+	r, inFlight := p.inFlight[tx.Hash]
+	s := p.settled[tx.Hash]
+	return (inFlight && r.owner != tx && r.owner.seq > tx.seq) || (s != nil && s != tx && s.seq > tx.seq)
+}
+
+// Release ends the reservations of txs, which a batch settled or a failed
+// one spent; an outbound one stays held until Forget.
 func (p *HeldPool) Release(txs []*Held) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, tx := range txs {
+		p.unreserve(tx)
+		if s := p.settled[tx.Hash]; tx.Direction == Outbound && (s == nil || s.seq <= tx.seq) {
+			p.settled[tx.Hash] = tx
+		}
+	}
+}
+
+// unreserve ends tx's reservation; a copy sent again keeps its own.
+func (p *HeldPool) unreserve(tx *Held) {
+	if r, ok := p.inFlight[tx.Hash]; ok && r.owner == tx {
 		delete(p.inFlight, tx.Hash)
+	}
+}
+
+// unsettle lets go of tx as settled; a copy sent again keeps its hold.
+func (p *HeldPool) unsettle(tx *Held) {
+	if s := p.settled[tx.Hash]; s == tx {
+		delete(p.settled, tx.Hash)
+	}
+}
+
+// Drop ends the reservations of txs, whose nonces are spent elsewhere.
+func (p *HeldPool) Drop(txs []*Held) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, tx := range txs {
+		p.unreserve(tx)
+	}
+}
+
+// Forget lets go of txs, released and final on L1.
+func (p *HeldPool) Forget(txs []*Held) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, tx := range txs {
+		p.unsettle(tx)
 	}
 }
 
@@ -446,7 +537,7 @@ func (p *HeldPool) PopN(n int) []*Held {
 	for _, tx := range drained {
 		delete(p.byHash, tx.Hash)
 		if _, ok := p.inFlight[tx.Hash]; !ok {
-			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync}
+			p.inFlight[tx.Hash] = reservation{tx.chainKey(), tx.Nonce, slotsOf(tx.Raw), tx.Cost, tx.sync, tx}
 		}
 	}
 	return drained
@@ -511,14 +602,15 @@ func (p *HeldPool) Prune(nonce func(common.Address) (uint64, error), finalized u
 }
 
 // Holds reports whether the pool holds the transaction of hash, queued or
-// in flight, or discarded it as composed outbound: the rollup takes such a
-// transaction from the composer alone, never as a plain one.
+// in flight, or as outbound settled short of finality or discarded once
+// composed: the rollup takes such a transaction from the composer alone,
+// never as a plain one.
 func (p *HeldPool) Holds(hash common.Hash) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, inFlight := p.inFlight[hash]
 	_, discarded := p.discarded[hash]
-	return inFlight || p.byHash[hash] || discarded
+	return inFlight || p.byHash[hash] || discarded || p.settled[hash] != nil
 }
 
 // Len is the number of queued transactions.

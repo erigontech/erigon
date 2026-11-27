@@ -336,6 +336,10 @@ func TestSend(t *testing.T) {
 			params: `{"txs":["%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100},
 		},
 		{
+			name: "block reached", txs: 1, target: Target{Block: 98}, answer: accepted,
+			params: `{"txs":["%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100},
+		},
+		{
 			name: "in order", txs: 2, target: Target{Block: 100}, answer: accepted,
 			params: `{"txs":["%s","%s"],"blockNumber":"0x64","revertingTxHashes":["HASH1"]}`, sent: Sent{Block: 100},
 		},

@@ -134,9 +134,9 @@ func (k *composition) add(h *Held) error {
 	}
 	switch {
 	case h.Nonce < onChain:
-		c.logger.Info("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.stale",
+		c.logger.Warn("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.cc_compose.stale_nonce_evicted",
 			"hash", h.Hash, "sender", h.Sender, "direction", h.Direction, "nonce", h.Nonce, "onChain", onChain)
-		c.x.Pool.Release([]*Held{h})
+		c.x.Pool.Drop([]*Held{h})
 		return nil
 	case h.Nonce > onChain:
 		// Admitted on a pending nonce: a predecessor sent elsewhere has yet
@@ -185,7 +185,7 @@ func (k *composition) add(h *Held) error {
 			k.drop(h)
 			return nil
 		}
-		c.logger.Info("[eez] held transaction waits: the manager cannot pay its value", "event", "eez.composer.funding",
+		c.logger.Info("[eez] held transaction waits: the manager cannot pay its value", "event", "eez.composer.cc_compose.funding_retry",
 			"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "attempts", h.Attempts, "err", err)
 		k.deferred = append(k.deferred, h)
 		k.unroomed++
@@ -215,7 +215,11 @@ func (k *composition) room(h *Held, cost l1Cost) error {
 
 // evict evicts h with the rest of its nonce chain, err why.
 func (k *composition) evict(h *Held, err error) {
-	k.c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
+	event := "eez.composer.cc_compose.poison_eviction_completed"
+	if errors.Is(err, ErrMultiCall) {
+		event = "eez.composer.cc_compose.outbound_multicall_unsupported"
+	}
+	k.c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", event,
 		"hash", h.Hash, "sender", h.Sender, "direction", h.Direction, "nonce", h.Nonce, "err", err)
 	k.c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
 	k.drop(h)
@@ -228,7 +232,7 @@ func (k *composition) drop(h *Held) {
 	k.rest, k.deferred = slices.DeleteFunc(k.rest, behind), slices.DeleteFunc(k.deferred, behind)
 }
 
-// inbound delivers the calls tx, an L1 transaction, makes into the rollup.
+// inbound delivers the calls tx, h's L1 transaction, makes into the rollup.
 func (k *composition) inbound(h *Held, tx types.Transaction) error {
 	ds, err := NewDeliveries(k.c.x.Sync, k.draft)
 	if err != nil {
@@ -248,6 +252,7 @@ func (k *composition) inbound(h *Held, tx types.Transaction) error {
 	k.gas.take(cost)
 	k.draft = ds.fork
 	k.fx.deliveries = append(k.fx.deliveries, ds.Delivered...)
+	k.fx.owners = append(k.fx.owners, slices.Repeat([]*Held{h}, len(ds.Delivered))...)
 	return nil
 }
 
