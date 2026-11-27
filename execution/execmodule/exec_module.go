@@ -560,6 +560,11 @@ func closeWithoutView(view *func() error, close func()) {
 // validator holds its state.
 func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, revalidate bool) (ValidationResult, error) {
 	blockHash, blockNumber := block.Hash(), block.NumberU64()
+	vcT0 := time.Now()
+	var vcView, vcDoms, vcUnw, vcVal time.Time
+	defer func() {
+		e.logger.Info("[np-split] vc", "blk", blockNumber, "view", vcDur(vcT0, vcView), "doms", vcDur(vcView, vcDoms), "unwind", vcDur(vcDoms, vcUnw), "validate", vcDur(vcUnw, vcVal), "post", vcDur(vcVal, time.Now()), "total", time.Since(vcT0))
+	}()
 	if e.readAheader != nil {
 		defer e.readAheader.CancelWarmup()
 	}
@@ -629,6 +634,7 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 			return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
 		}
 	}
+	vcView = time.Now()
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusTooFarAway,
@@ -715,11 +721,14 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 		}
 	}()
 
+	vcDoms = time.Now()
 	if err := e.unwindToCommonCanonical(doms, tx, header, ensureReadAheadSuspended); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
 	}
+	vcUnw = time.Now()
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body, revalidate, ensureReadAheadSuspended, e.logger)
+	vcVal = time.Now()
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
@@ -1119,4 +1128,12 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 		return false, err
 	}
 	return has, nil
+}
+
+// vcDur is b-a, or -1 when a border was not reached.
+func vcDur(a, b time.Time) time.Duration {
+	if a.IsZero() || b.IsZero() {
+		return -1
+	}
+	return b.Sub(a)
 }
