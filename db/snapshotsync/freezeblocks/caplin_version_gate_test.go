@@ -163,6 +163,42 @@ func TestOpenListMissingUnsupportedSegmentKeepsBaseResult(t *testing.T) {
 	}
 }
 
+func TestOpenListSkipsPartialUnsupportedSegmentInBothModes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		optimistic bool
+	}{
+		{name: "strict"},
+		{name: "optimistic", optimistic: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			typ := snaptype.BeaconBlocks
+			name := typ.FileName(version.V2_0, 0, 2)
+			writeCaplinSegment(t, dirs, typ, 0, 2, version.V2_0, true, func(uint64) []byte { return []byte{1} })
+			partial := name + ".torrent4014494284"
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
+
+			var err error
+			panicValue := recoverPanic(func() { err = s.OpenList([]string{partial}, tc.optimistic) })
+			require.Nil(t, panicValue)
+			require.NoError(t, err)
+			require.Empty(t, s.Files())
+		})
+	}
+}
+
+func TestOpenListReportsUnsupportedMajorOnlySegmentName(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	name := "v2-000000000-000000010-beaconblocks.seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte("corrupt"), 0o644))
+	s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(s.Close)
+	panicValue := recoverPanic(func() { _ = s.OpenList([]string{name}, false) })
+	require.Contains(t, fmt.Sprint(panicValue), name)
+}
+
 func TestOpenListReportsUnsupportedIndexAfterBrokenSegment(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -185,10 +221,8 @@ func TestOpenListReportsUnsupportedIndexAfterBrokenSegment(t *testing.T) {
 
 			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
 			t.Cleanup(s.Close)
-			var err error
-			panicValue := recoverPanic(func() { err = s.OpenList([]string{supported, unsupportedIndex}, false) })
+			panicValue := recoverPanic(func() { require.NoError(t, s.OpenList([]string{supported, unsupportedIndex}, false)) })
 			require.Contains(t, fmt.Sprint(panicValue), unsupported)
-			require.NoError(t, err)
 		})
 	}
 }
