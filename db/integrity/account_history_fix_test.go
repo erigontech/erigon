@@ -32,7 +32,7 @@ func TestFixCodeHash(t *testing.T) {
 
 	res, err := integrity.FixCodeHash(ctx, db, false, log.New())
 	require.NoError(t, err)
-	require.Equal(t, 1, res.Keys)
+	require.Equal(t, 2, res.Keys)
 	require.Zero(t, res.Unfixable)
 
 	require.NoError(t, integrity.CheckCodeHash(ctx, sc, db, true, 0, log.New()))
@@ -67,7 +67,7 @@ func TestFixDryRunKeepsFiles(t *testing.T) {
 
 	res, err := integrity.FixCodeHash(ctx, db, true, log.New())
 	require.NoError(t, err)
-	require.Equal(t, 1, res.Keys)
+	require.Equal(t, 2, res.Keys)
 	res, err = integrity.FixStorageOfAbsentAccount(ctx, db, true, log.New())
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Keys)

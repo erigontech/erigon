@@ -41,9 +41,12 @@ type accountHistoryFaults struct {
 
 // buildAccountHistory writes, in files of 10-tx steps: a contract with two storage slots
 // destroyed at txNum 15 and re-created at 17 with one slot, and an EOA whose delegation is
-// cleared at txNum 25 and which changes again at 27. One fault wipes the storage at the re-create before the destroy is
-// written, which leaves the destroy nothing to wipe; the other skips the code delete at the
-// clear.
+// cleared at txNum 25, set again to the same delegate at 27 and cleared again at 29, and an
+// EOA whose delegation is cleared at txNum 25 and set to another delegate at 45. The second
+// delegation records an empty code before it, as a node does that takes it from the cleared
+// account, so the first delegation code is left only in an older domain file. One fault wipes the storage at the re-create before the destroy is
+// written, which leaves the destroy nothing to wipe; the other skips the code delete at each
+// clear, so the code is not written again at the second delegation.
 func buildAccountHistory(t *testing.T, faults accountHistoryFaults) kv.TemporalRwDB {
 	t.Helper()
 	ctx := t.Context()
@@ -95,7 +98,25 @@ func buildAccountHistory(t *testing.T, faults accountHistoryFaults) kv.TemporalR
 	if !faults.codeKeptAfterClear {
 		del(kv.CodeDomain, eoa[:], 25)
 	}
-	put(kv.AccountsDomain, eoa[:], account(3, nil), 27)
+	put(kv.AccountsDomain, eoa[:], account(3, delegation), 27)
+	if !faults.codeKeptAfterClear {
+		put(kv.CodeDomain, eoa[:], delegation, 27)
+	}
+	put(kv.AccountsDomain, eoa[:], account(4, nil), 29)
+	if !faults.codeKeptAfterClear {
+		del(kv.CodeDomain, eoa[:], 29)
+	}
+
+	redelegated, delegate2 := common.HexToAddress("0xe1"), common.HexToAddress("0xdf")
+	delegation2 := append([]byte{0xef, 0x01, 0x00}, delegate2[:]...)
+	put(kv.AccountsDomain, redelegated[:], account(1, delegation), 3)
+	put(kv.CodeDomain, redelegated[:], delegation, 3)
+	put(kv.AccountsDomain, redelegated[:], account(2, nil), 25)
+	if !faults.codeKeptAfterClear {
+		del(kv.CodeDomain, redelegated[:], 25)
+	}
+	put(kv.AccountsDomain, redelegated[:], account(3, delegation2), 45)
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, redelegated[:], delegation2, 45, []byte{}))
 
 	filler := common.HexToAddress("0xf0")
 	for txNum := uint64(30); txNum < txs; txNum++ {

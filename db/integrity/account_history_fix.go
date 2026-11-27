@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 
@@ -238,8 +239,10 @@ func (h *keyHistory) setLatest(v []byte) {
 	h.latest = v
 }
 
-// withCodeHash returns a code of the history of addr whose hash is codeHash.
-func (h *keyHistory) withCodeHash(addr, codeHash []byte) ([]byte, error) {
+// withCodeHash returns a code of addr whose hash is codeHash: from its code history, or
+// else from the code domain files. A code that was only ever the latest value is in no
+// history entry, but an older file can still hold it after the code changed again.
+func (h *keyHistory) withCodeHash(tx kv.TemporalTx, addr, codeHash []byte) ([]byte, error) {
 	if codeMatchesHash(codeHash, nil) {
 		return nil, nil
 	}
@@ -248,7 +251,20 @@ func (h *keyHistory) withCodeHash(addr, codeHash []byte) ([]byte, error) {
 			return v, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: account %x: no code of hash %x in its code history", errUnfixable, addr, codeHash)
+	maxTxNum := uint64(math.MaxUint64)
+	for {
+		v, found, fromTxNum, _, err := tx.Debug().GetLatestFromFiles(kv.CodeDomain, addr, maxTxNum)
+		if err != nil {
+			return nil, err
+		}
+		if found && len(v) > 0 && codeMatchesHash(codeHash, v) {
+			return bytes.Clone(v), nil
+		}
+		if !found || fromTxNum == 0 {
+			return nil, fmt.Errorf("%w: account %x: no code of hash %x in its code history or code files", errUnfixable, addr, codeHash)
+		}
+		maxTxNum = fromTxNum - 1
+	}
 }
 
 // planAccountCode changes the code history of addr so that the code matches the code hash
@@ -266,7 +282,7 @@ func planAccountCode(tx kv.TemporalTx, addr []byte) (*keyHistory, error) {
 		if codeMatchesHash(c.codeHash, code.asOf(c.txNum+1)) {
 			continue
 		}
-		v, err := code.withCodeHash(addr, c.codeHash)
+		v, err := code.withCodeHash(tx, addr, c.codeHash)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +293,7 @@ func planAccountCode(tx kv.TemporalTx, addr []byte) (*keyHistory, error) {
 		return nil, accErr
 	}
 	if codeHash := accounts.DeserialiseV3CodeHash(acc); !codeMatchesHash(codeHash, code.latest) {
-		v, err := code.withCodeHash(addr, codeHash)
+		v, err := code.withCodeHash(tx, addr, codeHash)
 		if err != nil {
 			return nil, err
 		}
