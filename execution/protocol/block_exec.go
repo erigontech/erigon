@@ -130,7 +130,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	ibs.SetTxContext(blockNum, -1)
-	if err := initializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer, blockHashFunc); err != nil {
+	if err := InitializeBlockExecutionWithHash(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer, blockHashFunc); err != nil {
 		return nil, err
 	}
 	if err := endPhase(); err != nil {
@@ -209,7 +209,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		ibs.SetTxContext(blockNum, len(txs))
-		newBlock, _, err = finalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, blockHashFunc)
+		newBlock, _, err = FinalizeBlockExecutionWithHash(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, blockHashFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -350,10 +350,10 @@ func FinalizeBlockExecution(
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
-	return finalizeBlockExecution(engine, header, txs, uncles, cc, ibs, receipts, withdrawals, chainReader, isMining, logger, GetHashFnFromChain(header, chainReader))
+	return FinalizeBlockExecutionWithHash(engine, header, txs, uncles, cc, ibs, receipts, withdrawals, chainReader, isMining, logger, GetHashFnFromChain(header, chainReader))
 }
 
-func finalizeBlockExecution(engine rules.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader, isMining bool, logger log.Logger, getHash func(uint64) (common.Hash, error)) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
+func FinalizeBlockExecutionWithHash(engine rules.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader, isMining bool, logger log.Logger, getHash func(uint64) (common.Hash, error)) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{}, getHash)
 		return ret, err
@@ -375,10 +375,10 @@ func finalizeBlockExecution(engine rules.Engine, header *types.Header, txs types
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
 ) error {
-	return initializeBlockExecution(engine, chain, header, cc, ibs, logger, tracer, GetHashFnFromChain(header, chain))
+	return InitializeBlockExecutionWithHash(engine, chain, header, cc, ibs, logger, tracer, GetHashFnFromChain(header, chain))
 }
 
-func initializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header, cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks, getHash func(uint64) (common.Hash, error)) error {
+func InitializeBlockExecutionWithHash(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header, cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks, getHash func(uint64) (common.Hash, error)) error {
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{}, getHash)
 		return ret, err

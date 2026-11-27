@@ -185,10 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			break
 		}
 
-		getHash := txTask.EvmBlockContext.GetHash
-		if getHash == nil {
-			getHash = protocol.GetHashFnFromChain(header, rw.chain)
-		}
+		getHash := protocol.GetHashFnFromChain(header, rw.chain)
 		// Block initialisation
 		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -404,12 +401,9 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					defer ibs.Close()
 					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-					getHash := txTask.EvmBlockContext.GetHash
-					if getHash == nil {
-						getHash = protocol.GetHashFnFromChain(txTask.Header, chainReader)
-					}
+					getHash := protocol.GetHashFnFromChain(txTask.Header, chainReader)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{}, getHash)
+						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, cfg.Engine, false /* constCall */, vm.Config{}, getHash)
 					}
 
 					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)

@@ -29,8 +29,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -147,4 +149,49 @@ func TestRederiveBlockAccessListReportsMissingHeader(t *testing.T) {
 	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, noHeader)
 	require.ErrorContains(t, err, "not found")
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+func TestRederiveSystemCallBlockHash(t *testing.T) {
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = state.FirstContractIncarnation
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	for _, contract := range []accounts.Address{params.BeaconRootsAddress, params.WithdrawalRequestAddress} {
+		t.Run(contract.Value().String(), func(t *testing.T) {
+			emptyCode := []byte{byte(vm.STOP)}
+			emptyAcc := acc
+			emptyAcc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(emptyCode))
+			reader := &rederiveTestReader{NoopReader: state.NewNoopReader(), accounts: map[accounts.Address]accounts.Account{
+				params.WithdrawalRequestAddress: emptyAcc, params.ConsolidationRequestAddress: emptyAcc, contract: acc,
+			}, code: map[accounts.Address][]byte{
+				params.WithdrawalRequestAddress: emptyCode, params.ConsolidationRequestAddress: emptyCode, contract: code,
+			}}
+			ibs := state.New(reader)
+			defer ibs.Close()
+			ibs.SetVersionMap(state.NewVersionMap(nil))
+			ancestor := &types.Header{Number: *uint256.NewInt(1)}
+			parent := &types.Header{Number: *uint256.NewInt(2), ParentHash: ancestor.Hash()}
+			header := &types.Header{Number: *uint256.NewInt(3), ParentHash: parent.Hash(), GasLimit: 30_000_000, ParentBeaconBlockRoot: new(common.Hash)}
+			getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+				require.Equal(t, uint64(2), number)
+				require.Equal(t, parent.Hash(), hash)
+				return parent, nil
+			}
+			vio, err := RederiveBlockAccessList(t.Context(), chain.TestChainOsakaConfig, merge.New(ethash.NewFaker()), nil, getHeader, header, nil, nil, nil, ibs, log.New())
+			require.NoError(t, err)
+			var got *uint256.Int
+			for _, account := range vio.AsBlockAccessList() {
+				if account.Address == contract.Value() {
+					for _, slot := range account.StorageChanges {
+						if slot.Slot == accounts.ZeroKey && len(slot.Changes) > 0 {
+							got = &slot.Changes[0].Value
+						}
+					}
+				}
+			}
+			require.NotNil(t, got)
+			require.Equal(t, ancestor.Hash().U256(), *got)
+		})
+	}
 }

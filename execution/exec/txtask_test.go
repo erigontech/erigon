@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -458,4 +459,101 @@ func TestResetBlockStartHashReader(t *testing.T) {
 	got, err := evm.Context.GetHash(1)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+type historicalHashEngine struct {
+	rules.Engine
+	contract accounts.Address
+	want     common.Hash
+}
+
+func (e *historicalHashEngine) check(syscall rules.SystemCall) error {
+	got, err := syscall(e.contract, nil)
+	if err != nil {
+		return err
+	}
+	if common.BytesToHash(got) != e.want {
+		return fmt.Errorf("wrong hash: %x", got)
+	}
+	return nil
+}
+
+func (e *historicalHashEngine) Initialize(cfg *chain.Config, reader rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	return e.check(func(addr accounts.Address, data []byte) ([]byte, error) {
+		return syscall(addr, data, ibs, header, false)
+	})
+}
+
+func (e *historicalHashEngine) Finalize(cfg *chain.Config, header *types.Header, ibs *state.IntraBlockState, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, reader rules.ChainReader, syscall rules.SystemCall, skip bool, logger log.Logger) (types.FlatRequests, error) {
+	return nil, e.check(syscall)
+}
+
+func TestHistoricalSystemCallUsesLocalReader(t *testing.T) {
+	logger := log.New()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	contract := common.HexToAddress("0x000000000000000000000000000000000000c0de")
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	ancestor := &types.Header{Number: *uint256.NewInt(1)}
+	parent := &types.Header{Number: *uint256.NewInt(2), ParentHash: ancestor.Hash()}
+	require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(t.Context(), tx, logger)
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		putter := domains.AsPutDel(tx)
+		if err := putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil); err != nil {
+			return err
+		}
+		if err := putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			return err
+		}
+		if err := rawdb.WriteHeader(tx, parent); err != nil {
+			return err
+		}
+		return domains.Flush(t.Context(), tx)
+	}))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	engine := &historicalHashEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), want: ancestor.Hash()}
+	cfg := &ExecArgs{ChainConfig: chain.TestChainBerlinConfig, Engine: engine}
+	header := &types.Header{Number: *uint256.NewInt(3), ParentHash: parent.Hash(), GasLimit: 10_000_000}
+	for _, tc := range []struct {
+		name      string
+		index     int
+		nilEngine bool
+	}{
+		{"initialize", -1, false}, {"finalize", 0, false}, {"finalize_nil_task_engine", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &TxTask{
+				TxNum: 1, TxIndex: tc.index, Header: header, Config: cfg.ChainConfig, Engine: engine,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 3, GetHash: func(uint64) (common.Hash, error) { return common.Hash{}, errors.New("producer reader used") }},
+			}
+			if tc.nilEngine {
+				task.Engine = nil
+				task.EvmBlockContext.GetHash = func(uint64) (common.Hash, error) { return ancestor.Hash(), nil }
+			}
+			if tc.index == -1 {
+				worker := NewHistoricalTraceWorker(t.Context(), nil, nil, nil, false, cfg, logger)
+				defer worker.ibs.Close()
+				worker.ResetTx(tx)
+				result := worker.RunTxTask(task)
+				require.NoError(t, result.Err)
+				return
+			}
+			result := &TxResult{Task: task}
+			queue := NewResultsQueue(1, 1)
+			_, err := queue.Drain(t.Context(), result)
+			require.NoError(t, err)
+			processor := &historicalResultProcessor{}
+			consumer := TraceConsumerFunc(func(*BlockResult, *TxResult, kv.TemporalTx) error { return nil })
+			require.NotPanics(t, func() { _, _, err = processor.processResults(consumer, cfg, queue, task.TxNum, tx, false, logger) })
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+		})
+	}
 }
