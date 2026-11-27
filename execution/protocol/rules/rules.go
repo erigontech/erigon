@@ -220,25 +220,18 @@ func DefaultBlockPostValidation(header *types.Header,
 	}
 
 	var bloom types.Bloom
-	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-			if bloomFromReceipts {
-				bloom.Or(&r.Bloom)
-			}
-		}
+		bloom = types.SetReceiptBlooms(receipts)
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != header.ReceiptHash {
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, header.ReceiptHash, header.Number.Uint64(), header.Hash())
 		}
+	} else if checkBloom && !alwaysSkipReceiptCheck {
+		bloom = types.CreateBloom(receipts)
 	}
 
 	if checkBloom && !alwaysSkipReceiptCheck {
-		if !bloomFromReceipts {
-			bloom = types.CreateBloom(receipts)
-		}
 		if bloom != header.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
 		}

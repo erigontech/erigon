@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -154,6 +155,58 @@ func CreateBloom(receipts Receipts) Bloom {
 		}
 	}
 	return bin
+}
+
+// SetReceiptBlooms sets the Bloom of each receipt and returns their union.
+// Blocks often repeat an address or topic across logs, so recent ones skip the keccak.
+func SetReceiptBlooms(receipts Receipts) Bloom {
+	var addrSlots [64]bloomSlot[common.Address]
+	var topicSlots [256]bloomSlot[common.Hash]
+	var union Bloom
+	for _, r := range receipts {
+		r.Bloom = Bloom{}
+		for _, l := range r.Logs {
+			bits := cachedBloomBits(addrSlots[:], l.Address, l.Address[:])
+			r.Bloom.setBits(bits)
+			union.setBits(bits)
+			for _, topic := range l.Topics {
+				bits = cachedBloomBits(topicSlots[:], topic, topic[:])
+				r.Bloom.setBits(bits)
+				union.setBits(bits)
+			}
+		}
+	}
+	return union
+}
+
+type bloomBits struct {
+	i [3]uint16
+	v [3]byte
+}
+
+type bloomSlot[K comparable] struct {
+	key  K
+	bits bloomBits
+	set  bool
+}
+
+// cachedBloomBits looks data up in a direct-mapped cache; len(slots) must be a power of two up to 256.
+func cachedBloomBits[K comparable](slots []bloomSlot[K], key K, data []byte) bloomBits {
+	h := binary.LittleEndian.Uint64(data) ^ binary.LittleEndian.Uint64(data[len(data)-8:])
+	slot := &slots[int((h*0x9e3779b97f4a7c15)>>56)&(len(slots)-1)]
+	if slot.set && slot.key == key {
+		return slot.bits
+	}
+	var buf [6]byte
+	i1, v1, i2, v2, i3, v3 := bloomValues(data, &buf)
+	*slot = bloomSlot[K]{key: key, bits: bloomBits{i: [3]uint16{uint16(i1), uint16(i2), uint16(i3)}, v: [3]byte{v1, v2, v3}}, set: true}
+	return slot.bits
+}
+
+func (b *Bloom) setBits(bits bloomBits) {
+	b[bits.i[0]] |= bits.v[0]
+	b[bits.i[1]] |= bits.v[1]
+	b[bits.i[2]] |= bits.v[2]
 }
 
 // Bloom9 returns the bloom filter for the given data

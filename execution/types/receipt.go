@@ -156,16 +156,15 @@ func (r *Receipt) SetLogs(logs Logs) {
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
-		return rlp.Encode(w, data)
+		return r.encodePayload(w)
 	}
 	if r.Type != FrameTxType && !hasStandardReceiptPayload(r.Type) {
 		return ErrTxTypeNotSupported
 	}
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
-	if err := r.encodeTyped(data, buf); err != nil {
+	if err := r.encodeTyped(buf); err != nil {
 		return err
 	}
 	return rlp.Encode(w, buf.Bytes())
@@ -186,12 +185,46 @@ func (r *Receipt) EncodeRLP69(w io.Writer) error {
 }
 
 // encodeTyped writes the canonical encoding of a typed receipt to w.
-func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
+func (r *Receipt) encodeTyped(w *bytes.Buffer) error {
 	w.WriteByte(r.Type)
 	if r.Type == FrameTxType {
 		return rlp.Encode(w, &frameReceiptRLP{r.CumulativeGasUsed, r.Payer, r.FrameReceipts})
 	}
-	return rlp.Encode(w, data)
+	return r.encodePayload(w)
+}
+
+// encodePayload writes the receiptRLP list [status, cumulative gas, bloom, logs] to w.
+func (r *Receipt) encodePayload(w io.Writer) error {
+	buf := rlp.NewEncodingBuf()
+	defer buf.Release()
+	b := buf[:]
+	status := r.statusEncoding()
+	logsLen := 0
+	for _, l := range r.Logs {
+		logsLen += l.encodingSize()
+	}
+	size := rlp.StringLen(status) + rlp.U64Len(r.CumulativeGasUsed) + rlp.StringLen(r.Bloom[:]) + rlp.ListLen(logsLen)
+	if err := rlp.EncodeListPrefix(size, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(status, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(r.CumulativeGasUsed, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(r.Bloom[:], w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix(logsLen, w, b); err != nil {
+		return err
+	}
+	for _, l := range r.Logs {
+		if err := l.encodeRLP(w, b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // MarshalBinary returns the consensus encoding of the receipt.
@@ -202,9 +235,8 @@ func (r *Receipt) MarshalBinary() ([]byte, error) {
 	if r.Type != FrameTxType && !hasStandardReceiptPayload(r.Type) {
 		return nil, ErrTxTypeNotSupported
 	}
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	var buf bytes.Buffer
-	err := r.encodeTyped(data, &buf)
+	err := r.encodeTyped(&buf)
 	return buf.Bytes(), err
 }
 
@@ -640,9 +672,8 @@ func (rs Receipts) Copy() Receipts {
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
-		if err := rlp.Encode(w, data); err != nil {
+		if err := r.encodePayload(w); err != nil {
 			panic(err)
 		}
 		return
@@ -654,7 +685,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		// reach by sending one.
 		return
 	}
-	if err := r.encodeTyped(data, w); err != nil {
+	if err := r.encodeTyped(w); err != nil {
 		panic(err)
 	}
 }
