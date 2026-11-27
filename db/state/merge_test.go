@@ -1121,7 +1121,7 @@ func TestMergeFiles(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomain(t)
 	defer db.Close()
 	defer d.Close()
 
@@ -1247,8 +1247,7 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 func TestDomainMergeCancellationClosesOutput(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(32)
-	logger := log.New()
-	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, stepSize, logger)
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, stepSize)
 	d.Accessors = statecfg.AccessorBTree | statecfg.AccessorHashMap | statecfg.AccessorExistence
 	dt := d.beginForTests()
 	defer dt.Close()
@@ -1319,7 +1318,7 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 		t.Run(fmt.Sprintf("%s/existing_output=%t", tc.phase, tc.existingOutput), func(t *testing.T) {
 			db, h := filledHistoryValues(t, false, map[string][]upd{
 				"key": {{txNum: 1}, {txNum: 17, value: []byte("value")}},
-			}, log.New())
+			})
 			ps := background.NewProgressSet()
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 				for step := range kv.Step(2) {
@@ -1709,13 +1708,10 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 
 	txs := uint64(numFiles) * aggStep
 	ctx := context.Background()
-	logger := log.New()
 
-	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module, logger)
+	db, ii, _ := filledInvIndexOfSize(t, txs, aggStep, module)
 
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	ps := background.NewProgressSet()
 	for step := range kv.Step(numFiles) {

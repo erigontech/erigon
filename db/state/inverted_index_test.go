@@ -57,8 +57,9 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(tb testing.TB, aggStep uint64) (kv.RwDB, *InvertedIndex) {
 	tb.Helper()
+	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
@@ -97,10 +98,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 }
 
 func TestInvertedIndexVisibleEnd(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, ii := testDbAndInvertedIndex(t, 16)
+	tx := mdbxtest.BeginRw(t, db)
 
 	iit := ii.beginForTests()
 	defer iit.Close()
@@ -125,7 +124,7 @@ func TestInvertedIndexVisibleEnd(t *testing.T) {
 // Read-only txs share lastTxNumInDB per snapshot: a tx begun after a commit sees the new
 // value, and a tx begun before it keeps its own.
 func TestLastTxNumInDBPerSnapshot(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	db, ii := testDbAndInvertedIndex(t, 16)
 	put := func(txNum uint64) {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], txNum)
@@ -165,7 +164,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 	setup := func(t *testing.T) (*InvertedIndex, kv.RwTx, *time.Ticker, [8]byte, [8]byte) {
 		t.Helper()
-		db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
+		db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1)
 		t.Cleanup(func() { ii.Close(); db.Close() })
 
 		tx, err := db.BeginRw(t.Context())
@@ -480,10 +479,9 @@ const throttle throttleType = "throttle"
 func TestInvIndexCollationBuild(t *testing.T) {
 	t.Parallel()
 
-	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -557,7 +555,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	t.Parallel()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx) //nolint:gocritic
 	require.NoError(t, err)
@@ -645,11 +643,9 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		keyCount = 40 // unique keys written to the index
 	)
 	ctx := t.Context()
-	db, ii := testDbAndInvertedIndex(t, aggStep, log.New())
+	db, ii := testDbAndInvertedIndex(t, aggStep)
 
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
+	rwTx := mdbxtest.BeginRw(t, db)
 
 	// writeKeys adds keyCount entries to the index at the given txNum.
 	// forced=true in TableScanningPrune bypasses the CanPrune file check.
@@ -738,18 +734,18 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		"cursor preserved: only entries at/after midKey should be deleted")
 }
 
-func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndex(tb testing.TB) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
+	return filledInvIndexOfSize(tb, uint64(1000), 16, 31)
 }
 
 // Creates InvertedIndex instance and fills it with generated data.
 // Txs - amount of transactions to generate
 // AggStep - aggregation step for InvertedIndex
 // Module - amount of keys to generate
-func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
+	db, ii := testDbAndInvertedIndex(tb, aggStep)
 	ctx, require := tb.Context(), require.New(tb)
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -947,10 +943,9 @@ func TestInvIndexRanges(t *testing.T) {
 
 	t.Parallel()
 
-	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii, txs := filledInvIndex(t, logger)
+	db, ii, txs := filledInvIndex(t)
 	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -977,8 +972,7 @@ func TestInvIndexMerge(t *testing.T) {
 		t.Skip()
 	}
 
-	logger := log.New()
-	db, ii, txs := filledInvIndex(t, logger)
+	db, ii, txs := filledInvIndex(t)
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
@@ -990,7 +984,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	}
 
 	logger, require := log.New(), require.New(t)
-	db, ii, txs := filledInvIndex(t, logger)
+	db, ii, txs := filledInvIndex(t)
 
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
@@ -1110,7 +1104,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	t.Parallel()
 
-	db, ii, txs := filledInvIndex(t, log.New())
+	db, ii, txs := filledInvIndex(t)
 
 	mergeInverted(t, db, ii, txs)
 
@@ -1140,12 +1134,11 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 // and after that data is pruned the results would be incomplete.
 func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	aggStep := uint64(16)
-	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	db, ii := testDbAndInvertedIndex(t, aggStep)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -1242,10 +1235,9 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 // ValuesTable inside the frozen range; IdxRange must NOT return it.
 func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 
 	aggStep := uint64(16)
-	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	db, ii := testDbAndInvertedIndex(t, aggStep)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -1269,9 +1261,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	require.NoError(err)
 
 	// Build files for steps 0 and 1 (covers txNums 0..31).
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	for step := kv.Step(0); step <= 1; step++ {
 		require.NoError(ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
@@ -1325,14 +1315,11 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 // master switch: a writer taken from a disabled index must drop everything
 // instead of quietly collecting and flushing into the DB tables.
 func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
-	logger := log.New()
-	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	db, ii := testDbAndInvertedIndex(t, 16)
 	ii.Enabled = false
 	ctx := t.Context()
 
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 
 	ic := ii.beginForTests()
 	defer ic.Close()
@@ -1358,7 +1345,7 @@ func TestSeekInFilesCacheMissAtTxNumZero(t *testing.T) {
 	}
 	t.Parallel()
 
-	db, h, txs := filledHistory(t, false, log.New())
+	db, h, txs := filledHistory(t, false)
 	collateAndMergeHistory(t, db, h, txs, true)
 
 	tx, err := db.BeginRo(t.Context())
@@ -1524,7 +1511,7 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 	} {
 		for _, spill := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/spill=%t", seed.name, spill), func(t *testing.T) {
-				db, ii := testDbAndInvertedIndex(t, 16, log.New())
+				db, ii := testDbAndInvertedIndex(t, 16)
 				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 					for _, e := range seed.entries {
 						var txNum [8]byte
@@ -1538,9 +1525,7 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 					}
 					return nil
 				}))
-				tx, err := db.BeginRw(t.Context())
-				require.NoError(t, err)
-				defer tx.Rollback()
+				tx := mdbxtest.BeginRw(t, db)
 				expected := map[string]map[string]struct{}{ii.KeysTable: {}, ii.ValuesTable: {}}
 				for _, group := range [][]entry{seed.entries, entries} {
 					for _, e := range group {
@@ -1593,10 +1578,8 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 }
 
 func TestInvertedIndexPrefetchError(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, ii := testDbAndInvertedIndex(t, 16)
+	tx := mdbxtest.BeginRw(t, db)
 	iit := ii.beginForTests()
 	defer iit.Close()
 	wantErr := errors.New("read failed")
@@ -1622,7 +1605,7 @@ func TestInvertedIndexPrefetchError(t *testing.T) {
 func TestInvertedIndexPrefetchReuse(t *testing.T) {
 	for _, tc := range []struct{ workers, batchSize uint64 }{{1, 1024}, {3, 1024}, {3, 0}, {3, 1}} {
 		t.Run(fmt.Sprintf("workers=%d/batch=%d", tc.workers, tc.batchSize), func(t *testing.T) {
-			db, ii := testDbAndInvertedIndex(t, 16, log.New())
+			db, ii := testDbAndInvertedIndex(t, 16)
 			iit := ii.beginForTests()
 			defer iit.Close()
 			cursor := &prefetchIndexCursor{}
@@ -1656,10 +1639,8 @@ func TestInvertedIndexPrefetchReuse(t *testing.T) {
 func TestInvertedIndexPrefetchCancellation(t *testing.T) {
 	for _, batchSize := range []uint64{1, 1024} {
 		t.Run(fmt.Sprintf("batch=%d", batchSize), func(t *testing.T) {
-			db, ii := testDbAndInvertedIndex(t, 16, log.New())
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			db, ii := testDbAndInvertedIndex(t, 16)
+			tx := mdbxtest.BeginRw(t, db)
 			iit := ii.beginForTests()
 			defer iit.Close()
 			ctx, cancel := context.WithCancel(t.Context())
@@ -1694,9 +1675,7 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
 				RoTxsLimiter(limiter).MustOpen()
 			t.Cleanup(db.Close)
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			tx := mdbxtest.BeginRw(t, db)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			cursor := &prefetchIndexCursor{}
@@ -1732,12 +1711,9 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 // from the keys table alone, so it must see exactly the txNums that hold records.
 func TestInvIndexHasTxNumsInDB(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
-	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := t.Context()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := mdbxtest.BeginRw(t, db)
 	ic := ii.beginForTests()
 	defer ic.Close()
 	writer := ic.NewWriter(db)
@@ -1895,7 +1871,7 @@ func TestInvertedIndexChunks(t *testing.T) {
 		return txNums
 	}
 	setup := func(t *testing.T) (kv.RwTx, string, iiChunkModel) {
-		db, ii := testDbAndInvertedIndex(t, 16, log.New())
+		db, ii := testDbAndInvertedIndex(t, 16)
 		tx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		t.Cleanup(tx.Rollback)
@@ -1937,10 +1913,8 @@ func TestInvertedIndexChunks(t *testing.T) {
 		requireIIChunks(t, tx, table, m)
 	})
 	t.Run("legacy_values", func(t *testing.T) {
-		db, ii := testDbAndInvertedIndex(t, 16, log.New())
-		tx, err := db.BeginRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
+		db, ii := testDbAndInvertedIndex(t, 16)
+		tx := mdbxtest.BeginRw(t, db)
 		m := iiChunkModel{}
 		for _, n := range []uint64{3, 9, 12} { // one 8-byte txNum per dup: the layout before chunking
 			require.NoError(t, tx.Put(ii.ValuesTable, []byte("k"), binary.BigEndian.AppendUint64(nil, n)))
@@ -1953,10 +1927,8 @@ func TestInvertedIndexChunks(t *testing.T) {
 	})
 
 	t.Run("random_flush_prune_unwind", func(t *testing.T) {
-		db, ii := testDbAndInvertedIndex(t, 16, log.New())
-		tx, err := db.BeginRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
+		db, ii := testDbAndInvertedIndex(t, 16)
+		tx := mdbxtest.BeginRw(t, db)
 		r := rand.New(rand.NewPCG(25304, 1))
 		keys := []string{"a", "ab", "b", "hot"}
 		m := iiChunkModel{}
@@ -1999,10 +1971,8 @@ func TestInvertedIndexChunks(t *testing.T) {
 }
 
 func TestInvertedIndexPruneChunksResume(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, ii := testDbAndInvertedIndex(t, 16)
+	tx := mdbxtest.BeginRw(t, db)
 	m := iiChunkModel{}
 	for _, key := range []string{"a", "b", "c"} {
 		iiChunkAdd(t, tx, ii.ValuesTable, m, key, 1, 5, 9, 13)
@@ -2032,10 +2002,8 @@ func TestInvertedIndexPruneChunksResume(t *testing.T) {
 }
 
 func TestInvertedIndexPrefetchOncePerKey(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t, 16, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, ii := testDbAndInvertedIndex(t, 16)
+	tx := mdbxtest.BeginRw(t, db)
 	iit := ii.beginForTests()
 	defer iit.Close()
 	cursor := &prefetchIndexCursor{t: t}
@@ -2081,7 +2049,7 @@ func TestInvertedIndexChunkLayout(t *testing.T) {
 
 func TestInvertedIndex_IdxRange_Seek(t *testing.T) {
 	t.Parallel()
-	db, ii, txs := filledInvIndexOfSize(t, 512, 16, 7, log.New())
+	db, ii, txs := filledInvIndexOfSize(t, 512, 16, 7)
 	mergeInverted(t, db, ii, txs)
 
 	roTx, err := db.BeginRo(t.Context())

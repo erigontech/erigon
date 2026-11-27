@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -40,7 +39,7 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	prev := mmap.BatchPrefetch
 	mmap.BatchPrefetch = true
 	t.Cleanup(func() { mmap.BatchPrefetch = prev })
-	db, d, txs := filledDomain(t, log.New())
+	db, d, txs := filledDomain(t)
 	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
@@ -154,7 +153,7 @@ func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
 	prev, prevWaves := mmap.BatchPrefetch, prefetchMaxWaves
 	mmap.BatchPrefetch, prefetchMaxWaves = true, 1
 	t.Cleanup(func() { mmap.BatchPrefetch, prefetchMaxWaves = prev, prevWaves })
-	db, d, txs := filledDomain(t, log.New())
+	db, d, txs := filledDomain(t)
 	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
