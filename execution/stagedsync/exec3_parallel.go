@@ -2439,6 +2439,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
+	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
+	ibs.SetCancel(evm.Cancel)
+	defer func() {
+		ibs.SetCancel(nil)
+		// The cancel must not reach this worker's next task, which may run without a Reset.
+		evm.Reset(evm.TxContext, evm.IntraBlockState())
+	}()
 	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
