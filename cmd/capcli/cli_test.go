@@ -827,6 +827,7 @@ func TestArchiveSanitizerRejectsInvalidStateRoots(t *testing.T) {
 	}{
 		{"zero root", `{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`, http.StatusOK, "no state root found"},
 		{"duplicate null root", `{"data":{"root":"0x` + strings.Repeat("0", 63) + `1","root":null}}`, http.StatusOK, "no state root found"},
+		{"duplicate after malformed root", `{"data":{"root":"0x12","root":"0x` + strings.Repeat("0", 63) + `1"}}`, http.StatusOK, "beacon eth/v1/beacon/states/1/root: "},
 		{"not found", "", http.StatusNotFound, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -855,7 +856,7 @@ func TestArchiveSanitizerRejectsInvalidStateRoots(t *testing.T) {
 			if tc.wantErr == "" {
 				require.NoError(t, err)
 			} else {
-				require.EqualError(t, err, tc.wantErr)
+				require.ErrorContains(t, err, tc.wantErr)
 			}
 			require.True(t, requests.Contains("/eth/v1/beacon/states/0/root"))
 			require.True(t, requests.Contains("/eth/v1/beacon/states/1/root"))

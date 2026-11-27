@@ -824,10 +824,31 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
+type beaconRoot struct {
+	hash common.Hash
+	set  bool
+}
+
+func (r *beaconRoot) UnmarshalJSON(b []byte) error {
+	var s *string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*r = beaconRoot{}
+	if s == nil || *s == "" {
+		return nil
+	}
+	if err := r.hash.UnmarshalText([]byte(*s)); err != nil {
+		return err
+	}
+	r.set = true
+	return nil
+}
+
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
 	var response struct {
 		Data struct {
-			Root *string `json:"root"`
+			Root beaconRoot `json:"root"`
 		} `json:"data"`
 	}
 	status, err := getBeaconJSON(ctx, beaconApiURL, fmt.Sprintf("eth/v1/beacon/states/%d/root", slot), &response)
@@ -837,17 +858,10 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if response.Data.Root == nil || *response.Data.Root == "" {
+	if !response.Data.Root.set || response.Data.Root.hash == (common.Hash{}) {
 		return common.Hash{}, errors.New("no state root found")
 	}
-	var root common.Hash
-	if err := root.UnmarshalText([]byte(*response.Data.Root)); err != nil {
-		return common.Hash{}, err
-	}
-	if root == (common.Hash{}) {
-		return common.Hash{}, errors.New("no state root found")
-	}
-	return root, nil
+	return response.Data.Root.hash, nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
