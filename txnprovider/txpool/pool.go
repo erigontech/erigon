@@ -2339,28 +2339,27 @@ func (p *TxPool) addLocked(prefixes map[uint64]*fundedPrefix, mt *metaTxn, annou
 	return txpoolcfg.NotSet
 }
 
-// discardOverflow discards mt, which pending or base fee overflow has popped. The sender's txns after mt,
-// up to the next nonce gap, now follow a gap. They lose NoNonceGaps and move to queued at once, so that
-// they free their slots before the next eviction. Their other markers wait for the sender's next refresh,
-// which every block runs for senders with queued txns.
-func (p *TxPool) discardOverflow(mt *metaTxn, reason txpoolcfg.DiscardReason) {
+// discardOverflow discards mt, which pending or base fee overflow has popped. A txn at the sender's next
+// nonce then follows a nonce gap, and the balance no longer has to cover mt, so discardOverflow refreshes
+// the sender at once, as the next block would. The txns that thus leave pending or the base fee sub-pool
+// move to queued at once, so that they free their slots before the next eviction.
+func (p *TxPool) discardOverflow(cacheView kvcache.CacheView, mt *metaTxn, reason txpoolcfg.DiscardReason) error {
 	p.discardLocked(mt, reason)
-	if mt.keyedNonce {
-		return
+	senderID := mt.TxnSlot.SenderID
+	if mt.keyedNonce || p.all.get(senderID, mt.TxnSlot.Nonce+1) == nil {
+		return nil
 	}
-	for nonce := mt.TxnSlot.Nonce + 1; ; nonce++ {
-		next := p.all.get(mt.TxnSlot.SenderID, nonce)
-		if next == nil {
-			return
-		}
-		next.subPool &^= NoNonceGaps
-		if next.currentSubPool == PendingSubPool || next.currentSubPool == BaseFeeSubPool {
+	if err := p.refreshSender(cacheView, senderID); err != nil {
+		return err
+	}
+	p.all.ascend(senderID, func(next *metaTxn) bool {
+		if next.subPool < BaseFeePoolBits && (next.currentSubPool == PendingSubPool || next.currentSubPool == BaseFeeSubPool) {
 			p.removeFromSubPool(next, "nonce gap")
 			p.queued.Add(next, "nonce gap", p.logger)
-		} else {
-			p.updateInSubPool(next)
 		}
-	}
+		return true
+	})
+	return nil
 }
 
 // discardLocked removes the entry from the pool indexes and queues its database
@@ -2865,7 +2864,9 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 		if err := p.refreshFrameAccounts(cacheView); err != nil {
 			return err
 		}
-		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements)
+		if err := p.promoteSubPools(cacheView, pendingBaseFee, pendingBlobFee, announcements); err != nil {
+			return err
+		}
 		// Eviction can release payer funds or break a sender's nonce chain.
 		// Refresh affected accounts before finishing promotion.
 		if len(p.frameAccountsToRefresh) == 0 {
@@ -2888,7 +2889,7 @@ func coversPendingFees(mt *metaTxn, frameGasLimit, pendingBaseFee, pendingBlobFe
 		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
 }
 
-func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
+func (p *TxPool) promoteSubPools(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) error {
 	coversFees := func(mt *metaTxn) bool {
 		return coversPendingFees(mt, mt.TxnSlot.GetGas(), pendingBaseFee, pendingBlobFee)
 	}
@@ -2942,13 +2943,17 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardOverflow(tx, txpoolcfg.PendingPoolOverflow)
+		if err := p.discardOverflow(cacheView, tx, txpoolcfg.PendingPoolOverflow); err != nil {
+			return err
+		}
 	}
 
 	// Discard worst transactions from the base fee sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
-		p.discardOverflow(tx, txpoolcfg.BaseFeePoolOverflow)
+		if err := p.discardOverflow(cacheView, tx, txpoolcfg.BaseFeePoolOverflow); err != nil {
+			return err
+		}
 	}
 
 	// A parked frame temporarily blocks its account-nonce chain. Count that chain
@@ -2972,6 +2977,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.queued.Add(tx, "frame validation pending", p.logger)
 	}
 	p.enforceTotalCapacity(pendingBaseFee)
+	return nil
 }
 
 // Run - does:

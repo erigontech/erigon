@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -167,7 +168,7 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 				for _, txn := range successors {
 					mt := pool.byHash[string(txn.IDHash[:])]
 					require.Equal(t, subPool, mt.currentSubPool)
-					// A queued successor has lost NoNonceGaps, so no promotion returns it before its sender is refreshed.
+					// A queued successor follows a gap, so no promotion returns it to pending.
 					require.Equal(t, subPool != QueuedSubPool, mt.subPool&NoNonceGaps != 0)
 				}
 			}
@@ -239,4 +240,87 @@ func TestPendingOverflowFreesSlotOfStrandedSuccessor(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
 	require.Equal(t, QueuedSubPool, pool.byHash[string(next.IDHash[:])].currentSubPool)
 	require.Equal(t, 2, pool.pending.Len())
+}
+
+// Evicting a txn also frees what it cost its sender. Queued overflow then ranks the sender's later txns as
+// funded: it keeps the stranded successor, which is nearer its sender's nonce, over another sender's later
+// nonce.
+func TestQueuedOverflowCountsFundsFreedByEviction(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	senders := []common.Address{{2}, {3}, {4}}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, senders...), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.pending.limit, pool.queued.limit = 1, 1
+
+	// Each costs over half the balance, so the successor is unfunded while its predecessor is pooled.
+	const feeCap = 30_000 * common.GWei
+	first, reason := addRemoteTestTxn(t, pool, senders[0], 0, 1, feeCap, 1)
+	require.Equal(t, txpoolcfg.Success, reason)
+	next, reason := addRemoteTestTxn(t, pool, senders[0], 1, 1, feeCap, 2)
+	require.Equal(t, txpoolcfg.Success, reason)
+	require.Zero(t, pool.byHash[string(next.IDHash[:])].subPool&EnoughBalance)
+
+	other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 5, 10, 3)
+	require.Equal(t, txpoolcfg.Success, reason)
+	requireEvicted(t, pool, first, other)
+	require.NotZero(t, pool.byHash[string(next.IDHash[:])].subPool&EnoughBalance)
+
+	distant, reason := addRemoteTestTxn(t, pool, senders[2], 2, 1, 10, 4)
+	require.Equal(t, txpoolcfg.QueuedPoolOverflow, reason)
+	requireEvicted(t, pool, distant, next)
+}
+
+// A blob txn after a nonce gap is discarded. When overflow strands one, it goes at once, and does not first
+// take the queued slot of another txn.
+func TestOverflowDiscardsStrandedBlobTxn(t *testing.T) {
+	ctx, pool, _, _ := newPoolWithBlobTxn(t, "Osaka")
+	senders := []common.Address{{1}, {3}, {4}}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, senders...)
+	change.ChangeBatch[0].BlockHeight = 1
+	change.PendingBlobFeePerGas = 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.pending.limit, pool.queued.limit = 2, 1
+
+	first, reason := addRemoteTestTxn(t, pool, senders[0], 0, common.GWei, 2*common.GWei, 1)
+	require.Equal(t, txpoolcfg.Success, reason)
+	// A local txn ranks above remote ones, so overflow evicts its remote predecessor first.
+	blob := &TxnSlot{}
+	parser := NewTxnParseContext(*pool.chainConfig.ChainID)
+	parser.WithSender(false)
+	_, err := parser.ParseTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, pool.chainConfig.ChainID, 1), 0, blob, nil, false, true, nil)
+	require.NoError(t, err)
+	blob.Nonce = 1
+	blob.Txn.(*types.BlobTx).Nonce = 1
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[0], true, blob))
+	queued, reason := addRemoteTestTxn(t, pool, senders[1], 2, common.GWei, 2*common.GWei, 2)
+	require.Equal(t, txpoolcfg.Success, reason)
+
+	other, reason := addRemoteTestTxn(t, pool, senders[2], 0, 5*common.GWei, 10*common.GWei, 3)
+	require.Equal(t, txpoolcfg.Success, reason)
+	requireEvicted(t, pool, first, other)
+	require.NotContains(t, pool.byHash, string(blob.IDHash[:]))
+	require.Contains(t, pool.byHash, string(queued.IDHash[:]))
+}
+
+// The evicted txn's predecessors stay in pending; only the txns after the gap move to queued.
+func TestOverflowKeepsPredecessorsOfEvictedTxn(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	senders := []common.Address{{2}, {3}}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, senders...), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.pending.limit = 3
+
+	var chain []*TxnSlot
+	for nonce := range uint64(3) {
+		txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+		txn.IDHash[0] = byte(nonce + 1)
+		chain = append(chain, txn)
+	}
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, addTestTxns(t, pool, senders[0], false, chain[:2]...))
+	// A local txn ranks above remote ones, so overflow evicts the remote txn before it.
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[0], true, chain[2]))
+
+	other, reason := addRemoteTestTxn(t, pool, senders[1], 0, 5, 10, 4)
+	require.Equal(t, txpoolcfg.Success, reason)
+	requireEvicted(t, pool, chain[1], other)
+	require.Equal(t, PendingSubPool, pool.byHash[string(chain[0].IDHash[:])].currentSubPool)
+	require.Equal(t, QueuedSubPool, pool.byHash[string(chain[2].IDHash[:])].currentSubPool)
 }
