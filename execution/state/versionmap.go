@@ -2241,8 +2241,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		}
 	case MVReadResultDependency:
-		checkVersion(version, rr.Version())
-		valid = VersionInvalid
+		if valid = checkVersion(version, rr.Version()); version == rr.Version() {
+			valid = VersionInvalid
+		}
 	case MVReadResultNone:
 		switch {
 		case source == MapRead && !recursive &&

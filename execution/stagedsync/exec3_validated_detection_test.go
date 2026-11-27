@@ -570,3 +570,27 @@ func TestEstimateReexecWaitsForWriterCommit(t *testing.T) {
 	require.Equal(t, 1, pe.pool.queue.Len(), "the commit of an estimate writer must queue the stale reader")
 	require.Same(t, pt, pe.pool.pop())
 }
+
+func TestValidateNowNamesHighestWriterPastAnEstimate(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	estAddr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	slotAddr := accounts.InternAddress(common.HexToAddress("0xbb"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(estAddr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}})
+	reads.SetHeader(slotAddr, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 3}, reads)
+	estimate := newWS().bal(estAddr, state.Version{TxIndex: 1}, *uint256.NewInt(5)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 1}, estimate)
+	be.versionMap.FlushWrites(estimate, false)
+	stale := newWS().stor(slotAddr, key, state.Version{TxIndex: 2}, *uint256.NewInt(7)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 2}, stale)
+	be.versionMap.FlushWrites(stale, false)
+	be.versionMap.MarkWritesValidated(stale, nil)
+
+	valid, blocker := be.validateNow(3)
+	require.False(t, valid)
+	require.Equal(t, 2, blocker, "the blocker must be the highest stale writer, not the first one the scan meets")
+}
