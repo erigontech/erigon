@@ -341,6 +341,11 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 	other.FlushWrites(ws, true)
 	require.NoError(t, cc.emitTouched(cc.foldView(other, 100+txIdx+1, base), newTestUpdates()))
 	require.Equal(t, readsBeforeFold+1, base.reads, "a fold over another block must read its own base")
+
+	uncached := accounts.InternAddress([20]byte{0xf3})
+	_, err := cc.foldView(vm, txIdx+1, base).ReadAccountData(uncached)
+	require.NoError(t, err)
+	require.NotContains(t, cc.baseAccounts, uncached, "the fold must not fill the block-base map")
 }
 
 // TestEmitTouched_FoldReusesFirstTouchKeyHash pins that the fold inserts each key under

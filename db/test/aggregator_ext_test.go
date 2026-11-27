@@ -56,7 +56,7 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
+const allIrreversible = uint64(math.MaxUint64)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -136,7 +136,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, allIrreversible)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -414,7 +414,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 	})
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, allIrreversible)
 	require.NoError(t, err)
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
@@ -516,7 +516,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, maxTx, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, maxTx, allIrreversible)
 	require.NoError(t, err)
 
 	buildTx, err := db.BeginTemporalRw(t.Context())
@@ -627,7 +627,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	//t.Logf("expected hash: %x", expectedHash)
-	err = agg.BuildFiles(db, stepSize*16, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, stepSize*16, allIrreversible)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -718,7 +718,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, allIrreversible)
 	require.NoError(t, err)
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
@@ -779,12 +779,16 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	finalityCtx := execfinality.NewContext(blocks, 0, 5, true, rawdbv3.TxNums)
+	var irreversibleTxNum uint64
+	require.NoError(t, tdb.View(ctx, func(tx kv.Tx) (err error) {
+		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, rawdbv3.TxNums, execfinality.IrreversibleBlock(blocks, 0, 5, true))
+		return err
+	}))
 	if buildFiles2 {
-		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
+		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), irreversibleTxNum, true)
 		agg.WaitForFiles()
 	} else {
-		err = agg.BuildFiles(tdb, txnNums, finalityCtx)
+		err = agg.BuildFiles(tdb, txnNums, irreversibleTxNum)
 	}
 	require.NoError(t, err)
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())
