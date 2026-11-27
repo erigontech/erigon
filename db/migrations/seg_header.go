@@ -87,9 +87,7 @@ func upgradeSegHeader(ctx context.Context, path string, logger log.Logger) error
 		logger.Warn("[seg_header] keeping the header", "file", filepath.Base(path), "err", err)
 		return nil
 	}
-	if fc != seg.CompressNone && filepath.Ext(path) != ".kv" {
-		fc = seg.CompressKeys | seg.CompressVals // only .kv readers start at a key; others Reset to any word, which reads with the key flag
-	}
+	fc = seg.CompressionForFile(path, fc)
 	d.Close() // release mmap before writing
 
 	// before the patch: a crash after it must not leave a .torrent for the old bytes

@@ -355,3 +355,28 @@ func TestPagedReaderNext2KeepsHeapBuffer(t *testing.T) {
 	require.NotEmpty(t, v)
 	require.Equal(t, &buf[:1][0], &bufOut[:1][0], "an uncompressed word is a slice of the mapping, so it must not come back as the scratch buffer")
 }
+
+func TestNewWriterOneSidedOnlyForKV(t *testing.T) {
+	for name, want := range map[string]FileCompression{
+		"v1.0-code.0-1024.kv": CompressVals,
+		"v1.0-code.0-1024.v":  CompressKeys | CompressVals, // history reads a value as the first word after Reset
+		"v1.0-code.0-1024.ef": CompressKeys | CompressVals,
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), name)
+			c, err := NewCompressor(t.Context(), t.Name(), file, t.TempDir(), DefaultCfg, log.LvlError, log.New())
+			require.NoError(t, err)
+			defer c.Close()
+			_, err = NewWriter(c, CompressVals).Write([]byte("word"))
+			require.NoError(t, err)
+			require.NoError(t, c.Compress())
+
+			d, err := NewDecompressor(file)
+			require.NoError(t, err)
+			defer d.Close()
+			fc, ok := d.WordLevelCompression()
+			require.True(t, ok)
+			require.Equal(t, want, fc)
+		})
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"path/filepath"
 	"sort"
 
 	"github.com/c2h5oh/datasize"
@@ -151,7 +152,18 @@ type Writer struct {
 	*Compressor
 }
 
+// CompressionForFile returns fc as readers of the file at path need it. Only .kv readers
+// always start at a key; readers of other files Reset to any word, which then reads
+// with the key flag, so those files get both flags or none.
+func CompressionForFile(path string, fc FileCompression) FileCompression {
+	if !fc.Has(CompressKeys) && !fc.Has(CompressVals) || filepath.Ext(path) == ".kv" {
+		return fc
+	}
+	return CompressKeys | CompressVals
+}
+
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+	compress = CompressionForFile(kv.outputFile, compress)
 	// The bits are replaced rather than OR-ed: the header has to describe this
 	// Writer's compression, not that of an earlier one over the same Compressor.
 	bitmask := kv.featureFlagBitmask&^FeatureFlagBitmask(WordLevelKeyCompressionEnabled|WordLevelValCompressionEnabled) | FeatureFlagBitmask(WordLevelCompressionKnown)
