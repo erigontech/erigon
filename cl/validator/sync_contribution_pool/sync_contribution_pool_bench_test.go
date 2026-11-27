@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diaglib
+package sync_contribution_pool
 
 import (
-	"net/http"
-	"sync"
+	"testing"
 
-	"github.com/coder/websocket"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
-type DiagnosticClient struct {
-	metricsMux *http.ServeMux
-
-	syncStages []SyncStage
-	mu         sync.Mutex
-	conn       *websocket.Conn
+func BenchmarkAddSyncCommitteeMessage(b *testing.B) {
+	_, msgs, s := getTestCommitteesMessages(int(clparams.MainnetBeaconConfig.SyncCommitteeSize / clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount))
+	b.ReportAllocs()
+	for b.Loop() {
+		pool := NewSyncContributionPool(&clparams.MainnetBeaconConfig)
+		for i := range msgs {
+			if err := pool.AddSyncCommitteeMessage(s, 0, &msgs[i]); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
 }

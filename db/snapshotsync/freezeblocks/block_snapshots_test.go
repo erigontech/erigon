@@ -54,6 +54,10 @@ func (c blockFinalityContextStub) RetireToBlockNum() uint64 {
 	return c.retireTo
 }
 
+func (c blockFinalityContextStub) CollateToBlockNum() uint64 {
+	return 0
+}
+
 func (c blockFinalityContextStub) MaxReorgDepth() uint64 {
 	return 0
 }
