@@ -1105,16 +1105,11 @@ func checkDownloadDecision(t *testing.T, item snapcfg.Preverified, mode CaplinMo
 func TestDownloadUnknownCaplinPath(t *testing.T) {
 	const name = "caplin/v1.1-000000-000050-NoSuchTable.seg"
 	raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
-	for _, typed := range []bool{false, true} {
-		items := raw
-		if typed {
-			items = raw.Typed(snaptype.CaplinSnapshotTypes)
-		}
-		for _, state := range []bool{false, true} {
-			t.Run(fmt.Sprintf("typed=%t/state=%t", typed, state), func(t *testing.T) {
-				checkDownloadDecision(t, items, NoCaplin, state, 0, false)
-			})
-		}
+	require.Empty(t, raw.Typed(snaptype.CaplinSnapshotTypes).Items)
+	for _, state := range []bool{false, true} {
+		t.Run(fmt.Sprintf("state=%t", state), func(t *testing.T) {
+			checkDownloadDecision(t, raw, NoCaplin, state, 0, false)
+		})
 	}
 }
 

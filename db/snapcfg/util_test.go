@@ -298,3 +298,14 @@ func TestTypedDropsRootEntryWithInnerExtension(t *testing.T) {
 	})
 	require.Equal(t, []string{"v1.1-000000-000100-beaconblocks.seg"}, names)
 }
+
+func TestTypedCountsUnknownTypeWithRegisteredSuffixAsUnreadable(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-000000-000100-future-beaconblocks.seg", Hash: "unknown"},
+		{Name: "v1.1-000000-000100-BLOCKSIDECARS.idx", Hash: "misspelled"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, 1, drops.unreadable)
+	require.Equal(t, []string{"v1.1-000000-000100-BLOCKSIDECARS.idx"}, drops.unparsableNames)
+}
