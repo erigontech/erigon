@@ -8,7 +8,7 @@ replace github.com/libp2p/go-libp2p-pubsub => github.com/domiwei/go-libp2p-pubsu
 
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
-	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
+	github.com/erigontech/fastkeccak v0.1.1-0.20261125212329-2896a6477a7f
 	github.com/erigontech/mdbx-go v0.43.1
 	github.com/erigontech/secp256k1 v1.4.1
 )
