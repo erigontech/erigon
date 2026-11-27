@@ -38,10 +38,16 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
-// BlockBodiesEnvelope carries a request ID and the RLP payload of the body list.
+// BlockBodiesEnvelope holds the request ID and the concatenated RLP encodings of the bodies.
 type BlockBodiesEnvelope struct {
 	RequestId     uint64
 	EncodedBodies []byte
+}
+
+// BlockAccessListsEnvelope holds the request ID and the concatenated RLP encodings of the BAL entries.
+type BlockAccessListsEnvelope struct {
+	RequestId          uint64
+	EncodedAccessLists []byte
 }
 
 type UnregisterFunc = event.UnregisterFunc
@@ -83,7 +89,7 @@ func NewMessageListener(
 		newBlockHashesObservers:   event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
 		blockHeadersObservers:     event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
 		blockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[BlockBodiesEnvelope]](),
-		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
+		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[BlockAccessListsEnvelope]](),
 		peerEventObservers:        event.NewObservers[*sentryproto.PeerEvent](),
 	}
 }
@@ -97,7 +103,7 @@ type MessageListener struct {
 	newBlockHashesObservers   *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers     *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
 	blockBodiesObservers      *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]]
-	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
+	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[BlockAccessListsEnvelope]]
 	peerEventObservers        *event.Observers[*sentryproto.PeerEvent]
 	stopWg                    sync.WaitGroup
 }
@@ -120,7 +126,7 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	// once context has been cancelled wait for the background loops to stop
 	ml.stopWg.Wait()
 
-	// unregister all observers
+	// Unregister the inbound message observers.
 	ml.newBlockObservers.Close()
 	ml.newBlockHashesObservers.Close()
 	ml.blockHeadersObservers.Close()
@@ -145,7 +151,7 @@ func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*
 	return ml.blockBodiesObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterBlockAccessListsObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockAccessListsObserver(observer event.Observer[*DecodedInboundMessage[BlockAccessListsEnvelope]]) UnregisterFunc {
 	return ml.blockAccessListsObservers.Register(observer)
 }
 
@@ -186,10 +192,8 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockHashesObservers, message)
 		case sentryproto.MessageId_BLOCK_HEADERS_66:
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, message)
-		case sentryproto.MessageId_BLOCK_BODIES_66:
-			return notifyBlockBodiesObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
-		case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockAccessListsObservers, message)
+		case sentryproto.MessageId_BLOCK_BODIES_66, sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
+			return ml.notifyListResponse(ctx, message)
 		default:
 			return nil
 		}
@@ -253,62 +257,62 @@ func notifyInboundMessageObservers[TPacket any](
 		return handleInboundMessageDecodeError(ctx, logger, peerPenalizer, peerId, err)
 	}
 
-	decodedMessage := DecodedInboundMessage[TPacket]{
-		InboundMessage: message,
-		Decoded:        decodedData,
-		PeerId:         peerId,
-	}
-	observers.Notify(&decodedMessage)
-
+	notifyDecodedMessage(observers, message, peerId, decodedData)
 	return nil
 }
 
-func notifyBlockBodiesObservers(
-	ctx context.Context,
-	logger log.Logger,
-	peerPenalizer *PeerPenalizer,
-	observers *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]],
+func notifyDecodedMessage[TPacket any](
+	observers *event.Observers[*DecodedInboundMessage[TPacket]],
 	message *sentryproto.InboundMessage,
-) error {
-	peerId := PeerIdFromH512(message.PeerId)
-	requestId, encodedBodies, err := decodeBlockBodiesEnvelope(message.Data)
-	if err != nil {
-		return handleInboundMessageDecodeError(ctx, logger, peerPenalizer, peerId, err)
-	}
+	peerId *PeerId,
+	decoded TPacket,
+) {
+	observers.Notify(&DecodedInboundMessage[TPacket]{InboundMessage: message, PeerId: peerId, Decoded: decoded})
+}
 
-	observers.Notify(&DecodedInboundMessage[BlockBodiesEnvelope]{
-		InboundMessage: message,
-		Decoded: BlockBodiesEnvelope{
-			RequestId:     requestId,
-			EncodedBodies: encodedBodies,
-		},
-		PeerId: peerId,
-	})
+func (ml *MessageListener) notifyListResponse(ctx context.Context, message *sentryproto.InboundMessage) error {
+	peerId := PeerIdFromH512(message.PeerId)
+	requestId, payload, err := decodeListResponseEnvelope(message.Data)
+	if err != nil {
+		return handleInboundMessageDecodeError(ctx, ml.logger, ml.peerPenalizer, peerId, err)
+	}
+	if message.Id == sentryproto.MessageId_BLOCK_BODIES_66 {
+		notifyDecodedMessage(ml.blockBodiesObservers, message, peerId, BlockBodiesEnvelope{requestId, payload})
+	} else {
+		notifyDecodedMessage(ml.blockAccessListsObservers, message, peerId, BlockAccessListsEnvelope{requestId, payload})
+	}
 	return nil
 }
 
-func decodeBlockBodiesEnvelope(data []byte) (uint64, []byte, error) {
-	envelope, rest, err := rlp.SplitList(data)
+// decodeListResponseEnvelope reads [request ID, [entries...]]. Both lists must end
+// at the packet boundary. It returns a read-only view of the encoded entries so
+// the fetcher can match the peer and request ID before decoding them.
+func decodeListResponseEnvelope(data []byte) (uint64, []byte, error) {
+	stream := rlp.NewBytesStream(data)
+	defer rlp.PutStream(stream)
+
+	envelopeSize, err := stream.List()
 	if err != nil {
 		return 0, nil, err
 	}
-	if len(rest) != 0 {
+	if envelopeSize != uint64(len(stream.Peek())) {
 		return 0, nil, rlp.ErrMoreThanOneValue
 	}
 
-	requestId, encodedBodies, err := rlp.SplitUint64(envelope)
+	requestId, err := stream.Uint64()
 	if err != nil {
 		return 0, nil, err
 	}
-	encodedBodies, rest, err = rlp.SplitList(encodedBodies)
+	listSize, err := stream.List()
 	if err != nil {
 		return 0, nil, err
 	}
-	if len(rest) != 0 {
+	payload := stream.Peek()
+	if listSize != uint64(len(payload)) {
 		return 0, nil, rlp.ErrMoreThanOneValue
 	}
 
-	return requestId, encodedBodies, nil
+	return requestId, payload, nil
 }
 
 func handleInboundMessageDecodeError(

@@ -38,22 +38,77 @@ import (
 )
 
 type errorCursor struct {
-	err error
+	kv.Cursor
+	seekErr error
+	nextErr error
 }
 
-func (c errorCursor) First() ([]byte, []byte, error)           { return nil, nil, nil }
-func (c errorCursor) Seek([]byte) ([]byte, []byte, error)      { return nil, nil, nil }
-func (c errorCursor) SeekExact([]byte) ([]byte, []byte, error) { return nil, nil, nil }
-func (c errorCursor) Next() ([]byte, []byte, error)            { return nil, nil, c.err }
-func (c errorCursor) Prev() ([]byte, []byte, error)            { return nil, nil, nil }
-func (c errorCursor) Last() ([]byte, []byte, error)            { return nil, nil, nil }
-func (c errorCursor) Current() ([]byte, []byte, error)         { return nil, nil, nil }
-func (c errorCursor) Close()                                   {}
+func (c errorCursor) Seek(key []byte) ([]byte, []byte, error) {
+	if c.seekErr != nil {
+		return []byte{}, nil, c.seekErr
+	}
+	return c.Cursor.Seek(key)
+}
+
+func (c errorCursor) Next() ([]byte, []byte, error) {
+	if c.nextErr != nil {
+		return []byte{}, nil, c.nextErr
+	}
+	return nil, nil, nil
+}
+func (c errorCursor) Close() {}
+
+type cursorTx struct {
+	kv.Tx
+	cursor kv.Cursor
+}
+
+func (tx cursorTx) Cursor(string) (kv.Cursor, error) { return tx.cursor, nil }
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	return db
+}
+
+func TestRangeBlockRootsReturnsCursorError(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	const slot = uint64(12)
+	root := common.Hash{1}
+	require.NoError(t, MarkRootCanonical(tx, slot, root))
+
+	wantErr := errors.New("cursor failed")
+	for _, test := range []struct {
+		name      string
+		cursor    errorCursor
+		stop      bool
+		wantSlots []uint64
+		wantErr   error
+	}{
+		{name: "Seek", cursor: errorCursor{seekErr: wantErr}, wantErr: wantErr},
+		{name: "Next", cursor: errorCursor{nextErr: wantErr}, wantSlots: []uint64{slot}, wantErr: wantErr},
+		{name: "Next after the callback stops", cursor: errorCursor{nextErr: wantErr}, stop: true, wantSlots: []uint64{slot}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
+			require.NoError(t, err)
+			defer cursor.Close()
+			test.cursor.Cursor = cursor
+			var slots []uint64
+			err = RangeBlockRoots(cursorTx{Tx: tx, cursor: test.cursor}, slot, slot+1, func(gotSlot uint64, gotRoot common.Hash) bool {
+				require.Equal(t, root, gotRoot)
+				slots = append(slots, gotSlot)
+				return !test.stop
+			})
+			require.Equal(t, test.wantSlots, slots)
+			if test.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, test.wantErr)
+		})
+	}
 }
 
 func TestCustodyRaiseSlotNeverDecreases(t *testing.T) {
@@ -568,7 +623,7 @@ func TestPruneBlocksLimitExactLimitHasNoMore(t *testing.T) {
 func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
 	wantErr := errors.New("cursor failed")
 
-	hasMore, err := hasMorePrunableBeaconBlocks(errorCursor{err: wantErr}, 10)
+	hasMore, err := hasMorePrunableBeaconBlocks(errorCursor{nextErr: wantErr}, 10)
 
 	require.False(t, hasMore)
 	require.ErrorIs(t, err, wantErr)
