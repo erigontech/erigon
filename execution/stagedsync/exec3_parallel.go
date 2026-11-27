@@ -3549,9 +3549,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// calculator, producing a wrong trie root when an EIP-7002/7251 SSTORE
 				// changes a previously-untouched slot.
 				syscallIBS := ibs
+				var chainTx kv.Tx = applyTx
+				if overlay := pe.doms.BlockOverlay(); overlay != nil {
+					chainTx = overlay.NewReadView(applyTx)
+				}
+				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, chainTx, pe.cfg.blockReader, pe.logger)
+				getHash := protocol.GetHashFnFromChain(tt.Header, chainReader)
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig, getHash)
 					if err != nil {
 						return nil, err
 					}
@@ -3559,7 +3565,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return ret, err
 				}
 
-				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger,
