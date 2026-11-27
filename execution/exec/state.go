@@ -116,7 +116,7 @@ type WorkerContext struct {
 	chainConfig  *chain.Config
 
 	ctx        context.Context
-	stopCancel func() bool
+	unwatchCtx func()
 	engine     rules.Engine
 	genesis    *types.Genesis
 	chain      rules.ChainReader
@@ -173,8 +173,46 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
-	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
+	w.watchCtx(ctx)
 	return w
+}
+
+func (rw *WorkerContext) watchCtx(ctx context.Context) {
+	rw.ctx = ctx
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		rw.evm.Cancel()
+		close(cancelled)
+	})
+	rw.unwatchCtx = func() {
+		// A cancel already started must land before the EVM is reused.
+		if !stop() {
+			<-cancelled
+		}
+		rw.unwatchCtx = func() {}
+	}
+}
+
+// Rebind readies a parked worker for an executor run under ctx.
+func (rw *WorkerContext) Rebind(ctx context.Context, metrics *WorkerMetrics) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.unwatchCtx()
+	rw.evm.Reset(evmtypes.TxContext{}, rw.ibs)
+	rw.metrics = metrics
+	rw.watchCtx(ctx)
+}
+
+// Park drops what an executor run bound to the worker; the EVM and IntraBlockState
+// keep their capacity for the next run.
+func (rw *WorkerContext) Park() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.unwatchCtx()
+	_ = rw.bindTx(nil)
+	rw.flushCollector()
+	rw.ibs.ResetReader(nil)
+	rw.rs, rw.stateReader, rw.historyMode, rw.prevBlockReg, rw.chain = nil, nil, false, nil, nil
 }
 
 func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader) error {
@@ -199,9 +237,13 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stopCancel()
+	rw.unwatchCtx()
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
+	rw.flushCollector()
+}
+
+func (rw *WorkerContext) flushCollector() {
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
 			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
@@ -334,11 +376,10 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
-	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
-		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
+		rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
-		rw.ibs = state.New(rw.stateReader)
+		rw.ibs.ResetReader(rw.stateReader)
 	}
 
 	switch reader.(type) {
@@ -358,8 +399,7 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
-	rw.ibs.Close()
-	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
+	rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {

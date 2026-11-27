@@ -95,6 +95,8 @@ type ExecuteBlockCfg struct {
 	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
 	// reference instead of the header.
 	balSink func(blockNum uint64, bal types.BlockAccessList)
+
+	workers *execWorkerCache
 }
 
 // SetBALSink registers a callback receiving each executed block's derived BAL.
@@ -143,6 +145,7 @@ func StageExecuteBlocksCfg(
 		experimentalBAL:   experimentalBAL,
 		readAheader:       readAheader,
 		discardCommitment: dbg.DiscardCommitment(),
+		workers:           &execWorkerCache{},
 	}
 }
 

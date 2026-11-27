@@ -1641,15 +1641,23 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
-	var err error
-	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
-		workersCtx, true, pe.cfg.db, nil, nil,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
-	)
-	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
+	if pe.execWorkers = pe.cfg.workers.take(poolSize); pe.execWorkers != nil {
+		for _, w := range pe.execWorkers {
+			w.Rebind(workersCtx, pe.taskExecMetrics)
+		}
+	} else {
+		var err error
+		pe.execWorkers, _, _, err = exec.NewWorkersPool(
+			workersCtx, true, pe.cfg.db, nil, nil,
+			pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
+			poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+		)
+		if err != nil {
+			return execLoopCtx, execLoopCtxCancel, err
+		}
 	}
+	workers := pe.execWorkers
+	pe.stopWorkers = sync.OnceFunc(func() { pe.cfg.workers.put(workers) })
 
 	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed

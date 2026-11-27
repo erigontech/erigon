@@ -353,6 +353,13 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
+// ResetReader is Reset over another committed-base reader; the maps keep their capacity.
+func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
+	ibs.Reset()
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+}
+
 // statePool is sync.Pool's surface, so a test can substitute one that keeps
 // what it is given: sync.Pool may discard any item.
 type statePool interface {
