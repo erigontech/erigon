@@ -54,15 +54,20 @@ func TestDebugTraceCallBlockOverrideKeys(t *testing.T) {
 			`{"fooBar":"0x1"}`,
 			`{"time":"` + blockTime.String() + `","Time":"` + blockTime.String() + `"}`,
 			`{"difficulty":"0x1"}`,
+			`{"difficulty":"0x0"}`,
 		} {
 			requireErrorCode(t, traceCall(client, callArgs, overrides), -32602)
 		}
 		for _, overrides := range []string{
 			`{"Time":"` + blockTime.String() + `"}`,
 			`{"number":"0x10","prevRandao":"0x0000000000000000000000000000000000000000000000000000000000000001"}`,
+			`null`,
 		} {
 			require.NoError(t, traceCall(client, callArgs, overrides), overrides)
 		}
+		var res json.RawMessage
+		config := json.RawMessage(`{"tracer":"callTracer","tracerConfig":{"blockOverrides":{"fooBar":"0x1"}}}`)
+		require.NoError(t, client.CallContext(t.Context(), &res, "debug_traceCall", callArgs, "latest", config))
 	})
 
 	t.Run("repeated outer keys", func(t *testing.T) {
@@ -71,12 +76,15 @@ func TestDebugTraceCallBlockOverrideKeys(t *testing.T) {
 		for _, config := range []string{
 			`{"tracer":"callTracer","blockOverrides":{"fooBar":"0x1","time":` + ts + `,"Time":` + ts + `},"BlockOverrides":{}}`,
 			`{"tracer":"callTracer","blockOverrides":{"fooBar":"0x1"},"blockOverrides":{}}`,
-			`{"tracer":"callTracer","blockOverrides":{"time":` + ts + `},"BlockOverrides":{"Time":` + ts + `}}`,
+			`{"tracer":"callTracer","blockOverrides":{},"BlockOverrides":{"fooBar":"0x1"}}`,
 		} {
 			var res json.RawMessage
 			err := client.CallContext(t.Context(), &res, "debug_traceCall", callArgs, "latest", json.RawMessage(config))
 			requireErrorCode(t, err, -32602)
 		}
+		var res json.RawMessage
+		config := json.RawMessage(`{"tracer":"callTracer","blockOverrides":{"time":` + ts + `},"BlockOverrides":{"Time":` + ts + `}}`)
+		require.NoError(t, client.CallContext(t.Context(), &res, "debug_traceCall", callArgs, "latest", config))
 	})
 
 	t.Run("before the merge", func(t *testing.T) {
