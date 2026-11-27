@@ -359,6 +359,80 @@ func TestGetDutiesProposerRecentFuluUsesEpochLookahead(t *testing.T) {
 	requireProposerDuties(t, response.Data, epochState, slot, expected)
 }
 
+func TestGetDutiesProposerRecentPreFuluUsesEpochState(t *testing.T) {
+	for _, lastBlockInEpoch := range []bool{true, false} {
+		t.Run(strconv.FormatBool(lastBlockInEpoch), func(t *testing.T) {
+			_, _, _, _, postState, handler, _, manager, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			epoch := state.Epoch(postState) + 1
+			slot := epoch * cfg.SlotsPerEpoch
+
+			previousState, err := handler.copyHeadStateForDuties(postState)
+			require.NoError(t, err)
+			increaseProposerTestBalance(t, previousState)
+			active := previousState.GetActiveValidatorsIndices(epoch)
+			require.Greater(t, len(active), 3)
+			source, target := active[2], active[3]
+			require.NoError(t, previousState.SetExitEpochForValidatorAtIndex(int(source), epoch))
+			require.NoError(t, previousState.SetWithdrawableEpochForValidatorAtIndex(int(source), epoch+1))
+			for _, index := range []uint64{source, target} {
+				require.NoError(t, previousState.SetWithdrawalCredentialForValidatorAtIndex(int(index), common.Hash{byte(cfg.CompoundingWithdrawalPrefix)}))
+			}
+			require.NoError(t, previousState.SetValidatorBalance(int(source), cfg.MaxEffectiveBalanceElectra))
+			require.NoError(t, previousState.SetEffectiveBalanceForValidatorAtIndex(int(source), cfg.MaxEffectiveBalanceElectra))
+			previousState.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: source, TargetIndex: target})
+
+			epochState, err := previousState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(epochState, slot))
+			expected, err := epochState.GetBeaconProposerIndices(epoch)
+			require.NoError(t, err)
+			if !lastBlockInEpoch {
+				previousProposers, err := previousState.GetBeaconProposerIndices(epoch)
+				require.NoError(t, err)
+				require.NotEqual(t, expected, previousProposers)
+			}
+
+			blockState := previousState
+			if lastBlockInEpoch {
+				blockState = epochState
+			}
+			header := blockState.LatestBlockHeader()
+			header.Slot = blockState.Slot()
+			header.Root = common.Hash{}
+			blockState.SetLatestBlockHeader(&header)
+			head, err := blockState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(head, slot+cfg.SlotsPerEpoch))
+			balanceBefore, err := epochState.ValidatorEffectiveBalance(int(target))
+			require.NoError(t, err)
+			balanceAfter, err := head.ValidatorEffectiveBalance(int(target))
+			require.NoError(t, err)
+			require.Greater(t, balanceAfter, balanceBefore)
+			recomputed, err := head.GetBeaconProposerIndices(epoch)
+			require.NoError(t, err)
+			require.NotEqual(t, expected, recomputed)
+
+			epochRoot, err := head.GetBlockRootAtSlot(slot + cfg.SlotsPerEpoch - 1)
+			require.NoError(t, err)
+			require.NotEmpty(t, epochRoot)
+			fcu.StateAtBlockRootVal[epochRoot] = blockState
+			fcu.FinalizedSlotVal = slot - 1
+			fcu.LowestAvailableSlotVal = &slot
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, common.Hash{1}))
+
+			for _, version := range []string{"v1", "v2"} {
+				t.Run(version, func(t *testing.T) {
+					path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
+					response := getProposerDutiesForPath(t, handler, path)
+					require.False(t, response.Finalized)
+					requireProposerDuties(t, response.Data, epochState, slot, expected)
+				})
+			}
+		})
+	}
+}
+
 func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	_, _, _, _, postState, handler, _, manager, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
@@ -619,6 +693,11 @@ func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {
 	expectedState, err := gloasHead.Copy()
 	require.NoError(t, err)
 	expectedState.SetVersion(clparams.DenebVersion)
+	expectedSlot := targetEpoch * handler.beaconChainCfg.SlotsPerEpoch
+	require.NoError(t, expectedState.SetSlot(expectedSlot+handler.beaconChainCfg.SlotsPerEpoch-1))
+	epochRoot, err := gloasHead.GetBlockRootAtSlot(expectedState.Slot())
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[epochRoot] = expectedState
 	expectedProposers, err := expectedState.GetBeaconProposerIndices(targetEpoch)
 	require.NoError(t, err)
 	gloasProposers, err := gloasHead.GetBeaconProposerIndices(targetEpoch)
@@ -632,7 +711,6 @@ func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {
 		require.Equal(t, clparams.GloasVersion, headState.Version())
 		return nil
 	}))
-	expectedSlot := targetEpoch * handler.beaconChainCfg.SlotsPerEpoch
 	for i, duty := range response.Data {
 		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
 		require.Equal(t, expectedProposers[i], duty.ValidatorIndex)

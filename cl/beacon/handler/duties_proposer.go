@@ -107,7 +107,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		stateEpoch := state.Epoch(s)
 
-		if epoch < stateEpoch && targetVersion >= clparams.FuluVersion {
+		if epoch < stateEpoch {
 			root, err := s.GetBlockRootAtSlot(expectedSlot + a.beaconChainCfg.SlotsPerEpoch - 1)
 			if err != nil {
 				return err
@@ -125,6 +125,16 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	}
 	if recentRoot != (common.Hash{}) {
 		if err := a.forkchoiceStore.ViewStateAtBlockRoot(recentRoot, func(s *state.CachingBeaconState) error {
+			if state.Epoch(s) < epoch {
+				advancedState, err := a.copyHeadStateForDuties(s)
+				if err != nil {
+					return err
+				}
+				if err := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); err != nil {
+					return err
+				}
+				s = advancedState
+			}
 			return a.fillProposerDutiesForTarget(duties, s, targetVersion, epoch, expectedSlot)
 		}); err != nil {
 			return nil, err

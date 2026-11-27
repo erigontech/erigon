@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -62,7 +63,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			logger.SetHandler(log.DiscardHandler())
 		}
 	}
-	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
+	_, blocks, _, preState, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
 
 	var err error
 
@@ -97,6 +98,15 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 			fcu.FinalizedSlotVal = 0
 			fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
+			if c.v == clparams.Phase0Version {
+				lastSlot := (postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch)*handler.beaconChainCfg.SlotsPerEpoch - 1
+				root, err := postState.GetBlockRootAtSlot(lastSlot)
+				require.NoError(c.t, err)
+				recentState, err := preState.Copy()
+				require.NoError(c.t, err)
+				require.NoError(c.t, transition.DefaultMachine.ProcessSlots(recentState, lastSlot))
+				fcu.StateAtBlockRootVal[root] = recentState
+			}
 			require.NoError(c.t, sm.OnHeadState(postState))
 		}
 	}
