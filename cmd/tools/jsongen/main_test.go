@@ -145,6 +145,19 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON", ""), "undefinedHere")
 }
 
+// go/types does not check every rule the compiler does, so a package that only the compiler
+// rejects must stop the run too. The compiler stops at a type error, so the package has none.
+func TestGenerateRefusesPackageOnlyTheCompilerRejects(t *testing.T) {
+	const pkg = "testdata/noescape"
+	require.NoError(t, os.Mkdir(pkg, 0o755))
+	t.Cleanup(func() { _ = dir.RemoveAll(pkg) })
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "sample.go"),
+		[]byte("package noescape\n\ntype Sample struct {\n\tA uint64 `json:\"a\" ethjson:\"quantity\"`\n}\n\n//go:noescape\nfunc withBody() {}\n"), 0o644))
+
+	t.Chdir(pkg)
+	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON", ""), "noescape")
+}
+
 // A Windows path carries a colon of its own, and CI runs there.
 func TestPositionFile(t *testing.T) {
 	for pos, want := range map[string]string{

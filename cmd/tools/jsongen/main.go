@@ -180,17 +180,29 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		// Imports come from export data, so go list also compiles this package. Its compile
-		// errors repeat, without a position, what type-checking the source reports.
-		if missingWhatThisWrites(e.Msg) || e.Kind == packages.ListError && strings.HasPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n") {
-			continue
-		}
-		content, err := os.ReadFile(positionFile(e.Pos))
-		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
+		// Imports come from export data, so go list also compiles this package and reports the
+		// compiler's errors as one, a "pos: msg" line each.
+		if compiled, ok := strings.CutPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n"); ok && e.Kind == packages.ListError {
+			for line := range strings.Lines(compiled) {
+				pos, msg, _ := strings.Cut(strings.TrimSpace(line), ": ")
+				if !skippable(pos, msg) {
+					return nil, e
+				}
+			}
+		} else if !skippable(e.Pos, e.Msg) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// skippable reports an error that only the output of a past run causes.
+func skippable(pos, msg string) bool {
+	if missingWhatThisWrites(msg) {
+		return true
+	}
+	content, err := os.ReadFile(positionFile(pos))
+	return err == nil && bytes.HasPrefix(content, []byte(marker))
 }
 
 // missingWhatThisWrites reports the compiler's two wordings for the absence of a method this run
