@@ -2,7 +2,6 @@ package stats
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/erigontech/erigon/common"
@@ -43,14 +42,13 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 		return
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	logger.Info("[snapshots:history] Stat",
 		"blocks", common.PrettyCounter(domainBlockNumProgress+1),
 		"step2blockNum", strings.Join(str, ","),
 		"txs", common.PrettyCounter(at.Agg().EndTxNumMinimax()),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		"alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	warnUnevenIIAvailability(at, tx, logger, tx2block)
 }

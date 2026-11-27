@@ -1571,6 +1571,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 
 	_, err = stream.Read(make([]byte, 1))
 	require.Error(t, err)
+	require.NotErrorIs(t, err, io.EOF, "an over-limit request must be rejected by decoding, not answered and closed")
 }
 
 func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {

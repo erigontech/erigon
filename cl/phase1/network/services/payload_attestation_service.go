@@ -409,7 +409,7 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 	if _, loaded := s.pending.jobs.Load(key); loaded {
 		return nil
 	}
-	err = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) { return key, nil })
+	_, err = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) { return key, nil })
 	if errors.Is(err, errPendingJobQueueFull) {
 		if _, loaded := s.pending.jobs.Load(key); loaded {
 			return nil

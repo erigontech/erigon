@@ -11,13 +11,13 @@ Whatever network you are running, it's easy to connect your Erigon node to your 
 For Erigon to provide access to wallet functionalities it is necessary to enable RPC by adding the flags
 
 ```bash
---http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
+--http.addr="0.0.0.0" --http.api=eth,web3,net,trace,txpool
 ```
 
 For example:
 
 ```bash
-/build/bin/erigon --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
+/build/bin/erigon --http.addr="0.0.0.0" --http.api=eth,web3,net,trace,txpool
 ```
 
 ## Metamask

@@ -28,7 +28,8 @@ import (
 func BenchmarkNewFrameContext(b *testing.B) {
 	for _, dataSize := range []int{0, 128 * 1024} {
 		b.Run(fmt.Sprint(dataSize), func(b *testing.B) {
-			var ibs IntraBlockState
+			ibs := New(NewNoopReader())
+			b.Cleanup(ibs.Close)
 			tx := &types.FrameTransaction{
 				NonceKeys:  []uint256.Int{{1}, {2}},
 				Frames:     []types.Frame{{Data: make([]byte, dataSize)}},

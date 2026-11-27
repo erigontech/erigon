@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameEntryPoint supplies the protocol caller for DEFAULT and VERIFY frames.
+// FrameEntryPoint supplies the protocol caller for DEFAULT, VERIFY and ASSERT frames.
 // Frames enter their targets directly, without executing an entry-point contract.
 var FrameEntryPoint = accounts.InternAddress(common.HexToAddress("0xaa"))
 
@@ -42,6 +42,9 @@ var ErrFrameSkipped = errors.New("frame skipped")
 func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if evm.FrameContext == nil {
 		return pc, nil, ErrFrameContext
+	}
+	if inAssert(evm) {
+		return pc, nil, ErrWriteProtection
 	}
 	offset, length := call.Stack.pop2Uint64()
 	scope := call.Stack.pop()
@@ -77,24 +80,20 @@ func (evm *EVM) approveFrame(address accounts.Address, scope uint64) error {
 		if !payer.IsNil() || !approved {
 			return ErrExecutionReverted
 		}
-		if !ctx.GasBailout {
-			balance, err := evm.intraBlockState.GetBalance(target)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			}
-			if balance.Lt(&ctx.MaxCost) {
-				return ErrExecutionReverted
-			}
+		balance, err := evm.intraBlockState.GetBalance(target)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if balance.Lt(&ctx.MaxCost) {
+			return ErrExecutionReverted
 		}
 		// Payment approval consumes the nonce set exactly once. The state journal
 		// makes the nonce updates, fee debit and approval context revert together.
 		if err := evm.consumeFrameNonce(); err != nil {
 			return err
 		}
-		if !ctx.GasBailout {
-			if err := evm.intraBlockState.SubBalance(target, ctx.MaxCost, tracing.BalanceDecreaseGasBuy); err != nil {
-				return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			}
+		if err := evm.intraBlockState.SubBalance(target, ctx.MaxCost, tracing.BalanceDecreaseGasBuy); err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		payer = target
 	}
@@ -148,7 +147,10 @@ func (evm *EVM) consumeFrameNonce() error {
 	if !ctx.ChargeStateGas(stateGas) {
 		return ErrOutOfGas
 	}
-	sequence := *uint256.NewInt(tx.Nonce + 1)
+	sequence := *uint256.NewInt(tx.Nonce)
+	if !tx.UsesSingleUseNonce() {
+		sequence.AddUint64(&sequence, 1)
+	}
 	for _, slot := range slots[:len(tx.NonceKeys)] {
 		if err := ibs.SetState(manager, slot, sequence); err != nil {
 			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -177,7 +179,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 				return
 			}
 			typ := CALL
-			if frame.Mode == types.FrameVerify {
+			if frame.IsStatic() {
 				typ = STATICCALL
 			}
 			evm.captureBegin(0, typ, caller, target, false, frame.Data, frame.Limits, frame.Value, nil)
@@ -196,17 +198,13 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	evm.intraBlockState.AddAddressToAccessList(target)
 	evm.intraBlockState.MarkAddressAccess(target, false)
 	evm.Origin = caller
-	var bailout bool
 	if !frame.Value.IsZero() {
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, frame.Value)
 		if err != nil {
 			return nil, gas.Execution, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !canTransfer {
-			if !ctx.GasBailout {
-				return nil, gas.Execution, ErrExecutionReverted
-			}
-			bailout = true
+			return nil, gas.Execution, ErrExecutionReverted
 		}
 		empty, err := evm.intraBlockState.Empty(target)
 		if err != nil {
@@ -262,10 +260,10 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	gas.State = ctx.StateGasLeft()
 	var left mdgas.MdGas
 	entered = true
-	if frame.Mode == types.FrameVerify {
+	if frame.IsStatic() {
 		ret, left, _, err = evm.StaticCall(caller, target, frame.Data, gas)
 	} else {
-		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, bailout)
+		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, false /* bailout */)
 	}
 	return ret, left.Execution, err
 }
@@ -280,7 +278,7 @@ func (evm *EVM) TraceSkippedFrame(index int) {
 	caller, typ := FrameEntryPoint, CALL
 	if frame.Mode == types.FrameSender {
 		caller = accounts.InternAddress(tx.SenderAddress)
-	} else if frame.Mode == types.FrameVerify {
+	} else if frame.IsStatic() {
 		typ = STATICCALL
 	}
 	tracer.EmitEnter(1, byte(typ), caller, accounts.InternAddress(frame.ResolvedTarget(tx.SenderAddress)), false, frame.Data, frame.Limits, frame.Value, nil)

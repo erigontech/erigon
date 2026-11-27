@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -155,7 +154,7 @@ func TestTraceCallUsesCommittedHeader(t *testing.T) {
 
 	contractAddress := common.Address{3}
 	coinbaseCode := hexutil.Bytes{byte(vm.COINBASE), 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
-	traceConfig := &config.TraceConfig{
+	traceConfig := &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddress): {Code: &coinbaseCode},
 		},
@@ -206,7 +205,7 @@ func TestTraceFilterRejectsNonCanonicalBlockHash(t *testing.T) {
 	sideHash := writeNonCanonicalTestBlock(t, m).Hash()
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &sideHash}, nil, nil, jsonstream.New(io.Discard))
+	err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &sideHash}, nil, jsonstream.New(io.Discard))
 	requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", sideHash))
 }
 
@@ -215,7 +214,7 @@ func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {
 	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	result, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil, nil)
+	result, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -227,7 +226,7 @@ func TestReplayBlockTransactionsUsesCommittedBlockBody(t *testing.T) {
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
-	result, err := api.ReplayBlockTransactions(m.Ctx, latest, []string{TraceTypeTrace}, nil, nil)
+	result, err := api.ReplayBlockTransactions(m.Ctx, latest, []string{TraceTypeTrace}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -391,7 +390,7 @@ func TestTraceTransactionUsesCommittedTxnLookup(t *testing.T) {
 	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	result, err := api.Transaction(m.Ctx, common.Hash{1}, nil, nil)
+	result, err := api.Transaction(m.Ctx, common.Hash{1}, nil)
 
 	require.NoError(t, err)
 	require.Nil(t, result)
@@ -433,7 +432,7 @@ func TestTraceBlockUsesUncachedCommittedState(t *testing.T) {
 	base.stateCache = rejectStateCache{}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	_, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil, nil)
+	_, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil)
 
 	require.NoError(t, err)
 }
@@ -454,7 +453,7 @@ func TestReplayTransactionUsesUncachedCommittedState(t *testing.T) {
 	base.stateCache = rejectStateCache{}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	result, err := api.ReplayTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), []string{TraceTypeTrace}, nil, nil)
+	result, err := api.ReplayTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), []string{TraceTypeTrace}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)

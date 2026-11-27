@@ -64,10 +64,6 @@ func memoryCreate(callContext *CallContext) (uint64, bool) {
 	return calcMemSize64(callContext.Stack.back2(1, 2))
 }
 
-func memoryCreate2(callContext *CallContext) (uint64, bool) {
-	return calcMemSize64(callContext.Stack.back2(1, 2))
-}
-
 func memoryCall(callContext *CallContext) (uint64, bool) {
 	x, overflow := calcMemSize64(callContext.Stack.back2(5, 6))
 	if overflow {

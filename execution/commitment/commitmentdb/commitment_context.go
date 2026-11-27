@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -91,9 +90,11 @@ type SharedDomainsCommitmentContext struct {
 
 type v3Trie interface {
 	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
+	WitnessNodes(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error)
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
 	SetStorageFanOutMin(int)
+	SetStorageWorkersMax(int)
 	TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error)
 	BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error)
 }
@@ -174,6 +175,12 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 func (sdc *SharedDomainsCommitmentContext) SetStorageFanOutMin(n int) {
 	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
 		trie.SetStorageFanOutMin(n)
+	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetStorageWorkersMax(n int) {
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
+		trie.SetStorageWorkersMax(n)
 	}
 }
 
@@ -339,13 +346,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 }
 
 func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
-	d := kv.AccountsDomain
-	switch len(plainKey) {
-	case length.Addr:
-	case length.Addr + length.Hash:
-		d = kv.StorageDomain
-	default:
-		return fmt.Errorf("touch key from state: unexpected key length %d (%x)", len(plainKey), plainKey)
+	d, err := plainKeyDomain(plainKey)
+	if err != nil {
+		return err
 	}
 	if sdc.updates.Mode() != commitment.ModeCollect {
 		sdc.TouchKey(d, string(plainKey), nil)
@@ -359,8 +362,28 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, p
 	if err != nil {
 		return err
 	}
+	return sdc.TouchKeyValue(plainKey, val)
+}
+
+// TouchKeyValue is TouchKeyFromState for a caller that already holds the key's latest value.
+func (sdc *SharedDomainsCommitmentContext) TouchKeyValue(plainKey, val []byte) error {
+	d, err := plainKeyDomain(plainKey)
+	if err != nil {
+		return err
+	}
 	sdc.TouchKey(d, string(plainKey), val)
 	return nil
+}
+
+func plainKeyDomain(plainKey []byte) (kv.Domain, error) {
+	switch len(plainKey) {
+	case length.Addr:
+		return kv.AccountsDomain, nil
+	case length.Addr + length.Hash:
+		return kv.StorageDomain, nil
+	default:
+		return 0, fmt.Errorf("touch key: unexpected plain key length %d (%x)", len(plainKey), plainKey)
+	}
 }
 
 // TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
@@ -397,6 +420,9 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Contex
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
+	if wt, ok := sdc.Trie().(v3Trie); ok {
+		return wt.WitnessNodes(ctx, sdc.updates, produceExclusionProofs)
+	}
 	wt, err := sdc.witnessTrie()
 	if err != nil {
 		return nil, nil, err
@@ -410,35 +436,6 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
 	return lean, rootHash, nil
-}
-
-// WitnessLean builds the proof trie from the lean (pruned) witness node set — the
-// strict-verifier form debug_executionWitness emits — and re-attaches codeReads. Use
-// it when a single witness is serialized whole (eth_getWitness op-stream); the full
-// superset Witness() returns is for consumers that do their own per-key selection.
-// The returned nodes are the raw lean set (root first, no code attached), suitable for
-// feeding a node-set stateless verifier directly.
-func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
-	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	proofTrie, err = trie.RLPDecode(nodes)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	for addrHash, codeWithHash := range codeReads {
-		if len(codeWithHash.Code) == 0 {
-			continue
-		}
-		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
-			continue
-		}
-		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
-			return nil, nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
-		}
-	}
-	return proofTrie, nodes, rootHash, nil
 }
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
@@ -1040,7 +1037,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	otherKey, otherErr := commitment.KeyCommitmentV3State, "the datadir holds commitment v3 records: start erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true)"
 	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: with ERIGON_COMMITMENT_V3 unset, convert it with `integration commitment convert --v3` first"
+		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first"
 	}
 	other, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
 	if err != nil {

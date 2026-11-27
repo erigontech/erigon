@@ -387,6 +387,19 @@ func TestOnOwnedHeadStateWithBlockRootCopyOwnedCopyRotation(t *testing.T) {
 	require.Same(t, formerHead, manager.spareHeadState)
 }
 
+// The owned path drops a state on every head change; keeping it lets the next head be copied into its buffers.
+func TestOwnedPublishKeepsTheDroppedStateForTheNextCopy(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(first, common.Hash{0x01}))
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
+	require.Nil(t, manager.TakeSpareHeadState())
+
+	require.NoError(t, manager.OnOwnedHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x03}))
+	require.Same(t, first, manager.TakeSpareHeadState())
+	require.Nil(t, manager.TakeSpareHeadState(), "a taken state is no longer managed")
+}
+
 func TestOnOwnedHeadStateWithBlockRootDemotesOwnedHead(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	first := state.New(&clparams.MainnetBeaconConfig)

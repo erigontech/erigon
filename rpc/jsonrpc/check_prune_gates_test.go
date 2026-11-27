@@ -113,6 +113,72 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	executed := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+	wantBalance, err := apis.eth.GetBalance(ctx, testAddr, &executed)
+	require.NoError(t, err)
+
+	forkchoiceHead := chainInfo.head + uint64(pruneGatingDistance) + 1
+	headHash := common.Hash{0xfc}
+	require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, headHash)
+		return rawdb.WriteHeaderNumber(tx, headHash, forkchoiceHead)
+	}))
+	require.Greater(t, pruneGatingDistance.PruneTo(forkchoiceHead), chainInfo.head, "the executed block must fall below the forkchoice prune floor")
+
+	for name, blockNumber := range map[string]rpc.BlockNumber{
+		"latest_executed": rpc.LatestExecutedBlockNumber,
+		"executed_number": rpc.BlockNumber(chainInfo.head),
+	} {
+		t.Run(name, func(t *testing.T) {
+			selector := rpc.BlockNumberOrHashWithNumber(blockNumber)
+			balance, err := apis.eth.GetBalance(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, *wantBalance, *balance)
+
+			nonce, err := apis.eth.GetTransactionCount(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, hexutil.Uint64(pruneGatingChainLen-1), *nonce)
+
+			values, err := apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+			require.NoError(t, err)
+			require.Equal(t, []hexutil.Bytes{make([]byte, 32)}, values[testAddr])
+
+			graphqlBalance, graphqlNonce, _, err := apis.graphql.GetAccountInfo(ctx, testAddr, blockNumber)
+			require.NoError(t, err)
+			require.Equal(t, wantBalance.String(), graphqlBalance)
+			require.Equal(t, uint64(pruneGatingChainLen-1), graphqlNonce)
+
+			_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", blockNumber)
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("block_below_forkchoice_floor", func(t *testing.T) {
+		belowFloor := rpc.BlockNumber(chainInfo.head - 1)
+		require.GreaterOrEqual(t, uint64(belowFloor), pruneGatingDistance.PruneTo(chainInfo.head), "the block must be above the execution prune floor")
+		selector := rpc.BlockNumberOrHashWithNumber(belowFloor)
+
+		_, err := apis.eth.GetBalance(ctx, testAddr, &selector)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, _, _, err = apis.graphql.GetAccountInfo(ctx, testAddr, belowFloor)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", belowFloor)
+		require.ErrorIs(t, err, state.ErrPruned)
+	})
+}
+
 // TestCallBundleGatesTxBlockAndStateBlockSeparately pins the two blocks eth_callBundle
 // reads apart: the bundle's transactions come from the bodies of the blocks that hold
 // them, the state they run against comes from the block the caller names. A retention
@@ -300,7 +366,7 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 
 			apis.trace.kv = historyFloorDB{TemporalRoDB: apis.trace.kv, startTxNum: startTxNum}
 			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tc.firstBlock))
-			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, nil, &tracersConfig.TraceConfig{})
+			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, &tracersConfig.TraceConfig{})
 			require.NoError(t, err, "replay must accept the oldest block supported by its reader")
 			require.NotEmpty(t, traces)
 
@@ -1286,7 +1352,7 @@ func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 				ToBlock:   new(rpc.BlockNumber(to)),
 			}
 			return streamedResult(func(stream *jsonstream.Stream) error {
-				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
+				return apis.trace.Filter(ctx, req, nil, stream)
 			})
 		}},
 	} {
@@ -2287,7 +2353,7 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
 		}},
 		{"trace_filter", func() (any, error) {
-			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(io.Discard))
+			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, nil, jsonstream.New(io.Discard))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2604,30 +2670,38 @@ func TestCapabilitiesRenderAWindowThatHasNotStarted(t *testing.T) {
 	require.Equal(t, uint64(pruneGatingReceiptsUnstarted), uint64(caps.Receipts.DeleteStrategy.RetentionBlocks))
 }
 
-// TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared
-// against a cap expressed in ether, and a zero cap disables the check.
+// TestCheckTxFee checks the maximum fee in wei against the RPC cap in ether.
+// Ordinary transactions use gas limit times fee cap per gas, and frame
+// transactions use their signed MaxFee. A zero cap disables the check.
 func TestCheckTxFee(t *testing.T) {
 	t.Parallel()
 
-	oneEtherGasPrice := new(big.Int).Div(big.NewInt(common.Ether), big.NewInt(21000))
+	// One ether in wei is divisible by 25,000, so the at-cap case tests exact equality.
+	gasPrice := uint256.NewInt(common.Ether / 25_000)
+	oneEther := types.NewTransaction(0, common.Address{}, nil, 25_000, gasPrice, nil)
+	twoEther := types.NewTransaction(0, common.Address{}, nil, 50_000, gasPrice, nil)
+	wrappedFrame := &types.FrameTxWrapper{FrameTransaction: &types.FrameTransaction{
+		Fees: types.FrameFees{MaxFee: *uint256.NewInt(common.Ether + 1)},
+	}}
 	for _, tc := range []struct {
 		name     string
-		gasPrice *big.Int
-		gas      uint64
-		gasCap   float64
-		wantErr  bool
+		txn      types.Transaction
+		capEther float64
+		wantErr  string
 	}{
-		{"no_cap", oneEtherGasPrice, 21000, 0, false},
-		{"under_cap", oneEtherGasPrice, 21000, 2, false},
-		{"at_cap", oneEtherGasPrice, 21000, 1, false},
-		{"over_cap", oneEtherGasPrice, 42000, 1, true},
-		{"zero_fee", big.NewInt(0), 21000, 1, false},
+		{"no_cap", oneEther, 0, ""},
+		{"under_cap", oneEther, 2, ""},
+		{"at_cap", oneEther, 1, ""},
+		{"over_cap", twoEther, 1, "tx fee (2.00 ether) exceeds the configured cap (1.00 ether)"},
+		{"zero_fee", &types.LegacyTx{}, 1, ""},
+		{"wrapped_frame_rounds_to_cap", wrappedFrame, 1, ""},
+		{"wrapped_frame_over_cap", wrappedFrame, 0.5, "tx fee (1.00 ether) exceeds the configured cap (0.50 ether)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := checkTxFee(tc.gasPrice, tc.gas, tc.gasCap)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the configured cap")
+			err := checkTxFee(tc.txn, tc.capEther)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
 			} else {
 				require.NoError(t, err)
 			}

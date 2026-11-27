@@ -45,15 +45,14 @@
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam-parallel
-#                                              race-detector variants filtered
-#                                              to the Amsterdam fork only.
+#   blocktests-devnet-race-{amsterdam,amsterdam-to-bogota}-parallel
+#                                              Amsterdam and its transition to Bogota.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
 #                                              runner; compares debug_executionWitness
 #                                              (canonical) per block.
-#   zkevm-witness-race                         race-detector variant of the above over
-#                                              the whole corpus (run via evm.race).
+#   zkevm-witness-race                         full witness corpus via evm.race.
+#   zkevm-witness-race-{a-h,rest}              CI partitions of the witness race corpus.
 #   zkevm-witness-v3                           zkevm-witness on serial commitment v3.
 #   Every other shard runs with parallel commitment; the manifest pins the mode
 #   through commitment-parallel and commitment-v3. Execution is parallel in
@@ -181,8 +180,7 @@ case "$shard_route" in
 		paths=("$base/blockchain_tests_engine_x/$gas_dir")
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
 	zkevm-witness*)
-		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
-		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
+		# Witness references can come from cases outside a shard's --run filter.
 		cmd=zkevmtest;   paths=("$base/blockchain_tests") ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac

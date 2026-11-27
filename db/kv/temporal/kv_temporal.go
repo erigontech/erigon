@@ -79,6 +79,7 @@ type DB struct {
 	// blockFiles: block snapshots, the peer of stateFiles. Nil for state-only
 	// tools; a tx from such a DB pins no view and panics on any block read.
 	blockFiles *blocksnapshots.RoSnapshots
+	closeOnce  sync.Once // a concurrent second Close must wait for the first: MDBX Close returns at once for it
 }
 
 // New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
@@ -265,10 +266,15 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	if db.stateFiles != nil {
-		db.stateFiles.Close()
-	}
-	db.RwDB.Close()
+	db.closeOnce.Do(func() {
+		if db.stateFiles != nil {
+			db.stateFiles.StopMaintenance()
+		}
+		db.RwDB.Close() // refuses new txs and waits for open ones, which may read state files
+		if db.stateFiles != nil {
+			db.stateFiles.Close()
+		}
+	})
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
@@ -781,20 +787,20 @@ func (db *DB) MaxPrunableStepsBacklog() uint64 {
 	return db.stateFiles.MaxPrunableStepsBacklog()
 }
 
-func (db *DB) BuildFiles(toTxNum uint64, finalityCtx kv.FinalityContext) error {
-	return db.stateFiles.BuildFiles(db, toTxNum, finalityCtx)
+func (db *DB) BuildFiles(toTxNum, irreversibleTxNum uint64) error {
+	return db.stateFiles.BuildFiles(db, toTxNum, irreversibleTxNum)
 }
 
-func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
-	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, doMerge)
+func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
+	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, irreversibleTxNum, doMerge)
 }
 
-func (db *DB) BuildFilesInBackground(finalityCtx kv.FinalityContext) chan struct{} {
+func (db *DB) BuildFilesInBackground(irreversibleTxNum uint64) chan struct{} {
 	toTxNum := db.stateFiles.EndTxNumMinimax() + db.stateFiles.StepSize()
-	return db.stateFiles.BuildFilesInBackground(db, toTxNum, finalityCtx)
+	return db.stateFiles.BuildFilesInBackground(db, toTxNum, irreversibleTxNum)
 }
 
-func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (uint64, error)) (bool, <-chan struct{}, error) {
 	return db.stateFiles.CollateAndPrune(ctx, db, pruneFn)
 }
 

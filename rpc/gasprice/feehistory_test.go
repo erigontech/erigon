@@ -248,6 +248,7 @@ func TestFeeHistoryValues(t *testing.T) {
 			},
 			receipts: map[uint64]types.Receipts{
 				1: {{GasUsed: 63_000}, {GasUsed: 21_000}, {GasUsed: 42_000}},
+				2: {},
 				3: {{GasUsed: 30_000_000}},
 			},
 		}

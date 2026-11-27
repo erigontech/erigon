@@ -230,7 +230,7 @@ func TestRunnersRunFilesBesideOneThatIsNotAnObject(t *testing.T) {
 			stdout := tt.Output()
 			tt.WaitExit()
 			require.Equal(t, exitIncompleteRun, tt.ExitStatus())
-			require.Contains(t, tt.StderrText(), "array.json: json: cannot unmarshal array")
+			require.Contains(t, tt.StderrText(), "array.json: not a JSON object of fixtures")
 
 			var results []testResult
 			require.NoError(t, json.Unmarshal(stdout, &results))

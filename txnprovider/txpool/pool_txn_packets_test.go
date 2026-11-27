@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -432,4 +433,88 @@ func TestTransactionPacketCountLimit(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestTransactionPacketAuthorizationLimit(t *testing.T) {
+	const (
+		firstHalf = maxRemoteAuthorizations / 2
+		remaining = maxRemoteAuthorizations - firstHalf
+	)
+	minTuple, err := rlp.EncodeToBytes(&types.Authorization{})
+	require.NoError(t, err)
+	require.Equal(t, (p2pTxPacketLimit+txnMaxSize)/len(minTuple), maxRemoteAuthorizations)
+
+	first := remoteSetCodeTxn(t, 0, firstHalf).Rlp
+	fillsRemainder := remoteSetCodeTxn(t, 1, remaining).Rlp
+	oneAuth := remoteSetCodeTxn(t, 2, 1).Rlp
+	exceedsRemainder := remoteSetCodeTxn(t, 3, remaining+1).Rlp
+	malformed := append(bytes.Clone(oneAuth), 0)
+	ordinary := tpEncodeTests[1].txns[0]
+	outbound := [][]byte{remoteSetCodeTxn(t, 0, 3_700).Rlp, remoteSetCodeTxn(t, 1, 4_800).Rlp}
+	require.Less(t, len(outbound[0]), p2pTxPacketLimit)
+	require.NoError(t, ValidateSerializedTxn(outbound[1]))
+
+	tests := []struct {
+		name        string
+		validateRLP func([]byte) error
+		txns        [][]byte
+		want        [][]byte
+	}{
+		{
+			name:        "outbound batch with a large final transaction",
+			validateRLP: ValidateSerializedTxn,
+			txns:        outbound,
+			want:        outbound,
+		},
+		{
+			name:        "ordinary transaction after budget is spent",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name:        "budget applies without an RLP validator",
+			validateRLP: nil,
+			txns:        [][]byte{first, fillsRemainder, oneAuth, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name:        "over-budget transaction is skipped before decoding",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, fillsRemainder, malformed, ordinary},
+			want:        [][]byte{first, fillsRemainder, ordinary},
+		},
+		{
+			name:        "later transaction fits remaining budget",
+			validateRLP: ValidateSerializedTxn,
+			txns:        [][]byte{first, exceedsRemainder, fillsRemainder},
+			want:        [][]byte{first, fillsRemainder},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewTxnParseContext(*uint256.NewInt(1))
+			ctx.WithSender(false)
+			ctx.ValidateRLP(tt.validateRLP)
+			payload := EncodeTransactions(tt.txns, nil)
+			var slots TxnSlots
+			pos, err := ParseTransactions(payload, 0, ctx, &slots, nil)
+			require.NoError(t, err)
+			require.Equal(t, len(payload), pos)
+			require.NoError(t, slots.Valid())
+			require.Len(t, slots.Txns, len(tt.want))
+			for i, want := range tt.want {
+				require.Equal(t, crypto.Keccak256Hash(want), common.Hash(slots.Txns[i].IDHash))
+			}
+		})
+	}
+}
+
+func TestTransactionPacketOversizedSetCode(t *testing.T) {
+	over := remoteSetCodeTxn(t, 0, maxRemoteAuthorizations+1).Rlp
+	payload := EncodeTransactions([][]byte{over}, nil)
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx.ValidateRLP(ValidateSerializedTxn)
+	_, err := ParseTransactions(payload, 0, ctx, &TxnSlots{}, nil)
+	require.ErrorIs(t, err, ErrRlpTooBig)
 }

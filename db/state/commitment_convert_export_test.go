@@ -19,8 +19,12 @@ package state
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // Test-only bridge: convertCommitmentFile and its sentinels are package-private,
@@ -35,7 +39,7 @@ var (
 	DumpCommitmentStepForTest    = dumpCommitmentStep
 )
 
-func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte)) (uint64, error) {
+func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (ok bool, k, v []byte)) (uint64, error) {
 	rebuilt, err := rebuildCommitmentShard(ctx, sd, tx, next, &rebuiltCommitment{StepTo: 1})
 	if err != nil {
 		return 0, err
@@ -54,9 +58,46 @@ func SetConvertPhase5HookForTest(fn func() error) {
 	convertPhase5Hook = fn
 }
 
+func SetVerifyViewDirsHookForTest(fn func(*datadir.Dirs)) {
+	verifyViewDirsHook = fn
+}
+
+func SetConvertHistoryAfterFileHookForTest(fn func(idx int) error) {
+	convertHistoryAfterFileHook = fn
+}
+
 func SetCommitmentV3BatchBytesForTest(n int) int {
 	old := commitmentV3BatchBytes
 	commitmentV3BatchBytes = n
+	return old
+}
+
+func SetCommitmentV3FoldRangesForTest(n uint64) uint64 {
+	old := commitmentV3FoldRanges
+	commitmentV3FoldRanges = n
+	return old
+}
+
+func SetCommitmentV3FoldChunkForTest(n int) int {
+	old := commitmentV3FoldChunk
+	commitmentV3FoldChunk = n
+	return old
+}
+
+func SetFoldCommitmentV3RangeHookForTest(h func(seq int)) func() {
+	foldCommitmentV3RangeHook = h
+	return func() { foldCommitmentV3RangeHook = nil }
+}
+
+func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
+	old := legacyShapeMinVersions
+	legacyShapeMinVersions = n
+	return old
+}
+
+func SetCommitmentV3BatchForTest(n int) int {
+	old := commitmentV3Batch
+	commitmentV3Batch = n
 	return old
 }
 
@@ -66,4 +107,22 @@ func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64
 		return
 	}
 	legacyCommitTxNumsFn = fn
+}
+
+func BuildCommitmentAccessorsForTest(ctx context.Context, a *Aggregator, kvPath, dstDir string, from, to kv.Step) error {
+	d := a.d[kv.CommitmentDomain]
+	legacyAccessors := d.Accessors
+	d.Accessors = statecfg.CommitmentV3Accessors
+	defer func() { d.Accessors = legacyAccessors }()
+	dec, err := seg.NewDecompressor(kvPath)
+	if err != nil {
+		return err
+	}
+	defer dec.Close()
+	bt, err := d.buildBtIndex(d.kvBtAccessorNewFilePathIn(dstDir, from, to), d.kvExistenceIdxNewFilePathIn(dstDir, from, to), d.dataReader(dec), *d.salt.Load(), background.NewProgressSet())
+	if err != nil {
+		return err
+	}
+	bt.Close()
+	return nil
 }

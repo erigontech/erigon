@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
 )
 
@@ -33,12 +34,12 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	ctx context.Context,
 	blobDB blob_storage.BlobStorage,
 	beaconConfig *clparams.BeaconChainConfig,
-	block *cltypes.SignedBeaconBlock,
+	block, child *cltypes.SignedBeaconBlock,
 ) error {
-	commitments := block.Block.Body.GetBlobKzgCommitments()
-	if !c.Blobs || commitments == nil || commitments.Len() == 0 {
+	if !c.Blobs || expectedBlobsForChild(block, child) == 0 {
 		return nil
 	}
+	commitments := block.Block.Body.GetBlobKzgCommitments()
 	ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, beaconConfig)
 	if err != nil {
 		return fmt.Errorf("failed to get blob identifiers at slot %d: %w", block.Block.Slot, err)
@@ -53,7 +54,7 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if err != nil {
 		return err
 	}
-	blobs, err := blobfetch.Retrieve(ctx, c.Endpoint, blockRoot, block)
+	blobs, err := blobfetch.Retrieve(ctx, c.Endpoint, blockRoot, block, func(context.Context) (*cltypes.SignedBlindedBeaconBlock, error) { return block.Blinded() })
 	if err != nil {
 		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
 	}
@@ -61,4 +62,12 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 		return fmt.Errorf("failed to verify and store blobs at slot %d: %w", block.Block.Slot, err)
 	}
 	return nil
+}
+
+func expectedBlobsForChild(block, child *cltypes.SignedBeaconBlock) int {
+	n := blobfetch.BlobCount(block)
+	if n == 0 || block.Version() < clparams.GloasVersion || child == nil || forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
+		return n
+	}
+	return 0
 }

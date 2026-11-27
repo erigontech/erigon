@@ -461,13 +461,13 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 	defer evm.putCallContext(scope)
 	scope.Memory.Resize(64)
 	clear(scope.Memory.Data())
-	allocations := func(memorySize int) float64 {
+	allocations := func(memorySize int, initCodeSize uint64) float64 {
 		return testing.AllocsPerRun(100, func() {
 			scope.Memory.store = scope.Memory.store[:memorySize]
 			scope.Memory.lastGasCost = 0
 			scope.Stack.Reset()
 			scope.Stack.push(uint256.Int{})
-			scope.Stack.push(*uint256.NewInt(64))
+			scope.Stack.push(*uint256.NewInt(initCodeSize))
 			scope.Stack.push(uint256.Int{})
 			scope.Stack.push(uint256.Int{})
 			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
@@ -479,10 +479,11 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 			}
 		})
 	}
-	withoutPadding := allocations(64)
-	withPadding := allocations(32)
-	if withPadding != withoutPadding {
-		t.Fatalf("zero-padding adds initcode allocations: without padding %g, with padding %g", withoutPadding, withPadding)
+	empty := allocations(64, 0)
+	withoutPadding := allocations(64, 64)
+	withPadding := allocations(32, 64)
+	if withoutPadding > empty || withPadding > empty+1 {
+		t.Fatalf("CREATE2 allocations: empty %g, in memory %g, zero-padded %g", empty, withoutPadding, withPadding)
 	}
 }
 

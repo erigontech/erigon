@@ -93,9 +93,15 @@ func (a *LogsFilterAggregator) removeLogsFilterLocked(filterId uint64, filter *L
 	a.checkEmpty()
 }
 
-func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remoteproto.LogsFilterRequest) {
+// updateLogsFilter applies filterReq and, if it asks, acks it on the stream. The ack is
+// sent under logsFilterLock like every log, so the stream has one sender at a time.
+func (a *LogsFilterAggregator) updateLogsFilter(filterId uint64, filterReq *remoteproto.LogsFilterRequest) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
+	filter, ok := a.logsFilters[filterId]
+	if !ok {
+		return nil
+	}
 	a.subtractLogFilters(filter)
 	filter.addrs = make(map[common.Address]int)
 	if filterReq.GetAllAddresses() {
@@ -117,6 +123,10 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 	}
 	a.addLogsFilters(filter)
 	a.checkEmpty()
+	if !filterReq.GetAck() {
+		return nil
+	}
+	return filter.sender.Send(&remoteproto.SubscribeLogsReply{FilterApplied: true})
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
@@ -156,7 +166,9 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	var filterReq *remoteproto.LogsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
-		a.updateLogsFilter(filter, filterReq)
+		if err := a.updateLogsFilter(filterId, filterReq); err != nil {
+			return fmt.Errorf("acking log filter request: %w", err)
+		}
 	}
 	if !errors.Is(recvErr, io.EOF) { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)

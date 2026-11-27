@@ -157,6 +157,9 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if result.Status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
+	if result.Status == execmodule.ExecutionStatusReorgTooDeep {
+		return nil, errors.New("forkchoice reorg is too deep")
+	}
 	if attr == nil {
 		if !cc.EnableFastConfirmation {
 			if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {

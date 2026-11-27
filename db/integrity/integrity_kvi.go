@@ -44,6 +44,8 @@ import (
 // ErrIntegrity is useful to differentiate integrity errors from program errors.
 var ErrIntegrity = errors.New("integrity error")
 
+var ErrSkipped = errors.New("integrity check skipped")
+
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
 // parallelizing the lookup work inside each file.
 func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkType Check, sc SamplerCfg, cache *IntegrityCache, failFast bool, logger log.Logger) error {

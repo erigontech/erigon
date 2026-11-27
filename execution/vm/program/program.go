@@ -255,6 +255,14 @@ func (p *Program) JumpIf(loc any, condition any) *Program {
 	return p
 }
 
+// AssertEq consumes the top stack word and reverts unless it equals expected.
+func (p *Program) AssertEq(expected uint64) *Program {
+	p.Push(expected).Op(vm.EQ)
+	destination := p.Size() + 7
+	return p.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
+		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
+}
+
 // Size returns the current size of the bytecode.
 func (p *Program) Size() int {
 	return len(p.code)

@@ -326,7 +326,7 @@ func TestFastConfirmationAcrossImportedEpochs(t *testing.T) {
 		now := (anchor.GenesisTime() + block.Block.Slot*anchor.BeaconConfig().SecondsPerSlot) * 1000
 		store.OnTick(now)
 		previousSlot := block.Block.Slot - 1
-		headState, err := store.GetOwnedStateAtBlockRoot(previousRoot)
+		headState, err := store.GetOwnedStateAtBlockRoot(previousRoot, nil)
 		require.NoError(t, err)
 		epoch := previousSlot / anchor.BeaconConfig().SlotsPerEpoch
 		for committeeIndex := uint64(0); committeeIndex < headState.CommitteeCount(epoch); committeeIndex++ {

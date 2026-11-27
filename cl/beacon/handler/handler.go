@@ -258,8 +258,10 @@ type ApiHandler struct {
 	syncMessagePool           sync_contribution_pool.SyncContributionPool
 	committeeSub              committee_subscription.CommitteeSubscribe
 	attestationProducer       attestation_producer.AttestationDataProducer
-	attestationDataImportWait time.Duration
+	importWait                time.Duration
+	// Each endpoint that waits for an import has its own per-slot budget, so a caller of one does not cut the wait of the other.
 	attestationDataWaitedSlot atomic.Uint64
+	headRootWaitedSlot        atomic.Uint64
 	aggregatePool             aggregation.AggregationPool
 
 	// services
@@ -403,7 +405,7 @@ func NewApiHandler(
 		columnStorage:                      columnStorage,
 		caplinSnapshots:                    blobSnapshots,
 		attestationProducer:                attestationProducer,
-		attestationDataImportWait:          defaultAttestationDataImportWait,
+		importWait:                         defaultImportWait,
 		blobBundles:                        blobBundles,
 		engine:                             engine,
 		syncMessagePool:                    syncMessagePool,
@@ -616,6 +618,7 @@ func (a *ApiHandler) init() {
 							r.Post("/validator_balances", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconValidatorsBalances))
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
+							r.Post("/validator_identities", beaconhttp.HandleEndpointFunc(a.PostEthV1ValidatorIdentities))
 							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
 							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
 							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
@@ -699,7 +702,6 @@ func (a *ApiHandler) init() {
 		})
 		if a.routerCfg.Validator {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
-			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Post("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlock))
 		}
 	})

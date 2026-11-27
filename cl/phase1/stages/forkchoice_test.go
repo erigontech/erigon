@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -44,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -466,7 +469,7 @@ func TestHeadEventBeforeStateCopyMatchesCopiedStateEvent(t *testing.T) {
 
 			emitted := emitHeadEventBeforeStateCopy(&beaconCfg, store, earlyEmitter, headSlot, head.Root)
 			require.True(t, emitted)
-			copied, err := store.GetOwnedStateAtBlockRoot(head.Root)
+			copied, err := store.GetOwnedStateAtBlockRoot(head.Root, nil)
 			require.NoError(t, err)
 			require.NoError(t, emitHeadEvent(&beaconCfg, store, oldEmitter, headSlot, head.Root, copied))
 
@@ -931,6 +934,40 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 		require.Same(t, recorder.ownedState, head)
 		return nil
 	}))
+}
+
+type spareHeadStateData struct {
+	synced_data.SyncedData
+	spare *state.CachingBeaconState
+}
+
+func (s *spareHeadStateData) TakeSpareHeadState() *state.CachingBeaconState {
+	spare := s.spare
+	s.spare = nil
+	return spare
+}
+
+func TestPostForkchoiceOperationsCopiesTheHeadIntoTheSpareState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 1)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	var spare *state.CachingBeaconState
+	require.NoError(t, fixture.cfg.forkChoice.ViewStateAtBlockRoot(fixture.headRoot, func(current *state.CachingBeaconState) error {
+		spare = state.New(current.BeaconConfig())
+		return nil
+	}))
+	recorder := &recordingHeadPublish{SyncedData: &spareHeadStateData{SyncedData: fixture.syncedData, spare: spare}}
+	fixture.cfg.syncedData = recorder
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+
+	require.Same(t, spare, recorder.ownedState)
+	require.Equal(t, fixture.headState.Slot(), spare.Slot())
 }
 
 func newForkChoicePublicationFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock, common.Hash) {
@@ -1497,6 +1534,63 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 	}
 }
 
+func TestCanonicalRootsLeaveSkippedSlotsEmpty(t *testing.T) {
+	phase0, _, _ := tests.GetPhase0Random()
+	capella, _, _ := tests.GetCapellaRandom()
+	electra, _, _ := tests.GetElectraRandom()
+	chains := map[string][]*cltypes.SignedBeaconBlock{
+		"phase0":                    phase0,
+		"capella":                   capella,
+		"electra":                   electra,
+		"gloas full parent":         tests.GetGloasFixture("missed_slot_payload_availability", false, 0).Blocks,
+		"gloas missed epochs":       tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0).Blocks,
+		"gloas every payload empty": tests.GetGloasFixture("finality_no_updates_at_genesis", false, 0).Blocks,
+	}
+	for name, blocks := range chains {
+		for _, viaForkChoice := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fork choice %v", name, viaForkChoice), func(t *testing.T) {
+				ctx := t.Context()
+				cfg := newLockOrderFixture(t, 0).cfg
+				cfg.indiciesDB = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+				roots := make(map[uint64]common.Hash, len(blocks))
+				for i, block := range blocks {
+					root, err := block.Block.HashSSZ()
+					require.NoError(t, err)
+					roots[block.Block.Slot] = root
+					if i == 0 || !viaForkChoice {
+						require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+							return writeDownloadedBlock(tx, block, nil, false, false)
+						}))
+						continue
+					}
+					require.NoError(t, persistAcceptedBlock(ctx, cfg, block))
+					require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+						_, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, root, cfg)
+						return err
+					}))
+				}
+
+				require.NoError(t, cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+					for slot := blocks[0].Block.Slot; slot <= blocks[len(blocks)-1].Block.Slot; slot++ {
+						root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+						require.NoError(t, err)
+						want, hasBlock := roots[slot]
+						if !hasBlock {
+							require.Equal(t, common.Hash{}, root, "skipped slot %d has a canonical root", slot)
+							continue
+						}
+						require.Equal(t, want, root, "slot %d", slot)
+						body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root))
+						require.NoError(t, err)
+						require.NotEmpty(t, body, "canonical block at slot %d has no body", slot)
+					}
+					return nil
+				}))
+			})
+		}
+	}
+}
+
 func writeTestBlockIndices(t *testing.T, tx kv.RwTx, root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 	t.Helper()
 	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
@@ -2052,7 +2146,7 @@ func TestHeadEventsDeduplicateAcrossStateCopy(t *testing.T) {
 	emitPass := func() {
 		t.Helper()
 		require.True(t, emitHeadEventBeforeStateCopy(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot))
-		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot)
+		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot, nil)
 		require.NoError(t, err)
 		require.NoError(t, emitHeadEvent(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot, copied))
 	}
@@ -2414,7 +2508,7 @@ func TestPendingSafeUpdateDoesNotDelayNewHead(t *testing.T) {
 	}
 }
 
-func TestDirectForkChoiceFlagOffRecordsDeferredHead(t *testing.T) {
+func TestDirectForkChoiceFlagOffExecutionHead(t *testing.T) {
 	for _, result := range []execmodule.ForkChoiceResult{
 		{Status: execmodule.ExecutionStatusMissingSegment},
 		{Status: execmodule.ExecutionStatusTooFarAway},
@@ -2426,7 +2520,13 @@ func TestDirectForkChoiceFlagOffRecordsDeferredHead(t *testing.T) {
 			direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &deferredOnceExecutionModule{firstResult: result}, time.Second), nil)
 			require.NoError(t, err)
 			engine.forkChoiceFn = direct.ForkChoiceUpdate
+			previousHead := cfg.executionHead
 			_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+			if result.Status == execmodule.ExecutionStatusReorgTooDeep {
+				require.ErrorContains(t, err, "forkchoice reorg is too deep")
+				require.Equal(t, previousHead, cfg.executionHead)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, cfg.executionHead)
 		})

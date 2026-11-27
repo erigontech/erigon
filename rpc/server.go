@@ -135,14 +135,13 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
-	// Don't serve if server is stopped.
+	// Check run only after Add: a Stop that misses the codec in its close pass
+	// must have flipped run already.
+	s.codecs.Add(codec)
+	defer s.codecs.Remove(codec)
 	if !s.run.Load() {
 		return
 	}
-
-	// Add the codec to the set so it can be closed by Stop.
-	s.codecs.Add(codec)
-	defer s.codecs.Remove(codec)
 
 	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
 	for {

@@ -972,3 +972,12 @@ func Test_DoPublishable_StopsOnExpiredContext(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.ErrorIs(t, doPublishable(ctx, dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB)), context.DeadlineExceeded)
 }
+
+func TestDoPublishableRejectsMixedCommitmentVersions(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v2.0-commitment.0-128.kv")
+	createMockFile(t, dirs.SnapDomain, "v3.0-commitment.128-192.kv")
+
+	err := doPublishable(t.Context(), dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.ErrorContains(t, err, "mixed major versions")
+}

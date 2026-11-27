@@ -549,8 +549,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-		genesisProFork = genesiswrite.MustCommitGenesis(gspecProFork, dbProFork, datadir.New(t.TempDir()), log.Root())
+		genesisNoFork  = genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork)
+		genesisProFork = genesiswrite.MustCommitGenesis(gspecProFork, dbProFork)
 	)
 
 	var s1, s2 *GrpcServer
@@ -638,7 +638,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork)
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &sentryproto.StatusData{
@@ -1369,7 +1369,7 @@ func TestGrpcServer_SetStatus_NilStatusReadyIsSafe(t *testing.T) {
 	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
-	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork)
 
 	ss := &GrpcServer{} // zero-value statusReady (nil channel)
 	require.NoError(t, ss.SetP2PServer(srv))

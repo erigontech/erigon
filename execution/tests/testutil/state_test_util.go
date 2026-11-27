@@ -332,7 +332,6 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
-	statedb.SetVersionMap(state.NewVersionMap(nil))
 	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
@@ -468,6 +467,7 @@ func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.Tempo
 	// Read through sd.AsStateGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.New(r)
+	defer statedb.Close()
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
@@ -504,17 +504,23 @@ func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.Tempo
 	}
 
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), blockNr-1)
-	if err := statedb.FinalizeTx(rules, w); err != nil {
+	writes, err := statedb.FinalizedWrites(rules)
+	if err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, w); err != nil {
+	statedb.FlushWritesToVersionMap(writes)
+	if err := statedb.WriteFlushedTo(writes, w); err != nil {
 		return nil, err
 	}
 
 	if _, err := sd.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "pre-state-commitment", nil); err != nil {
 		return nil, err
 	}
-	return statedb, nil
+	// The pre-state is in sd now: the caller's run reads it through r on a state of its own.
+	run := state.New(r)
+	run.SetNoConflictDetection()
+	run.SetTxContext(blockNr, 0)
+	return run, nil
 }
 
 func (t *StateTest) genesis(config *chain.Config) *types.Genesis {

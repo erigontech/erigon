@@ -201,7 +201,7 @@ func (f *ForkChoiceStore) loadFastConfirmationStates(v *fcrView) error {
 		b.total = max(b.total, v.balanceIncrement)
 		tracker.balances[cp] = b
 	}
-	headState, err := f.GetOwnedStateAtBlockRoot(v.head)
+	headState, err := f.GetOwnedStateAtBlockRoot(v.head, nil)
 	if err != nil {
 		return err
 	}

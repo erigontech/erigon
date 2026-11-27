@@ -260,14 +260,15 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 	defer csn.Close()
 
-	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
+	baseUri, err := url.Parse(c.Endpoint)
 	if err != nil {
 		return err
 	}
+	blocksUri := baseUri.JoinPath("eth/v2/beacon/blocks")
 
 	log.Info("Hooked", "endpoint", blobfetch.RedactEndpoint(c.Endpoint))
 	// Let's fetch the head first
-	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
+	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, blocksUri.JoinPath("head").String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve head: %w", err)
 	}
@@ -286,12 +287,13 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
-	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	child := currentBlock
 	previousLogBlock := currentBlock.Block.Slot
 
 	logInterval := time.NewTicker(30 * time.Second)
@@ -307,7 +309,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 
 		// Let's fetch the head first
-		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, blocksUri.JoinPath("0x"+stringifiedRoot).String(), (*common.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block 0x%s: %w", stringifiedRoot, err)
 		}
@@ -318,9 +320,10 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock, child); err != nil {
 			return false, err
 		}
+		child = currentBlock
 
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
@@ -349,17 +352,16 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 
 				// Look the blobs up under the walked root: before Gloas the stored body has no execution
 				// transactions or withdrawals, so its own hash is not the block root.
-				kzgCommitments := 0
-				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
-					kzgCommitments = c.Len()
+				if n := expectedBlobsForChild(block, child); n > 0 {
+					stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, n)
+					if err != nil {
+						return false, err
+					}
+					if !stored {
+						break
+					}
 				}
-				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
-				if err != nil {
-					return false, err
-				}
-				if !stored {
-					break
-				}
+				child = block
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
@@ -777,8 +779,12 @@ type ArchiveSanitizer struct {
 }
 
 func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
+	base, err := url.Parse(beaconApiURL)
+	if err != nil {
+		return 0, blobfetch.RedactURLError(err)
+	}
 	headResponse := map[string]any{}
-	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath("eth/v2/debug/beacon/heads").String(), nil)
 	if err != nil {
 		return 0, blobfetch.RedactURLError(err)
 	}
@@ -808,8 +814,12 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 }
 
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
+	base, err := url.Parse(beaconApiURL)
+	if err != nil {
+		return common.Hash{}, blobfetch.RedactURLError(err)
+	}
 	response := map[string]any{}
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", base.JoinPath(fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)).String(), nil)
 	if err != nil {
 		return common.Hash{}, blobfetch.RedactURLError(err)
 	}
@@ -872,6 +882,10 @@ func (a *ArchiveSanitizer) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	base, err := url.Parse(a.BeaconApiURL)
+	if err != nil {
+		return blobfetch.RedactURLError(err)
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
@@ -888,7 +902,7 @@ func (a *ArchiveSanitizer) Run(ctx context.Context) error {
 		if stateRoot == (common.Hash{}) {
 			continue
 		}
-		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
+		state, err := getBeaconState(ctx, beaconConfig, base.JoinPath(fmt.Sprintf("eth/v2/debug/beacon/states/%d", i)).String(), i)
 		if err != nil {
 			return err
 		}
@@ -929,6 +943,10 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	base, err := url.Parse(b.BaseURL)
+	if err != nil {
+		return blobfetch.RedactURLError(err)
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
@@ -954,10 +972,15 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 	}
 
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
-		uri := b.BaseURL + b.Endpoint
-		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
-		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
-		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
+		path := strings.Replace(b.Endpoint, "{slot}", strconv.FormatUint(i, 10), 1)
+		path = strings.Replace(path, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
+		ref, err := url.Parse(path)
+		if err != nil {
+			return blobfetch.RedactURLError(err)
+		}
+		u := base.JoinPath(ref.EscapedPath())
+		u.RawQuery = joinRawQueries(base.RawQuery, ref.RawQuery)
+		elapsed, err := timeRequest(ctx, u.String(), b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
@@ -969,6 +992,17 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 		log.Info("Benchmarked", "slot", i, "elapsed", elapsed)
 	}
 	return nil
+}
+
+func joinRawQueries(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "&" + b
+	}
 }
 
 func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {
