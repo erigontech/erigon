@@ -390,14 +390,11 @@ func TestHistoryAfterPrune(t *testing.T) {
 func TestHistoryRangeWithPrune(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := t.Context()
 
 	db, h, _ := filledHistory(t, true)
 	collateAndMergeHistory(t, db, h, 32, true)
 
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	hc := h.beginForTests()
 	defer hc.Close()
@@ -416,9 +413,7 @@ func TestHistoryRangeWithPrune(t *testing.T) {
 	db2, h2, _ := filledHistory(t, true)
 	collateAndMergeHistory(t, db2, h2, 32, false)
 
-	roTx2, err := db2.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx2.Rollback()
+	roTx2 := beginRo(t, db2)
 	hc2 := h2.beginForTests()
 	defer hc2.Close()
 
@@ -448,9 +443,7 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	db, h, _ := filledHistory(t, true)
 	collateAndMergeHistory(t, db, h, 200, false)
 
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 
 	hc := h.beginForTests()
 	defer hc.Close()
@@ -471,9 +464,7 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	db2, h2, _ := filledHistory(t, true)
 	collateAndMergeHistory(t, db2, h2, 200, true)
 
-	roTx2, err := db2.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx2.Rollback()
+	roTx2 := beginRo(t, db2)
 	hc2 := h2.beginForTests()
 	defer hc2.Close()
 
@@ -1577,19 +1568,15 @@ func TestHistoryRange2(t *testing.T) {
 			}, vals)
 
 			// single Get test-cases
-			tx, err := db.BeginRo(ctx)
-			require.NoError(err)
-			defer tx.Rollback()
-
-			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutil.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, roTx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
@@ -1632,9 +1619,7 @@ func TestHistoryRange2(t *testing.T) {
 			}, keys)
 
 			// single Get test-cases
-			tx, err := db.BeginRo(ctx)
-			require.NoError(err)
-			defer tx.Rollback()
+			tx := beginRo(t, db)
 
 			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
@@ -2343,9 +2328,7 @@ func TestHistoryStreamsKeepInvariant2(t *testing.T) {
 	db, h, txs := filledHistory(t, true)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	tx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRo(t, db)
 
 	ic := h.beginForTests()
 	defer ic.Close()
@@ -2496,9 +2479,7 @@ func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
 	for _, largeValues := range []bool{false, true} {
 		t.Run(fmt.Sprintf("largeValues=%t", largeValues), func(t *testing.T) {
 			db, h, _ := filledHistory(t, largeValues)
-			roTx, err := db.BeginRo(t.Context())
-			require.NoError(t, err)
-			defer roTx.Rollback()
+			roTx := beginRo(t, db)
 			hc := h.beginForTests()
 			defer hc.Close()
 

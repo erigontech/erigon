@@ -56,9 +56,7 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	require.NotEmpty(t, kvMaps)
 	before, kvBefore := residentPages(t, maps), residentPages(t, kvMaps)
 
-	roTx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
+	roTx := beginRo(t, db)
 	keys := make([][]byte, 0, 31)
 	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
 		keys = append(keys, binary.BigEndian.AppendUint64(nil, keyNum))
