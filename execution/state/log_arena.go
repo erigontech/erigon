@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,6 +51,7 @@ const (
 	// batch: one per worker of a 16-thread box. One smaller than a chunk is cheap
 	// to rebuild and not worth a place.
 	maxParkedLogArenas = 16
+	maxParkedLogBytes  = 64 << 20
 
 	maxLogChunkLen = 1024
 )
@@ -174,46 +176,64 @@ func (a *logArena) forTx(txIndex int) types.Logs {
 // release parks the arena's entries for the next one and empties it.
 func (a *logArena) release() {
 	a.reset()
-	logPark.put(a.entries, a.poolBytes)
+	logPark.put(a)
 	*a = logArena{}
 }
 
 func (a *logArena) unpark() {
-	a.entries, a.poolBytes = logPark.take()
+	*a = logPark.take()
+}
+
+// heldBytes counts what a reset arena keeps alive: its run, the entries, their
+// Topics and Data, and the unused tail of the last chunk.
+func (a *logArena) heldBytes() int {
+	const logSize = int(unsafe.Sizeof(types.Log{}))
+	n := cap(a.entries)*int(unsafe.Sizeof(&types.Log{})) + len(a.free)*logSize + a.poolBytes
+	for _, lp := range a.entries[:cap(a.entries)] {
+		if lp == nil {
+			break
+		}
+		n += logSize + cap(lp.Topics)*int(unsafe.Sizeof(common.Hash{}))
+	}
+	return n
 }
 
 type parkedLogs struct {
-	entries   types.Logs
-	poolBytes int
+	arena logArena
+	bytes int
 }
 
 type logParking struct {
 	mu     sync.Mutex
 	arenas []parkedLogs
+	bytes  int
 }
 
 var logPark logParking
 
-func (p *logParking) put(entries types.Logs, poolBytes int) {
-	if cap(entries) < maxLogChunkLen {
+func (p *logParking) put(a *logArena) {
+	if cap(a.entries) < maxLogChunkLen {
 		return
 	}
+	bytes := a.heldBytes()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.arenas) < maxParkedLogArenas {
-		p.arenas = append(p.arenas, parkedLogs{entries, poolBytes})
+	if len(p.arenas) < maxParkedLogArenas && p.bytes+bytes <= maxParkedLogBytes {
+		p.arenas = append(p.arenas, parkedLogs{*a, bytes})
+		p.bytes += bytes
 	}
 }
 
-func (p *logParking) take() (types.Logs, int) {
+func (p *logParking) take() logArena {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := len(p.arenas) - 1
 	if n < 0 {
-		return nil, 0
+		return logArena{}
 	}
 	parked := p.arenas[n]
 	p.arenas[n] = parkedLogs{}
 	p.arenas = p.arenas[:n]
-	return parked.entries, parked.poolBytes
+	p.bytes -= parked.bytes
+	return parked.arena
 }
