@@ -154,7 +154,11 @@ func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.Logs
 	if !ok {
 		return nil, rpc.ErrFilterNotFound
 	}
-	return api.GetLogs(ctx, criteria)
+	res, err := api.GetLogs(ctx, criteria)
+	if err != nil {
+		return nil, err
+	}
+	return res.Logs, nil
 }
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a

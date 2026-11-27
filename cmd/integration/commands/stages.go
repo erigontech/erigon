@@ -863,17 +863,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
+		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (uint64, error) {
+			irreversibleBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
-			pruneStage.FinalityCtx = finalityCtx
-			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.IrreversibleBlock = irreversibleBlock
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return 0, err
+			}
+			return execfinality.IrreversibleTxNum(ctx, tx, br.TxnumReader(), irreversibleBlock)
 		})
 		return err
 	}
@@ -1231,7 +1234,7 @@ func checkCommitmentTrieMatchesFiles() error {
 	cfg := statecfg.Schema.CommitmentDomain
 	if cfg.CommitmentV3Records != statecfg.ExperimentalCommitmentV3 {
 		if statecfg.ExperimentalCommitmentV3 {
-			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
+			return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` first")
 		}
 		return errors.New("commitment domain files are v3 and ERIGON_COMMITMENT_V3 is off; set ERIGON_COMMITMENT_V3=true")
 	}

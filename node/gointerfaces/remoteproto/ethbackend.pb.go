@@ -981,6 +981,7 @@ type LogsFilterRequest struct {
 	Addresses     []*typesproto.H160     `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	AllTopics     bool                   `protobuf:"varint,3,opt,name=all_topics,json=allTopics,proto3" json:"all_topics,omitempty"`
 	Topics        []*typesproto.H256     `protobuf:"bytes,4,rep,name=topics,proto3" json:"topics,omitempty"`
+	Ack           bool                   `protobuf:"varint,5,opt,name=ack,proto3" json:"ack,omitempty"` // ask the server to reply filter_applied once it applied this request
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1043,6 +1044,13 @@ func (x *LogsFilterRequest) GetTopics() []*typesproto.H256 {
 	return nil
 }
 
+func (x *LogsFilterRequest) GetAck() bool {
+	if x != nil {
+		return x.Ack
+	}
+	return false
+}
+
 type SubscribeLogsReply struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Address          *typesproto.H160       `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
@@ -1055,6 +1063,7 @@ type SubscribeLogsReply struct {
 	TransactionIndex uint64                 `protobuf:"varint,8,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
 	Removed          bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
 	BlockTimestamp   uint64                 `protobuf:"varint,10,opt,name=block_timestamp,json=blockTimestamp,proto3" json:"block_timestamp,omitempty"`
+	FilterApplied    bool                   `protobuf:"varint,11,opt,name=filter_applied,json=filterApplied,proto3" json:"filter_applied,omitempty"` // acks a LogsFilterRequest; carries no log
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1159,10 +1168,18 @@ func (x *SubscribeLogsReply) GetBlockTimestamp() uint64 {
 	return 0
 }
 
+func (x *SubscribeLogsReply) GetFilterApplied() bool {
+	if x != nil {
+		return x.FilterApplied
+	}
+	return false
+}
+
 type ReceiptsFilterRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	AllTransactions   bool                   `protobuf:"varint,1,opt,name=all_transactions,json=allTransactions,proto3" json:"all_transactions,omitempty"`
 	TransactionHashes []*typesproto.H256     `protobuf:"bytes,2,rep,name=transaction_hashes,json=transactionHashes,proto3" json:"transaction_hashes,omitempty"`
+	Ack               bool                   `protobuf:"varint,3,opt,name=ack,proto3" json:"ack,omitempty"` // ask the server to reply filter_applied once it applied this request
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1211,6 +1228,13 @@ func (x *ReceiptsFilterRequest) GetTransactionHashes() []*typesproto.H256 {
 	return nil
 }
 
+func (x *ReceiptsFilterRequest) GetAck() bool {
+	if x != nil {
+		return x.Ack
+	}
+	return false
+}
+
 type SubscribeReceiptsReply struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	BlockHash         *typesproto.H256       `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
@@ -1236,6 +1260,7 @@ type SubscribeReceiptsReply struct {
 	EffectiveGasPrice *typesproto.H256       `protobuf:"bytes,21,opt,name=effective_gas_price,json=effectiveGasPrice,proto3" json:"effective_gas_price,omitempty"`
 	Payer             *typesproto.H160       `protobuf:"bytes,22,opt,name=payer,proto3" json:"payer,omitempty"`
 	FrameReceipts     []*FrameReceipt        `protobuf:"bytes,23,rep,name=frame_receipts,json=frameReceipts,proto3" json:"frame_receipts,omitempty"`
+	FilterApplied     bool                   `protobuf:"varint,24,opt,name=filter_applied,json=filterApplied,proto3" json:"filter_applied,omitempty"` // acks a ReceiptsFilterRequest; carries no receipt
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1429,6 +1454,13 @@ func (x *SubscribeReceiptsReply) GetFrameReceipts() []*FrameReceipt {
 		return x.FrameReceipts
 	}
 	return nil
+}
+
+func (x *SubscribeReceiptsReply) GetFilterApplied() bool {
+	if x != nil {
+		return x.FilterApplied
+	}
+	return false
 }
 
 type FrameReceipt struct {
@@ -2793,13 +2825,14 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\x0e2\r.remote.EventR\x04type\"G\n" +
 	"\x0eSubscribeReply\x12!\n" +
 	"\x04type\x18\x01 \x01(\x0e2\r.remote.EventR\x04type\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\xa7\x01\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xb9\x01\n" +
 	"\x11LogsFilterRequest\x12#\n" +
 	"\rall_addresses\x18\x01 \x01(\bR\fallAddresses\x12)\n" +
 	"\taddresses\x18\x02 \x03(\v2\v.types.H160R\taddresses\x12\x1d\n" +
 	"\n" +
 	"all_topics\x18\x03 \x01(\bR\tallTopics\x12#\n" +
-	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\"\x88\x03\n" +
+	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\x12\x10\n" +
+	"\x03ack\x18\x05 \x01(\bR\x03ack\"\xaf\x03\n" +
 	"\x12SubscribeLogsReply\x12%\n" +
 	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12*\n" +
 	"\n" +
@@ -2812,10 +2845,12 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x11transaction_index\x18\b \x01(\x04R\x10transactionIndex\x12\x18\n" +
 	"\aremoved\x18\t \x01(\bR\aremoved\x12'\n" +
 	"\x0fblock_timestamp\x18\n" +
-	" \x01(\x04R\x0eblockTimestamp\"~\n" +
+	" \x01(\x04R\x0eblockTimestamp\x12%\n" +
+	"\x0efilter_applied\x18\v \x01(\bR\rfilterApplied\"\x90\x01\n" +
 	"\x15ReceiptsFilterRequest\x12)\n" +
 	"\x10all_transactions\x18\x01 \x01(\bR\x0fallTransactions\x12:\n" +
-	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\xa8\a\n" +
+	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\x12\x10\n" +
+	"\x03ack\x18\x03 \x01(\bR\x03ack\"\xcf\a\n" +
 	"\x16SubscribeReceiptsReply\x12*\n" +
 	"\n" +
 	"block_hash\x18\x01 \x01(\v2\v.types.H256R\tblockHash\x12!\n" +
@@ -2843,7 +2878,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\rlast_in_block\x18\x14 \x01(\bR\vlastInBlock\x12;\n" +
 	"\x13effective_gas_price\x18\x15 \x01(\v2\v.types.H256R\x11effectiveGasPrice\x12!\n" +
 	"\x05payer\x18\x16 \x01(\v2\v.types.H160R\x05payer\x12;\n" +
-	"\x0eframe_receipts\x18\x17 \x03(\v2\x14.remote.FrameReceiptR\rframeReceipts\"\xaa\x01\n" +
+	"\x0eframe_receipts\x18\x17 \x03(\v2\x14.remote.FrameReceiptR\rframeReceipts\x12%\n" +
+	"\x0efilter_applied\x18\x18 \x01(\bR\rfilterApplied\"\xaa\x01\n" +
 	"\fFrameReceipt\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x04R\x06status\x12,\n" +
 	"\x12execution_gas_used\x18\x02 \x01(\x04R\x10executionGasUsed\x12$\n" +

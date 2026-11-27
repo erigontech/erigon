@@ -289,7 +289,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -407,7 +407,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -475,7 +475,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -533,7 +533,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 	p, isPrecompile := evm.precompile(addr)
 	var code accounts.Code
 	if !isPrecompile {
-		code, err = evm.intraBlockState.ResolveCode(addr)
+		code, err = evm.intraBlockState.ResolveCode(addr, evm.chainRules.IsPrague)
 		if err != nil {
 			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -913,7 +913,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
 	isCreate := typ == CREATE || typ == CREATE2
-	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Value()))
 }
 
 // Frame calls sit below a synthetic transaction root. Opcode depths

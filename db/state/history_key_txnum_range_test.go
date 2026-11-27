@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -73,7 +72,6 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 	}
 	t.Parallel()
 
-	logger := log.New()
 	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
@@ -109,11 +107,11 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.Equal(expectedKeyTxNums(980, 1001, txs), collectKeyTxNumRange(t, it))
 	}
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false)
 		test(t, h, db, txs)
 	})
 }
@@ -124,7 +122,6 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 	}
 	t.Parallel()
 
-	logger := log.New()
 	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
@@ -191,11 +188,11 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false)
 		test(t, h, db, txs)
 	})
 }
@@ -203,7 +200,6 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 	t.Parallel()
 
-	logger := log.New()
 	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
@@ -231,11 +227,11 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 		require.Len(collectKeyTxNumRange(t, it), 3)
 	}
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false)
 		test(t, h, db, txs)
 	})
 }
@@ -246,7 +242,6 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 	}
 	t.Parallel()
 
-	logger := log.New()
 	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
@@ -289,11 +284,11 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false)
 		test(t, h, db, txs)
 	})
 }

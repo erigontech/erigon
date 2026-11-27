@@ -288,7 +288,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure, txpoolcfg.NotReplaced,
 	}, reasons)
 }
 

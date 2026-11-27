@@ -105,6 +105,14 @@ func renameFiles(domains []string, exts []string, dirs datadir2.Dirs) ([]string,
 				name: uint16(d),
 				ext:  ".vi",
 			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".ef",
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().II.DataEF.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".efi",
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().II.AccessorEFI.Current
 		} else {
 			ii, _ := kv.String2InvertedIdx(dString)
 			renameVerMap[fileSmallMapping{

@@ -235,7 +235,7 @@ func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
 	for range 2 {
 		actual, err := api.GetFilterLogs(ctx, filterID)
 		require.NoError(t, err)
-		require.Equal(t, expected, actual)
+		require.Equal(t, expected.Logs, actual)
 	}
 }
 

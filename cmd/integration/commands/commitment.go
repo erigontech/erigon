@@ -44,7 +44,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -62,6 +64,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -76,6 +79,7 @@ var (
 	branchPrefixFlag string
 	txnumFlag        uint64
 	verifyAsOf       []uint
+	verifyHistory    bool
 )
 
 // visualize command flags
@@ -141,9 +145,11 @@ func init() {
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
-	withChain(cmdCommitmentVerify)
-	withDataDir(cmdCommitmentVerify)
+	flags.DirVar(cmdCommitmentVerify.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	must(cmdCommitmentVerify.MarkFlagDirname(utils.DataDirFlag.Name))
+	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records just after the first state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
@@ -288,38 +294,30 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
 		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	dirs := datadir.Open(datadirCli)
+	if salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger); err != nil {
+		return err
+	} else if salt == nil {
+		return fmt.Errorf("verify needs %s", filepath.Join(dirs.Snap, "salt-state.txt"))
+	}
+	hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if hasHistory {
+		statecfg.EnableHistoricalCommitment()
+	}
+	agg, err := openStateFiles(ctx, dirs, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
 	agg.DisableAllDependencies()
-	points := []uint64{math.MaxUint64}
-	for _, txNum := range verifyAsOf {
-		points = append(points, uint64(txNum))
+	asOf := make([]uint64, len(verifyAsOf))
+	for i, txNum := range verifyAsOf {
+		asOf[i] = uint64(txNum)
 	}
-	historyDisabled := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled
-	for _, asOf := range points {
-		label := "latest"
-		if asOf != math.MaxUint64 {
-			label = strconv.FormatUint(asOf, 10)
-			if historyDisabled {
-				return fmt.Errorf("as of %s: commitment history is disabled", label)
-			}
-		}
-		started := time.Now()
-		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
-		if err != nil {
-			return fmt.Errorf("as of %s: %w", label, err)
-		}
-		if asOf != math.MaxUint64 && c.TxNum >= asOf {
-			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
-		}
-		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
-			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
-	}
-	return nil
+	return dbstate.VerifyCommitmentV3(ctx, agg, asOf, verifyHistory, logger)
 }
 
 var cmdCommitmentRebuild = &cobra.Command{
@@ -330,6 +328,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
+		// The rebuild writes a file per shard and per merge; in-memory existence filters and hash indexes of those files grow the heap until the run ends.
+		statecfg.Schema.CommitmentDomain.ExistenceFilter = statecfg.ExistenceFilterRandom
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -365,6 +365,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return err
 	}
 	defer rwTx.Rollback()
+	if err := dbstate.AggTx(rwTx).AssertRetired(rwTx); err != nil {
+		return err
+	}
 
 	if !clearCommitment {
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
@@ -500,6 +503,27 @@ var cmdCommitmentPrint = &cobra.Command{
 	},
 }
 
+// commitmentFileState describes the commitment state record of the .kv file whose last txNum is maxTxNum.
+func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string, error) {
+	v3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records
+	key := commitment.KeyCommitmentState
+	if v3 {
+		key = commitment.KeyCommitmentV3State
+	}
+	record, found, _, fileEnd, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+	if err != nil {
+		return "", fmt.Errorf("failed to get the commitment state from files: %w", err)
+	}
+	if !found || fileEnd != maxTxNum+1 { // an older file's record is not this file's state
+		return "no state record", nil
+	}
+	if !v3 {
+		return commitment.HexTrieStateToShortString(record)
+	}
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
+}
+
 func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	if err := checkCommitmentTrieMatchesFiles(); err != nil {
 		return err
@@ -522,14 +546,9 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context) error {
 	for _, f := range commitmentFiles {
 		name := filepath.Base(f.Fullpath())
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		rootString, err := commitmentFileState(acRo, f.EndRootNum()-1)
 		if err != nil {
-			return fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
@@ -564,11 +583,13 @@ removes the converted files. It is mutually exclusive with --squeeze and
 --nibbles.v2.
 
 --continue resumes a prior interrupted run, re-using complete shards left
-in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
-pass the same --squeeze and --nibbles.v2 values used in the original run; a
-mismatch silently produces mixed-encoding output. Without --continue, a
-mid-run crash discards any in-progress work in snap/rebuild/domain/ and
-Phase 1 restarts from scratch. --continue is mutually exclusive with
+in <datadir>/snap/rebuild/domain/ and converted commitment history files
+whose .v, .vi, .ef and .efi all exist in snap/rebuild/{history,idx,accessor}/,
+and re-doing the rest. The operator MUST pass the same --squeeze and
+--nibbles.v2 values used in the original run; a mismatch silently produces
+mixed-encoding output. Without --continue, a mid-run crash discards any
+in-progress work in snap/rebuild/domain/ and snap/rebuild/{history,idx,accessor}/
+and Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
 For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
@@ -598,7 +619,7 @@ Examples:
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
-		if statecfg.ExperimentalCommitmentV3 {
+		if statecfg.ExperimentalCommitmentV3 && !convertV3 && !convertRestore { // --v3 opens the files at their on-disk version; --restore opens none
 			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {
@@ -639,15 +660,37 @@ func commitmentConvert(agg *dbstate.Aggregator, ctx context.Context, logger log.
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
+func openStateFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*dbstate.Aggregator, error) {
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return nil, err
+	}
+	if err := dbstate.CheckSnapshotFileVersions(dirs); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // sorts and folds spill there
+		return nil, err
+	}
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := agg.OpenFolder(nil); err != nil {
+		agg.Close()
+		return nil, err
+	}
+	return agg, nil
+}
+
 func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	dirs := datadir.Open(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return err
 	}
-	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
-		return err
-	}
-	if opts.TargetV3 && !opts.NoHistory {
+	if opts.TargetV3 {
 		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 		if err != nil {
 			return err
@@ -656,21 +699,11 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 			statecfg.EnableHistoricalCommitment()
 		}
 	}
-	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil { // the converter's sorts spill there
-		return err
-	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	agg, err := openStateFiles(ctx, dirs, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return err
-	}
 	if opts.TargetV3 && !opts.NoDomain {
 		blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 		defer blockSnaps.Close()
@@ -703,10 +736,12 @@ Examples:
   integration commitment visualize /path/to/commitment.kv
   integration commitment visualize --output /tmp/analysis /path/to/*.kv
   integration commitment visualize --state /path/to/commitment.kv  # print state only`,
-	Args: cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:         cobra.MinimumNArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		visualizeCommitmentFiles(args)
+		defer debug.Exit()
+		return visualizeCommitmentFiles(args)
 	},
 }
 
@@ -1406,7 +1441,7 @@ func printBenchResults(name string, stats BenchStats, totalSize int64, keyCount 
 	fmt.Println()
 }
 
-func visualizeCommitmentFiles(files []string) {
+func visualizeCommitmentFiles(files []string) error {
 	sema := make(chan struct{}, visualizeConcurrency)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
@@ -1414,6 +1449,7 @@ func visualizeCommitmentFiles(files []string) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var failed []error
 
 	page := components.NewPage()
 	page.SetLayout(components.PageFlexLayout)
@@ -1432,6 +1468,9 @@ func visualizeCommitmentFiles(files []string) {
 			stat, err := processCommitmentFile(fpath)
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
+				mu.Lock()
+				failed = append(failed, err)
+				mu.Unlock()
 				return
 			}
 
@@ -1447,8 +1486,8 @@ func visualizeCommitmentFiles(files []string) {
 	}
 	wg.Wait()
 	fmt.Println()
-	if visualizePrintState {
-		return
+	if visualizePrintState || len(failed) == len(files) {
+		return errors.Join(failed...)
 	}
 
 	dir := filepath.Dir(files[0])
@@ -1478,6 +1517,7 @@ func visualizeCommitmentFiles(files []string) {
 	if err := page.Render(io.MultiWriter(f)); err != nil {
 		panic(err)
 	}
+	return errors.Join(failed...)
 }
 
 type visualizeOverallStat struct {
@@ -1548,8 +1588,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
-			err := fmt.Errorf("failed to decode branch: %x %x", key, val)
-			panic(err)
+			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}
 		keysSink <- *stat
 	}
@@ -1557,15 +1596,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 }
 
 func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
+	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
+		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
+	}
 	stats := make(chan commitment.BranchStat, 8)
-	errch := make(chan error)
-	go func() {
-		err := extractKVPairFromCompressed(fpath, stats)
-		if err != nil {
-			errch <- err
-		}
-		close(errch)
-	}()
+	errch := make(chan error, 1)
+	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
 	totals := newVisualizeOverallStat()
 	for s := range stats {
@@ -1585,12 +1621,8 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 		totals.prefixes[s.KeySize] = ps
 	}
 
-	select {
-	case err := <-errch:
-		if err != nil {
-			return nil, err
-		}
-	default:
+	if err := <-errch; err != nil {
+		return nil, err
 	}
 	return totals, nil
 }

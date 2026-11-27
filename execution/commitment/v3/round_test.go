@@ -771,6 +771,33 @@ func TestPrefetch(t *testing.T) {
 		}
 	})
 
+	t.Run("path_node_keys_cover_flat_reads", func(t *testing.T) {
+		const contracts, flatDepth = 3000, 2
+		ctx, _ := seeded(t, contracts)
+		for _, c := range []struct{ account, slot int }{{7, 14}, {1234, 2468}, {contracts + 5, 0}} {
+			addr, slot := benchAddr(c.account), benchSlot(c.slot)
+			addrHash, slotHash := keccak.Sum256(addr), keccak.Sum256(slot)
+			batch := map[string]bool{}
+			for _, key := range PathNodeKeys(nil, commitment.KeyToHexNibbleHash(addr), flatDepth) {
+				batch[string(key)] = true
+			}
+			for _, key := range PathNodeKeys(nil, commitment.KeyToHexNibbleHash(append(slices.Clone(addr), slot...)), flatDepth) {
+				batch[string(key)] = true
+			}
+			var flatReads int
+			read := func(key []byte) []byte {
+				if int(key[len(key)-1]) <= flatDepth {
+					flatReads++
+					require.Truef(t, batch[string(key)], "account %d slot %d: path read %x is not in the batch", c.account, c.slot, key)
+				}
+				return ctx.branches[string(key)]
+			}
+			PrefetchPath(read, addrHash[:], nil)
+			PrefetchPath(read, addrHash[:], slotHash[:])
+			require.NotZero(t, flatReads)
+		}
+	})
+
 	t.Run("leaf_refs_keep_roots_and_records", func(t *testing.T) {
 		const contracts = 2000
 		base, _ := seeded(t, contracts)

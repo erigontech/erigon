@@ -255,7 +255,7 @@ func BenchmarkWitness(b *testing.B) {
 	b.Run("collapse/v3/trace-only", func(b *testing.B) {
 		reader, _ := bed.v3Mem.Open(ctx)
 		for b.Loop() {
-			require.NoError(b, traceCollapses(reader, items, func([]byte, []byte) {}))
+			require.NoError(b, traceCollapsesDeletes(reader, items, func([]byte, []byte) {}))
 		}
 	})
 }

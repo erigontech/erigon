@@ -30,16 +30,17 @@ import (
 var errTrieContext = errors.New("commitment v3: missing Patricia context")
 
 type Trie struct {
-	ctx             commitment.PatriciaContext
-	ctxFactory      commitment.TrieContextFactory
-	root            []byte
-	scheduleWorkers int
-	fanOutMin       int
-	deferUpdates    bool
-	deferred        deltaParts
-	collapseTracer  commitment.CollapseTracer
-	preRecs         map[string][]byte
-	preRoot         []byte
+	ctx               commitment.PatriciaContext
+	ctxFactory        commitment.TrieContextFactory
+	root              []byte
+	scheduleWorkers   int
+	storageWorkersMax int
+	fanOutMin         int
+	deferUpdates      bool
+	deferred          deltaParts
+	collapseTracer    commitment.CollapseTracer
+	preRecs           map[string][]byte
+	preRoot           []byte
 }
 
 func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -91,6 +92,8 @@ func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = d
 
 func (t *Trie) SetStorageFanOutMin(n int) { t.fanOutMin = n }
 
+func (t *Trie) SetStorageWorkersMax(n int) { t.storageWorkersMax = n }
+
 func (t *Trie) SetCollapseTracer(tracer commitment.CollapseTracer) { t.collapseTracer = tracer }
 
 func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
@@ -130,7 +133,7 @@ func (t *Trie) Process(
 			t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
 			defer func() { t.ctx = inner }()
 		}
-		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
+		sorted = func(items []feedEntry) error { return traceCollapsesDeletes(t.ctx, items, t.collapseTracer) }
 	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
 		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
@@ -149,7 +152,7 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 	inner, rootBefore, deferredBefore, deferUpdatesBefore := t.ctx, bytes.Clone(t.root), t.deferred, t.deferUpdates
 	t.ctx, t.deferred, t.deferUpdates = cache, nil, true
 	root, err := t.round(ctx, nil, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapses(cache, items, tracer) })
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapsesDeletes(cache, items, tracer) })
 	})
 	t.ctx, t.root, t.deferred, t.deferUpdates = inner, rootBefore, deferredBefore, deferUpdatesBefore
 	return root, err
@@ -178,7 +181,7 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	if err != nil {
 		return nil, err
 	}
-	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.fanOutMin)
+	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.storageWorkersMax, t.fanOutMin)
 	if err != nil {
 		return nil, err
 	}

@@ -174,23 +174,34 @@ func requireConvertRefusedBeforeWriting(t *testing.T, dirs datadir.Dirs, wantErr
 	require.Equal(t, before, snapshotTree(t, dirs.Snap))
 }
 
+// convert --v3 is the migration to v3, so it also runs when v3 is already on: it opens
+// the commitment files at their on-disk version.
 func TestCommitmentConvertWithoutChaindata(t *testing.T) {
-	dirs, stepSize, lastTxNum, roots := legacyDatadirWithoutChaindata(t)
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{{"v3 off", false}, {"v3 on", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs, stepSize, lastTxNum, roots := legacyDatadirWithoutChaindata(t)
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
 
-	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+			require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
 
-	require.NoDirExists(t, dirs.Chaindata)
-	requireCommitmentKVPrefix(t, dirs, "v3.")
-	require.ErrorContains(t, state.CheckExecResetDone(dirs), "stage_exec --reset")
+			require.NoDirExists(t, dirs.Chaindata)
+			requireCommitmentKVPrefix(t, dirs, "v3.")
+			require.ErrorContains(t, state.CheckExecResetDone(dirs), "stage_exec --reset")
 
-	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder(nil))
-	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
-	require.NoError(t, err)
-	require.Equal(t, lastTxNum, c.TxNum)
-	require.Equal(t, roots[lastTxNum], common.Hash(c.Root))
+			require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
+			agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(t.Context())
+			t.Cleanup(agg.Close)
+			require.NoError(t, agg.OpenFolder(nil))
+			checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{math.MaxUint64}, nil)
+			require.NoError(t, err)
+			c := checks[0]
+			require.Equal(t, lastTxNum, c.TxNum)
+			require.Equal(t, roots[lastTxNum], common.Hash(c.Root))
+		})
+	}
 }
 
 // The next step that convert advertises also runs without chaindata: with no DB there
@@ -209,6 +220,18 @@ func TestStageExecResetAfterConvertWithoutChaindata(t *testing.T) {
 	require.NoError(t, root.ExecuteContext(t.Context()))
 	require.NoError(t, state.CheckExecResetDone(dirs))
 	require.NoDirExists(t, dirs.Chaindata)
+}
+
+// The rollback of a conversion also runs with v3 on: convert's own errors advise it.
+func TestCommitmentConvertV3RestoreWithV3On(t *testing.T) {
+	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+	requireCommitmentKVPrefix(t, dirs, "v3.")
+
+	require.NoError(t, runCommitmentConvert(t, dirs, "--restore"))
+
+	requireCommitmentKVPrefix(t, dirs, "v2.2-")
 }
 
 func TestCommitmentConvertModesWithoutChaindata(t *testing.T) {
@@ -315,6 +338,30 @@ func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {
 	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v2.")
 
 	requireConvertRefusedBeforeWriting(t, dirs, "legacy commitment history", "--v3", "--no-history")
+}
+
+func TestCommitmentConvertV3NoHistoryVerifiesV3History(t *testing.T) {
+	dirs := legacyDatadirWithCommitmentHistory(t)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		_, suffix, found := strings.Cut(filepath.Base(f), "-")
+		require.True(t, found)
+		require.NoError(t, os.Rename(f, filepath.Join(dirs.SnapHistory, "v3.0-"+suffix)))
+	}
+
+	err = runCommitmentConvert(t, dirs, "--v3", "--no-history")
+	require.ErrorContains(t, err, "has no state entries")
+	require.ErrorContains(t, err, "integration commitment convert --restore")
+	requireCommitmentKVPrefix(t, dirs, "v2.")
+	entries, err := os.ReadDir(filepath.Join(dirs.Snap, "backup", "domains"))
+	if err != nil {
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	require.Empty(t, entries)
+	_, err = os.Stat(filepath.Join(dirs.Snap, "backup", ".exec_reset_pending"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {

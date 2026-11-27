@@ -62,7 +62,7 @@ type logArena struct {
 
 // alloc returns txIndex's next entry sized for numTopics/dataSize. The caller must write every topic and data
 // byte; what it leaves unwritten is the previous transaction's. The arena owns
-// the entry, so it must never be handed out without copying.
+// the entry; callers must copy it before retaining it across a reset or truncate.
 func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	logIdx := len(a.entries)
 	entries := slices.Grow(a.entries, 1)[:logIdx+1]

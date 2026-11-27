@@ -157,7 +157,8 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	defer cursor.Close()
 
 	var buf bytes.Buffer
-	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+	k, v, err := cursor.First()
+	for ; err == nil && k != nil; k, v, err = cursor.Next() {
 		staticValidator := &StaticValidator{}
 		buf.Reset()
 		if _, err := buf.Write(v); err != nil {
@@ -168,7 +169,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)
 	}
-	if err != nil { //nolint:govet
+	if err != nil {
 		return err
 	}
 	slot, err := GetStateProcessingProgress(tx)

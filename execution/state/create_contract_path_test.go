@@ -41,16 +41,16 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 
 	contract := getAddress(1)
 	require.NoError(t, ibs.CreateAccount(contract, true))
-	if _, ok := ibs.versionedWrites.GetCreateContract(contract); !ok {
+	if _, ok := ibs.writes.GetCreateContract(contract); !ok {
 		t.Fatal("contract creation must record CreateContractPath (drives apply-side storage clear)")
 	}
-	if _, ok := ibs.versionedWrites.GetIncarnation(contract); !ok {
+	if _, ok := ibs.writes.GetIncarnation(contract); !ok {
 		t.Fatal("contract creation also bumps IncarnationPath — the two are co-emitted, distinct signals")
 	}
 
 	plain := getAddress(2)
 	require.NoError(t, ibs.CreateAccount(plain, false))
-	if _, ok := ibs.versionedWrites.GetCreateContract(plain); ok {
+	if _, ok := ibs.writes.GetCreateContract(plain); ok {
 		t.Fatal("non-contract account creation must not set CreateContractPath")
 	}
 }
@@ -62,7 +62,7 @@ func TestNoConflictDetectionCreateAccountRecordsNoConflictReads(t *testing.T) {
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	defer ibs.Close()
 	conflictReads := func() (balance, incarnation bool) {
-		reads := ibs.VersionedReads()
+		reads := ibs.Reads()
 		_, balance = reads.GetBalance(addr)
 		_, incarnation = reads.GetIncarnation(addr)
 		return balance, incarnation

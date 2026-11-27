@@ -630,6 +630,17 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
+		// The prune is off, but blocks in state files can not be unwound, and a step goes into files only after its
+		// blocks' changesets are gone.
+		if cfg.blockReader != nil {
+			end, err := keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+			if err != nil {
+				return err
+			}
+			if err := rawdb.PruneTable(tx, kv.ChangeSets3, end, ctx, 200_000, noPruneChangesetsTimeout, logger, s.LogPrefix()); err != nil {
+				return err
+			}
+		}
 		return s.Done(tx)
 	}
 	// on chain-tip:
@@ -673,37 +684,44 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
-	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
-	// AlwaysGenerateChangesets disables this prune so the node retains
-	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag).
-	// Without the guard, the flag still controls *generation* but every
-	// generated changeset is pruned 96 blocks later, defeating the point.
-	if !cfg.syncCfg.AlwaysGenerateChangesets {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some chains produce blocks with 400 chunks of diff = 3mb
-		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
-			pruneChangeSetsStartTime := time.Now()
-			if err := rawdb.PruneTable(
-				tx,
-				kv.ChangeSets3,
-				blockPruneTo,
-				ctx,
-				pruneDiffsLimit,
-				pruneChangeSetsTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
-			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
-				logger.Debug(
-					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-					"duration", duration,
-					"timeout", pruneChangeSetsTimeout,
-					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				)
-			}
+	blockPruneTo := s.IrreversibleBlock + 1 // the prune is exclusive
+	// Blocks in state files can not be unwound, so their changesets go in every mode, also those an older build
+	// left behind. AlwaysGenerateChangesets keeps changesets for unwinds deeper than MaxReorgDepth (debug /
+	// integration tool / explicit --experimental.always-generate-changesets flag): only the steps about to be
+	// collated lose theirs.
+	var changesetsPruneTo uint64
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		changesetsPruneTo, err = keptChangesetsFrom(ctx, tx, cfg.blockReader, s.IrreversibleBlock)
+	} else {
+		changesetsPruneTo, err = blocksInFilesEnd(ctx, tx, cfg.blockReader)
+		changesetsPruneTo = max(changesetsPruneTo, blockPruneTo)
+	}
+	if err != nil {
+		return err
+	}
+	// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+	// Some chains produce blocks with 400 chunks of diff = 3mb
+	if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+		pruneChangeSetsStartTime := time.Now()
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			changesetsPruneTo,
+			ctx,
+			pruneDiffsLimit,
+			pruneChangeSetsTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"timeout", pruneChangeSetsTimeout,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			)
 		}
 	}
 
@@ -755,6 +773,59 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	}
 	return nil
 }
+
+func producesStateFiles(blockReader dbservices.FullBlockReader) bool {
+	return blockReader.FreezingCfg().ProduceE3 && !dbg.NoBackgroundMaintenance()
+}
+
+// blocksInFilesEnd is the block after the last block in the visible state files.
+func blocksInFilesEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader) (uint64, error) {
+	filesEnd := tx.Debug().TxNumsInFiles(kv.StateDomains...)
+	if filesEnd == 0 {
+		return 0, nil
+	}
+	lastBlock, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, filesEnd-1)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return lastBlock + 1, nil
+}
+
+// keptChangesetsFrom is the first block that keeps its changeset when changesets are kept for deep unwinds: the
+// blocks in state files, and in the steps about to be collated, lose theirs.
+func keptChangesetsFrom(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+	if !producesStateFiles(blockReader) {
+		return blocksInFilesEnd(ctx, tx, blockReader)
+	}
+	return collatableStepsEnd(ctx, tx, blockReader, irreversibleBlock)
+}
+
+// collatableStepsEnd is the block after the visible state files and after the steps not yet in them whose
+// blocks all reach no higher than irreversibleBlock.
+func collatableStepsEnd(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, irreversibleBlock uint64) (uint64, error) {
+	end, err := blocksInFilesEnd(ctx, tx, blockReader)
+	if err != nil {
+		return 0, err
+	}
+	txNumsReader := blockReader.TxnumReader()
+	irreversibleTxNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, irreversibleBlock)
+	if err != nil || !ok {
+		return end, err
+	}
+	stepSize := tx.Debug().StepSize()
+	stepsEnd := (irreversibleTxNum + 1) / stepSize * stepSize
+	if stepsEnd <= tx.Debug().TxNumsInFiles(kv.StateDomains...) {
+		return end, nil
+	}
+	lastBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, stepsEnd-1)
+	if err != nil || !ok {
+		return end, err
+	}
+	return lastBlock + 1, nil
+}
+
+// noPruneChangesetsTimeout bounds the changeset delete that collation still needs with the prune off.
+const noPruneChangesetsTimeout = 100 * time.Millisecond
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
 // txNum — the aggregator floors each to its file step. CommitmentDomain uses its

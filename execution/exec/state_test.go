@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"testing/synctest"
@@ -54,7 +55,7 @@ func (task *workerTestTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, _ *ca
 }
 
 func (task *workerTestTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, _ *state.IntraBlockState,
-	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
+	_ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
 ) *TxResult {
 	return task.execute(evm)
 }
@@ -150,7 +151,6 @@ func TestWorkerCancellationStopsSystemCalls(t *testing.T) {
 				w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, engine, datadir.Dirs{}, log.New())
 				defer w.Close()
 				w.SetReader(state.NewNoopReader())
-				w.stateWriter = state.NewNoopWriter()
 				result := w.RunTxTask(&TxTask{Config: chain.AllProtocolChanges, TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}})
 				require.ErrorIs(t, result.Err, context.Canceled)
 				require.Equal(t, uint64(cancelAfter), engine.value.Uint64(), "cancelled system calls must not write storage")
@@ -196,6 +196,24 @@ func TestWorkerCancellationDuringExecutionReturnsOperationalError(t *testing.T) 
 
 	require.ErrorIs(t, result.Err, context.Canceled)
 	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
+}
+
+type resetFailingTask struct{ TxTask }
+
+func (task *resetFailingTask) Reset(*vm.EVM, *state.IntraBlockState, *calltracer.CallTracer) error {
+	return errors.New("reset failed")
+}
+
+// A failed task reset reads nothing, so its result names no dependency: a scheduler must not wait on tx 0 for it.
+func TestWorkerResetFailureRecordsNoDependency(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(state.NewNoopReader())
+	result := w.RunTxTask(&resetFailingTask{TxTask{TxIndex: 3, Header: &types.Header{Number: *uint256.NewInt(1)}}})
+
+	require.ErrorContains(t, result.Err, "reset failed")
+	require.False(t, result.Operational, "a reset failure is the tx's verdict")
+	require.Equal(t, state.UnknownDep, result.Dep)
 }
 
 type missingHeaderReader struct {

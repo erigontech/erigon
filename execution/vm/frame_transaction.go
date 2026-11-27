@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameEntryPoint supplies the protocol caller for DEFAULT, VERIFY and POST_TX frames.
+// FrameEntryPoint supplies the protocol caller for DEFAULT, VERIFY and ASSERT frames.
 // Frames enter their targets directly, without executing an entry-point contract.
 var FrameEntryPoint = accounts.InternAddress(common.HexToAddress("0xaa"))
 
@@ -43,7 +43,7 @@ func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if evm.FrameContext == nil {
 		return pc, nil, ErrFrameContext
 	}
-	if inPostTx(evm) {
+	if inAssert(evm) {
 		return pc, nil, ErrWriteProtection
 	}
 	offset, length := call.Stack.pop2Uint64()
@@ -147,7 +147,10 @@ func (evm *EVM) consumeFrameNonce() error {
 	if !ctx.ChargeStateGas(stateGas) {
 		return ErrOutOfGas
 	}
-	sequence := *uint256.NewInt(tx.Nonce + 1)
+	sequence := *uint256.NewInt(tx.Nonce)
+	if !tx.UsesSingleUseNonce() {
+		sequence.AddUint64(&sequence, 1)
+	}
 	for _, slot := range slots[:len(tx.NonceKeys)] {
 		if err := ibs.SetState(manager, slot, sequence); err != nil {
 			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
