@@ -17,6 +17,7 @@
 package validator_params
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -54,8 +55,6 @@ func newTestValidatorParams() (*ValidatorParams, *time.Time) {
 	return params, &now
 }
 
-// Validator clients repeat their requests every epoch, so a validator that no request refreshed
-// for attachmentTTL is no longer attached.
 func TestAttachedValidatorExpiresWithoutRefresh(t *testing.T) {
 	params, now := newTestValidatorParams()
 	params.AddAttachedValidator(7)
@@ -91,7 +90,6 @@ func TestRefreshedValidatorStaysAttached(t *testing.T) {
 	require.ElementsMatch(t, []uint64{7, 8}, params.GetValidators())
 }
 
-// A validator that expired is attached again by its next request.
 func TestExpiredValidatorIsAttachedAgain(t *testing.T) {
 	params, now := newTestValidatorParams()
 	params.AddAttachedValidator(7)
@@ -102,4 +100,26 @@ func TestExpiredValidatorIsAttachedAgain(t *testing.T) {
 
 	require.True(t, params.HasAttachedValidator(7))
 	require.ElementsMatch(t, []uint64{7}, params.GetValidators())
+}
+
+func TestRefreshDuringCleanupKeepsValidatorAttached(t *testing.T) {
+	const validators = 2000
+	for range 200 {
+		params, now := newTestValidatorParams()
+		for index := range uint64(validators) {
+			params.AddAttachedValidator(index)
+		}
+		*now = now.Add(attachmentTTL)
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for index := range uint64(validators) {
+				params.AddAttachedValidator(index)
+			}
+		})
+		wg.Go(func() { params.GetValidators() })
+		wg.Wait()
+
+		require.Len(t, params.GetValidators(), validators)
+	}
 }
