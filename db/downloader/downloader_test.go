@@ -1497,16 +1497,16 @@ func TestSeedableFilesPreserveSnapshotKeys(t *testing.T) {
 	require.ElementsMatch(t, append(rootNames, filepath.ToSlash(filepath.Join("caplin", stateName))), got)
 }
 
-func TestSeedableFilesUseSnapshotRootForCaplinArchive(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	dirs.SnapCaplin = filepath.Join(dirs.Snap, "archive", datadir.SnapCaplinDir)
-	require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
-	name := snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, name), nil, 0o644))
+func TestSeedableFilesSkipsUnknownRootFileInCaplinDatadir(t *testing.T) {
+	dirs := datadir.New(filepath.Join(t.TempDir(), "caplin-node"))
+	const name = "v1.1-000000-000100-BlockProposers.seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), nil, 0o644))
 
-	got, err := SeedableFiles(dirs, "", true)
+	var got []string
+	var err error
+	require.NotPanics(t, func() { got, err = SeedableFiles(dirs, "mainnet", false) })
 	require.NoError(t, err)
-	require.Contains(t, got, filepath.ToSlash(filepath.Join("archive", datadir.SnapCaplinDir, name)))
+	require.NotContains(t, got, name)
 }
 
 func TestAddNewSeedableFileKeepsUnknownFileBehavior(t *testing.T) {

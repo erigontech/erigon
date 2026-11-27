@@ -1547,7 +1547,7 @@ func (d *Downloader) saveMetainfoFromTorrent(t *torrent.Torrent) error {
 }
 
 func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap, dirs.Snap, chainName, all)
+	files, err := seedableSegmentFiles(dirs.Snap, chainName, all)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
@@ -1572,7 +1572,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 	// check if dirs.SnapCaplin exists
 	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
-		l5, err = seedableSegmentFiles(dirs.SnapCaplin, dirs.Snap, chainName, all)
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
 		if err != nil {
 			return nil, err
 		}

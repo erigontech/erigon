@@ -100,7 +100,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 // the index (blocksidecars), not the segment type.
 func isBlobSidecarFile(name string) bool {
 	info, _, ok := snaptype.ParseFileName("", name)
-	return ok && info.Type != nil && snaptype.IsBlobSidecarType(info.Type.Enum())
+	return ok && info.Type != nil && info.Type.Enum() == snaptype.BlobSidecars.Enum()
 }
 
 // BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
@@ -122,11 +122,12 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, er
 	}
 	var tip uint64
 	for _, p := range items {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok || info.Type == nil || !snaptype.IsBlobSidecarType(info.Type.Enum()) {
+		if !isBlobSidecarFile(p.Name) {
 			continue
 		}
-		tip = max(tip, info.To)
+		if info, _, ok := snaptype.ParseFileName("", p.Name); ok {
+			tip = max(tip, info.To)
+		}
 	}
 	if tip <= r.ServeWindowSlots {
 		return 0, nil
@@ -674,9 +675,7 @@ func SnapshotsToDownload(
 	}
 
 	for _, p := range preverifiedBlockSnapshots.Items {
-		info, _, parsed := snaptype.ParseFileName("", p.Name)
-		caplinType := parsed && info.Type != nil && (info.Type.Enum() == snaptype.BeaconBlocks.Enum() || snaptype.IsBlobSidecarType(info.Type.Enum()))
-		caplinFile := strings.Contains(p.Name, datadir.SnapCaplinDir) || caplinType
+		caplinFile := strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") || snaptype.IsCaplinFile(p.Name)
 		if caplin == NoCaplin && caplinFile {
 			continue
 		}
@@ -690,7 +689,7 @@ func SnapshotsToDownload(
 		if skipBlobDownload(p.Name, blobs, blobFloor) {
 			continue
 		}
-		if !caplinState && strings.Contains(p.Name, datadir.SnapCaplinDir+"/") {
+		if !caplinState && strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
 			continue
 		}
 		if headerchain &&
@@ -892,15 +891,15 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
-	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
-	if !ok {
-		return true
-	}
 	if strings.HasPrefix(name, "salt") {
 		return false // not applicable
 	}
 	if strings.HasPrefix(name, datadir.SnapCaplinDir+"/") {
 		return false // not applicable, caplin files are slot-based
+	}
+	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
+	if !ok {
+		return true
 	}
 	if stateFile {
 		return kv.Step(fileInfo.To) > toStep

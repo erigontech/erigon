@@ -216,13 +216,12 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		default: // smallest number in file name is > 1_000, so we represent it as /1000
 			multiplier = 1_000
 		}
-		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString, typeString
+		res.From, res.To, res.TypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString
 		res.Type, ok = ParseFileType(typeString)
-		if ok {
-			res.CaplinTypeString = res.Type.Name()
-		} else {
-			return res, isStateFile, false
+		if !ok {
+			return res, false, false
 		}
+		res.CaplinTypeString = res.Type.Name()
 	}
 	return res, isStateFile, true
 }

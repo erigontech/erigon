@@ -3802,9 +3802,7 @@ func duClassifyFile(dir, name string) string {
 // consensus-layer data. Caplin writes these alongside the execution block segments,
 // but they are retained by the --caplin.*-archive flags rather than --prune.mode.
 func duIsCaplinSegment(lname string) bool {
-	return strings.Contains(lname, "beaconblocks") ||
-		strings.Contains(lname, "blobsidecars") ||
-		strings.Contains(lname, "blocksidecars")
+	return snaptype.IsCaplinFile(lname)
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
@@ -3858,8 +3856,8 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 			if ok {
 				fi.From = parsed.From
 				fi.To = parsed.To
-				fi.Subcategory = parsed.TypeString
 			}
+			fi.Subcategory = parsed.TypeString
 
 			files = append(files, fi)
 		}

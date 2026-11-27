@@ -48,6 +48,7 @@ func IsCaplinType(t Enum) bool {
 	return t >= MinCaplinEnum && t < MaxCaplinEnum
 }
 
-func IsBlobSidecarType(t Enum) bool {
-	return t == CaplinEnums.BlobSidecars
+func IsCaplinFile(name string) bool {
+	info, _, ok := ParseFileName("", name)
+	return ok && info.Type != nil && (info.Type.Enum() == BeaconBlocks.Enum() || info.Type.Enum() == BlobSidecars.Enum())
 }

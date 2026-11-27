@@ -39,6 +39,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snaptype"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -193,14 +194,14 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if strings.HasPrefix(p.Name, "caplin") {
-			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
+			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
 			if !known || caplinFile.Type == nil {
 				drops.unreadable++
 				continue
 			}
 
-			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, datadir.SnapCaplinDir+"/"))
 			if err != nil {
 				drops.unparsableItem(p.Name)
 				continue
@@ -213,7 +214,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 				drops.outOfWindow++
 				continue
 			}
-			if !keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion) {
+			if !keepNewest(&bestVersions, &keptVersions, datadir.SnapCaplinDir+"/"+name, p, caplinVersion) {
 				drops.superseded++
 			}
 			continue
@@ -469,7 +470,7 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		if info == nil {
 			continue
 		}
-		if strings.Contains(info.Name(), "caplin") {
+		if strings.HasPrefix(info.Name(), datadir.SnapCaplinDir+"/") {
 			continue
 		}
 

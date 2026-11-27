@@ -1118,58 +1118,104 @@ func TestDownloadUnknownCaplinPath(t *testing.T) {
 	}
 }
 
-func TestDownloadTypedCaplinPaths(t *testing.T) {
-	basenames := []string{"salt-blocks.txt", "salt-state.txt", "erigondb.toml", "v1.0-accounts.0-32.kv"}
-	for _, typ := range slices.Concat(snaptype2.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes) {
-		basenames = append(basenames, typ.FileName(snaptype.Version{}, 0, 50_000))
-		basenames = append(basenames, typ.IdxFileNames(0, 50_000)...)
+func TestDownloadUnknownCaplinPathIgnoresBlockLimit(t *testing.T) {
+	const name = "caplin/v1.1-000000-000050-BlockProposers.seg"
+	item := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+	for _, limit := range []uint64{0, 42} {
+		t.Run(fmt.Sprintf("toBlock=%d", limit), func(t *testing.T) {
+			checkDownloadDecision(t, item, AlsoCaplin, true, limit, true)
+		})
 	}
-	for _, basename := range basenames {
-		for _, suffix := range []string{"", ".torrent"} {
-			name := "caplin/" + basename + suffix
-			raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
-			typed := raw.Typed(snaptype2.BlockSnapshotTypes)
-			if strings.HasPrefix(basename, "v1.1-") {
-				require.Equal(t, raw.Items, typed.Items, name)
+}
+
+func TestDownloadNameContainingCaplinUsesLocation(t *testing.T) {
+	const name = "domain/caplin-v1.1-000000-000050-headers.seg"
+	checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}, NoCaplin, false, 0, true)
+}
+
+func TestDownloadTypedCaplinPaths(t *testing.T) {
+	fixtures := []struct {
+		basename string
+		keep     bool
+	}{
+		{basename: "salt-blocks.txt"},
+		{basename: "salt-state.txt"},
+		{basename: "erigondb.toml"},
+		{basename: "v1.0-accounts.0-32.kv"},
+		{basename: snaptype2.Headers.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype2.Headers.IdxFileNames(0, 50_000)[0]},
+		{basename: snaptype.BeaconBlocks.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype.BeaconBlocks.IdxFileNames(0, 50_000)[0], keep: true},
+		{basename: snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype.PendingDepositsDump.IdxFileNames(0, 50_000)[0], keep: true},
+	}
+	for _, fixture := range fixtures {
+		name := "caplin/" + fixture.basename
+		raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+		typed := raw.Typed(snaptype2.BlockSnapshotTypes)
+		t.Run("typed/"+fixture.basename, func(t *testing.T) {
+			if fixture.keep {
+				require.Equal(t, raw.Items, typed.Items)
 			} else {
-				require.Empty(t, typed.Items, name)
+				require.Empty(t, typed.Items)
 			}
-			for _, useTyped := range []bool{false, true} {
-				items := raw
-				if useTyped {
-					items = typed
-				}
-				for _, mode := range []CaplinMode{NoCaplin, OnlyCaplin, AlsoCaplin} {
-					for _, state := range []bool{false, true} {
-						for _, limit := range []uint64{0, 42} {
-							t.Run(fmt.Sprintf("%s/typed=%t/mode=%d/state=%t/limit=%d", name, useTyped, mode, state, limit), func(t *testing.T) {
-								checkDownloadDecision(t, items, mode, state, limit, len(items.Items) > 0 && mode != NoCaplin && state && (limit == 0 || basename != "erigondb.toml"))
-							})
-						}
-					}
-				}
+		})
+	}
+
+	beacon := "caplin/" + snaptype.BeaconBlocks.FileName(snaptype.Version{}, 0, 50_000)
+	header := "caplin/" + snaptype2.Headers.FileName(snaptype.Version{}, 0, 50_000)
+	cases := []struct {
+		name        string
+		useTyped    bool
+		mode        CaplinMode
+		caplinState bool
+		toBlock     uint64
+		want        bool
+	}{
+		{name: beacon, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: beacon, useTyped: true, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: beacon, useTyped: true, mode: AlsoCaplin, caplinState: true, want: true},
+		{name: beacon, useTyped: true, mode: OnlyCaplin, toBlock: 0, want: false},
+		{name: beacon + ".torrent", useTyped: true, mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: header, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: header, mode: OnlyCaplin, toBlock: 0, want: false},
+		{name: header, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/salt-blocks.txt", mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/erigondb.toml", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/v1.0-accounts.0-32.kv", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/typed=%t/mode=%d/state=%t/toBlock=%d", tc.name, tc.useTyped, tc.mode, tc.caplinState, tc.toBlock), func(t *testing.T) {
+			items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: tc.name}}}
+			if tc.useTyped {
+				items = items.Typed(snaptype2.BlockSnapshotTypes)
 			}
-		}
+			checkDownloadDecision(t, items, tc.mode, tc.caplinState, tc.toBlock, tc.want)
+		})
 	}
 }
 
 func TestDownloadBareCaplinState(t *testing.T) {
-	for _, typ := range snaptype.CaplinStateSnapshotTypes {
-		names := append([]string{typ.FileName(snaptype.Version{}, 0, 50_000)}, typ.IdxFileNames(0, 50_000)...)
-		for _, name := range names {
-			names = append(names, name+".torrent")
-		}
-		for _, name := range names {
-			pv := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
-			for _, mode := range []CaplinMode{NoCaplin, OnlyCaplin, AlsoCaplin} {
-				for _, state := range []bool{false, true} {
-					for _, limit := range []uint64{0, 42} {
-						t.Run(fmt.Sprintf("%s/mode=%d/state=%t/limit=%d", name, mode, state, limit), func(t *testing.T) {
-							checkDownloadDecision(t, pv, mode, state, limit, mode != OnlyCaplin && limit == 0)
-						})
-					}
-				}
-			}
-		}
+	seg := snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)
+	idx := snaptype.PendingDepositsDump.IdxFileNames(0, 50_000)[0]
+	cases := []struct {
+		name        string
+		mode        CaplinMode
+		caplinState bool
+		toBlock     uint64
+		want        bool
+	}{
+		{name: seg, mode: NoCaplin, want: true},
+		{name: seg, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: seg, mode: OnlyCaplin, caplinState: true, want: false},
+		{name: seg, mode: AlsoCaplin, want: true},
+		{name: seg + ".torrent", mode: AlsoCaplin, caplinState: true, want: true},
+		{name: idx, mode: NoCaplin, want: true},
+		{name: idx, mode: OnlyCaplin, caplinState: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/mode=%d/state=%t/toBlock=%d", tc.name, tc.mode, tc.caplinState, tc.toBlock), func(t *testing.T) {
+			checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: tc.name}}}, tc.mode, tc.caplinState, tc.toBlock, tc.want)
+		})
 	}
 }

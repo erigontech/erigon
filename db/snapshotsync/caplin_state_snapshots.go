@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -165,10 +166,9 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) 
 type CaplinStateSnapshots struct {
 	*BaseRoSnapshots
 
-	snapshotTypes  SnapshotTypes
-	tmpdir         string
-	typeEnums      map[string]snaptype.Enum
-	downloaderRoot string
+	snapshotTypes SnapshotTypes
+	tmpdir        string
+	typeEnums     map[string]snaptype.Enum
 }
 
 type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
@@ -213,7 +213,6 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, sn
 		snapshotTypes:   snapshotTypes,
 		tmpdir:          dirs.Tmp,
 		typeEnums:       typeEnums,
-		downloaderRoot:  dirs.Snap,
 	}
 	sn.keepUnindexedlyCovered = true
 	for _, typ := range types {
@@ -264,27 +263,17 @@ func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) e
 	}
 	if onDelete != nil {
 		notify := onDelete
-		onDelete = func(l []string) error {
-			keys, err := downloaderKeys(s.downloaderRoot, s.Dir(), l)
-			if err != nil {
-				return err
-			}
-			return notify(keys)
-		}
+		onDelete = func(l []string) error { return notify(downloaderKeys(l)) }
 	}
 	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
 }
 
-func downloaderKeys(root, dir string, names []string) ([]string, error) {
+func downloaderKeys(names []string) []string {
 	keys := make([]string, len(names))
 	for i, name := range names {
-		rel, err := filepath.Rel(root, filepath.Join(dir, name))
-		if err != nil {
-			return nil, err
-		}
-		keys[i] = filepath.ToSlash(rel)
+		keys[i] = path.Join(datadir.SnapCaplinDir, filepath.ToSlash(name))
 	}
-	return keys, nil
+	return keys
 }
 
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {

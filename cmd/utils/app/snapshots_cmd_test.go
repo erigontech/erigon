@@ -1031,6 +1031,23 @@ func TestDUUnknownCaplinArchiveBytes(t *testing.T) {
 	}
 }
 
+func TestDUUnknownCaplinSubcategory(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	const name = "v1.1-000000-000100-beaconblocks-extra.seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), make([]byte, 64), 0o644))
+
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	for _, file := range files {
+		if file.Name == name {
+			require.Equal(t, duCatBlocks, file.Category)
+			require.Equal(t, "beaconblocks-extra", file.Subcategory)
+			return
+		}
+	}
+	t.Fatalf("missing %s", name)
+}
+
 func TestDUComputeEstimates_CountsUnparseableStateFilesInEveryMode(t *testing.T) {
 	snapDir := t.TempDir()
 	files := []duFileInfo{
