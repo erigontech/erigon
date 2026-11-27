@@ -36,6 +36,7 @@ const (
 	chainTipNoPeersRetryInterval = 2 * time.Second
 	chainTipPollInterval         = time.Second
 	chainTipPresenceInterval     = 20 * time.Millisecond
+	chainTipTimeout              = 25 * time.Second
 )
 
 func validPendingGloasPayload(p forkchoice.PendingELPayload) bool {
@@ -185,11 +186,10 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			}
 			return
 		}
-		cfg.chainTipResumeSlot.Store(next)
-
 		// Send fetched blocks to the response channel or handle context cancellation
 		select {
 		case respCh <- blocks:
+			cfg.chainTipResumeSlot.Store(next)
 		case <-ctx.Done():
 			return
 		}
@@ -199,6 +199,33 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			return
 		}
 	}
+}
+
+type chainTipFetch struct {
+	blocks chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
+	errors chan error
+	cancel context.CancelFunc
+}
+
+func startChainTipFetch(ctx context.Context, cfg *Cfg, args Args) *chainTipFetch {
+	delay := time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 2
+	buffer := 1024
+	if cfg.safeUpdatePending {
+		delay = 0
+		buffer = 0 // Keep at most one batch while the stage retries publication.
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, chainTipTimeout)
+	fetch := &chainTipFetch{
+		blocks: make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], buffer),
+		errors: make(chan error),
+		cancel: cancel,
+	}
+	go func() {
+		defer close(fetch.blocks)
+		defer cancel()
+		startFetchingBlocksMissedByGossipAfterSomeTime(requestCtx, cfg, args, delay, fetch.blocks, fetch.errors)
+	}()
+	return fetch
 }
 
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
@@ -247,7 +274,10 @@ MainLoop:
 		case err := <-errCh:
 			// Handle errors received on the error channel
 			return err
-		case blocks := <-respCh:
+		case blocks, ok := <-respCh:
+			if !ok {
+				return fetchCtx.Err()
+			}
 			if blocks == nil {
 				continue
 			}
@@ -1718,6 +1748,10 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	if args.seenSlot >= args.targetSlot {
+		if cfg.pendingTipFetch != nil {
+			cfg.pendingTipFetch.cancel()
+			cfg.pendingTipFetch = nil
+		}
 		// [GLOAS] Wait for the head's execution payload envelope before proceeding to ForkChoice.
 		// The block was already processed by gossip during SleepForSlot, but the envelope
 		// may still be in-flight. Without this, FCU sends the parent's execution hash.
@@ -1770,24 +1804,30 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		"targetSlot", args.targetSlot,
 		"requestedSlots", totalRequest,
 	)
-	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
-	errCh := make(chan error)
-
-	importCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	importCtx, cancel := context.WithTimeout(ctx, chainTipTimeout)
 	defer cancel()
-	fetchCtx := importCtx
-	delay := time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 2
+	fetch := cfg.pendingTipFetch
+	cfg.pendingTipFetch = nil
+	if fetch == nil {
+		fetch = startChainTipFetch(ctx, cfg, args)
+	}
+	defer func() {
+		if cfg.pendingTipFetch == nil {
+			fetch.cancel()
+		}
+	}()
+	waitCtx := importCtx
 	if cfg.safeUpdatePending {
-		delay = 0
-		var cancelFetch context.CancelFunc
-		fetchCtx, cancelFetch = context.WithTimeout(importCtx, sleepForSlotRewakeInterval)
-		defer cancelFetch()
+		var stopWait context.CancelFunc
+		waitCtx, stopWait = context.WithTimeout(importCtx, sleepForSlotRewakeInterval)
+		defer stopWait()
 	}
 
-	go startFetchingBlocksMissedByGossipAfterSomeTime(fetchCtx, cfg, args, delay, respCh, errCh)
-
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, fetchCtx, logger, cfg, args, respCh, errCh)
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, waitCtx, logger, cfg, args, fetch.blocks, fetch.errors)
 	if cfg.safeUpdatePending && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		if waitCtx.Err() == context.DeadlineExceeded && importCtx.Err() == nil {
+			cfg.pendingTipFetch = fetch
+		}
 		return nil
 	}
 	return err

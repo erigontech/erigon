@@ -103,6 +103,7 @@ type Cfg struct {
 	ancestorLookupFailedSlot    uint64
 	// chainTipResumeSlot is the slot after a capped window, so a run of skipped slots longer than one request is crossed.
 	chainTipResumeSlot atomic.Uint64
+	pendingTipFetch    *chainTipFetch
 	pendingBlockWrite  *pendingBlockWrite
 }
 

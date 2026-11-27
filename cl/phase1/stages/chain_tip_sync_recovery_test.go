@@ -2527,12 +2527,34 @@ func TestPendingSafeUpdateFetchesMissedParent(t *testing.T) {
 		require.NoError(t, response.WriteByte(0))
 		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, tip, digest[:]...))
 		f.sentinel.response = response.Bytes()
-		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		f.sentinel.SentinelClient = &statusSentinel{}
+		f.sentinel.chainTipBatchEnvelopeSentinel.onRequest = func(ctx context.Context) error {
+			return common.Sleep(ctx, 2500*time.Millisecond)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
 		defer cancel()
 
-		err = chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: tip.Block.Slot})
+		args := Args{seenSlot: f.parent.Block.Slot, targetSlot: tip.Block.Slot}
+		stage := ConsensusClStages().Stages[ChainTipSync]
+		engine := f.cfg.executionClient.(*testExecutionEngine)
+		for _, deferred := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing} {
+			start := time.Now()
+			require.NoError(t, stage.ActionFunc(ctx, log.Root(), f.cfg, args))
+			require.GreaterOrEqual(t, time.Since(start), time.Second)
+			require.Less(t, time.Since(start), 1500*time.Millisecond)
+			require.Equal(t, ForkChoice, stage.TransitionFunc(f.cfg, args, nil))
+			head, slot, err := f.cfg.forkChoice.GetHeadNode()
+			require.NoError(t, err)
+			engine.forkChoiceErr = deferred
+			require.NoError(t, notifyServicesOfHead(ctx, log.Root(), f.cfg, head, slot))
+			require.True(t, f.cfg.safeUpdatePending)
+			require.Zero(t, f.graph.added[tipRoot])
+		}
+		require.Len(t, engine.forkChoiceHeads, 2)
+		err = stage.ActionFunc(ctx, log.Root(), f.cfg, args)
 
 		require.NoError(t, err)
+		require.Equal(t, 1, f.sentinel.calls)
 		require.Equal(t, 1, f.graph.added[middleRoot], "fetch the parent missed by gossip")
 		require.Equal(t, 1, f.graph.added[tipRoot], "import its child after recovery")
 		head, _, err := f.cfg.forkChoice.GetHead(nil)
