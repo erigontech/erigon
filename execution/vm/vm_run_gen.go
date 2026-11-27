@@ -314,7 +314,7 @@ run:
 					continue run
 				}
 			case MCOPY:
-				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+				if sLen >= 3 && jt[MCOPY].memorySize != nil && (stack.back(2).IsZero() || callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2))) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 					dst, src, length := callContext.Stack.pop3()
 					callContext.gas, callContext.savedPC = gasLeft, pc
@@ -734,7 +734,7 @@ run:
 						continue run
 					}
 				case CALLDATACOPY:
-					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if sLen >= 3 && (stack.back(2).IsZero() || callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, dataOffset, length := callContext.Stack.pop3()
 						dataOffset64, overflow := dataOffset.Uint64WithOverflow()
@@ -751,7 +751,7 @@ run:
 						continue run
 					}
 				case CODECOPY:
-					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if sLen >= 3 && (stack.back(2).IsZero() || callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, codeOffset, length := callContext.Stack.pop3()
 						uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
@@ -765,7 +765,7 @@ run:
 						continue run
 					}
 				case RETURNDATACOPY:
-					if sLen >= 3 && jt[RETURNDATACOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if sLen >= 3 && jt[RETURNDATACOPY].memorySize != nil && (stack.back(2).IsZero() || callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, dataOffset, length := callContext.Stack.pop3()
 
