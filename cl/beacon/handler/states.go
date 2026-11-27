@@ -443,7 +443,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	if epochReq != nil {
 		epoch = *epochReq
 	}
-	if epoch > stateEpoch || stateEpoch-epoch >= a.beaconChainCfg.EpochsPerHistoricalVector {
+	if !randaoMixAvailable(stateEpoch, epoch, a.beaconChainCfg.EpochsPerHistoricalVector) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("epoch is out of range for the randao_mixes of the state"))
 	}
 	randaoMixes := a.randaoMixesPool.Get().(solid.HashListSSZ)
@@ -474,6 +474,10 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	return newBeaconResponse(randaoResponse{Randao: mix}).
 		WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithOptimistic(isOptimistic), nil
+}
+
+func randaoMixAvailable(stateEpoch, epoch, vectorLength uint64) bool {
+	return epoch <= stateEpoch && stateEpoch-epoch < vectorLength
 }
 
 func randaoReadError(err error) *beaconhttp.EndpointError {

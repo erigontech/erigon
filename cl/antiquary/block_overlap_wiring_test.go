@@ -17,9 +17,11 @@
 package antiquary
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -103,7 +106,7 @@ func TestMergeBlocksMergesDumpedSegmentsIntoTheNextTier(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		var prevRoot common.Hash
-		for slot := uint64(0); slot < tier; slot += 500 {
+		for slot := uint64(0); slot <= tier; slot += 500 {
 			var root common.Hash
 			binary.BigEndian.PutUint64(root[:], slot+1)
 			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
@@ -280,7 +283,9 @@ func TestMergeBlocksKeepsTheSegmentsBelowTheMergedRange(t *testing.T) {
 
 func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
+	var logs bytes.Buffer
 	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	dirs := datadir.New(t.TempDir())
 	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
 	above := writeStateFixture(t, dirs.Snap, "beaconblocks", 2*limit, 3*limit, logger)
@@ -290,7 +295,7 @@ func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		var prevRoot common.Hash
-		for slot := uint64(limit); slot < 3*limit; slot += 500 {
+		for slot := uint64(limit); slot <= 3*limit; slot += 500 {
 			var root common.Hash
 			binary.BigEndian.PutUint64(root[:], slot+1)
 			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
@@ -317,4 +322,148 @@ func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
 	after, err := os.Stat(above)
 	require.NoError(t, err)
 	require.True(t, os.SameFile(before, after), "the indexed segment above the hole must not be dumped again")
+	require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the segment above, not the canonical head, holds the bound")
+}
+
+func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTail(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const head, tail = limit - 2, limit - 1
+	for _, finalized := range []uint64{limit + safetyMargin, limit + safetyMargin + 1} {
+		t.Run(fmt.Sprintf("finalized %d", finalized), func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+			dirs := datadir.New(t.TempDir())
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			var slots []uint64
+			for slot := uint64(0); slot < head; slot += 500 {
+				slots = append(slots, slot)
+			}
+			slots = append(slots, head, tail, limit)
+			roots := make(map[uint64]common.Hash)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				var prevRoot common.Hash
+				for _, slot := range slots {
+					block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+					block.Block.Slot = slot
+					block.Block.ParentRoot = prevRoot
+					if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, slot <= head); err != nil {
+						return err
+					}
+					root, err := block.Block.HashSSZ()
+					if err != nil {
+						return err
+					}
+					roots[slot], prevRoot = root, root
+				}
+				return beacon_indicies.WriteHighestFinalized(tx, finalized)
+			}))
+			sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+			a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+			require.NoError(t, a.antiquate())
+			require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
+			require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead=9998 freezeBound=10000"), "the wait for the canonical index must be reported")
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
+				if err != nil {
+					return err
+				}
+				require.NotEmpty(t, body, "the block at slot %d must stay in the database", tail)
+				return nil
+			}))
+
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, tail, roots[tail])
+			}))
+			a.lastCanonicalHeadCapLog = time.Time{}
+			require.NoError(t, a.antiquate())
+			require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+			require.Equal(t, 1, strings.Count(logs.String(), "canonicalHead="), "a canonical index that reaches the bound is not reported")
+			view := sn.View()
+			defer view.Close()
+			segment, ok := view.BeaconBlocksSegment(tail)
+			require.True(t, ok)
+			word, err := segment.Get(tail)
+			require.NoError(t, err)
+			require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
+		})
+	}
+}
+
+func TestAntiquateReportsTheCanonicalHeadOnlyWhenItHoldsBackASegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	t.Run("the margin holds the next segment", func(t *testing.T) {
+		a, _ := antiquaryWithBlockSegments(t, 0, limit)
+		var logs bytes.Buffer
+		a.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := beacon_indicies.MarkRootCanonical(tx, limit-1_000, common.Hash{1}); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin+5_000)
+		}))
+
+		require.NoError(t, a.antiquate())
+		require.Equal(t, uint64(limit-1), a.sn.BlocksAvailable())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "the margin, not the canonical head, holds the next segment")
+	})
+	t.Run("the gap below the next indexed segment is shorter than a segment", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		dirs := datadir.New(t.TempDir())
+		writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+		writeStateFixture(t, dirs.Snap, "beaconblocks", limit+limit/2, 2*limit+limit/2, logger)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := beacon_indicies.MarkRootCanonical(tx, limit-1, common.Hash{1}); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteHighestFinalized(tx, 2*limit+safetyMargin)
+		}))
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+		t.Cleanup(sn.Close)
+		require.NoError(t, sn.OpenFolder())
+		a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+		require.NoError(t, a.antiquate())
+		require.Zero(t, strings.Count(logs.String(), "canonicalHead="), "no complete segment fits below the next indexed segment")
+	})
+}
+
+func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	a, _ := antiquaryWithBlockSegments(t, 0, 0)
+	a.downloader = nil
+	require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(0); slot <= limit; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = prevRoot
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return nil
+	}))
+	for _, tc := range []struct{ finalized, available uint64 }{
+		{safetyMargin - 1, 0},
+		{limit + safetyMargin - 1, 0},
+		{limit + safetyMargin, limit - 1},
+	} {
+		require.NoError(t, a.mainDB.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteHighestFinalized(tx, tc.finalized)
+		}))
+		require.NoError(t, a.antiquate())
+		require.Equal(t, tc.available, a.sn.BlocksAvailable(), "finalized %d", tc.finalized)
+	}
 }

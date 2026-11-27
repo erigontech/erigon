@@ -407,7 +407,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("content-type", contentType)
+	w.Header().Set("Content-Type", contentType)
 	codec := newHTTPServerConn(r, w, body)
 	defer codec.Close()
 	var stream *jsonstream.Stream
@@ -472,7 +472,11 @@ func validateRequest(r *http.Request) (int, error) {
 	// GET calls need the content type too: a cross-site page can send a GET without a CORS
 	// preflight, but not one carrying this header.
 	// Check content-type
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
+	ct := r.Header.Get("Content-Type")
+	if ct == contentType {
+		return 0, nil
+	}
+	if mt, _, err := mime.ParseMediaType(ct); err == nil {
 		if slices.Contains(acceptedContentTypes, mt) {
 			return 0, nil
 		}
