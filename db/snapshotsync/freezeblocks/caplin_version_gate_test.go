@@ -112,33 +112,85 @@ func TestReviewUnsupportedAfterBrokenSegmentStillPanics(t *testing.T) {
 }
 
 func TestOpenListReportsUnsupportedVersionBeforeIndexError(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	typ := snaptype.BeaconBlocks
-	unsupported := typ.FileName(version.V2_0, 0, 2)
-	writeCaplinSegment(t, dirs, typ, 0, 2, version.V2_0, true, func(uint64) []byte { return []byte{1} })
-	supported := typ.FileName(typ.Versions().Current, 0, 2)
-	writeCaplinSegment(t, dirs, typ, 0, 2, typ.Versions().Current, true, func(uint64) []byte { return []byte{1} })
-	index := typ.IdxFileName(version.V2_0, 0, 2)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, index), []byte("corrupt"), 0o644))
+	for _, tc := range []struct {
+		name  string
+		files func(snaptype.Type) []string
+	}{
+		{name: "supported-first", files: func(typ snaptype.Type) []string {
+			return []string{typ.FileName(typ.Versions().Current, 0, 2), typ.IdxFileName(version.V2_0, 2, 4)}
+		}},
+		{name: "unsupported-index-first", files: func(typ snaptype.Type) []string {
+			return []string{typ.IdxFileName(version.V2_0, 2, 4), typ.FileName(typ.Versions().Current, 0, 2)}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			typ := snaptype.BeaconBlocks
+			writeCaplinSegment(t, dirs, typ, 0, 2, typ.Versions().Current, true, func(uint64) []byte { return []byte{1} })
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, typ.IdxFileName(typ.Versions().Current, 0, 2)), []byte("corrupt"), 0o644))
+			unsupported := typ.FileName(version.V2_0, 2, 4)
+			writeCaplinSegment(t, dirs, typ, 2, 4, version.V2_0, true, func(uint64) []byte { return []byte{1} })
 
-	s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(s.Close)
-	panicValue := recoverPanic(func() { _ = s.OpenList([]string{unsupported, supported}, false) })
-	require.Contains(t, fmt.Sprint(panicValue), unsupported)
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
+			panicValue := recoverPanic(func() { require.NoError(t, s.OpenList(tc.files(typ), false)) })
+			require.Contains(t, fmt.Sprint(panicValue), unsupported)
+		})
+	}
 }
 
-func TestOpenListReportsUnsupportedVersionBeforeSegmentOpenError(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	typ := snaptype.BeaconBlocks
-	unsupported := typ.FileName(version.V2_0, 0, 2)
-	writeCaplinSegment(t, dirs, typ, 0, 2, version.V2_0, true, func(uint64) []byte { return []byte{1} })
-	broken := typ.FileName(typ.Versions().Current, 2, 4)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, broken), []byte("corrupt"), 0o644))
+func TestOpenListMissingUnsupportedSegmentKeepsBaseResult(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		optimistic bool
+	}{
+		{name: "strict"},
+		{name: "optimistic", optimistic: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			typ := snaptype.BeaconBlocks
+			name := typ.FileName(version.V2_0, 0, 2)
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
 
-	s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(s.Close)
-	panicValue := recoverPanic(func() { _ = s.OpenList([]string{unsupported, broken}, false) })
-	require.Contains(t, fmt.Sprint(panicValue), unsupported)
+			var err error
+			panicValue := recoverPanic(func() { err = s.OpenList([]string{name}, tc.optimistic) })
+			require.Nil(t, panicValue)
+			require.NoError(t, err)
+			require.Empty(t, s.Files())
+		})
+	}
+}
+
+func TestOpenListReportsUnsupportedIndexAfterBrokenSegment(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		corrupt bool
+	}{
+		{name: "missing"},
+		{name: "corrupt", corrupt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			typ := snaptype.BeaconBlocks
+			supported := typ.FileName(version.V1_1, 0, 2)
+			if tc.corrupt {
+				writeCaplinSegment(t, dirs, typ, 0, 2, version.V1_1, true, func(uint64) []byte { return []byte{1} })
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, supported), []byte("corrupt"), 0o644))
+			}
+			unsupported := typ.FileName(version.V2_0, 2, 4)
+			writeCaplinSegment(t, dirs, typ, 2, 4, version.V2_0, true, func(uint64) []byte { return []byte{1} })
+			unsupportedIndex := typ.IdxFileName(version.V2_0, 2, 4)
+
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
+			var err error
+			panicValue := recoverPanic(func() { err = s.OpenList([]string{supported, unsupportedIndex}, false) })
+			require.Contains(t, fmt.Sprint(panicValue), unsupported)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestOpenListUsesOpenedBeaconSegmentVersion(t *testing.T) {
@@ -151,7 +203,7 @@ func TestOpenListUsesOpenedBeaconSegmentVersion(t *testing.T) {
 
 	s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(s.Close)
-	panicValue := recoverPanic(func() { _ = s.OpenList([]string{index}, false) })
+	panicValue := recoverPanic(func() { require.NoError(t, s.OpenList([]string{index}, false)) })
 	require.Nil(t, panicValue)
 	require.Equal(t, []string{name}, s.Files())
 }
@@ -166,7 +218,7 @@ func TestOpenListKeepsBeaconIndexVersionBehavior(t *testing.T) {
 
 	s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(s.Close)
-	panicValue := recoverPanic(func() { _ = s.OpenList([]string{index, name}, true) })
+	panicValue := recoverPanic(func() { require.NoError(t, s.OpenList([]string{index, name}, true)) })
 	require.Nil(t, panicValue, "listing the same index and segment must keep the folder open result")
 	require.Equal(t, []string{name}, s.Files())
 }
