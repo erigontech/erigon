@@ -2007,8 +2007,14 @@ func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
 	require.NoError(t, s.OpenFolder())
 
 	merged := snaptype2.Headers.FileInfo(dir, 0, 100_000)
-	require.NoError(t, os.Remove(merged.Path))
-	require.NoError(t, os.Remove(filepath.Join(dir, snaptype.IdxFileName(snaptype2.Headers.Versions().Current, 0, 100_000, snaptype2.Headers.Name()))))
+	exist := fileExist
+	defer func() { fileExist = exist }()
+	fileExist = func(path string) (bool, error) {
+		if path == merged.Path {
+			return false, nil
+		}
+		return exist(path)
+	}
 	before := fileNames(t, dir)
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
