@@ -63,7 +63,6 @@ type testExecTask struct {
 	*exec.TxTask
 	ctx          context.Context
 	ops          []Op
-	readMap      state.ReadSet
 	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
@@ -91,7 +90,6 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		},
 		ctx:          context.Background(),
 		ops:          ops,
-		readMap:      state.ReadSet{},
 		writeMap:     &state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
@@ -113,7 +111,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
-	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
@@ -124,7 +121,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 	version := t.Version()
 
-	t.readMap = state.ReadSet{}
 	t.writeMap = &state.WriteSet{}
 
 	dep := -1
@@ -144,10 +140,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			// op[0] is always a NoncePath read; peek the versionMap value (no
 			// extra recorded read) and abort on a nonce mismatch.
 			if i == 0 {
-				if vm := ibs.VersionMap(); vm != nil {
-					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
-						return &exec.TxResult{Err: fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}
-					}
+				if nonce, _, ok := ibs.VersionMap().ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+					return &exec.TxResult{Err: fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}
 				}
 			}
 
@@ -157,17 +151,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				}
 			}
 
-			var readKind state.ReadSource
-
-			if result.Status() == state.MVReadResultDone {
-				readKind = state.MapRead
-			} else if result.Status() == state.MVReadResultNone {
-				readKind = state.StorageRead
-			}
-
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
-
-			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
@@ -182,14 +166,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	return &exec.TxResult{}
-}
-
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
-	return t.writeMap
-}
-
-func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
-	return t.readMap
 }
 
 func (t *testExecTask) Sender() accounts.Address {
@@ -1892,7 +1868,7 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 
 	earlier := state.Version{BlockNum: 1, TxIndex: 0}
 	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
-	be.versionMap.FlushVersionedWrites(earlierWrites, false)
+	be.versionMap.FlushWrites(earlierWrites, false)
 	be.blockIO.RecordWrites(earlier, earlierWrites)
 
 	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}
@@ -1908,6 +1884,51 @@ func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(7), bal7)
 	require.Equal(t, state.MVReadResultDone, res.Status())
 	require.Equal(t, state.Version{TxIndex: 0, Incarnation: 1}, res.Version())
+}
+
+// A re-run that drops a write and makes no new one changes the tx's writes: nextResult passes the
+// earlier writes to the re-validation of committed dependents, so a validated reader of the
+// dropped key runs again. Without an access list, the drop removes the cell the reader read.
+func TestParallelNextResultRevalidatesTheReaderOfADroppedWrite(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	addr := accounts.InternAddress([20]byte{0xaa})
+
+	txs := []types.Transaction{signedTx, signedTx}
+	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
+	readerTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, discardConsumers(1), false, nil)
+	be.tasks = []*execTask{eTask, readerTask}
+	be.results = []*execResult{nil, nil}
+	be.poolTasks = []*poolTask{{}, {}}
+	be.execFailed = make([]int, 2)
+	be.execTasks.setInProgress(0)
+
+	earlier := state.Version{BlockNum: 1, TxIndex: 0}
+	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
+	be.versionMap.FlushWrites(earlierWrites, false)
+	be.blockIO.RecordWrites(earlier, earlierWrites)
+
+	reads := state.ReadSet{}
+	reads.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: earlier})
+	be.blockIO.RecordReads(state.Version{BlockNum: 1, TxIndex: 1}, reads)
+	be.indexReads(1, reads)
+	be.finalizedResults[1] = &execResult{TxResult: &exec.TxResult{Task: readerTask.Task}}
+	markValidated(be, 1)
+
+	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}
+	rerun := &exec.TxResult{
+		Task:     &taskVersion{execTask: eTask, version: dropping},
+		TxOut:    &state.WriteSet{},
+		Coinbase: accounts.ZeroAddress,
+	}
+	_, _ = be.nextResult(context.Background(), pe, rerun, roTx)
+
+	require.False(t, be.validateTasks.checkComplete(1), "tx 1 read the dropped write")
+	require.Equal(t, 1, be.execFailed[1])
 }
 
 // A newPayload block lives only in the block overlay until commit; the tracer

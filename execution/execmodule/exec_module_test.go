@@ -817,7 +817,7 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangeset
 	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
 }
 
-func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+func newExecutedTransferChain(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -828,7 +828,7 @@ func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester,
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	m := execmoduletester.New(t, append(opts, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))...)
 	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -1416,7 +1416,6 @@ func txPoolBehindParentFixture(t *testing.T) (
 	require.NoError(t, m.InsertChain(chainPack))
 
 	parent = chainPack.TopBlock
-	// A synctest bubble would fast-forward this wait past the txpool catching up in real time.
 	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
 	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
 	provider = &rewindingTxnProvider{
@@ -1501,8 +1500,8 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 }
 
 func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
-	m, parent, params, provider := txPoolBehindParentFixture(t)
 	synctest.Test(t, func(t *testing.T) {
+		m, parent, params, provider := txPoolBehindParentFixture(t)
 		payloadID, err := m.AssembleBlock(t.Context(), params)
 		require.NoError(t, err)
 		<-provider.ready

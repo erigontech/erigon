@@ -1140,7 +1140,7 @@ func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv
 	if err != nil {
 		return err
 	}
-	h.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(h.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 
@@ -2580,4 +2580,34 @@ func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
 			require.Equal(t, rangeOf(1000, 995), got)
 		})
 	}
+}
+
+func TestHistoryPagersValueRejectsAKeyMissingFromItsPage(t *testing.T) {
+	values := generateTestData(t, length.Addr, length.Addr+length.Hash, 64, 8, 10)
+	db, h := filledHistoryValues(t, false, values, log.New())
+	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(16)
+	h.HistoryValuesOnCompressedPage = 16
+	collateAndMergeHistory(t, db, h, 64, false)
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	require.NotEmpty(t, hc.files)
+	var pagers historyPagers
+	_, err := pagers.value(hc, 0, 0, 0, []byte("not in the file"))
+	require.ErrorContains(t, err, "holds no value")
+}
+
+func TestHistoryValueAtRejectsAKeyMissingFromItsPage(t *testing.T) {
+	values := generateTestData(t, length.Addr, length.Addr+length.Hash, 64, 8, 10)
+	db, h := filledHistoryValues(t, false, values, log.New())
+	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(16)
+	h.HistoryValuesOnCompressedPage = 16
+	collateAndMergeHistory(t, db, h, 64, false)
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	require.NotEmpty(t, hc.iit.files)
+	txNum := hc.iit.files[0].startTxNum
+	_, _, err := hc.historyValueAt([]byte("not in the file"), iiSeekResult{txNum: txNum}, txNum)
+	require.ErrorContains(t, err, "page of")
 }

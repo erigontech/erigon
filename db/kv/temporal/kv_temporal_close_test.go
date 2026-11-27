@@ -51,9 +51,7 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	require.Equal(t, accountAt(1), v)
 
 	var closers sync.WaitGroup
-	for range 2 {
-		closers.Go(db.Close)
-	}
+	closers.Go(db.Close)
 	// MDBX refuses new txs only once Close has reached it.
 	require.Eventually(t, func() bool {
 		tx, beginErr := mdbxDb.BeginRo(ctx) //nolint:gocritic
@@ -62,6 +60,16 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 		}
 		return beginErr != nil
 	}, 10*time.Second, time.Millisecond)
+	secondClosed := make(chan struct{})
+	closers.Go(func() {
+		db.Close()
+		close(secondClosed)
+	})
+	select {
+	case <-secondClosed:
+		t.Fatal("second Close returned while a tx is open")
+	case <-time.After(100 * time.Millisecond):
+	}
 
 	require.Positive(t, roTx.Debug().TxNumsInFiles(kv.AccountsDomain), "open tx lost its files")
 	v, _, err = roTx.GetAsOf(kv.AccountsDomain, acc[:], 2)

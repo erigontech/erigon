@@ -29,6 +29,11 @@ func ChainTomlR2URL(branch, chain string) string {
 	return fmt.Sprintf("https://erigon-snapshots.erigon.network/%s/%s.toml", branch, chain)
 }
 
+// WebseedTomlGitHubURL returns the GitHub raw URL of a chain's webseed list on a snapshot branch.
+func WebseedTomlGitHubURL(branch, chain string) string {
+	return fmt.Sprintf("https://raw.githubusercontent.com/erigontech/erigon-snapshot/%s/webseed/%s.toml", branch, chain)
+}
+
 // ChainTomlGitHubURL returns the GitHub raw URL for a chain's snapshot TOML.
 func ChainTomlGitHubURL(branch, chain string) string {
 	return fmt.Sprintf("https://raw.githubusercontent.com/erigontech/erigon-snapshot/%s/%s.toml", branch, chain)

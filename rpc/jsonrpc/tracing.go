@@ -84,7 +84,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, hash, _, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return err
 	}
@@ -122,11 +122,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	engine := api.engine()
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return err
-	}
-
 	ibs, blockCtx, stateReader, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, 0)
 	if err != nil {
 		return err
@@ -140,7 +135,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			}
 		}
 	}
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
@@ -288,7 +283,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
@@ -339,12 +334,12 @@ type traceCallState struct {
 func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *DebugAPIImpl, tx kv.TemporalTx, block rpc.BlockNumberOrHash, txIndex *I) (traceCallState, error) {
 	return readWithStableTxView(ctx, tx, func() (traceCallState, error) {
 		var result traceCallState
-		blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, block, tx, canonicalViewReader{api._blockReader})
+		blockNumber, hash, isLatest, err := rpchelper.ResolveExecutedBlock(ctx, true, block, tx, canonicalViewReader{api._blockReader})
 		if err != nil {
+			if _, ok := errors.AsType[*rpchelper.BlockNotExecutedError](err); ok {
+				return result, err
+			}
 			return result, fmt.Errorf("get block number: %w", err)
-		}
-		if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
-			return result, err
 		}
 		var minTxNum uint64
 		var index int
@@ -414,9 +409,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return err
 	}
 	header := prepared.header
-	ibs := state.New(prepared.reader)
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -500,9 +494,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	header := prepared.header
-	ibs := state.New(prepared.reader)
+	ibs := state.NewVersionedCall(prepared.reader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, canonicalViewReader{api._blockReader}, overrideBlockHash)
 

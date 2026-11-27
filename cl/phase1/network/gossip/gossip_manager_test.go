@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	gossipnames "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -135,6 +136,7 @@ type newPubsubValidatorTestSuite struct {
 	ctrl      *gomock.Controller
 	mockP2P   *mock_services.MockP2PManager
 	mockClock *eth_clock.MockEthereumClock
+	useful    []peer.ID // peers the validator marked useful
 }
 
 // SetupTest is called before each test method
@@ -166,6 +168,8 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 	}).AnyTimes()
 	s.mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
 	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	s.useful = nil
+	s.mockP2P.EXPECT().MarkPeerUseful(gomock.Any()).Do(func(pid peer.ID) { s.useful = append(s.useful, pid) }).AnyTimes()
 
 	s.gm = NewGossipManager(
 		context.Background(),
@@ -332,6 +336,27 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationReject, result)
+	s.Empty(s.useful, "a rejected message does not make its forwarder useful")
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorPassesForwardingPeer() {
+	var got peer.ID
+	service := &mockService{
+		processFunc: func(ctx context.Context, _ *uint64, _ any) error {
+			got, _ = serviceintf.GossipPeer(ctx)
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage("/eth2/abcd1234/beacon_block/ssz_snappy", utils.CompressSnappy([]byte("test data")))
+
+	s.Equal(pubsub.ValidationAccept, validator(context.Background(), peer.ID("forwarder"), msg))
+	s.Equal(peer.ID("forwarder"), got)
+}
+
+func (s *newPubsubValidatorTestSuite) TestBanPeerWithoutBannerIsNoop() {
+	s.NotPanics(func() { s.gm.BanPeer(peer.ID("forwarder")) })
+	s.Empty(s.gm.peerBanQueue)
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorBansEncodedPeerID() {
@@ -466,6 +491,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageErrIg
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationIgnore, result)
+	s.Empty(s.useful, "an ignored message does not make its forwarder useful")
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_WithSubnet() {
@@ -520,6 +546,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_Success() {
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationAccept, result)
+	s.Equal([]peer.ID{pid}, s.useful, "an accepted message is a first delivery by its forwarder")
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_DecodesWithTopicForkVersion() {

@@ -56,3 +56,15 @@ func BenchmarkBALPrefetchKeys(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkBALCommitmentWarmupKeys(b *testing.B) {
+	for _, c := range []struct{ accounts, slotsPerAccount int }{{1000, 3}, {10000, 20}} {
+		bal := syntheticBAL(c.accounts, c.slotsPerAccount)
+		b.Run(fmt.Sprintf("accounts=%d/slots=%d", c.accounts, c.accounts*c.slotsPerAccount), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				balCommitmentWarmupKeys(bal)
+			}
+		})
+	}
+}

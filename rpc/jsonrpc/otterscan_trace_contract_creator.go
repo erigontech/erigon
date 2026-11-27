@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
+type create2InputHookKey struct{}
+
 type CreateTracer struct {
 	ctx     context.Context
 	target  accounts.Address
@@ -75,4 +77,9 @@ func (t *CreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to 
 
 	t.found = true
 	t.Creator = from
+	if vm.OpCode(typ) == vm.CREATE2 {
+		if onCreate2, ok := t.ctx.Value(create2InputHookKey{}).(func([]byte)); ok {
+			onCreate2(input)
+		}
+	}
 }

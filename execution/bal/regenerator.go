@@ -190,7 +190,6 @@ func (g *Regenerator) historyStartTxNum(ctx context.Context, tx kv.TemporalTx, b
 func RederiveFromHistory(ctx context.Context, cfg *chain.Config, engine rules.Engine, blockReader dbservices.FullBlockReader, tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, logger log.Logger) (*state.VersionedIO, error) {
 	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
 	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return blockReader.Header(ctx, tx, hash, number)
 	}

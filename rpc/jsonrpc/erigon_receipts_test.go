@@ -84,7 +84,7 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	require.NoError(t, m.InsertChain(c))
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)})
+	logs, err := logsOf(api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}))
 	require.NoError(t, err)
 	require.Len(t, logs, len(topics))
 	for i, l := range logs {
@@ -133,25 +133,25 @@ func TestGetLogs(t *testing.T) {
 	{
 		ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+		logs, err := logsOf(ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)}))
 		require.NoError(err)
 		assert.Equal(hexutil.Uint64(10), logs[0].BlockNumber)
 
 		// filter by wrong address
-		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		logs, err = logsOf(ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
 			Addresses: common.Addresses{common.Address{}},
-		})
+		}))
 		require.NoError(err)
 		assert.Empty(logs)
 
 		// filter by wrong address
-		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
+		logs, err = logsOf(ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
 			Topics:    [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
-		})
+		}))
 		require.NoError(err)
 		assert.Len(logs, 1)
 	}
@@ -240,13 +240,13 @@ func TestGetLatestLogsFrameFeeAccounting(t *testing.T) {
 		},
 	}))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{2}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.SetUint64(2 * frameTx.GetGasLimit())
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -959,7 +959,7 @@ func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
 			}
 			m := newLatestLogsTestChain(t)
 			crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
-			want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+			want, err := logsOf(newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit))
 			require.NoError(t, err)
 			require.Len(t, want, 3)
 			slices.Reverse(want)
@@ -1023,7 +1023,7 @@ func TestErigonGetLatestLogsPinsOverlayView(t *testing.T) {
 		require.Len(t, got, 3)
 	})
 	t.Run("eth_getLogs", func(t *testing.T) {
-		got, err := newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit)
+		got, err := logsOf(newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit))
 		require.NoError(t, err)
 		require.Len(t, got, 3)
 	})
@@ -1136,10 +1136,10 @@ func TestGetLogsServesCachedLogsWithoutCopy(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	crit := filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}
 
-	first, err := api.GetLogs(m.Ctx, crit)
+	first, err := logsOf(api.GetLogs(m.Ctx, crit))
 	require.NoError(t, err)
 	require.NotEmpty(t, first)
-	second, err := api.GetLogs(m.Ctx, crit)
+	second, err := logsOf(api.GetLogs(m.Ctx, crit))
 	require.NoError(t, err)
 	require.Len(t, second, len(first))
 	for i := range first {

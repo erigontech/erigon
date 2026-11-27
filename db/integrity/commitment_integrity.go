@@ -74,6 +74,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 		}
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
+	if err := aggTx.AssertFilesGap(); err != nil {
+		return fmt.Errorf("%w: CommitmentRoot: %w", ErrIntegrity, err)
+	}
 	if len(files) == 0 {
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
@@ -295,8 +298,8 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 }
 
 func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
-	if skipsCommitmentV3Records("CommitmentKvi", logger) {
-		return nil
+	if err := skipCommitmentV3Records("CommitmentKvi"); err != nil {
+		return err
 	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -307,8 +310,8 @@ func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
-	if skipsCommitmentV3Records("CommitmentKvDeref", logger) {
-		return nil
+	if err := skipCommitmentV3Records("CommitmentKvDeref"); err != nil {
+		return err
 	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -851,8 +854,8 @@ func deriveDecompForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
-	if skipsCommitmentV3Records("CommitmentHistVal", logger) {
-		return nil
+	if err := skipCommitmentV3Records("CommitmentHistVal"); err != nil {
+		return err
 	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -1275,8 +1278,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
-	if skipsCommitmentV3Records("StateVerify", logger) {
-		return nil
+	if err := skipCommitmentV3Records("StateVerify"); err != nil {
+		return err
 	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -2436,10 +2439,9 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 	return touches, nil
 }
 
-func skipsCommitmentV3Records(check string, logger log.Logger) bool {
+func skipCommitmentV3Records(check string) error {
 	if !statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).CommitmentV3Records {
-		return false
+		return nil
 	}
-	logger.Info("[integrity] " + check + " skipped: it checks legacy commitment files, not v3 records")
-	return true
+	return fmt.Errorf("%w: %s checks legacy commitment files, not v3 records", ErrSkipped, check)
 }

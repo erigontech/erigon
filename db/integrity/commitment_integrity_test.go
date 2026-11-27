@@ -70,3 +70,16 @@ func TestTouchHistoricalKeysReadsEachKeyOnce(t *testing.T) {
 	require.Equal(t, uint64(3), touches)
 	require.Equal(t, map[string]int{string(addr[:]): 1}, reader.reads)
 }
+
+func TestLegacyCommitmentChecksReportSkippedOnV3Records(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	ctx, logger := t.Context(), log.New()
+	for name, err := range map[string]error{
+		"CommitmentKvi":     CheckCommitmentKvi(ctx, SamplerCfg{}, nil, nil, false, logger),
+		"CommitmentKvDeref": CheckCommitmentKvDeref(ctx, nil, nil, false, logger),
+		"CommitmentHistVal": CheckCommitmentHistVal(ctx, SamplerCfg{}, nil, nil, false, logger),
+		"StateVerify":       CheckStateVerify(ctx, nil, false, 0, logger),
+	} {
+		require.ErrorIs(t, err, ErrSkipped, name)
+	}
+}

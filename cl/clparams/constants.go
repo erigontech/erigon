@@ -4,7 +4,9 @@ import "math"
 
 const (
 	MaxSupportedCommitteesPerSlot = 64
-	AttestationSubnetExtraBits    = uint64(0)
+	// Keeps the Electra attesting-indices list size in bytes (limit*8+31) within int.
+	MaxSupportedValidatorsPerCommittee = (math.MaxInt - 31) / 8 / MaxSupportedCommitteesPerSlot
+	AttestationSubnetExtraBits         = uint64(0)
 
 	// non-configurable constants
 	// For Gloas
