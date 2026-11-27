@@ -29,7 +29,7 @@ import (
 func readOnlyBuilder(addrs []accounts.Address) *BlockAccessListBuilder {
 	b := NewBlockAccessListBuilder()
 	for _, a := range addrs {
-		ensureAccountState(b.ac, a).updateReadBalance(*uint256.NewInt(1))
+		b.account(a).updateReadBalance(*uint256.NewInt(1))
 	}
 	return b
 }
