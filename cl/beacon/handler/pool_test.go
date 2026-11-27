@@ -1141,7 +1141,7 @@ func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
 			},
 			Signature: common.Bytes96{2},
 		},
-		nil,
+		{},
 	}
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
@@ -2216,6 +2216,7 @@ func TestPostRejectsNullListElement(t *testing.T) {
 		{name: "sync committees", path: "/eth/v1/beacon/pool/sync_committees"},
 		{name: "contributions and proofs", path: "/eth/v1/validator/contribution_and_proofs"},
 		{name: "beacon committee subscriptions", path: "/eth/v1/validator/beacon_committee_subscriptions"},
+		{name: "aggregates and proofs", path: "/eth/v1/validator/aggregate_and_proofs"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)

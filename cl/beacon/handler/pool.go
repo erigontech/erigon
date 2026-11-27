@@ -547,8 +547,8 @@ func (a *ApiHandler) decodeSignedAggregatesAndProofs(w http.ResponseWriter, r *h
 		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
 	}
 	if contentType != "application/octet-stream" {
-		req := []*cltypes.SignedAggregateAndProof{}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req, err := decodeJSONList[cltypes.SignedAggregateAndProof](r.Body)
+		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		return req, nil
@@ -578,7 +578,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 
 	failures := []poolingFailure{}
 	for idx, v := range req {
-		if v == nil || v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
+		if v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: "invalid aggregate and proof"})
 			continue
 		}
