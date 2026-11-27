@@ -125,7 +125,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	}
 	if recentRoot != (common.Hash{}) {
 		if err := a.forkchoiceStore.ViewStateAtBlockRoot(recentRoot, func(s *state.CachingBeaconState) error {
-			if state.Epoch(s) < epoch {
+			if s.Version() < clparams.FuluVersion && state.Epoch(s) < epoch {
 				advancedState, err := a.copyHeadStateForDuties(s)
 				if err != nil {
 					return err
