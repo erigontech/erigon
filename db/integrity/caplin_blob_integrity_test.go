@@ -915,8 +915,8 @@ type blobIntegrityBed struct {
 func newBlobIntegrityBed(t *testing.T, segments uint64) *blobIntegrityBed {
 	t.Helper()
 	const limit = snaptype.CaplinMergeLimit
-	dirs := datadir.New(t.TempDir())
 	bed := &blobIntegrityBed{cfg: denebBlobIntegrityConfig(), db: mdbxtest.NewTestDB(t, dbcfg.CaplinDB)}
+	dirs := datadir.New(t.TempDir())
 	for i := range segments {
 		from, to := i*limit, (i+1)*limit
 		slot := from + 1

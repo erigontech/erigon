@@ -288,18 +288,24 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 
 	hasher := sha1.New()
 	pieceLen := info.PieceLength
-	if pieceLen <= 0 {
+	totalLength := info.TotalLength()
+	if pieceLen < 0 || (pieceLen == 0 && (!info.HasV1() || totalLength != 0 || len(info.Pieces) != 0)) {
 		return [20]byte{}, "", fmt.Errorf("invalid piece length %d in torrent %s", pieceLen, torrentPath)
 	}
-	if !info.HasV1() {
-		return [20]byte{}, "", fmt.Errorf("torrent %s has no v1 pieces", torrentPath)
+	if pieceLen == 0 {
+		return hash, resolvedDataPath, nil
 	}
-	totalLength := info.TotalLength()
-	expectedPieces := (totalLength + pieceLen - 1) / pieceLen
+	expectedPieces := totalLength / pieceLen
+	if totalLength%pieceLen != 0 {
+		expectedPieces++
+	}
 	if len(info.Pieces)%sha1.Size != 0 || int64(len(info.Pieces)/sha1.Size) != expectedPieces {
 		return [20]byte{}, "", fmt.Errorf("invalid piece hashes in torrent %s, got %d, want %d", torrentPath, len(info.Pieces)/sha1.Size, expectedPieces)
 	}
-	numPieces := info.NumPieces()
+	numPieces := len(info.Pieces) / sha1.Size
+	if info.HasV2() && info.NumPieces() != numPieces {
+		return [20]byte{}, "", fmt.Errorf("hybrid torrent piece count mismatch in %s", torrentPath)
+	}
 
 	for i := range numPieces {
 		select {

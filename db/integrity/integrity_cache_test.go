@@ -74,7 +74,7 @@ func TestPrepareIntegrityCacheSavesOnlyVerifiedFiles(t *testing.T) {
 	require.False(t, failedCached, "failed piece verification must not be saved in the cache")
 }
 
-func TestPrepareIntegrityCacheLoadsCacheFile(t *testing.T) {
+func TestPrepareIntegrityCacheLoadsMissingFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "snapshots")
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")

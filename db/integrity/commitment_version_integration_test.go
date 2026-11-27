@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -47,38 +46,50 @@ func TestCheckKvisUsesOnlyVerifiedCacheEntries(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs, db, files := buildCacheCheckDB(t, false)
 	buildTorrents(t, dirs.Snap, files)
+	logger := log.New()
+	var logBuffer bytes.Buffer
+	logger.SetHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat()))
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
-	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, log.New())
+	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
 	require.NoError(t, err)
-	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, log.New()))
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, logger))
 	require.NoError(t, cache.Save())
 
-	removeFile(t, files[0])
-	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, log.New()))
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, logger))
+	require.Contains(t, logBuffer.String(), "skipping (cache hit)")
 
 	coldCache, err := integrity.LoadIntegrityCache(cachePath)
 	require.NoError(t, err)
-	require.Error(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, coldCache, true, log.New()))
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, coldCache, true, logger))
+	require.NotContains(t, logBuffer.String(), "skipping (cache hit)")
 }
 
 func TestCheckCommitmentKvDerefUsesOnlyVerifiedCacheEntries(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs, db, files := buildCacheCheckDB(t, true)
 	buildTorrents(t, dirs.Snap, files)
+	logger := log.New()
+	var logBuffer bytes.Buffer
+	logger.SetHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat()))
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
-	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, log.New())
+	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
 	require.NoError(t, err)
-	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, log.New()))
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, logger))
 	require.NoError(t, cache.Save())
 
-	removeFile(t, files[0])
-	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, log.New()))
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, logger))
+	require.Contains(t, logBuffer.String(), "skipping (cache hit)")
 
 	coldCache, err := integrity.LoadIntegrityCache(cachePath)
 	require.NoError(t, err)
-	require.Error(t, integrity.CheckCommitmentKvDeref(t.Context(), db, coldCache, true, log.New()))
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, coldCache, true, logger))
+	require.NotContains(t, logBuffer.String(), "skipping (cache hit)")
 }
 
 func buildCacheCheckDB(t *testing.T, referencesInCommitmentBranches bool) (datadir.Dirs, kv.TemporalRoDB, []string) {
@@ -136,11 +147,6 @@ func buildTorrents(t *testing.T, root string, files []string) {
 		_, err := downloader.BuildTorrentIfNeed(t.Context(), file, root, fs)
 		require.NoError(t, err)
 	}
-}
-
-func removeFile(t *testing.T, path string) {
-	t.Helper()
-	require.NoError(t, dir2.RemoveFile(path))
 }
 
 // TestCheckStateVerify_VersionRegimes builds two single-regime datadirs — one referenced and one

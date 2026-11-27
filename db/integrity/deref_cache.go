@@ -93,8 +93,7 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	return c, scanner.Err()
 }
 
-// Save atomically writes all entries to disk.
-// No-ops when nothing changed since Load.
+// Save atomically writes changed entries and upgrades legacy files, not newer formats.
 func (c *IntegrityCache) Save() error {
 	if c.readOnly || !c.dirty {
 		return nil
