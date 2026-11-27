@@ -991,3 +991,29 @@ func TestHistoricalAttesterStateHistoryEligibility(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoricalProposerRetainedTableWithoutReplay(t *testing.T) {
+	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	lowest := uint64(97)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 96)
+	}))
+	var table *state_accessors.StaticValidatorTable
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		table, err = state_accessors.LoadStaticValidatorTable(tx, true, antiquary.StateHistoryEnabled(true, false, h.beaconChainCfg))
+		return err
+	}))
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+			require.Equal(t, http.StatusOK, status, body)
+		})
+	}
+}

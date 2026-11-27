@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -271,4 +273,63 @@ func TestStateAntiquaryCommitIsBounded(t *testing.T) {
 	require.Equal(t, singleProgress, boundedProgress)
 	require.Greater(t, boundedCommits, singleCommits)
 	require.GreaterOrEqual(t, boundedCommits, singleCommits+2)
+}
+
+func TestRecoveryBacksOffShortEffectiveBalanceDump(t *testing.T) {
+	blocks, preState, postState := tests.GetBellatrixRandom()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 1
+	cfg.BellatrixForkEpoch = 1
+	cfg.InitializeForkSchedule()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
+	synced := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, synced.OnHeadState(postState))
+	table := state_accessors.NewStaticValidatorTable()
+	a := NewAntiquary(t.Context(), nil, preState, table, &cfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, synced, log.New(), true, true, false, false, nil)
+	require.NoError(t, a.IncrementBeaconState(t.Context(), blocks[len(blocks)-1].Block.Slot+33))
+	const candidate = uint64(clparams.SlotsPerDump)
+	source := blocks[len(blocks)-1].Block.Slot
+	reader.U[candidate] = blocks[len(blocks)-1]
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, row := range []struct {
+			table string
+			from  uint64
+		}{{kv.SlotData, source}, {kv.EpochData, cfg.RoundSlotToEpoch(source)}, {kv.BalancesDump, 0}} {
+			data, err := tx.GetOne(row.table, base_encoding.Encode64ToBytes4(row.from))
+			if err != nil {
+				return err
+			}
+			require.NotEmpty(t, data, row.table)
+			if err := tx.Put(row.table, base_encoding.Encode64ToBytes4(candidate), data); err != nil {
+				return err
+			}
+		}
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			return err
+		}
+		short := encoder.EncodeAll(make([]byte, 8), nil)
+		encoder.Close()
+		if err := tx.Put(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(candidate), short); err != nil {
+			return err
+		}
+		for _, name := range []string{kv.BlockRoot, kv.StateRoot} {
+			if err := tx.Put(name, base_encoding.Encode64ToBytes4(candidate-1), make([]byte, 32)); err != nil {
+				return err
+			}
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, candidate, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 11*candidate)
+	}))
+	genesis, err := preState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, genesis.SetSlot(candidate-1))
+	recoveryTable := state_accessors.NewStaticValidatorTable()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, recoveryTable) }))
+	recovery := NewAntiquary(t.Context(), nil, genesis, recoveryTable, &cfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, synced, log.New(), true, true, false, false, nil)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return recovery.initializeStateAntiquaryIfNeeded(t.Context(), tx) }))
+	require.Equal(t, candidate-1, recovery.currentState.Slot())
 }

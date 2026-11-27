@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -249,4 +250,30 @@ func TestHistoricalValidatorEndpointsWithoutArchiveRetainedProgress(t *testing.T
 			}
 		})
 	}
+}
+
+func TestHistoricalValidatorIdentitiesRetainedTableWithoutReplay(t *testing.T) {
+	db, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	slot := blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedSlotVal = slot + 1
+	lowest := slot + 1
+	fcu.LowestAvailableSlotVal = &lowest
+	var table *state_accessors.StaticValidatorTable
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		table, err = state_accessors.LoadStaticValidatorTable(tx, true, antiquary.StateHistoryEnabled(true, false, h.beaconChainCfg))
+		return err
+	}))
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/validator_identities", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var response struct {
+		Data []struct {
+			Pubkey hexutil.Bytes `json:"pubkey"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &response))
+	require.NotEmpty(t, response.Data)
+	want := preState.ValidatorSet().Get(0).PublicKey()
+	require.Equal(t, want[:], []byte(response.Data[0].Pubkey))
 }

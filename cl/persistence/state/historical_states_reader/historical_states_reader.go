@@ -577,7 +577,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	if len(compressed) == 0 {
-		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
+		return nil, fmt.Errorf("dump not found for slot %d", dumpSlot)
 	}
 
 	// Read the diff file
@@ -589,6 +589,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 	_, err = io.ReadFull(zstdReader, currentList)
 	base_encoding.PutZstdReader(zstdReader)
 	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || dumpSlot >= slot) {
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("%w: %w", state_accessors.ErrHistoryRebuildRequired, err)
+		}
 		return nil, err
 	}
 
@@ -641,20 +644,22 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	}
 	midpoint := uint64(clparams.SlotsPerDump / 2)
 	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	dumpSlot := freshDumpSlot
 	if forward {
 		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		dumpSlot += clparams.SlotsPerDump
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(dumpSlot))
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if len(compressed) == 0 {
-		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
+		return nil, fmt.Errorf("dump not found for slot %d", dumpSlot)
 	}
 	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
