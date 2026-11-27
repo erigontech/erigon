@@ -432,10 +432,6 @@ type slotLimitedDB struct {
 	waiting chan struct{}
 }
 
-func newSlotLimitedDB() *slotLimitedDB {
-	return &slotLimitedDB{waiting: make(chan struct{}, 3)}
-}
-
 func (db *slotLimitedDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	db.mu.Lock()
 	if !db.held {
@@ -476,6 +472,15 @@ func (db *slotLimitedDB) release() {
 	db.queue = db.queue[1:]
 }
 
+func (db *slotLimitedDB) waitQueued(t *testing.T) {
+	t.Helper()
+	select {
+	case <-db.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reader queued for the read-tx slot")
+	}
+}
+
 func (db *slotLimitedDB) free() bool {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -491,7 +496,7 @@ type slotTx struct {
 func (tx *slotTx) Rollback() { tx.once.Do(tx.db.release) }
 
 func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
-	db := newSlotLimitedDB()
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	holder, err := s.begin(t.Context())
 	require.NoError(t, err)
@@ -506,7 +511,7 @@ func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
 		}
 		waiterDone <- err
 	}()
-	<-db.waiting
+	db.waitQueued(t)
 
 	rollbackDone := make(chan struct{})
 	go func() {
@@ -526,7 +531,7 @@ func TestKvServerRollbackUnblocksBeginWaitingForReadTxSlot(t *testing.T) {
 }
 
 func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
-	db := newSlotLimitedDB()
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	renewed, err := s.begin(t.Context())
 	require.NoError(t, err)
@@ -540,14 +545,25 @@ func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
 			otherID <- id
 		}
 	}()
-	<-db.waiting
+	db.waitQueued(t)
 
 	renewDone := make(chan error, 1)
+	renewQueued := make(chan struct{})
 	go func() {
 		renewErr := make(chan error, 1)
 		go func() { renewErr <- s.renew(ctx, renewed) }()
-		other := <-otherID
-		<-db.waiting
+		var other uint64
+		select {
+		case other = <-otherID:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-db.waiting:
+		case <-ctx.Done():
+			return
+		}
+		close(renewQueued)
 		s.rollback(other)
 		renewDone <- <-renewErr
 	}()
@@ -557,13 +573,18 @@ func TestKvServerRollbackUnblocksRenewWaitingForReadTxSlot(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		cancel()
-		t.Fatal("renew waiting for a read-tx slot was not unblocked by a concurrent rollback")
+		select {
+		case <-renewQueued:
+			t.Fatal("renew waiting for a read-tx slot was not unblocked by a concurrent rollback")
+		default:
+			t.Fatal("renew did not queue for the read-tx slot")
+		}
 	}
 	s.rollback(renewed)
 }
 
 func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
-	db := newSlotLimitedDB()
+	db := &slotLimitedDB{waiting: make(chan struct{}, 2)}
 	s := NewKvServer(t.Context(), db, nil, nil, log.New())
 	renewed, err := s.begin(t.Context())
 	require.NoError(t, err)
@@ -577,7 +598,7 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 			otherID <- id
 		}
 	}()
-	<-db.waiting
+	db.waitQueued(t)
 
 	renewDone := make(chan error, 1)
 	go func() { renewDone <- s.renew(ctx, renewed) }()
@@ -588,7 +609,7 @@ func TestKvServerRollbackOfRenewingTxDoesNotBlockOtherRollbacks(t *testing.T) {
 		cancel()
 		t.Fatal("renew blocked the begin that waits for the read-tx slot")
 	}
-	<-db.waiting
+	db.waitQueued(t)
 
 	renewedRollbackDone := make(chan struct{})
 	go func() {
