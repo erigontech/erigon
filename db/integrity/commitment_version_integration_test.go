@@ -48,7 +48,7 @@ func TestCheckKvisUsesOnlyVerifiedCacheEntries(t *testing.T) {
 	buildTorrents(t, dirs.Snap, files)
 	logger := log.New()
 	var logBuffer bytes.Buffer
-	logger.SetHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat()))
+	logger.SetHandler(log.SyncHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat())))
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
 	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
@@ -73,7 +73,7 @@ func TestCheckCommitmentKvDerefUsesOnlyVerifiedCacheEntries(t *testing.T) {
 	buildTorrents(t, dirs.Snap, files)
 	logger := log.New()
 	var logBuffer bytes.Buffer
-	logger.SetHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat()))
+	logger.SetHandler(log.SyncHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat())))
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
 	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
