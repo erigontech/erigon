@@ -1805,7 +1805,18 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	if !batch.hasUnprepared() {
 		return batch, nil
 	}
-	err := p.withLockedState(ctx, &txns, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, nil, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+		// Admission registers the full batch later. Registering every sender here
+		// would allocate temporary IDs even for inputs that skip this precheck.
+		var senderIDs []uint64
+		for i := range batch.txns {
+			a := &batch.txns[i]
+			if a.needsPreparation {
+				a.txn.SenderID, a.txn.Traced = p.senders.getOrCreateID(a.sender, p.logger)
+				senderIDs = append(senderIDs, a.txn.SenderID)
+			}
+		}
+		defer p.forgetUnusedSenders(senderIDs)
 		_, err := p.precheckUnprepared(&batch, view)
 		return err
 	})

@@ -176,17 +176,19 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 func BenchmarkNonceRetryPrepare(b *testing.B) {
 	for _, tc := range []struct {
-		name, fork    string
-		nonce         uint64
-		cached, mixed bool
+		name, fork      string
+		nonce           uint64
+		cached          bool
+		ordinarySenders uint8
 	}{
-		{"fresh_blob_cancun", "Cancun", 0, false, false},
-		{"distant_cancun", "Cancun", 1000, true, false},
-		{"eligible_cancun", "Cancun", 1000, true, false},
-		{"mixed_distant_cancun", "Cancun", 1000, true, true},
-		{"fresh_blob_osaka", "Osaka", 0, false, false},
-		{"distant_osaka", "Osaka", 1000, true, false},
-		{"eligible_osaka", "Osaka", 1000, true, false},
+		{"fresh_blob_cancun", "Cancun", 0, false, 0},
+		{"distant_cancun", "Cancun", 1000, true, 0},
+		{"eligible_cancun", "Cancun", 1000, true, 0},
+		{"mixed_distant_cancun", "Cancun", 1000, true, 1},
+		{"mixed_128_senders_cancun", "Cancun", 1000, true, 128},
+		{"fresh_blob_osaka", "Osaka", 0, false, 0},
+		{"distant_osaka", "Osaka", 1000, true, 0},
+		{"eligible_osaka", "Osaka", 1000, true, 0},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			pool, slot := nonceRetryBlob(b, tc.fork, tc.nonce)
@@ -201,8 +203,11 @@ func BenchmarkNonceRetryPrepare(b *testing.B) {
 			if tc.name == "eligible_cancun" || tc.name == "eligible_osaka" {
 				nonceRetrySender(b, pool, tc.nonce)
 			}
-			if tc.mixed {
-				txns.Append(newTestTxnSlot(0, 0, 300_000, 300_000, 100_000), sender[:], false)
+			for i := range tc.ordinarySenders {
+				ordinarySender := common.Address{i + 1}
+				ordinary := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+				ordinary.IDHash[0] = i + 1
+				txns.Append(ordinary, ordinarySender[:], false)
 			}
 			b.ReportAllocs()
 			b.ResetTimer()

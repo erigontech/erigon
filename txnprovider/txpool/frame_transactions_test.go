@@ -1339,21 +1339,39 @@ func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	}
 }
 
-func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	backend := pool.ethBackend.(*frameValidationBackend)
+func TestAdmissionPreparesDeferredBlobAndSetCodeAfterStateChange(t *testing.T) {
+	ctx, pool, blob, txns := newPoolWithBlobTxn(t, "Bogota")
+	sender := txns.Senders.AddressAt(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{3}, 7)
+	require.NoError(t, err)
+	setCode := newTestSetCodeTxnSlot(blob.Nonce+1, 0, 1, 2, 100_000)
+	setCode.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	setCode.IDHash = setCode.Txn.Hash()
+	txns.Append(setCode, sender[:], true)
+
+	frameSender := common.Address{2}
+	txns.Append(framePoolSlot(t, frameSender, 1, 2, uint256.Int{1}), frameSender[:], true)
+	backend := &frameValidationBackend{payer: frameSender, balance: common.Ether, valid: true}
+	pool.ethBackend = backend
+	// A reorg during frame simulation can make a previously spent nonce usable again.
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, setCode.Nonce+1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	backend.onValidate = func() {
 		backend.onValidate = nil
-		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, blob.Nonce, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}
-	other := common.Address{2}
-	var txns TxnSlots
-	txns.Append(newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000), sender[:], true)
-	txns.Append(framePoolSlot(t, other, 1, 2, uint256.Int{1}), other[:], true)
+
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	owner := pool.auths[AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), auth.Nonce}]
+	require.NotNil(t, owner, "the recovered signer and nonce must be reserved")
+	require.Same(t, setCode, owner.TxnSlot)
+	for _, hash := range blob.GetBlobHashes() {
+		cells, _ := pool.blobs.cells.Peek(hash)
+		require.NotNil(t, cells, "missing verified cells for blob %s", hash)
+	}
 }
 
 func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {
