@@ -175,6 +175,7 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 // When wrappedWithBlobs is set, type-3 transactions and frame transactions with blobs must
 // include their sidecar (blobs, commitments, and proofs).
 // See https://eips.ethereum.org/EIPS/eip-4844#networking for the type-3 network format.
+// validateHash runs before sender recovery and before a wrapped sidecar is copied.
 //
 // On success, p is the offset just past the transaction in payload. Packet parsing also needs
 // this offset on ErrRejected so it can continue with the next transaction.
@@ -294,7 +295,8 @@ func (ctx *TxnParseContext) parseTransaction(
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
-		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
+		// The hash covers only the inner transaction. The callback can reject a
+		// known hash here and avoid copying the sidecar.
 		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
 		if validateHash != nil {
 			err = validateHash(slot.IDHash[:])
@@ -502,8 +504,8 @@ type PoolBlobBundle struct {
 // Txn must be non-nil except in the B-tree search sentinel (SenderID and Nonce)
 // and deletion records for rows rejected on reload (IDHash and SenderID).
 //
-// A flush moves ordinary transaction encodings to the database for lookup by hash
-// and keeps blob wrappers in memory for gossip and reorgs.
+// A flush stores ordinary transaction encodings in the database for lookup by hash
+// and clears their Rlp to free memory. Blob wrappers stay in memory for gossip and reorgs.
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
 	Rlp      []byte            // Encoded transaction. Pooled transactions with blobs include the sidecar. Block notifications carry only the body.
