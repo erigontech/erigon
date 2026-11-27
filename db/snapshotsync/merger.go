@@ -225,9 +225,19 @@ func (m *Merger) Merge(
 
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
-			if snapshots.hasIndexedDirtyFile(t.Enum(), output.Path) {
+			if reused := snapshots.indexedDirtyFilePaths(t.Enum(), output.Path, snapDir); reused != nil {
 				// A stopped merge already wrote this output, or an input already is it; writing over the open
 				// file would fail on Windows, and an input with the output's path must be neither deleted nor retired.
+				// The other inputs are deleted next, so the output must still be on disk.
+				for _, f := range reused {
+					exists, err := dir.FileExist(filepath.Join(snapDir, f))
+					if err == nil && !exists {
+						err = fmt.Errorf("reused output %s is missing from disk", f)
+					}
+					if err != nil {
+						return fmt.Errorf("merger.Merge: %w", err)
+					}
+				}
 				isOutput := func(s *DirtySegment) bool { return s.FilePath() == output.Path }
 				toMerge[t.Enum()] = slices.DeleteFunc(toMerge[t.Enum()], isOutput)
 				mergedFileNames = append(mergedFileNames, output.Path)
