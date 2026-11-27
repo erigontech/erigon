@@ -110,7 +110,8 @@ func TestGenerateRejects(t *testing.T) {
 // The output it wrote last time is in the package it type-checks, so a field renamed since then
 // must not be able to lock the generator out of rewriting it — nor may a sibling belonging to
 // another type, since go generate runs one directive per type and the first failure stops the
-// package before the run that would fix it.
+// package before the run that would fix it. A call whose arguments changed since then gets a
+// compiler error with indented have/want lines, which belong to it.
 func TestGenerateOverStaleOutput(t *testing.T) {
 	// Inside the module, or the go tool has no go.mod to resolve the package against.
 	const pkg = "testdata/stale"
@@ -119,7 +120,7 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_left_json.go": "Left"} {
 		stale := marker + " DO NOT EDIT.\n\npackage sample\n\n" +
 			"import \"github.com/erigontech/erigon/rpc/jsonstream\"\n\nfunc (x *" + recv +
-			") MarshalFastJSONTo(s *jsonstream.Stream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
+			") MarshalFastJSONTo(s *jsonstream.Stream) error {\n\t_ = x.SinceRenamed\n\ts.WriteNil(x)\n\treturn nil\n}\n"
 		require.NoError(t, os.WriteFile(filepath.Join(pkg, name), []byte(stale), 0o644))
 	}
 

@@ -181,9 +181,13 @@ func load() (*packages.Package, error) {
 	}
 	for _, e := range pkgs[0].Errors {
 		// Imports come from export data, so go list also compiles this package and reports the
-		// compiler's errors as one, a "pos: msg" line each.
+		// compiler's errors as one, a "pos: msg" line each. An indented line continues the error
+		// above it.
 		if compiled, ok := strings.CutPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n"); ok && e.Kind == packages.ListError {
 			for line := range strings.Lines(compiled) {
+				if strings.HasPrefix(line, "\t") {
+					continue
+				}
 				pos, msg, _ := strings.Cut(strings.TrimSpace(line), ": ")
 				if !skippable(pos, msg) {
 					return nil, e
