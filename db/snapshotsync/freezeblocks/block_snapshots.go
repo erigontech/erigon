@@ -115,8 +115,8 @@ type BlockRetire struct {
 }
 
 type blockRetireRequest struct {
-	minBlockNum uint64
-	finalityCtx kv.FinalityContext
+	minBlockNum       uint64
+	irreversibleBlock uint64
 }
 
 func NewBlockRetire(
@@ -166,8 +166,9 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }
 
-func (br *BlockRetire) canRetire(blocksInSnapshots uint64, finalityCtx kv.FinalityContext, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
-	blockTo = finalityCtx.RetireToBlockNum()
+// canRetire computes the block range to retire, up to and including irreversibleBlock.
+func (br *BlockRetire) canRetire(blocksInSnapshots, irreversibleBlock uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
+	blockTo = irreversibleBlock + 1
 	blockFrom = blocksInSnapshots + 1
 	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
 	return blockFrom, blockTo, can
@@ -223,7 +224,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 func (br *BlockRetire) buildFiles(
 	ctx context.Context,
 	minBlockNum uint64,
-	finalityCtx kv.FinalityContext,
+	irreversibleBlock uint64,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 ) (bool, error) {
@@ -236,7 +237,7 @@ func (br *BlockRetire) buildFiles(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := br.canRetire(minBlockNum, finalityCtx, snaptype.Unknown)
+	blockFrom, blockTo, ok := br.canRetire(minBlockNum, irreversibleBlock, snaptype.Unknown)
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err
@@ -330,13 +331,13 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
 	minBlockNum uint64,
-	finalityCtx kv.FinalityContext,
+	irreversibleBlock uint64,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
-	br.scheduleRetire(&blockRetireRequest{minBlockNum: minBlockNum, finalityCtx: finalityCtx})
+	br.scheduleRetire(&blockRetireRequest{minBlockNum: minBlockNum, irreversibleBlock: irreversibleBlock})
 
 	if !br.working.CompareAndSwap(false, true) {
 		return false
@@ -363,7 +364,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.BuildFiles(ctx, minBlockNum, finalityCtx, lvl, seeder, onFinishRetire)
+		err := br.BuildFiles(ctx, minBlockNum, irreversibleBlock, lvl, seeder, onFinishRetire)
 		if errors.Is(err, snapshotsync.ErrRangeBuildInProgress) {
 			br.logger.Debug("[snapshots] retire blocks: deferred to in-flight build", "err", err)
 			return
@@ -388,7 +389,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 func (br *BlockRetire) scheduleRetire(request *blockRetireRequest) {
 	for {
 		current := br.retireRequest.Load()
-		if current != nil && current.finalityCtx.RetireToBlockNum() >= request.finalityCtx.RetireToBlockNum() {
+		if current != nil && current.irreversibleBlock >= request.irreversibleBlock {
 			return
 		}
 		if br.retireRequest.CompareAndSwap(current, request) {
@@ -410,12 +411,12 @@ func (br *BlockRetire) Close() {
 func (br *BlockRetire) BuildFiles(
 	ctx context.Context,
 	requestedMinBlockNum uint64,
-	finalityCtx kv.FinalityContext,
+	irreversibleBlock uint64,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 	onFinish func() error,
 ) error {
-	br.scheduleRetire(&blockRetireRequest{minBlockNum: requestedMinBlockNum, finalityCtx: finalityCtx})
+	br.scheduleRetire(&blockRetireRequest{minBlockNum: requestedMinBlockNum, irreversibleBlock: irreversibleBlock})
 	if err := br.BuildMissedIndicesIfNeed(ctx, "BuildFiles", br.notifier); err != nil {
 		return err
 	}
@@ -425,7 +426,7 @@ func (br *BlockRetire) BuildFiles(
 		var ok bool
 		current := br.retireRequest.Load()
 		minBlockNum := max(br.blockReader.FrozenBlocks(), current.minBlockNum)
-		ok, err = br.buildFiles(ctx, minBlockNum, current.finalityCtx, lvl, seeder)
+		ok, err = br.buildFiles(ctx, minBlockNum, current.irreversibleBlock, lvl, seeder)
 		if err != nil {
 			return err
 		}

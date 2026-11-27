@@ -2333,6 +2333,32 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	<-done
 }
 
+// A read that records a dependency cancels the run; a cleared cancel is not called.
+func TestDependencyReadCancelsTheRun(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xca"))
+	read := func(set bool) (*IntraBlockState, int) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
+		ibs := NewWithVersionMap(NewNoopReader(), vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 2)
+		var cancels int
+		ibs.SetCancel(func() { cancels++ })
+		if !set {
+			ibs.SetCancel(nil)
+		}
+		_, err := ibs.GetBalance(addr)
+		require.NoError(t, err)
+		return ibs, cancels
+	}
+
+	ibs, cancels := read(true)
+	require.True(t, ibs.HadInvalidRead())
+	require.Equal(t, 1, cancels, "a run that records a dependency is cancelled")
+	_, cancels = read(false)
+	require.Zero(t, cancels, "a cleared cancel is not called")
+}
+
 // An account's Root is derived by commitment, not part of the versioned value, so completing
 // an Address cell with an account that differs only in Root is not a one-value-per-version violation.
 func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {

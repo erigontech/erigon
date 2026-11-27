@@ -18,12 +18,63 @@ package state_accessors
 
 import (
 	"bytes"
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+type validatorCursorTx struct {
+	kv.Tx
+	cursor kv.Cursor
+}
+
+func (tx validatorCursorTx) Cursor(string) (kv.Cursor, error) { return tx.cursor, nil }
+
+type validatorErrorCursor struct {
+	kv.Cursor
+	row      []byte
+	firstErr error
+	nextErr  error
+}
+
+func (c validatorErrorCursor) First() ([]byte, []byte, error) {
+	if c.firstErr != nil {
+		return []byte{}, nil, c.firstErr
+	}
+	return []byte{0, 0, 0, 0}, c.row, nil
+}
+
+func (c validatorErrorCursor) Next() ([]byte, []byte, error) { return []byte{}, nil, c.nextErr }
+func (c validatorErrorCursor) Close()                        {}
+
+func TestReadValidatorsTableReturnsCursorError(t *testing.T) {
+	var row bytes.Buffer
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&row))
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	wantErr := errors.New("cursor failed")
+	for _, test := range []struct {
+		name   string
+		cursor validatorErrorCursor
+	}{
+		{name: "First", cursor: validatorErrorCursor{firstErr: wantErr}},
+		{name: "Next after a row", cursor: validatorErrorCursor{row: row.Bytes(), nextErr: wantErr}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := db.View(t.Context(), func(tx kv.Tx) error {
+				return ReadValidatorsTable(validatorCursorTx{Tx: tx, cursor: test.cursor}, NewStaticValidatorTable())
+			})
+			require.ErrorIs(t, err, wantErr)
+		})
+	}
+}
 
 func TestStaticValidatorTable(t *testing.T) {
 	// Make 5 validators.

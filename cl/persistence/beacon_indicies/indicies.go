@@ -370,7 +370,8 @@ func RangeBlockRoots(tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, bea
 		return err
 	}
 	defer cursor.Close()
-	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
+	k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot))
+	for ; err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
 		if !fn(base_encoding.Decode64FromBytes4(k), common.BytesToHash(v)) {
 			break
 		}
