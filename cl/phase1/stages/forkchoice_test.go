@@ -2354,6 +2354,31 @@ func TestPendingSafeUpdatePacesFatalErrors(t *testing.T) {
 	})
 }
 
+func TestPendingSafeUpdateRefreshesFinalityAfterWait(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	cfg := newLockOrderFixtureWithConfig(t, 0, engine, common.Hash{}, false, nil).cfg
+	finalized := cfg.forkChoice.FinalizedCheckpoint()
+	cfg.forkChoice.EnableFastConfirmation(finalized)
+	cfg.safeUpdatePending = true
+	head := forkchoice.ForkChoiceNode{Root: common.Hash{1}}
+	headHash, finalizedHash := common.Hash{2}, common.Hash{3}
+	cfg.forkChoice.MarkPayloadVerified(head.Root, headHash)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), common.Hash{}, common.Hash{}, headHash, nil, gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), finalizedHash, finalizedHash, headHash, nil, gomock.Any()).
+		Return(nil, nil)
+
+	synctest.Test(t, func(t *testing.T) {
+		require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, 1))
+		require.True(t, cfg.safeUpdatePending)
+		time.AfterFunc(sleepForSlotRewakeInterval/2, func() {
+			cfg.forkChoice.MarkPayloadVerified(finalized.Root, finalizedHash)
+		})
+		require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, head, 1))
+		require.False(t, cfg.safeUpdatePending)
+	})
+}
+
 func TestPendingSafeUpdateDoesNotDelayNewHead(t *testing.T) {
 	for _, failure := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateTimeout, execution_client.ErrForkChoiceUpdateSyncing} {
 		t.Run(failure.Error(), func(t *testing.T) {

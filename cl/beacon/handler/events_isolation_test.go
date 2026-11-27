@@ -62,6 +62,29 @@ func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
 	require.Equal(t, beaconevents.StateHead, e.Event)
 }
 
+func TestFastAttestationsDoNotCloseUnrelatedStream(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.OpVoluntaryExit))
+	defer sub.unsubscribe()
+	for range eventStreamFeedBuffer + 1 {
+		emitters.Operation().TrySendAttestation(&beaconevents.AttestationData{})
+		emitters.Operation().TrySendSingleAttestation(&beaconevents.SingleAttestationData{})
+	}
+	select {
+	case err := <-sub.opSub.Err():
+		t.Fatalf("unrelated stream received %v", err)
+	default:
+	}
+	require.Empty(t, sub.op)
+	require.Equal(t, 1, emitters.Operation().SendVoluntaryExit(&beaconevents.VoluntaryExitData{}))
+	require.Equal(t, beaconevents.OpVoluntaryExit, (<-sub.op).Event)
+
+	att := subscribeEventStream(emitters, mapset.NewSet(beaconevents.OpAttestation))
+	defer att.unsubscribe()
+	require.Equal(t, 1, emitters.Operation().TrySendAttestation(&beaconevents.AttestationData{}))
+	require.Equal(t, beaconevents.OpAttestation, (<-att.op).Event)
+}
+
 // A full operation buffer does not make the stream miss an execution_payload_available event, which is sent without
 // waiting for subscribers.
 func TestEventStreamPayloadAvailableIsNotCrowdedOutByOperationEvents(t *testing.T) {

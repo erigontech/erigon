@@ -36,10 +36,15 @@ import (
 
 var errFastConfirmationSnapshotChanged = errors.New("fork choice changed during fast confirmation snapshot")
 
+type publishedConfirmation struct {
+	root            common.Hash
+	reconfirmBySlot uint64
+}
+
 type fastConfirmationTracker struct {
 	mu                 sync.Mutex
 	rule               *fastConfirmation
-	result             atomic.Pointer[common.Hash]
+	result             atomic.Pointer[publishedConfirmation]
 	changed            chan struct{}
 	lastSlot           uint64
 	attempted          bool
@@ -57,16 +62,25 @@ func (f *ForkChoiceStore) GetExecutionFinalityHashes(head, finalizedFallback, sa
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	root := f.finalizedCheckpoint.Load().(solid.Checkpoint).Root
-	finalized := f.finalizedExecutionHashLocked(root)
-	if confirmed := f.fastConfirmation.result.Load(); confirmed != nil && f.isAncestor(ForkChoiceNode{Root: head, PayloadStatus: cltypes.PayloadStatusPending}, ForkChoiceNode{Root: *confirmed, PayloadStatus: cltypes.PayloadStatusPending}) {
-		confirmedHeader, hasConfirmed := f.forkGraph.GetHeader(*confirmed)
-		finalizedHeader, hasFinalized := f.forkGraph.GetHeader(root)
-		if hasConfirmed && hasFinalized && confirmedHeader.Slot >= finalizedHeader.Slot {
-			root = *confirmed
-		}
+	finalizedRoot := f.FinalizedCheckpoint().Root
+	finalized := f.finalizedExecutionHashLocked(finalizedRoot)
+	result := f.fastConfirmation.result.Load()
+	slot := f.Slot()
+	if result == nil || result.root == finalizedRoot || slot > result.reconfirmBySlot {
+		return finalized, finalized
 	}
-	return finalized, f.finalizedExecutionHashLocked(root)
+	header, ok := f.forkGraph.GetHeader(result.root)
+	if !ok || f.computeEpochAtSlot(header.Slot)+1 < f.computeEpochAtSlot(slot) {
+		return finalized, finalized
+	}
+	finalizedHeader, ok := f.forkGraph.GetHeader(finalizedRoot)
+	if !ok || header.Slot < finalizedHeader.Slot || f.getAncestor(ForkChoiceNode{Root: head, PayloadStatus: cltypes.PayloadStatusPending}, header.Slot).Root != result.root {
+		return finalized, finalized
+	}
+	if safe := f.finalizedExecutionHashLocked(result.root); safe != (common.Hash{}) {
+		return finalized, safe
+	}
+	return finalized, finalized
 }
 
 func (f *ForkChoiceStore) EnableFastConfirmation(anchorVotingSource solid.Checkpoint) {
@@ -111,7 +125,7 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 	reset := func() {
 		tracker.rule = newFastConfirmation(f.FinalizedCheckpoint())
 		tracker.balances = nil
-		tracker.publish(tracker.rule.confirmedRoot)
+		f.publishConfirmation(tracker.rule.confirmedRoot, slot)
 	}
 	slotStart := (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
 	deadline := slotStart + f.getAttestationDueMs(slot/f.beaconCfg.SlotsPerEpoch)
@@ -160,7 +174,7 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 	}
 	tracker.rule.confirmedRoot = root
 	tracker.balances = map[solid.Checkpoint]*fcrBalances{tracker.rule.previousObserved: previous, tracker.rule.currentObserved: current}
-	tracker.publish(root)
+	f.publishConfirmation(root, slot)
 	return nil
 }
 
@@ -225,11 +239,17 @@ func (f *ForkChoiceStore) loadFastConfirmationStates(v *fcrView) error {
 	return nil
 }
 
-func (t *fastConfirmationTracker) publish(root common.Hash) {
-	previous := t.result.Swap(&root)
-	if previous != nil && *previous == root {
-		return
+func (f *ForkChoiceStore) publishConfirmation(root common.Hash, slot uint64) {
+	t := f.fastConfirmation
+	// The rule has the whole first slot of the next epoch to reconfirm this root.
+	reconfirmBy := f.computeStartSlotAtEpoch(f.computeEpochAtSlot(slot) + 1)
+	result := publishedConfirmation{root: root, reconfirmBySlot: reconfirmBy}
+	if previous := t.result.Swap(&result); previous == nil || *previous != result {
+		t.notifyChanged()
 	}
+}
+
+func (t *fastConfirmationTracker) notifyChanged() {
 	select {
 	case t.changed <- struct{}{}:
 	default:

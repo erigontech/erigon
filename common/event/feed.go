@@ -81,12 +81,18 @@ func (f *Feed) init(etype reflect.Type) {
 // The channel should have ample buffer space to avoid blocking other subscribers.
 // Slow subscribers are not dropped.
 func (f *Feed) Subscribe(channel any) Subscription {
+	return f.SubscribeWithTrySendFilter(channel, nil)
+}
+
+// SubscribeWithTrySendFilter filters TrySend and TrySendOrFail before queueing or reporting lag.
+// The filter runs during publication and must not block or call back into the feed.
+func (f *Feed) SubscribeWithTrySendFilter(channel any, accept func(any) bool) Subscription {
 	chanval := reflect.ValueOf(channel)
 	chantyp := chanval.Type()
 	if chantyp.Kind() != reflect.Chan || chantyp.ChanDir()&reflect.SendDir == 0 {
 		panic(errBadChannel)
 	}
-	sub := &feedSub{feed: f, channel: chanval, err: make(chan error, 1)}
+	sub := &feedSub{feed: f, accept: accept, channel: chanval, err: make(chan error, 1)}
 
 	f.once.Do(func() { f.init(chantyp.Elem()) })
 	if f.etype != chantyp.Elem() {
@@ -217,6 +223,9 @@ func (f *Feed) trySend(op string, value any, reportLag bool) (nsent int) {
 	f.subscribersMu.RLock()
 	defer f.subscribersMu.RUnlock()
 	for sub := range f.subscribers {
+		if sub.accept != nil && !sub.accept(value) {
+			continue
+		}
 		if sub.channel.TrySend(rvalue) {
 			nsent++
 			continue
@@ -234,6 +243,7 @@ func (f *Feed) trySend(op string, value any, reportLag bool) (nsent int) {
 }
 
 type feedSub struct {
+	accept  func(any) bool
 	feed    *Feed
 	channel reflect.Value
 	errOnce sync.Once

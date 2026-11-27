@@ -75,22 +75,24 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 
 	// Perform fork choice update if the engine is available
 	if engine := cfg.forkChoice.Engine(); engine != nil {
-		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
-		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
-		finalizedHash, safeHash := cfg.forkChoice.GetExecutionFinalityHashes(headRoot,
-			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root))
-		update := forkChoiceUpdate{beaconHead: headRoot, head: executionHead, safe: safeHash, finalized: finalizedHash}
+		currentUpdate := func() forkChoiceUpdate {
+			finalized, safe := cfg.forkChoice.GetExecutionFinalityHashes(headRoot,
+				cfg.forkChoice.GetFinalizedExecutionHash(cfg.forkChoice.FinalizedCheckpoint().Root),
+				cfg.forkChoice.GetFinalizedExecutionHash(cfg.forkChoice.JustifiedCheckpoint().Root))
+			return forkChoiceUpdate{beaconHead: headRoot, head: executionHead, safe: safe, finalized: finalized}
+		}
+		update := currentUpdate()
 		if cfg.safeUpdatePending && update == cfg.lastFailedForkChoice {
 			if delay := time.Until(cfg.forkChoiceRetryAt); delay > 0 {
 				if err := common.Sleep(ctx, delay); err != nil {
 					return err
 				}
+				update = currentUpdate()
 			}
 		}
 		logger.Debug("Caplin is sending forkchoice")
 		if _, err := engine.ForkChoiceUpdate(
-			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
+			ctx, update.finalized, update.safe, executionHead, nil, headVersion,
 		); err != nil {
 			if cfg.safeUpdatePending {
 				cfg.lastFailedForkChoice = update

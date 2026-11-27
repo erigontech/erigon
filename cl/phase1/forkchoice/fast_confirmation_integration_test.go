@@ -52,13 +52,13 @@ func TestFastConfirmationMissedDeadlineResetsToFinalized(t *testing.T) {
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: head.Root})
 	store.EnableFastConfirmation(store.FinalizedCheckpoint())
 	previous := common.Hash{90}
-	store.fastConfirmation.result.Store(&previous)
+	store.fastConfirmation.result.Store(&publishedConfirmation{root: previous})
 	store.SetSynced(true)
 	slotStart := store.genesisTime*1000 + store.beaconCfg.SecondsPerSlot*1000
 	now := slotStart + store.getAttestationDueMs(0)
 	store.timeMs.Store(now)
 	require.NoError(t, store.OnFastConfirmation(t.Context(), now, nil))
-	require.Equal(t, head.Root, *store.fastConfirmation.result.Load())
+	require.Equal(t, head.Root, store.fastConfirmation.result.Load().root)
 	select {
 	case <-store.FastConfirmationChanged():
 	default:
@@ -195,7 +195,7 @@ func TestFastConfirmationDiscardsResultWhenSlotAdvancesDuringReplay(t *testing.T
 	require.NoError(t, f.OnFastConfirmation(t.Context(), now, nil))
 	require.Equal(t, f.slotAtTimeMs(now)+1, f.Slot())
 	require.NotSame(t, rule, f.fastConfirmation.rule)
-	require.Equal(t, f.FinalizedCheckpoint().Root, *f.fastConfirmation.result.Load())
+	require.Equal(t, f.FinalizedCheckpoint().Root, f.fastConfirmation.result.Load().root)
 }
 
 func TestFastConfirmationSafeHashNeverPrecedesFinalized(t *testing.T) {
@@ -209,10 +209,110 @@ func TestFastConfirmationSafeHashNeverPrecedesFinalized(t *testing.T) {
 	graph.headers = map[common.Hash]*cltypes.BeaconBlockHeader{old.Root: {Slot: 0}, newer: {Slot: 1, ParentRoot: old.Root}}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: newer})
 	store.EnableFastConfirmation(store.FinalizedCheckpoint())
-	store.fastConfirmation.result.Store(&old.Root)
+	store.fastConfirmation.result.Store(&publishedConfirmation{root: old.Root})
 	finalized, safe := store.GetExecutionFinalityHashes(newer, common.Hash{98}, common.Hash{99})
 	require.Equal(t, common.Hash{20}, finalized)
 	require.Equal(t, finalized, safe)
+}
+
+func TestFastConfirmationMissingSafeMappingUsesFinalized(t *testing.T) {
+	store, graph, finalized := executionHeadFixture(t)
+	confirmed := common.Hash{4}
+	finalizedHash, confirmedHash := common.Hash{20}, common.Hash{21}
+	for root, hash := range map[common.Hash]common.Hash{finalized.Root: finalizedHash, confirmed: confirmedHash} {
+		block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.DenebVersion)
+		block.Block.Body.ExecutionPayload.BlockHash = hash
+		graph.blocks[root] = block
+	}
+	graph.blocks[confirmed].Block.Slot = 1
+	graph.blocks[confirmed].Block.ParentRoot = finalized.Root
+	graph.headers = map[common.Hash]*cltypes.BeaconBlockHeader{finalized.Root: {}, confirmed: {Slot: 1, ParentRoot: finalized.Root}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: finalized.Root})
+	store.EnableFastConfirmation(store.FinalizedCheckpoint())
+	store.fastConfirmation.result.Store(&publishedConfirmation{root: confirmed, reconfirmBySlot: store.beaconCfg.SlotsPerEpoch})
+	cache, err := lru.New[common.Hash, common.Hash](2)
+	require.NoError(t, err)
+	store.eth2Roots = cache
+	cache.Add(confirmed, confirmedHash)
+	cache.Add(finalized.Root, finalizedHash)
+	cache.Add(common.Hash{5}, common.Hash{22})
+
+	finalizedExecution, safe := store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, finalizedHash, finalizedExecution)
+	require.Equal(t, finalizedHash, safe)
+}
+
+func newPublishedConfirmationStore(t *testing.T) (*ForkChoiceStore, common.Hash) {
+	t.Helper()
+	store, graph, finalized := executionHeadFixture(t)
+	confirmed := common.Hash{4}
+	block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.ParentRoot = finalized.Root
+	block.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{20}
+	graph.blocks[confirmed] = block
+	graph.headers = map[common.Hash]*cltypes.BeaconBlockHeader{finalized.Root: {}, confirmed: {Slot: 1, ParentRoot: finalized.Root}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: finalized.Root})
+	store.EnableFastConfirmation(store.FinalizedCheckpoint())
+	store.justifiedCheckpoint.Store(store.FinalizedCheckpoint())
+	store.unrealizedJustifiedCheckpoint.Store(store.FinalizedCheckpoint())
+	store.unrealizedFinalizedCheckpoint.Store(store.FinalizedCheckpoint())
+	return store, confirmed
+}
+
+func TestFastConfirmationPublishedHashExpires(t *testing.T) {
+	store, confirmed := newPublishedConfirmationStore(t)
+	store.publishConfirmation(confirmed, 2*store.beaconCfg.SlotsPerEpoch-1)
+	require.Len(t, store.FastConfirmationChanged(), 1)
+	<-store.FastConfirmationChanged()
+
+	expiry := 2 * store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot * 1000
+	store.timeMs.Store(expiry - 1)
+	_, safe := store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, common.Hash{20}, safe)
+	store.OnTick(expiry)
+	select {
+	case <-store.FastConfirmationChanged():
+	default:
+		t.Fatal("expiring a published safe hash must wake fork choice")
+	}
+	_, safe = store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, common.Hash{2}, safe)
+}
+
+func TestFastConfirmationMissedEpochStartPublication(t *testing.T) {
+	store, confirmed := newPublishedConfirmationStore(t)
+	slotMs := store.beaconCfg.SecondsPerSlot * 1000
+	lastSlot := store.beaconCfg.SlotsPerEpoch - 1
+	store.timeMs.Store(lastSlot * slotMs)
+	store.publishConfirmation(confirmed, lastSlot)
+	require.Len(t, store.FastConfirmationChanged(), 1)
+	<-store.FastConfirmationChanged()
+	store.OnTick((lastSlot + 1) * slotMs)
+	_, safe := store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, common.Hash{20}, safe, "the worker has the epoch-start slot to reconfirm")
+	select {
+	case <-store.FastConfirmationChanged():
+	default:
+	}
+	store.OnTick((lastSlot + 2) * slotMs)
+	select {
+	case <-store.FastConfirmationChanged():
+	default:
+		t.Fatal("missing the full reconfirmation slot must wake fork choice")
+	}
+	_, safe = store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, common.Hash{2}, safe)
+
+	// The clock can tick between the worker checking its slot and publishing its result.
+	store.publishConfirmation(confirmed, lastSlot+1)
+	select {
+	case <-store.FastConfirmationChanged():
+	default:
+		t.Fatal("reconfirmation after expiry must wake publication even for the same root")
+	}
+	_, safe = store.GetExecutionFinalityHashes(confirmed, common.Hash{}, common.Hash{})
+	require.Equal(t, common.Hash{20}, safe)
 }
 
 func TestFastConfirmationAcrossImportedEpochs(t *testing.T) {
