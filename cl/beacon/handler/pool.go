@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -156,8 +157,8 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
-	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[solid.Attestation](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -240,8 +241,8 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
-	req := []*solid.SingleAttestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[solid.SingleAttestation](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -472,6 +473,19 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 	w.WriteHeader(http.StatusOK)
 }
 
+// decodeJSONList decodes a JSON array of objects. encoding/json stores a null element as a nil
+// pointer without calling the element's UnmarshalJSON, so such elements are rejected here.
+func decodeJSONList[T any](body io.Reader) ([]*T, error) {
+	var list []*T
+	if err := json.NewDecoder(body).Decode(&list); err != nil {
+		return nil, err
+	}
+	if i := slices.Index(list, nil); i >= 0 {
+		return nil, fmt.Errorf("element at index %d is null", i)
+	}
+	return list, nil
+}
+
 type poolingFailure struct {
 	Index   int    `json:"index"`
 	Message string `json:"message"`
@@ -494,8 +508,8 @@ func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []pool
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
-	req := []*cltypes.SignedBLSToExecutionChange{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[cltypes.SignedBLSToExecutionChange](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -628,12 +642,11 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 // PostEthV1BeaconPoolSyncCommittees is a handler for POST /eth/v1/beacon/pool/sync_committees.
 // it receives a list of sync committee messages and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
-	msgs := []*cltypes.SyncCommitteeMessage{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	msgs, err := decodeJSONList[cltypes.SyncCommitteeMessage](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	var err error
 
 	failures := []poolingFailure{}
 	var admissionErr error
@@ -731,8 +744,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 // PostEthV1ValidatorContributionsAndProofs is a handler for POST /eth/v1/validator/contributions_and_proofs.
 // it receives a list of signed contributions and proofs and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
-	msgs := []*cltypes.SignedContributionAndProof{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	msgs, err := decodeJSONList[cltypes.SignedContributionAndProof](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

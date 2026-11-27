@@ -2205,3 +2205,31 @@ func TestPoolSyncCommitteesPublishesTheLastSlotOfAPeriodOnTheNextCommitteeSubnet
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, []string{clgossip.TopicNameSyncCommittee(1)}, topics)
 }
+
+func TestPoolPostRejectsNullListElement(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, version string
+	}{
+		{name: "attestations v1", path: "/eth/v1/beacon/pool/attestations"},
+		{name: "attestations v2", path: "/eth/v2/beacon/pool/attestations", version: clparams.ElectraVersion.String()},
+		{name: "bls to execution changes", path: "/eth/v1/beacon/pool/bls_to_execution_changes"},
+		{name: "sync committees", path: "/eth/v1/beacon/pool/sync_committees"},
+		{name: "contributions and proofs", path: "/eth/v1/validator/contribution_and_proofs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			require.NoError(t, sd.OnHeadState(s))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader("[null]"))
+			request.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				request.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+
+			require.NotPanics(t, func() { handler.mux.ServeHTTP(recorder, request) })
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "element at index 0 is null")
+		})
+	}
+}
