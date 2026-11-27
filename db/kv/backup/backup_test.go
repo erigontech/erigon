@@ -389,3 +389,15 @@ func TestCopyAndCloseReportsAFailedFlush(t *testing.T) {
 	dst := open(dstDir).Readonly(true).MustOpen()
 	require.Error(t, copyAndClose(t.Context(), src, dst, log.New()))
 }
+
+func TestCopyPairAcceptsCurrentChainSchema(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen().Close()
+	src, dst, err := openPair(t.Context(), dirs.Chaindata, filepath.Join(dirs.Tmp, "copy"),
+		dbcfg.ChainDB, false, 0, datasize.MB, kv.ChaindataTablesCfg, log.New())
+	if err == nil {
+		dst.Close()
+		src.Close()
+	}
+	require.NoError(t, err, "a fresh chain database can be copied with OpenPair's schema")
+}

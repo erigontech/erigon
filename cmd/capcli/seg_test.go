@@ -18,21 +18,32 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -41,9 +52,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestSegDuCommand(t *testing.T) {
@@ -162,4 +176,985 @@ func TestDuDatadirChain(t *testing.T) {
 	if r.Chain != "gnosis" || r.Floors.Blocks != 1_470_000 {
 		t.Fatalf("chain = %s, block floor = %d; want gnosis, 1470000", r.Chain, r.Floors.Blocks)
 	}
+}
+
+func TestSegRetireBlocks(t *testing.T) {
+	dirs, roots := prepareCaplinRetireDatadir(t, 50_000, 40_000)
+
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet"}
+	require.NoError(t, app.Run(t.Context(), args))
+
+	entries, err := os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	require.NoError(t, func() error {
+		db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		return db.View(t.Context(), func(tx kv.Tx) error {
+			body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(1_000, roots[1_000]))
+			if err != nil {
+				return err
+			}
+			require.Empty(t, body)
+			body, err = tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(30_000, roots[30_000]))
+			if err != nil {
+				return err
+			}
+			require.NotEmpty(t, body)
+			return nil
+		})
+	}())
+	first := make(map[string]os.FileInfo, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		require.NoError(t, err)
+		first[entry.Name()] = info
+	}
+
+	require.NoError(t, app.Run(t.Context(), args))
+	entries, err = os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	second := make(map[string]os.FileInfo, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		require.NoError(t, err)
+		second[entry.Name()] = info
+	}
+	require.Len(t, second, len(first))
+	for name, before := range first {
+		after, ok := second[name]
+		require.True(t, ok, name)
+		require.True(t, os.SameFile(before, after), name)
+		require.Equal(t, before.ModTime(), after.ModTime(), name)
+	}
+}
+
+func TestSegRetireSkipsBlockGapWithoutSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 50_000
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, 50_000)
+	}))
+	db.Close()
+
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	require.NoError(t, app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"}))
+	require.Contains(t, output.String(), "skip blocks: hot beacon blocks start at 50000")
+	files, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == snaptype.BeaconBlocks.Enum() {
+			t.Fatalf("retire wrote block segment %s", file.Path)
+		}
+	}
+}
+
+func TestSegRetireCompactsCaplinDB(t *testing.T) {
+	dirs, roots := prepareCaplinCompactDatadir(t)
+	dataPath := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+	before, err := os.Stat(dataPath)
+	require.NoError(t, err)
+
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet"}
+	require.NoError(t, app.Run(t.Context(), args))
+
+	after, err := os.Stat(dataPath)
+	require.NoError(t, err)
+	require.Less(t, after.Size(), before.Size())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(30_000, roots[30_000]))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
+	db.Close()
+}
+
+func TestSegRetireNoCompact(t *testing.T) {
+	dirs, _ := prepareCaplinCompactDatadir(t)
+	dataPath := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+	before, err := os.Stat(dataPath)
+	require.NoError(t, err)
+
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"}
+	require.NoError(t, app.Run(t.Context(), args))
+
+	after, err := os.Stat(dataPath)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, after.Size(), before.Size())
+}
+
+func TestRetireRefusesUnindexedBlockSegments(t *testing.T) {
+	dirs := prepareCaplinStateRetireDatadirWithProgress(t, 0)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHighestFinalized(tx, 50_000); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 0)
+	}))
+	db.Close()
+	segments, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, segments)
+	path := segments[0].Path
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	err = runRetireFixture(t, dirs, "mainnet", "--no-compact")
+	require.ErrorContains(t, err, "snapshot index progress")
+	require.ErrorContains(t, err, "start the node")
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	db, err = caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Zero(t, progress)
+		return nil
+	}))
+}
+
+func prepareCaplinCompactDatadir(t *testing.T) (datadir.Dirs, map[uint64]common.Hash) {
+	t.Helper()
+	dirs, roots := prepareCaplinRetireDatadir(t, 50_000, 40_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		value := bytes.Repeat([]byte{1}, 4096)
+		for i := range 10_000 {
+			root := common.Hash{}
+			binary.BigEndian.PutUint64(root[:], uint64(i)+1)
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(uint64(i%30_000), root), value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	db.Close()
+	return dirs, roots
+}
+
+func TestSegRetireStopsAtCanonicalHead(t *testing.T) {
+	dirs, _ := prepareCaplinRetireDatadir(t, 50_000, 25_000)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	require.NoError(t, app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet"}))
+	require.Contains(t, output.String(), "freeze blocks 0..20000")
+	files, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	var ranges []string
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			ranges = append(ranges, fmt.Sprintf("%d..%d", file.From, file.To))
+		}
+	}
+	require.ElementsMatch(t, []string{"0..10000", "10000..20000"}, ranges)
+	require.NotContains(t, ranges, "0..30000")
+}
+
+func prepareCaplinRetireDatadir(t *testing.T, finalized, head uint64) (datadir.Dirs, map[uint64]common.Hash) {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	roots := make(map[uint64]common.Hash)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var parent common.Hash
+		for slot := uint64(0); slot <= head; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			roots[slot], parent = root, root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, finalized)
+	}))
+	db.Close()
+	return dirs, roots
+}
+
+func prepareCaplinBackfillGapDatadir(t *testing.T, linked bool) datadir.Dirs {
+	t.Helper()
+	dirs, roots := prepareCaplinRetireDatadir(t, 60_000, 50_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	var frozenRoot common.Hash
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = 29_999
+		block.Block.ParentRoot = roots[29_500]
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+		var err error
+		frozenRoot, err = block.Block.HashSSZ()
+		return err
+	}))
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, 30_000, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(30_000, roots[30_000])); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(30_000)); err != nil {
+			return err
+		}
+		parent := frozenRoot
+		if !linked {
+			parent = roots[30_000]
+		}
+		for slot := uint64(30_500); slot <= 50_000; slot += 500 {
+			if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, roots[slot])); err != nil {
+				return err
+			}
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			var err error
+			parent, err = block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+		}
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 29_999)
+	}))
+	db.Close()
+	return dirs
+}
+
+func prepareCaplinBackfillChainGapDatadir(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs, roots := prepareCaplinRetireDatadir(t, 70_000, 60_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	var frozenRoot common.Hash
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = 29_999
+		block.Block.ParentRoot = roots[29_500]
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+		frozenRoot, err = block.Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+		return nil
+	}))
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, 30_000, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		parent := frozenRoot
+		for slot := uint64(30_000); slot <= 60_000; slot += 500 {
+			if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, roots[slot])); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+			if slot == 39_500 {
+				continue
+			}
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if slot == 40_000 {
+				block.Block.ParentRoot = common.Hash{1}
+			}
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			parent, err = block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+		}
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 29_999)
+	}))
+	db.Close()
+	return dirs
+}
+
+func prepareCaplinBackfillTailGapDatadir(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs, roots := prepareCaplinRetireDatadir(t, 60_000, 60_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	var frozenRoot common.Hash
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = 29_999
+		block.Block.ParentRoot = roots[29_500]
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+		frozenRoot, err = block.Block.HashSSZ()
+		return err
+	}))
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, 30_000, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		parent := frozenRoot
+		for slot := uint64(30_000); slot <= 60_000; slot += 500 {
+			if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, roots[slot])); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+			if slot > 39_000 && slot != 40_500 {
+				continue
+			}
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if slot == 40_500 {
+				block.Block.ParentRoot = common.Hash{2}
+			}
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			parent, err = block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+		}
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 29_999)
+	}))
+	db.Close()
+	return dirs
+}
+
+func prepareCaplinNoSegmentChainGapDatadir(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs, roots := prepareCaplinRetireDatadir(t, 40_000, 30_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, slot := range []uint64{9_500, 10_000, 10_500} {
+			if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, roots[slot])); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+		}
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = 10_500
+		block.Block.ParentRoot = common.Hash{3}
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
+	}))
+	db.Close()
+	return dirs
+}
+
+func TestSegRetireBlobs(t *testing.T) {
+	dirs, roots := prepareCaplinBlobRetireDatadir(t)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "hoodi"}
+	require.NoError(t, app.Run(t.Context(), args))
+	require.Contains(t, output.String(), "15000")
+	files, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	var blobRanges []string
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
+			blobRanges = append(blobRanges, fmt.Sprintf("%d..%d", file.From, file.To))
+		}
+	}
+	require.Equal(t, []string{"0..10000"}, blobRanges)
+
+	blobDB := openCaplinBlobDB(t, dirs)
+	store := blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+	count, err := store.KzgCommitmentsCount(t.Context(), roots[5_000])
+	require.NoError(t, err)
+	require.Zero(t, count)
+	count, err = store.KzgCommitmentsCount(t.Context(), roots[14_500])
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), count)
+	blobDB.Close()
+
+	before := map[string]os.FileInfo{}
+	for _, file := range files {
+		info, err := os.Stat(file.Path)
+		require.NoError(t, err)
+		before[file.Path] = info
+	}
+	output.Reset()
+	require.NoError(t, app.Run(t.Context(), args))
+	files, err = snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	for _, file := range files {
+		if beforeInfo, ok := before[file.Path]; ok {
+			afterInfo, err := os.Stat(file.Path)
+			require.NoError(t, err)
+			require.True(t, os.SameFile(beforeInfo, afterInfo), file.Path)
+			require.Equal(t, beforeInfo.ModTime(), afterInfo.ModTime(), file.Path)
+		}
+	}
+}
+
+func TestSegRetireState(t *testing.T) {
+	dirs := prepareCaplinStateRetireDatadir(t)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet"}
+	require.NoError(t, app.Run(t.Context(), args))
+	require.Contains(t, output.String(), "state")
+
+	files, err := snaptype.Segments(dirs.SnapCaplin)
+	require.NoError(t, err)
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil).KeyValueGetters
+	for table := range types {
+		enum, ok := snaptype.ParseEnum(table)
+		require.True(t, ok, table)
+		var ranges []string
+		for _, file := range files {
+			if file.Type != nil && file.Type.Enum() == enum {
+				ranges = append(ranges, fmt.Sprintf("%d..%d", file.From, file.To))
+			}
+		}
+		require.Equal(t, []string{"0..50000"}, ranges, table)
+	}
+
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for table := range types {
+			below, err := tx.GetOne(table, base_encoding.Encode64ToBytes4(49_999))
+			if err != nil {
+				return err
+			}
+			require.Empty(t, below, table)
+			atBoundary, err := tx.GetOne(table, base_encoding.Encode64ToBytes4(50_000))
+			if err != nil {
+				return err
+			}
+			require.NotEmpty(t, atBoundary, table)
+		}
+		return nil
+	}))
+	db.Close()
+
+	before := make(map[string]os.FileInfo, len(files))
+	for _, file := range files {
+		info, err := os.Stat(file.Path)
+		require.NoError(t, err)
+		before[file.Path] = info
+	}
+	output.Reset()
+	require.NoError(t, app.Run(t.Context(), args))
+	files, err = snaptype.Segments(dirs.SnapCaplin)
+	require.NoError(t, err)
+	for _, file := range files {
+		beforeInfo, ok := before[file.Path]
+		require.True(t, ok, file.Path)
+		afterInfo, err := os.Stat(file.Path)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(beforeInfo, afterInfo), file.Path)
+		require.Equal(t, beforeInfo.ModTime(), afterInfo.ModTime(), file.Path)
+	}
+}
+
+func TestSegRetireStateSafetyMargin(t *testing.T) {
+	dirs := prepareCaplinStateRetireDatadirWithProgress(t, 150_000)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	args := []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet"}
+	require.NoError(t, app.Run(t.Context(), args))
+
+	files, err := snaptype.Segments(dirs.SnapCaplin)
+	require.NoError(t, err)
+	blockRoot, ok := snaptype.ParseEnum(kv.BlockRoot)
+	require.True(t, ok)
+	var ranges []string
+	for _, file := range files {
+		if file.Type != nil && file.Type.Enum() == blockRoot {
+			ranges = append(ranges, fmt.Sprintf("%d..%d", file.From, file.To))
+		}
+	}
+	require.Equal(t, []string{"0..50000"}, ranges)
+}
+
+func prepareCaplinStateRetireDatadir(t *testing.T) datadir.Dirs {
+	return prepareCaplinStateRetireDatadirWithProgress(t, 120_000)
+}
+
+func prepareCaplinStateRetireDatadirWithProgress(t *testing.T, progress uint64) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, &clparams.MainnetBeaconConfig).KeyValueGetters
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var parent common.Hash
+		for slot := range snaptype.CaplinMergeLimit {
+			slot := uint64(slot)
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			parent = root
+		}
+		if err := state_accessors.SetStateProcessingProgress(tx, progress); err != nil {
+			return err
+		}
+		for table := range types {
+			if table == kv.BlockRoot || table == kv.StateRoot {
+				for slot := range progress {
+					slot := uint64(slot)
+					value := make([]byte, 32)
+					value[0] = byte(slot)
+					if err := tx.Put(table, base_encoding.Encode64ToBytes4(slot), value); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			for _, slot := range []uint64{0, 50_000, 100_000} {
+				if err := tx.Put(table, base_encoding.Encode64ToBytes4(slot), []byte{byte(slot)}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, snaptype.CaplinMergeLimit-1)
+	}))
+	db.Close()
+	return dirs
+}
+
+func prepareCaplinBlobRetireDatadir(t *testing.T) (datadir.Dirs, map[uint64]common.Hash) {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	_, cfg, _, err := clparams.GetConfigsByNetworkName("hoodi")
+	require.NoError(t, err)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	roots := make(map[uint64]common.Hash)
+	blocks := make(map[uint64]*cltypes.SignedBeaconBlock)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var parent common.Hash
+		for slot := uint64(0); slot <= 30_000; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			roots[slot], blocks[slot], parent = root, block, root
+		}
+		return nil
+	}))
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, 30_000, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 29_999)
+	}))
+	db.Close()
+
+	blobDB := openCaplinBlobDB(t, dirs)
+	store := blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+	for slot, block := range blocks {
+		if slot > 20_000 || slot == 15_000 {
+			continue
+		}
+		sidecar := cltypes.NewBlobSidecar(0, &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, block.SignedBeaconBlockHeader(), solid.NewHashVector(cltypes.CommitmentBranchSize))
+		require.NoError(t, store.WriteBlobSidecars(t.Context(), roots[slot], []*cltypes.BlobSidecar{sidecar}))
+	}
+	blobDB.Close()
+	return dirs, roots
+}
+
+func openCaplinBlobDB(t *testing.T, dirs datadir.Dirs) kv.RwDB {
+	t.Helper()
+	db, err := mdbx.New(dbcfg.CaplinDB, log.New()).Path(filepath.Join(dirs.CaplinBlobs, "chaindata")).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Open(t.Context())
+	require.NoError(t, err)
+	return db
+}
+
+func runRetireFixture(t *testing.T, dirs datadir.Dirs, chain string, flags ...string) error {
+	t.Helper()
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	return app.Run(t.Context(), append([]string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", chain}, flags...))
+}
+
+func TestRetireLockedDirectory(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	unlock, err := dirs.TryFlock()
+	require.NoError(t, err)
+	defer unlock()
+	require.NoError(t, dir.RemoveAll(dirs.Migrations))
+	require.ErrorIs(t, runRetireFixture(t, dirs, "mainnet"), datadir.ErrDataDirLocked)
+	_, err = os.Stat(dirs.Migrations)
+	require.ErrorIs(t, err, os.ErrNotExist, "retire created migrations while the node held LOCK")
+}
+
+func TestRetireBeforeFirstBlockSegment(t *testing.T) {
+	dirs, _ := prepareCaplinRetireDatadir(t, 8_000, 9_000)
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"), "no block segment is due")
+}
+
+func TestRetireChecksFrozenBlockLink(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		linked bool
+	}{
+		{name: "backfill gap", linked: false},
+		{name: "linked after missed slot", linked: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dirs := prepareCaplinBackfillGapDatadir(t, test.linked)
+			var output bytes.Buffer
+			app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+			commandErr := app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"})
+			segments, err := snaptype.Segments(dirs.Snap)
+			require.NoError(t, err)
+			var frozen []string
+			for _, segment := range segments {
+				if segment.Type != nil && segment.Type.Enum() == snaptype.BeaconBlocks.Enum() && segment.From >= 30_000 {
+					frozen = append(frozen, segment.Path)
+				}
+			}
+			if test.linked {
+				require.NoError(t, commandErr)
+				require.Contains(t, output.String(), "freeze blocks 30000..40000")
+				require.NotEmpty(t, frozen)
+			} else {
+				if commandErr == nil {
+					require.Contains(t, output.String(), "skip blocks")
+					require.Contains(t, output.String(), "30500")
+				}
+				require.Empty(t, frozen)
+			}
+		})
+	}
+}
+
+func TestRetireChecksFrozenBlockChain(t *testing.T) {
+	dirs := prepareCaplinBackfillChainGapDatadir(t)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	commandErr := app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"})
+	segments, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	var frozen []string
+	for _, segment := range segments {
+		if segment.Type != nil && segment.Type.Enum() == snaptype.BeaconBlocks.Enum() && segment.From >= 30_000 {
+			frozen = append(frozen, segment.Path)
+		}
+	}
+	if commandErr == nil {
+		require.Contains(t, output.String(), "skip blocks")
+		require.Contains(t, output.String(), "40000")
+	}
+	require.Empty(t, frozen)
+}
+
+func TestRetireChecksFrozenBlockTail(t *testing.T) {
+	dirs := prepareCaplinBackfillTailGapDatadir(t)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	commandErr := app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"})
+	segments, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	var frozen []string
+	for _, segment := range segments {
+		if segment.Type != nil && segment.Type.Enum() == snaptype.BeaconBlocks.Enum() && segment.From >= 30_000 {
+			frozen = append(frozen, segment.Path)
+		}
+	}
+	if commandErr == nil {
+		require.Contains(t, output.String(), "skip blocks")
+		require.Contains(t, output.String(), "40500")
+	}
+	require.Empty(t, frozen)
+}
+
+func TestRetireChecksFrozenBlockChainWithoutSegments(t *testing.T) {
+	dirs := prepareCaplinNoSegmentChainGapDatadir(t)
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	commandErr := app.Run(t.Context(), []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"})
+	segments, err := snaptype.Segments(dirs.Snap)
+	require.NoError(t, err)
+	var frozen []string
+	for _, segment := range segments {
+		if segment.Type != nil && segment.Type.Enum() == snaptype.BeaconBlocks.Enum() {
+			frozen = append(frozen, segment.Path)
+		}
+	}
+	if commandErr == nil {
+		require.Contains(t, output.String(), "skip blocks")
+		require.Contains(t, output.String(), "10500")
+	}
+	require.Empty(t, frozen)
+}
+
+func TestRetireKeepsCompactDatabaseOnRerun(t *testing.T) {
+	dirs, _ := prepareCaplinRetireDatadir(t, 50_000, 50_000)
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"))
+	path := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, before.ModTime(), after.ModTime(), "second retire modified mdbx.dat")
+}
+
+func TestRetireCompactsIdleDatabase(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	value := bytes.Repeat([]byte{1}, 4096)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := range uint64(5000) {
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, common.Hash{byte(slot)}), value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := range uint64(5000) {
+			if err := tx.Delete(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, common.Hash{byte(slot)})); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	db.Close()
+
+	path := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+	previous := caplinNeedsCompaction
+	calls := 0
+	caplinNeedsCompaction = func(string) (bool, error) {
+		calls++
+		return calls == 1, nil
+	}
+	t.Cleanup(func() { caplinNeedsCompaction = previous })
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Less(t, after.Size(), before.Size())
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"))
+	afterSecond, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, after.ModTime(), afterSecond.ModTime())
+	require.Equal(t, 2, calls)
+}
+
+type failBlockPruneDB struct {
+	kv.RwDB
+	err error
+}
+
+func (db failBlockPruneDB) Update(context.Context, func(kv.RwTx) error) error {
+	return db.err
+}
+
+func TestRetireRetriesPublishedBlockPrune(t *testing.T) {
+	dirs, roots := prepareCaplinRetireDatadir(t, 30_000, 30_000)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	require.NoError(t, sn.OpenFolder())
+	fault := errors.New("block prune unavailable")
+	_, err = antiquary.RetireBeaconBlocks(t.Context(), failBlockPruneDB{db, fault}, sn, dirs, log.New(), nil, nil)
+	require.ErrorIs(t, err, fault)
+	header, _, _, err := sn.ReadHeader(500, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(500), header.Header.Slot)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, sn.BlocksAvailable())
+	}))
+	sn.Close()
+	db.Close()
+
+	require.NoError(t, runRetireFixture(t, dirs, "mainnet"))
+	db, err = caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		var hotBodies int
+		for slot, root := range roots {
+			if slot >= 10_000 {
+				continue
+			}
+			body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root))
+			require.NoError(t, err)
+			if len(body) != 0 {
+				hotBodies++
+			}
+		}
+		if progress != 9_999 || hotBodies != 0 {
+			t.Errorf("after retry: progress=%d covered hot bodies=%d, want 9999 and 0", progress, hotBodies)
+		}
+		return nil
+	}))
+}
+
+func TestRetireRetriesPublishedBlobPrune(t *testing.T) {
+	dirs, roots := prepareCaplinBlobRetireDatadir(t)
+	_, cfg, _, err := clparams.GetConfigsByNetworkName("hoodi")
+	require.NoError(t, err)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	store, closeStore, err := openCaplinBlobStore(t.Context(), dirs, false)
+	require.NoError(t, err)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "hoodi"}, cfg, dirs, log.New())
+	require.NoError(t, sn.OpenFolder())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	hooks := antiquary.BlobRetireHooks{Seed: func([]string) error { cancel(); return nil }}
+	_, err = antiquary.RetireBlobSidecars(ctx, db, store, sn, freezeblocks.NewBeaconSnapshotReader(sn, nil, cfg), cfg, dirs, sn.Salt, log.New(), hooks)
+	require.ErrorIs(t, err, context.Canceled)
+	sidecars, err := sn.ReadBlobSidecars(500)
+	require.NoError(t, err)
+	require.Len(t, sidecars, 1)
+	sn.Close()
+	closeStore()
+	db.Close()
+
+	require.NoError(t, runRetireFixture(t, dirs, "hoodi"))
+	store, closeStore, err = openCaplinBlobStore(t.Context(), dirs, false)
+	require.NoError(t, err)
+	defer closeStore()
+	count, err := store.KzgCommitmentsCount(t.Context(), roots[500])
+	require.NoError(t, err)
+	require.Zero(t, count, "retry left the published sidecar in hot storage")
+}
+
+type stopRepeatedStateDump struct {
+	cancel context.CancelFunc
+	passes int
+}
+
+func (w *stopRepeatedStateDump) Write(p []byte) (int, error) {
+	if bytes.HasPrefix(p, []byte("retire state ")) {
+		w.passes++
+		if w.passes == 2 {
+			w.cancel()
+		}
+	}
+	return len(p), nil
+}
+
+func TestRetireStopsAtIncompleteStateRange(t *testing.T) {
+	dirs := prepareCaplinStateRetireDatadir(t)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(1))
+	}))
+	db.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	writer := &stopRepeatedStateDump{cancel: cancel}
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: writer}
+	err = app.Run(ctx, []string{"capcli", "seg", "retire", "--datadir", dirs.DataDir, "--chain", "mainnet", "--no-compact"})
+	require.LessOrEqual(t, writer.passes, 1, "retire reported the same incomplete range a second time")
+	if err != nil {
+		require.NotErrorIs(t, err, context.Canceled)
+	}
+}
+
+func TestRetireBlockOverlapBeforeBlobFailure(t *testing.T) {
+	dirs, _ := prepareCaplinRetireDatadir(t, 30_000, 30_000)
+	writeCapcliSnapshotSegment(t, dirs, snaptype.BeaconBlocks, 0, 5_000, func(uint64) []byte { return nil })
+	small := snaptype.BeaconBlocks.FileInfo(dirs.Snap, 0, 5_000)
+	for _, idx := range small.Type.IdxFileNames(small.From, small.To) {
+		require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, idx)))
+	}
+	obstacle := snaptype.BlobSidecars.FileInfo(dirs.Snap, 0, 10_000).Path
+	require.NoError(t, os.Mkdir(obstacle, 0o700))
+	err := runRetireFixture(t, dirs, "hoodi", "--no-compact")
+	require.ErrorContains(t, err, filepath.Base(obstacle))
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(dirs.Snap, 0, 10_000).Path)
+	_, statErr := os.Stat(small.Path)
+	require.NoError(t, dir.RemoveAll(obstacle))
+	require.NoError(t, runRetireFixture(t, dirs, "hoodi", "--no-compact"))
+	require.NoFileExists(t, small.Path)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "block cleanup was deferred past a failing blob step")
+}
+
+type failSidecarPrune struct {
+	blob_storage.BlobStorage
+	err error
+}
+
+func (s failSidecarPrune) RemoveBlobSidecars(ctx context.Context, slot uint64, root common.Hash) error {
+	if slot == 500 {
+		return s.err
+	}
+	return s.BlobStorage.RemoveBlobSidecars(ctx, slot, root)
+}
+
+func TestRetireReportsBlobPruneError(t *testing.T) {
+	dirs, _ := prepareCaplinBlobRetireDatadir(t)
+	_, cfg, _, err := clparams.GetConfigsByNetworkName("hoodi")
+	require.NoError(t, err)
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	defer db.Close()
+	store, closeStore, err := openCaplinBlobStore(t.Context(), dirs, false)
+	require.NoError(t, err)
+	defer closeStore()
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "hoodi"}, cfg, dirs, log.New())
+	defer sn.Close()
+	require.NoError(t, sn.OpenFolder())
+	fault := errors.New("hot store write failed")
+	reader := freezeblocks.NewBeaconSnapshotReader(sn, nil, cfg)
+	result, err := antiquary.RetireBlobSidecars(t.Context(), db, failSidecarPrune{store, fault}, sn, reader, cfg, dirs, sn.Salt, log.New(), antiquary.BlobRetireHooks{})
+	require.ErrorIs(t, err, fault, "reported retirement through %d despite the hot prune failure", result.To)
 }

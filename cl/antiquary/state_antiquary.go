@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snaptype"
 )
 
 func (s *Antiquary) loopStates(ctx context.Context) {
@@ -652,7 +650,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	s.removeStateOverlapsAndSeed(ctx, dumpedTo)
+	if dumpedTo == 0 {
+		s.removeStateOverlapsAndSeed(ctx, 0)
+	}
 
 	return nil
 }
@@ -663,39 +663,8 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 	if s.stateSn == nil {
 		return
 	}
-	dropped := map[string]struct{}{}
-	var onDelete func(l []string) error
-	if s.downloader != nil {
-		onDelete = func(l []string) error {
-			for _, name := range l {
-				dropped[filepath.Base(name)] = struct{}{}
-			}
-			return s.downloader.Delete(ctx, l)
-		}
-	}
-	if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
-		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
-	}
-	if dumpedTo == 0 || s.downloader == nil {
-		return
-	}
-	// A removal that failed part-way leaves superseded subsets in the dirty set, and
-	// announcing one re-adds what Delete was just asked to drop.
-	// From 0, not the dump's start: a per-type resume can dump a new type from genesis.
-	all := s.stateSn.SegFileNames(0, dumpedTo)
-	names := make([]string, 0, len(all))
-	for _, name := range all {
-		if _, ok := dropped[filepath.Base(name)]; ok {
-			continue
-		}
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		return
-	}
-	if err := s.downloader.Seed(ctx, names); err != nil {
-		s.logger.Warn("[Antiquary] Failed to add items to bittorrent", "err", err)
-	}
+	seed, onDelete := s.downloaderFileCallbacks(ctx)
+	retireStateOverlapsAndSeed(ctx, s.stateSn, dumpedTo, seed, onDelete, s.logger)
 }
 
 // dumpCaplinStateIfDue reports the slot dumped to, or 0 when nothing was due.
@@ -703,40 +672,13 @@ func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 	if !s.snapgen || s.stateSn == nil {
 		return 0, nil
 	}
-	blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
-	from := s.stateSn.BlocksAvailable() + 1
-	if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
-		return 0, nil
-	}
-	to := s.currentState.Slot()
-	if to < (safetyMargin + blocksPerStatefulFile) {
-		return 0, nil
-	}
-	to -= (safetyMargin + blocksPerStatefulFile)
-	// planStateDump floors toSlot to a whole file; reporting the unaligned value re-seeds
-	// on every finalized update until the next boundary.
-	to = (to / blocksPerStatefulFile) * blocksPerStatefulFile
-	if from >= to {
-		return 0, nil
-	}
-	if err := s.stateSn.DumpCaplinState(
-		ctx,
-		to,
-		blocksPerStatefulFile,
-		s.sn.Salt,
-		s.dirs,
-		1,
-		log.LvlInfo,
-		s.logger,
-	); err != nil {
-		return 0, err
-	}
-	if err := s.stateSn.OpenFolder(); err != nil {
-		return 0, err
-	}
-	// Prune only after OpenFolder: coverage must include the just-frozen range.
-	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
-	return to, nil
+	seed, remove := s.downloaderFileCallbacks(ctx)
+	result, err := RetireCaplinState(ctx, s.mainDB, s.stateSn, s.currentState.Slot(), s.sn.Salt, s.dirs, 1, s.logger, StateRetireHooks{
+		Seed:           seed,
+		RemoveOverlaps: remove,
+		Prune:          func(ctx context.Context, progress uint64) error { s.pruneFrozenStateTables(ctx, progress); return nil },
+	})
+	return result.To, err
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {
