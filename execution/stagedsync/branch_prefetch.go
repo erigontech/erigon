@@ -22,6 +22,7 @@ import (
 	"hash/maphash"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -73,15 +74,18 @@ type branchPrefetcher struct {
 	bytes  atomic.Int64
 
 	dropped atomic.Uint64
+	np      bpProbe
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
+	t0 := time.Now()
 	p := newPrefetchRecords()
 	select {
 	case p.work = <-spareQueue:
 	default:
 		p.work = make(chan prefetchItem, branchPrefetchQueue)
 	}
+	defer func() { p.np.consNs = int64(time.Since(t0)) }()
 	ctx = kv.WithNonBlockingAcquire(ctx)
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
@@ -100,6 +104,7 @@ func newPrefetchRecords() *branchPrefetcher {
 func (p *branchPrefetcher) add(it prefetchItem) {
 	select {
 	case p.work <- it:
+		p.np.added.Add(1)
 	default:
 		p.dropped.Add(1)
 	}
@@ -183,9 +188,13 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			if data, _, ok := p.get(key); ok {
 				return data
 			}
+			t := time.Now()
 			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 			if err != nil {
 				return nil
+			}
+			if logNpPhases {
+				p.np.worker.note(key, data, time.Since(t))
 			}
 			return p.put(key, data, step)
 		}
