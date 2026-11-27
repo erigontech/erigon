@@ -336,9 +336,7 @@ func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
 	retired, err := aggRetire(t, agg, kv.RetireCutoffs{Default: stepSize})
 	require.NoError(t, err)
 	require.Positive(t, retired)
-	tx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRo(t, db)
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
