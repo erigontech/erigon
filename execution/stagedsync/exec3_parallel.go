@@ -2949,7 +2949,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
-			var ownedWrites *state.WriteSet
+			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {

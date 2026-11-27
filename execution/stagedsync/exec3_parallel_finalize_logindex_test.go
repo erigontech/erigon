@@ -231,7 +231,9 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
 
-func TestChargedTxKeepsRetainedTaskWritesUnchanged(t *testing.T) {
+// A tx charged at validation records one copy of its writes, kept by TxOut as well, and
+// the worker's own write-set stays free of the sender charge and the tip.
+func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	db := newResumeTestDB(t)
 	sender := senderIsCoinbaseKey.rawAddress
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
@@ -266,7 +268,6 @@ func TestChargedTxKeepsRetainedTaskWritesUnchanged(t *testing.T) {
 		Val:         1,
 	})
 	be.versionMap.FlushWrites(workerWrites, false)
-	retained := &poolTask{prevWrites: workerWrites}
 
 	be.execTasks.setInProgress(0)
 	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
@@ -293,9 +294,5 @@ func TestChargedTxKeepsRetainedTaskWritesUnchanged(t *testing.T) {
 	require.True(t, tipped, "the tip must be recorded")
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
-	require.NotSame(t, retained.prevWrites, recorded, "finalization must not extend a retained task's write set")
-	_, charged = retained.prevWrites.GetBalance(accounts.InternAddress(sender))
-	require.False(t, charged, "the retained task saw the sender charge")
-	_, tipped = retained.prevWrites.GetBalance(accounts.InternAddress(coinbase))
-	require.False(t, tipped, "the retained task saw the tip")
+	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
 }
