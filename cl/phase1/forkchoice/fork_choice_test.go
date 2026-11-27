@@ -628,26 +628,28 @@ func TestHeadPayloadValidatedClearsOptimisticHeadAndAncestors(t *testing.T) {
 		require.NoError(t, err)
 		roots[i] = root
 	}
-	newStore := func(t *testing.T) *forkchoice.ForkChoiceStore {
+	newStore := func(t *testing.T, statuses ...execution_client.PayloadStatus) *forkchoice.ForkChoiceStore {
 		engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-		gomock.InOrder(
-			engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil),
-			engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil).Times(2),
-		)
+		calls := make([]any, len(statuses))
+		for i, status := range statuses {
+			calls[i] = engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(status, nil)
+		}
+		gomock.InOrder(calls...)
 		store := newBellatrixForkChoiceStore(t, anchorState, engine)
-		for i, block := range blocks[:3] {
+		for i, block := range blocks[:len(statuses)] {
 			require.NoError(t, store.OnBlock(t.Context(), block, true, true, false), i)
 		}
-		require.True(t, store.IsRootOptimistic(roots[2]))
 		return store
 	}
+	optimisticHead := []execution_client.PayloadStatus{execution_client.PayloadStatusValidated, execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusNotValidated}
 	payloadStatus := func(store *forkchoice.ForkChoiceStore, root common.Hash) execution_client.PayloadStatus {
 		status, _ := store.GetRecentExecutionPayloadStatusByRoot(root)
 		return status
 	}
 
 	t.Run("head payload", func(t *testing.T) {
-		store := newStore(t)
+		store := newStore(t, optimisticHead...)
+		require.True(t, store.IsRootOptimistic(roots[2]))
 		store.OnHeadPayloadValidated(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
 		for _, root := range roots[1:] {
 			require.False(t, store.IsRootOptimistic(root))
@@ -655,11 +657,18 @@ func TestHeadPayloadValidatedClearsOptimisticHeadAndAncestors(t *testing.T) {
 		}
 	})
 	t.Run("another payload", func(t *testing.T) {
-		store := newStore(t)
+		store := newStore(t, optimisticHead...)
 		store.OnHeadPayloadValidated(roots[2], blocks[1].Block.Body.ExecutionPayload.BlockHash)
 		for _, root := range roots[1:] {
 			require.True(t, store.IsRootOptimistic(root))
 			require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, root))
 		}
+	})
+	// A VALID NewPayload marks only its own block, so a validated head can sit above a NotValidated parent.
+	t.Run("validated head above an optimistic parent", func(t *testing.T) {
+		store := newStore(t, execution_client.PayloadStatusValidated, execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusValidated)
+		require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, roots[1]))
+		store.OnHeadPayloadValidated(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
+		require.EqualValues(t, execution_client.PayloadStatusValidated, payloadStatus(store, roots[1]))
 	})
 }
