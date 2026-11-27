@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !unix
+//go:build !unix && !windows
 
 package migrations
 
 import "os"
 
 // No link count here, so every file is patched as a private copy.
-func sharesInode(os.FileInfo) bool { return true }
+func sharesInode(string, os.FileInfo) bool { return true }

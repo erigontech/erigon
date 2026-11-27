@@ -119,7 +119,6 @@ func detectCompression(ctx context.Context, d *seg.Decompressor) (fc seg.FileCom
 		}
 	}()
 	full, raw := d.MakeGetter(), d.MakeGetter()
-	full.Reset(0)
 	var word []byte
 	var start, end uint64
 	words := 0
@@ -168,7 +167,7 @@ func setWordLevelFlags(path string, fc seg.FileCompression) error {
 	if err != nil {
 		return err
 	}
-	if sharesInode(info) {
+	if sharesInode(path, info) {
 		return patchCopy(path, info.Mode(), fc)
 	}
 	if err := os.Chmod(path, info.Mode()|0o200); err != nil {

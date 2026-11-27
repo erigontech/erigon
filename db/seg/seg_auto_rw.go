@@ -135,9 +135,8 @@ func (g *Reader) Skip() (uint64, int) {
 	return g.Getter.SkipUncompressed()
 }
 
-// Writer takes the compression of each word from the Compressor's header bits and the
-// Writer compresses each word as its caller asked, picking key or value by the word's
-// position in the file. The header may record more compression than that, which reads
+// Writer compresses each word as its caller asked: a word at an even position in the
+// file is a key, at an odd position a value. The header may record more compression than that, which reads
 // correctly; older releases ignore the header and read with the caller's compression.
 type Writer struct {
 	*Compressor
