@@ -133,10 +133,7 @@ type absentAccount struct {
 func absentAccountsWithStorage(ctx context.Context, db kv.TemporalRoDB, logger log.Logger) ([]absentAccount, error) {
 	var mu sync.Mutex
 	byAddr := map[string][]uint64{}
-	err := walkAccountHistory(ctx, SamplerCfg{SampleRatio: 1}, db, 0, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, _ []byte) error {
-		if len(before) > 0 {
-			return nil
-		}
+	err := walkAbsentAccounts(ctx, SamplerCfg{SampleRatio: 1}, db, 0, logger, func(tx kv.TemporalTx, addr []byte, txNum uint64) error {
 		_, found, err := firstStorageAsOf(tx, addr, txNum)
 		if err != nil || !found {
 			return err

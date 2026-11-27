@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,9 +30,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -40,10 +43,7 @@ import (
 // destroying tx.
 func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	var probs problems
-	err := walkAccountHistory(ctx, sc, db, fromStep, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, _ []byte) error {
-		if len(before) > 0 {
-			return nil
-		}
+	err := walkAbsentAccounts(ctx, sc, db, fromStep, logger, func(tx kv.TemporalTx, addr []byte, txNum uint64) error {
 		slot, found, err := firstStorageAsOf(tx, addr, txNum)
 		if err != nil || !found {
 			return err
@@ -55,6 +55,187 @@ func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.Tempo
 		return err
 	}
 	return probs.verdict(string(StorageOfAbsentAccount))
+}
+
+type absentAccountChange struct {
+	addr  []byte
+	txNum uint64
+}
+
+// walkAbsentAccounts calls visit for each change in the accounts history files that creates
+// a sampled account which has a key in some storage history file. Only such an account can
+// have storage when it is absent, so the other accounts are not visited. The history files
+// are read sequentially, each by one goroutine, and the changes are visited by a pool of
+// workers.
+func walkAbsentAccounts(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, visit func(tx kv.TemporalTx, addr []byte, txNum uint64) error) error {
+	start := time.Now()
+	owners, err := storageOwners(ctx, db, logger)
+	if err != nil {
+		return err
+	}
+	files, err := historyIndexFiles(ctx, db, kv.AccountsDomain, fromStep)
+	if err != nil {
+		return err
+	}
+	var scanned, visited atomic.Uint64
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	progress := func() {
+		select {
+		case <-logEvery.C:
+			logger.Info(fmt.Sprintf("[integrity] %s", StorageOfAbsentAccount), "scannedFiles", fmt.Sprintf("%d/%d", scanned.Load(), len(files)), "creations", common.PrettyCounter(visited.Load()))
+		default:
+		}
+	}
+
+	work := make(chan []absentAccountChange, 1024)
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		defer close(work)
+		scans, scanCtx := errgroup.WithContext(gCtx)
+		scans.SetLimit(estimate.AlmostAllCPUs())
+		for _, f := range files {
+			scans.Go(func() error {
+				defer scanned.Add(1)
+				return scanAbsentAccounts(scanCtx, sc.NewWindowSampler(f.StartRootNum()), db, f, owners, work)
+			})
+		}
+		return scans.Wait()
+	})
+	for range estimate.AlmostAllCPUs() {
+		g.Go(func() error { return visitAbsentAccounts(gCtx, db, work, visit, &visited, progress) })
+	}
+	err = g.Wait()
+	logger.Info(fmt.Sprintf("[integrity] %s: history walked", StorageOfAbsentAccount), "files", len(files), "creations", common.PrettyCounter(visited.Load()), "took", time.Since(start))
+	return err
+}
+
+func visitAbsentAccounts(ctx context.Context, db kv.TemporalRoDB, work <-chan []absentAccountChange, visit func(tx kv.TemporalTx, addr []byte, txNum uint64) error, visited *atomic.Uint64, progress func()) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for batch := range work {
+		for _, c := range batch {
+			if err := visit(tx, c.addr, c.txNum); err != nil {
+				return err
+			}
+		}
+		visited.Add(uint64(len(batch)))
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		progress()
+	}
+	return nil
+}
+
+// storageOwners returns the sorted addresses that have a key in some storage history file.
+func storageOwners(ctx context.Context, db kv.TemporalRoDB, logger log.Logger) ([]common.Address, error) {
+	start := time.Now()
+	files, err := historyIndexFiles(ctx, db, kv.StorageDomain, 0)
+	if err != nil {
+		return nil, err
+	}
+	var mu sync.Mutex
+	var owners []common.Address
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
+	for _, f := range files {
+		g.Go(func() error {
+			tx, err := db.BeginTemporalRo(gCtx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			var addrs []common.Address
+			err = state.AggTx(tx).ScanHistoryKeys(gCtx, kv.StorageDomain, f.StartRootNum(), f.EndRootNum(), func(k []byte) error {
+				if len(k) < length.Addr {
+					return fmt.Errorf("storage key %x is shorter than an address", k)
+				}
+				if a := common.Address(k[:length.Addr]); len(addrs) == 0 || addrs[len(addrs)-1] != a {
+					addrs = append(addrs, a)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			owners = mergeSortedAddrs(owners, addrs)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	logger.Info(fmt.Sprintf("[integrity] %s: accounts with storage", StorageOfAbsentAccount), "files", len(files), "accounts", common.PrettyCounter(len(owners)), "took", time.Since(start))
+	return owners, nil
+}
+
+// mergeSortedAddrs merges two sorted lists of distinct addresses into one.
+func mergeSortedAddrs(a, b []common.Address) []common.Address {
+	res := make([]common.Address, 0, len(a)+len(b))
+	for len(a) > 0 && len(b) > 0 {
+		switch c := a[0].Cmp(b[0]); {
+		case c < 0:
+			res, a = append(res, a[0]), a[1:]
+		case c > 0:
+			res, b = append(res, b[0]), b[1:]
+		default:
+			res, a, b = append(res, a[0]), a[1:], b[1:]
+		}
+	}
+	return append(append(res, a...), b...)
+}
+
+// scanAbsentAccounts sends to work each change of the accounts history file f whose value
+// before is empty, for the sampled accounts in owners.
+func scanAbsentAccounts(ctx context.Context, sampler *Sampler, db kv.TemporalRoDB, f kv.VisibleFile, owners []common.Address, work chan<- []absentAccountChange) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	const batchSize = 4096
+	var batch []absentAccountChange
+	send := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		select {
+		case work <- batch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		batch = nil
+		return nil
+	}
+	var addr []byte
+	next, sampled := 0, false
+	err = state.AggTx(tx).ScanHistory(ctx, kv.AccountsDomain, f.StartRootNum(), f.EndRootNum(), func(k []byte, txNum uint64, before []byte) error {
+		if !bytes.Equal(k, addr) {
+			addr = append(addr[:0], k...)
+			for next < len(owners) && bytes.Compare(owners[next][:], k) < 0 {
+				next++
+			}
+			sampled = next < len(owners) && bytes.Equal(owners[next][:], k) && !sampler.CanSkip()
+		}
+		if !sampled || len(before) > 0 {
+			return nil
+		}
+		if batch = append(batch, absentAccountChange{addr: bytes.Clone(k), txNum: txNum}); len(batch) >= batchSize {
+			return send()
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return send()
 }
 
 func firstStorageAsOf(tx kv.TemporalTx, addr []byte, txNum uint64) (slot []byte, found bool, err error) {
@@ -175,7 +356,7 @@ type accountChanges struct {
 // history files, with the account before and after the change. Each file is scanned by one
 // goroutine, and the sampled accounts are visited by a pool of workers.
 func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, check Check, visit accountChangeVisitor) error {
-	files, err := accountHistoryFiles(ctx, db, fromStep)
+	files, err := historyIndexFiles(ctx, db, kv.AccountsDomain, fromStep)
 	if err != nil {
 		return err
 	}
@@ -213,7 +394,7 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 	return err
 }
 
-func accountHistoryFiles(ctx context.Context, db kv.TemporalRoDB, fromStep uint64) ([]kv.VisibleFile, error) {
+func historyIndexFiles(ctx context.Context, db kv.TemporalRoDB, domain kv.Domain, fromStep uint64) ([]kv.VisibleFile, error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -221,7 +402,7 @@ func accountHistoryFiles(ctx context.Context, db kv.TemporalRoDB, fromStep uint6
 	defer tx.Rollback()
 	fromTxNum := fromStep * tx.Debug().StepSize()
 	var files []kv.VisibleFile
-	for _, f := range tx.Debug().DomainFiles(kv.AccountsDomain) {
+	for _, f := range tx.Debug().DomainFiles(domain) {
 		if strings.HasSuffix(f.Fullpath(), ".ef") && f.EndRootNum() > fromTxNum {
 			files = append(files, f)
 		}
