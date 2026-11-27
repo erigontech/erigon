@@ -750,11 +750,11 @@ type TemporalRwDB interface {
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 	OpenStateSnapshots(ctx context.Context) error
-	// irreversibleTxNum is the last txnum no unwind can reach; only steps ending at or below it are collated.
-	BuildFiles2(ctx context.Context, fromStep, toStep Step, irreversibleTxNum uint64, doMerge bool) error
-	BuildFilesInBackground(irreversibleTxNum uint64) chan struct{}
+	// collateToTxNum is the last txnum no unwind can reach; only steps ending at or below it are collated.
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, collateToTxNum uint64, doMerge bool) error
+	BuildFilesInBackground(collateToTxNum uint64) chan struct{}
 	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
-	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (irreversibleTxNum uint64, err error)) (bool, <-chan struct{}, error)
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (collateToTxNum uint64, err error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities

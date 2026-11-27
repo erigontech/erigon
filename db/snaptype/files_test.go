@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -176,4 +177,34 @@ func TestLoadSaltReadOnlyKeepsMalformedFile(t *testing.T) {
 	if !bytes.Equal(saltBytes, content) {
 		t.Errorf("autoCreate=false rewrote the salt file: got %x, want %x", saltBytes, content)
 	}
+}
+
+func TestParseFileNameCaplinTypes(t *testing.T) {
+	types := slices.Concat(CaplinSnapshotTypes, CaplinStateSnapshotTypes)
+	for _, typ := range types {
+		t.Run(typ.Name(), func(t *testing.T) {
+			name := typ.FileName(Version{}, 0, 50_000)
+			base, state, ok := ParseFileName("", name)
+			require.True(t, ok)
+
+			for _, tc := range []struct {
+				dir  string
+				name string
+			}{
+				{dir: "caplin", name: name},
+				{name: filepath.Join("caplin", name)},
+			} {
+				got, gotState, gotOK := ParseFileName(tc.dir, tc.name)
+				want := base
+				want.Path = filepath.Join(tc.dir, tc.name)
+				want.name = tc.name
+				require.True(t, gotOK)
+				require.Equal(t, state, gotState)
+				require.Equal(t, want, got)
+			}
+		})
+	}
+
+	_, _, ok := ParseFileName(filepath.Join(t.TempDir(), "contains-caplin"), "v1.1-000000-000050-BlockProposers.seg")
+	require.False(t, ok, "unregistered file under a caplin directory must not parse")
 }
