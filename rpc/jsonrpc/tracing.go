@@ -18,8 +18,10 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -379,8 +381,26 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 	})
 }
 
+// DebugTraceCallConfig is the debug_traceCall config. Decoding rejects block
+// override keys that are not defined; encoding/json alone ignores them.
+type DebugTraceCallConfig tracersConfig.TraceConfig
+
+func (c *DebugTraceCallConfig) UnmarshalJSON(input []byte) error {
+	var dec struct {
+		BlockOverrides json.RawMessage `json:"blockOverrides"`
+	}
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if err := checkOverrideKeys(dec.BlockOverrides, reflect.TypeFor[ethapi.BlockOverrides](), "block override"); err != nil {
+		return err
+	}
+	return json.Unmarshal(input, (*tracersConfig.TraceConfig)(c))
+}
+
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
-func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, callConfig *DebugTraceCallConfig, stream *jsonstream.Stream) error {
+	config := (*tracersConfig.TraceConfig)(callConfig)
 	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return err
@@ -433,6 +453,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 			err := config.BlockOverrides.Override(&blockCtx)
 			if err != nil {
 				return err
+			}
+			if config.BlockOverrides.Difficulty != nil && (header.Difficulty.IsZero() || chainConfig.IsPostMerge(blockCtx.BlockNumber, blockCtx.Time)) {
+				return &rpc.InvalidParamsError{Message: `block override "difficulty" is not allowed after the merge`}
 			}
 		}
 

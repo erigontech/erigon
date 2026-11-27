@@ -348,7 +348,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"debug_traceCall", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return streamedResult(func(stream *jsonstream.Stream) error {
-			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &tracersConfig.TraceConfig{}, stream)
+			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &DebugTraceCallConfig{}, stream)
 		})
 	}},
 	// A witness re-executes the block, so it reads the body and the state history
