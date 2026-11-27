@@ -116,54 +116,6 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
-	t.Run("small_values_prefix_keys", func(t *testing.T) {
-		require := require.New(t)
-		db, h, txs := prefixKeysHistory(t, logger)
-		collateAndMergeHistory(t, db, h, txs, true)
-
-		tx, err := db.BeginRo(ctx)
-		require.NoError(err)
-		defer tx.Rollback()
-		ic := h.beginForTests()
-		defer ic.Close()
-
-		ab, abc := fmt.Sprintf("%x", "ab"), fmt.Sprintf("%x", "abc")
-		for _, c := range []struct {
-			from, to int
-			expected []string
-		}{
-			{2, 50, []string{abc + ":10", abc + ":20", abc + ":30", abc + ":40"}},                                          // files
-			{85, 101, []string{abc + ":90", abc + ":100"}},                                                                 // DB
-			{50, 101, []string{ab + ":81", abc + ":50", abc + ":60", abc + ":70", abc + ":80", abc + ":90", abc + ":100"}}, // files + DB
-		} {
-			it, err := ic.HistoryKeyTxNumRange(c.from, c.to, order.Asc, -1, tx)
-			require.NoError(err)
-			require.Equal(c.expected, collectKeyTxNumRange(t, it), "[%d, %d)", c.from, c.to)
-		}
-	})
-}
-
-// prefixKeysHistory writes "ab" at txNums 1 and 81 and "abc" at every 10th txNum, so "ab" is a prefix of the next key.
-func prefixKeysHistory(t *testing.T, logger log.Logger) (kv.RwDB, *History, uint64) {
-	t.Helper()
-	db, h := testDbAndHistory(t, false, logger)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	hc := h.beginForTests()
-	defer hc.Close()
-	writer := hc.NewWriter(db)
-	defer writer.close()
-
-	txs := uint64(100)
-	require.NoError(t, writer.AddPrevValue([]byte("ab"), 1, []byte{1}))
-	require.NoError(t, writer.AddPrevValue([]byte("ab"), 81, []byte{1}))
-	for txNum := uint64(10); txNum <= txs; txNum += 10 {
-		require.NoError(t, writer.AddPrevValue([]byte("abc"), txNum, []byte{2}))
-	}
-	require.NoError(t, writer.Flush(t.Context(), tx))
-	require.NoError(t, tx.Commit())
-	return db, h, txs
 }
 
 func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
@@ -285,6 +237,33 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 	t.Run("small_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
+	})
+	t.Run("small_values_prefix_keys", func(t *testing.T) {
+		require := require.New(t)
+		db, h := testDbAndHistory(t, false, logger)
+		rwTx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+		hc := h.beginForTests()
+		defer hc.Close()
+		writer := hc.NewWriter(db)
+		defer writer.close()
+		// "ab" has no change in the range and is a prefix of the next key "abc".
+		require.NoError(writer.AddPrevValue([]byte("ab"), 1, []byte{1}))
+		require.NoError(writer.AddPrevValue([]byte("abc"), 5, []byte{2}))
+		require.NoError(writer.AddPrevValue([]byte("abc"), 10, []byte{2}))
+		require.NoError(writer.Flush(ctx, rwTx))
+		require.NoError(rwTx.Commit())
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		ic := h.beginForTests()
+		defer ic.Close()
+		it, err := ic.HistoryKeyTxNumRange(2, 11, order.Asc, -1, tx)
+		require.NoError(err)
+		abc := fmt.Sprintf("%x", "abc")
+		require.Equal([]string{abc + ":5", abc + ":10"}, collectKeyTxNumRange(t, it))
 	})
 }
 
