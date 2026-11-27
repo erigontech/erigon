@@ -318,6 +318,25 @@ func TestWitnessReplayRevertsCodeWrites(t *testing.T) {
 	require.Empty(t, replay.codeUpdates)
 }
 
+func TestWitnessReplayRevertsRedelegation(t *testing.T) {
+	replay := &witnessStateless{t: trie.NewInMemoryTrie(nil), codeUpdates: make(map[common.Hash][]byte)}
+	ibs := state.NewVersionedBlock(replay)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+
+	authority := accounts.InternAddress(common.Address{1})
+	first := accounts.NewCode(types.AddressToDelegation(accounts.InternAddress(common.Address{2})))
+	second := accounts.NewCode(types.AddressToDelegation(accounts.InternAddress(common.Address{3})))
+	require.NoError(t, ibs.SetCode(authority, first.Bytes, tracing.CodeChangeAuthorization))
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(authority, second.Bytes, tracing.CodeChangeAuthorization))
+	require.Equal(t, second.Bytes, replay.codeUpdates[second.Hash.Value()])
+
+	ibs.RevertToSnapshot(snapshot, nil)
+	require.NotContains(t, replay.codeUpdates, second.Hash.Value())
+	require.Equal(t, first.Bytes, replay.codeUpdates[first.Hash.Value()])
+}
+
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
 // key is emitted only for accounts represented in the witness trie (present in pre-
 // or post-state); an address that exists in neither is excluded, while its accessed
@@ -943,31 +962,58 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 }
 
 func TestCanonicalWitnessReplaysCodeDeployedInTransaction(t *testing.T) {
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
-	statecfg.EnableHistoricalCommitment()
-
-	key, err := crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000001")
-	require.NoError(t, err)
 	factory, existing := common.Address{0xa1}, common.Address{0xb1}
 	runtimeCode := program.New().Sstore(1, 42).Op(vm.STOP).Bytes()
 	initcode := program.New().ReturnData(runtimeCode).Bytes()
 	factoryCode := program.New().Mstore(initcode, 0).
 		Push(len(initcode)).Push(0).Push(0).Op(vm.CREATE, vm.POP).
 		Call(nil, existing, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()
+	eth, at := replayCanonicalWitnessWithCalls(t, types.GenesisAlloc{
+		factory:  {Nonce: 1, Code: factoryCode},
+		existing: {Nonce: 1, Code: runtimeCode},
+	}, runtimeCode, factory)
+	stored, err := eth.GetStorageAt(t.Context(), existing, "0x1", &at)
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x2a"), stored)
+}
+
+func TestCanonicalWitnessReplaysCodeDestroyedInEarlierTransaction(t *testing.T) {
+	factory, existing, beneficiary := common.Address{0xa1}, common.Address{0xb1}, common.Address{0xc1}
+	runtimeCode := program.New().Selfdestruct(beneficiary).Bytes()
+	initcode := program.New().ReturnData(runtimeCode).Bytes()
+	eth, at := replayCanonicalWitnessWithCalls(t, types.GenesisAlloc{
+		factory:  {Nonce: 1, Code: program.New().Create2ThenCall(initcode, 0).Bytes()},
+		existing: {Nonce: 1, Code: runtimeCode},
+	}, runtimeCode, factory, existing)
+	created := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initcode).Hash)
+	code, err := eth.GetCode(t.Context(), created, &at)
+	require.NoError(t, err)
+	require.Empty(t, code)
+	balance, err := eth.GetBalance(t.Context(), beneficiary, &at)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(1), (*uint256.Int)(balance))
+}
+
+func replayCanonicalWitnessWithCalls(t *testing.T, alloc types.GenesisAlloc, deployedCode []byte, calls ...common.Address) (*APIImpl, rpc.BlockNumberOrHash) {
+	t.Helper()
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.EnableHistoricalCommitment()
+
+	key, err := crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000001")
+	require.NoError(t, err)
+	alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
 	genesis := &types.Genesis{
 		Config:   chain.TestChainBerlinConfig,
 		GasLimit: 10_000_000,
-		Alloc: types.GenesisAlloc{
-			crypto.PubkeyToAddress(key.PublicKey): {Balance: big.NewInt(common.Ether)},
-			factory:                               {Nonce: 1, Code: factoryCode},
-			existing:                              {Nonce: 1, Code: runtimeCode},
-		},
+		Alloc:    alloc,
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	witnessBenchEnableHistory(t, m)
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		b.AddTx(witnessBenchSignedCall(t, b, key, factory, nil))
+		for _, to := range calls {
+			b.AddTx(witnessBenchSignedCall(t, b, key, to, nil))
+		}
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
@@ -975,16 +1021,13 @@ func TestCanonicalWitnessReplaysCodeDeployedInTransaction(t *testing.T) {
 	mode := "canonical"
 	block := pack.Blocks[0]
 	at := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
-	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	stored, err := eth.GetStorageAt(t.Context(), existing, "0x1", &at)
-	require.NoError(t, err)
-	require.Equal(t, common.HexToHash("0x2a"), stored)
 	witness, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), at, &mode)
 	require.NoError(t, err)
-	require.NotContains(t, witness.Codes, hexutil.Bytes(runtimeCode))
+	require.NotContains(t, witness.Codes, hexutil.Bytes(deployedCode))
 	root, err := ReplayExecutionWitness(witness, block, m.ChainConfig, m.Engine)
 	require.NoError(t, err)
 	require.Equal(t, block.Root(), root)
+	return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil), at
 }
 
 func TestWitnessParentForAuRaGasLimit(t *testing.T) {
