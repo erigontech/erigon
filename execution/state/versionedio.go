@@ -2767,25 +2767,25 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	if writes != nil {
 		// Self-destruct is applied before the balance writes so the EIP-7928
 		// burn (zeroing a non-zero balance written by the destroying tx) fires.
-		for addr, w := range writes.SelfDestructs() {
+		for addr, w := range writes.selfDestruct {
 			if addr.IsNil() || !w.Val {
 				continue
 			}
 			ensureAccountState(ac, addr)
 		}
-		for addr, w := range writes.Balances() {
+		for addr, w := range writes.balance {
 			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Nonces() {
+		for addr, w := range writes.nonce {
 			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Codes() {
+		for addr, w := range writes.code {
 			if addr.IsNil() {
 				continue
 			}
@@ -2797,7 +2797,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			}
 			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, byKey := range writes.Storages() {
+		for addr, byKey := range writes.storage {
 			if addr.IsNil() {
 				continue
 			}
