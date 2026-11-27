@@ -255,6 +255,9 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
 ) error {
+	if accumulator == nil && !dbg.TraceUnwinds {
+		return nil
+	}
 	var currentInc uint64
 	codeChanged := make(map[common.Address]struct{})
 
