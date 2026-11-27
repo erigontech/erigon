@@ -377,6 +377,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	pe.consumers.register("commitResults", commitResults)
 	pe.maxBlockNum = maxBlockNum
 
+	npCons.clear()
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 
@@ -970,6 +971,8 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 }
 
 func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
+	npResetT0 := time.Now()
+	defer func() { npCons.reset.Add(int64(time.Since(npResetT0))) }()
 	pe.Lock()
 	defer pe.Unlock()
 
@@ -1664,6 +1667,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
+	npPoolT0 := time.Now()
 	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
 	// channels. Deterministic — the fault is decided here, not in a speculative worker.
@@ -1681,6 +1685,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 			pe.execWorkers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
 		}
 	}
+	npCons.pool.Add(int64(time.Since(npPoolT0)))
 	workers := pe.execWorkers
 	pe.stopWorkers = sync.OnceFunc(func() { putWorkers(pe.cfg.workers, workers) })
 
@@ -1698,7 +1703,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// Join the scheduler before draining workers: it may still add to runWG.
 		_ = pe.wait()
 		pe.runWG.Wait()
+		npStopT0 := time.Now()
 		pe.stopWorkers()
+		npCons.stop.Add(int64(time.Since(npStopT0)))
 	}, nil
 }
 
