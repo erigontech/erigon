@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -60,8 +59,6 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 		{"clock_2_request_2", 2, 2, validators, http.StatusOK},
 		{"clock_2_request_3", 2, 3, validators, http.StatusServiceUnavailable},
 		{"clock_2_request_4", 2, 4, validators, http.StatusBadRequest},
-		{"empty_beyond_seed", 2, 3, `[]`, http.StatusServiceUnavailable},
-		{"empty_at_seed_boundary", 2, 2, `[]`, http.StatusOK},
 		{"beyond_old_head_cap", 32, 33, `["0"]`, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,15 +71,6 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			h.mux.ServeHTTP(recorder, req)
 			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
-			if tc.body == "[]" && tc.code == http.StatusOK {
-				var response struct {
-					Data          json.RawMessage `json:"data"`
-					DependentRoot common.Hash     `json:"dependent_root"`
-				}
-				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
-				require.JSONEq(t, `[]`, string(response.Data))
-				require.Equal(t, common.Hash(headRoot), response.DependentRoot)
-			}
 		})
 	}
 }

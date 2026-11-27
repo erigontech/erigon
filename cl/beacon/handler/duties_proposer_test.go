@@ -471,10 +471,17 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 		return nil
 	}))
 	requireProposerDuties(t, response.Data, expectedState, expectedSlot, expected)
-	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
-	recorder := httptest.NewRecorder()
-	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	farEpoch := headEpoch + 3
+	farSlot := farEpoch * cfg.SlotsPerEpoch
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, farSlot))
+	farProposers := firstEpochProposers(expectedState)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(farEpoch, 10)
+			response := getProposerDutiesForPath(t, handler, path)
+			requireProposerDuties(t, response.Data, expectedState, farSlot, farProposers)
+		})
+	}
 }
 
 func TestGetDutiesProposerAdvancesFuluHeadCopyAcrossTargetFork(t *testing.T) {
@@ -528,10 +535,17 @@ func TestGetDutiesProposerAdvancesFuluHeadCopyAcrossTargetFork(t *testing.T) {
 		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
 		require.Equal(t, expectedProposers[i], duty.ValidatorIndex)
 	}
-	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
-	recorder := httptest.NewRecorder()
-	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	farEpoch := headEpoch + 3
+	farSlot := farEpoch * handler.beaconChainCfg.SlotsPerEpoch
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, farSlot))
+	farProposers := firstEpochProposers(expectedState)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(farEpoch, 10)
+			response := getProposerDutiesForPath(t, handler, path)
+			requireProposerDuties(t, response.Data, expectedState, farSlot, farProposers)
+		})
+	}
 }
 
 func increaseProposerTestBalance(t *testing.T, s *state.CachingBeaconState) uint64 {
