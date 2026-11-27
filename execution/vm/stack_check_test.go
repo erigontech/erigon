@@ -395,6 +395,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"dsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
 		"srchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
 		"srchugezero": {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0)},
+		"dsthugezero": {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(0)},
+		"zerofar":     {n(250), n(250), n(0)},
 		"lenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
 		"dst2pow128":  {pow2(128, 0), n(0), n(1)},
 		"dst2pow192":  {pow2(192, 0), n(0), n(1)},

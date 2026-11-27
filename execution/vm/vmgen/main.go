@@ -85,7 +85,7 @@ func fastOps() []fastOp {
 		// PUSH0 (from Shanghai on) is one of the most frequent ops in compiled contracts.
 		{name: "PUSH0", execute: "opPush0", gas: "GasQuickStep", push: 1, fork: true},
 		// MCOPY is in the jump table only from Cancun on.
-		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2))", copyLen: "stack.back(2)"},
+		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "jt[MCOPY].memorySize != nil && " + allocatedCopy("stack.back(1)"), copyLen: "stack.back(2)"},
 	}
 	for n := 3; n <= 32; n++ {
 		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
@@ -162,9 +162,15 @@ func coldOps() []fastOp {
 
 const allocated32 = "callContext.Memory.allocated32(stack.peek())"
 
+// allocatedCopy is the condition that a copy of stack.back(2) bytes to the stack top from src
+// needs no memory growth. A zero-length copy never grows memory, wherever dst and src point.
+func allocatedCopy(src string) string {
+	return "(stack.back(2).IsZero() || callContext.Memory.allocatedCopy(stack.peek(), " + src + ", stack.back(2)))"
+}
+
 // copyOp is a copy into memory from outside it, which writes length bytes at the stack top.
 func copyOp(name, execute, memorySize, dynamicGas string) fastOp {
-	allocated := "callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))"
+	allocated := allocatedCopy("stack.peek()")
 	if name == "RETURNDATACOPY" {
 		// RETURNDATACOPY is in the jump table only from Byzantium on.
 		allocated = "jt[RETURNDATACOPY].memorySize != nil && " + allocated

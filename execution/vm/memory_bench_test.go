@@ -45,3 +45,21 @@ func BenchmarkResizeCold(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkMemorySet copies into memory from the size of a word to 1 MiB, the
+// sizes RETURNDATACOPY and the other copy ops move.
+func BenchmarkMemorySet(b *testing.B) {
+	for _, size := range []uint64{32, 1024, 64 * 1024, 1024 * 1024} {
+		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
+			var m Memory
+			m.Resize(size + 7)
+			src := make([]byte, size)
+			b.SetBytes(int64(size))
+			var i uint64
+			for b.Loop() {
+				m.Set(i%7, size, src)
+				i++
+			}
+		})
+	}
+}
