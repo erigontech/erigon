@@ -86,8 +86,7 @@ func (d *nodeEncoder) short(elements []byte, path []byte, storage bool) ([]Witne
 		return nil, err
 	}
 	key := nibbles.CompactToHex(compactKey)
-	terminating := len(compactKey) > 0 && compactKey[0]&0x20 != 0
-	if terminating {
+	if nibbles.HasTerm(key) {
 		value, trailing, err := rlp.SplitString(rest)
 		if err != nil {
 			return nil, err
@@ -195,7 +194,7 @@ func (d *nodeEncoder) account(key, path []byte, account *accounts.Account) ([]Wi
 		return nil, fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", account.CodeHash.Value(), crypto.Keccak256Hash(code))
 	}
 	if emptyAccount && emptyCode {
-		return []WitnessOperator{accountLeaf(key, account, codeSize)}, nil
+		return []WitnessOperator{accountLeaf(key, account, codeSize, false)}, nil
 	}
 
 	if !emptyCode {
@@ -221,16 +220,16 @@ func (d *nodeEncoder) account(key, path []byte, account *accounts.Account) ([]Wi
 	} else {
 		operators = append(operators, &OperatorHash{Hash: account.Root})
 	}
-	return append(operators, accountLeaf(key, account, codeSize)), nil
+	return append(operators, accountLeaf(key, account, codeSize, true)), nil
 }
 
-func accountLeaf(key []byte, account *accounts.Account, codeSize uint64) *OperatorLeafAccount {
+func accountLeaf(key []byte, account *accounts.Account, codeSize uint64, hasCodeOrStorage bool) *OperatorLeafAccount {
 	return &OperatorLeafAccount{
 		Key:        append([]byte(nil), key...),
 		Nonce:      account.Nonce,
 		Balance:    account.Balance.ToBig(),
-		HasCode:    account.Root != empty.RootHash && account.Root != (common.Hash{}) || !account.IsEmptyCodeHash(),
-		HasStorage: account.Root != empty.RootHash && account.Root != (common.Hash{}) || !account.IsEmptyCodeHash(),
+		HasCode:    hasCodeOrStorage,
+		HasStorage: hasCodeOrStorage,
 		CodeSize:   codeSize,
 	}
 }
