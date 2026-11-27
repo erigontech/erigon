@@ -198,12 +198,16 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // prepareFrames checks pool policy under the lock, then simulates against the
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
-func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission) uint64 {
+func (p *TxPool) prepareFrames(ctx context.Context, txns []txnAdmission, cells blobCells) uint64 {
 	generation, stateBlockHash := p.precheckFrames(txns)
 	for i := range txns {
 		a := &txns[i]
 		if a.txn.TxType() == FrameTxnType && a.frame.reason == txpoolcfg.Success {
 			a.frame = p.simulateFrameResult(ctx, a.txn, generation, stateBlockHash)
+			if a.frame.validation != nil && a.sidecarReason == txpoolcfg.NotSet &&
+				a.txn.HasBlobs() && p.reusePooledSidecar(a.txn, cells) {
+				a.sidecarReason = txpoolcfg.Success
+			}
 			if a.frame.headChanged && p.waitForStateChange(ctx, generation) {
 				break
 			}
