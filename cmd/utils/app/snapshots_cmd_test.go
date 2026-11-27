@@ -1945,3 +1945,28 @@ func TestIntegrityCacheReportsTorrentAndSampleErrors(t *testing.T) {
 	require.ErrorContains(t, err, "hash mismatch at piece 0")
 	require.ErrorContains(t, err, "--sample must be in (0, 1], got 2")
 }
+
+func TestIntegrityCacheSkipsLoadWhenTorrentPiecesAreSkipped(t *testing.T) {
+	cachePath := t.TempDir()
+	dirs := datadir.New(t.TempDir())
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	genesis := common.HexToHash("0x01")
+	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteCanonicalHash(tx, genesis, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, genesis, &chain.Config{ChainID: uint256.NewInt(1337)})
+	}))
+	chainDB.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), []byte{0, 0, 0, 1}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte{0, 0, 0, 1}, 0o644))
+	command := cli.Command{Name: "integrity", Flags: snapshotCommand.Command("integrity").Flags, Action: doIntegrity}
+	err := command.Run(t.Context(), []string{
+		"integrity",
+		"--datadir", dirs.DataDir,
+		"--file-integrity-cache", cachePath,
+		"--check", "CommitmentKvi",
+		"--skip-check", "TorrentPieces",
+	})
+	require.NoError(t, err)
+}

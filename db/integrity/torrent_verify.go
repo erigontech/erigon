@@ -139,7 +139,9 @@ func verifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 				}
 				failedMu.Unlock()
 			} else if verified != nil {
+				failedMu.Lock()
 				verified(dataPath, hash)
+				failedMu.Unlock()
 			}
 			return nil
 		})
@@ -266,52 +268,43 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 
 	info, err := mi.UnmarshalInfo()
 	if err != nil {
-		return hash, "", fmt.Errorf("unmarshaling torrent info %s: %w", torrentPath, err)
+		return [20]byte{}, "", fmt.Errorf("unmarshaling torrent info %s: %w", torrentPath, err)
 	}
 
 	dataPath := strings.TrimSuffix(torrentPath, ".torrent")
-	resolvedDataPath, err := filepath.EvalSymlinks(dataPath)
-	if err != nil {
-		return hash, "", fmt.Errorf("resolving data file %s: %w", dataPath, err)
-	}
-	resolvedDataPath, err = filepath.Abs(resolvedDataPath)
-	if err != nil {
-		return hash, "", fmt.Errorf("absolutizing data file %s: %w", dataPath, err)
-	}
+	resolvedDataPath := cachePath(dataPath)
 	f, err := os.Open(resolvedDataPath)
 	if err != nil {
-		return hash, resolvedDataPath, fmt.Errorf("opening data file %s: %w", dataPath, err)
+		return [20]byte{}, "", fmt.Errorf("opening data file %s: %w", dataPath, err)
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return hash, resolvedDataPath, fmt.Errorf("stat data file %s: %w", dataPath, err)
+		return [20]byte{}, "", fmt.Errorf("stat data file %s: %w", dataPath, err)
 	}
 	if st.Size() != info.TotalLength() {
-		return hash, resolvedDataPath, fmt.Errorf("size mismatch, file: %s, size %d, torrent length %d", filepath.Base(dataPath), st.Size(), info.TotalLength())
+		return [20]byte{}, "", fmt.Errorf("size mismatch, file: %s, size %d, torrent length %d", filepath.Base(dataPath), st.Size(), info.TotalLength())
 	}
 
 	hasher := sha1.New()
 	pieceLen := info.PieceLength
 	if pieceLen <= 0 {
-		return hash, resolvedDataPath, fmt.Errorf("invalid piece length %d in torrent %s", pieceLen, torrentPath)
+		return [20]byte{}, "", fmt.Errorf("invalid piece length %d in torrent %s", pieceLen, torrentPath)
 	}
-	if info.HasV1() {
-		totalLength := info.TotalLength()
-		expectedPieces := totalLength / pieceLen
-		if totalLength%pieceLen != 0 {
-			expectedPieces++
-		}
-		if len(info.Pieces)%sha1.Size != 0 || int64(len(info.Pieces)/sha1.Size) != expectedPieces {
-			return hash, resolvedDataPath, fmt.Errorf("invalid piece hashes in torrent %s, got %d, want %d", torrentPath, len(info.Pieces)/sha1.Size, expectedPieces)
-		}
+	if !info.HasV1() {
+		return [20]byte{}, "", fmt.Errorf("torrent %s has no v1 pieces", torrentPath)
+	}
+	totalLength := info.TotalLength()
+	expectedPieces := (totalLength + pieceLen - 1) / pieceLen
+	if len(info.Pieces)%sha1.Size != 0 || int64(len(info.Pieces)/sha1.Size) != expectedPieces {
+		return [20]byte{}, "", fmt.Errorf("invalid piece hashes in torrent %s, got %d, want %d", torrentPath, len(info.Pieces)/sha1.Size, expectedPieces)
 	}
 	numPieces := info.NumPieces()
 
 	for i := range numPieces {
 		select {
 		case <-ctx.Done():
-			return hash, resolvedDataPath, ctx.Err()
+			return [20]byte{}, "", ctx.Err()
 		default:
 		}
 
@@ -327,12 +320,12 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 
 		_, err := io.Copy(hasher, io.NewSectionReader(f, offset, length))
 		if err != nil {
-			return hash, resolvedDataPath, fmt.Errorf("reading piece %d of %s: %w", i, dataPath, err)
+			return [20]byte{}, "", fmt.Errorf("reading piece %d of %s: %w", i, dataPath, err)
 		}
 
 		expectedHash := info.Pieces[i*20 : (i+1)*20]
 		if !bytes.Equal(hasher.Sum(nil), expectedHash) {
-			return hash, resolvedDataPath, fmt.Errorf("hash mismatch at piece %d, file: %s", i, filepath.Base(dataPath))
+			return [20]byte{}, "", fmt.Errorf("hash mismatch at piece %d, file: %s", i, filepath.Base(dataPath))
 		}
 
 		if completedBytes != nil {

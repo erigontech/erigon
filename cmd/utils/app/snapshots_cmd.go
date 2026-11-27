@@ -1582,25 +1582,28 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
-		var err error
-		_, skipTorrentPieces := skipSet[integrity.TorrentPieces]
-		// When using cache, verify torrent piece hashes first (unless skipped)
-		cache, err = integrity.PrepareIntegrityCache(ctx, cachePath, dirs.Snap, skipTorrentPieces, failFast, logger)
-		if cache != nil {
-			defer func() {
-				if err := cache.Save(); err != nil {
-					logger.Warn("[integrity] failed to save cache", "err", err)
-				}
-			}()
-		}
-		if err != nil {
-			if cache == nil || failFast {
-				return err
+		if _, skip := skipSet[integrity.TorrentPieces]; skip {
+			logger.Info("[integrity] cache disabled", "reason", "TorrentPieces skipped")
+		} else {
+			var err error
+			// When using cache, verify torrent piece hashes first.
+			cache, err = integrity.PrepareIntegrityCache(ctx, cachePath, dirs.Snap, failFast, logger)
+			if cache != nil {
+				defer func() {
+					if err := cache.Save(); err != nil {
+						logger.Warn("[integrity] failed to save cache", "err", err)
+					}
+				}()
 			}
-			// failFast=false means "warn and keep checking", so the run still has to
-			// produce its check results; the error is reported at the end instead.
-			logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
-			torrentVerifyErr = err
+			if err != nil {
+				if cache == nil || failFast {
+					return err
+				}
+				// failFast=false means "warn and keep checking", so the run still has to
+				// produce its check results; the error is reported at the end instead.
+				logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
+				torrentVerifyErr = err
+			}
 		}
 	}
 

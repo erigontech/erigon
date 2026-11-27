@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -50,8 +49,8 @@ type IntegrityCache struct {
 	path        string
 	entries     map[string]string // cacheKey (check+basenames) -> tab-separated hashes
 	dirty       bool              // true if entries were added or replaced
-	verifiedMu  sync.Mutex
 	verifiedSet map[verifiedFile]struct{}
+	readOnly    bool
 }
 
 // LoadIntegrityCache reads the cache file at path into an IntegrityCache.
@@ -71,27 +70,25 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
-	checked := false
-	versioned := false
+	if !scanner.Scan() {
+		return c, scanner.Err()
+	}
+	header := scanner.Text()
+	if header != integrityCacheVersion {
+		if strings.HasPrefix(header, "integrity-cache-") {
+			c.readOnly = true
+		} else {
+			c.dirty = true
+		}
+		return c, nil
+	}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		if !checked {
-			checked = true
-			versioned = line == integrityCacheVersion
-			continue
-		}
-		if !versioned {
-			continue
-		}
 		key, hashes := parseEntry(line)
 		c.entries[key] = hashes
-	}
-	if !versioned {
-		clear(c.entries)
-		c.dirty = checked
 	}
 	return c, scanner.Err()
 }
@@ -99,7 +96,7 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 // Save atomically writes all entries to disk.
 // No-ops when nothing changed since Load.
 func (c *IntegrityCache) Save() error {
-	if !c.dirty {
+	if c.readOnly || !c.dirty {
 		return nil
 	}
 	tmpPath := c.path + ".tmp"
@@ -174,9 +171,7 @@ func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
 }
 
 func (c *IntegrityCache) markVerified(path string, hash [20]byte) {
-	c.verifiedMu.Lock()
 	c.verifiedSet[verifiedFile{path: path, hash: hash}] = struct{}{}
-	c.verifiedMu.Unlock()
 }
 
 func (c *IntegrityCache) filesVerified(files []fileFingerprint) bool {
@@ -200,11 +195,7 @@ func cachePath(path string) string {
 	return filepath.Clean(path)
 }
 
-func PrepareIntegrityCache(ctx context.Context, path string, snapshotsDir string, skipTorrentPieces bool, failFast bool, logger log.Logger) (*IntegrityCache, error) {
-	if skipTorrentPieces {
-		logger.Info("[integrity] cache disabled", "reason", "TorrentPieces skipped")
-		return nil, nil
-	}
+func PrepareIntegrityCache(ctx context.Context, path string, snapshotsDir string, failFast bool, logger log.Logger) (*IntegrityCache, error) {
 	cache, err := LoadIntegrityCache(path)
 	if err != nil {
 		return nil, err

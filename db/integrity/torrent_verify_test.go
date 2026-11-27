@@ -83,6 +83,23 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestVerifyTorrentFilesRejectsV2OnlyTorrent(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	infoBytes := []byte(fmt.Sprintf("d9:file treed8:test.segd0:d6:lengthi1024e11:pieces root32:%seee12:meta versioni2e4:name8:test.seg12:piece lengthi16384ee", make([]byte, 32)))
+	f, err := os.Create(dataPath + ".torrent")
+	require.NoError(t, err)
+	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
+	require.NoError(t, f.Close())
+
+	var verifyErr error
+	require.NotPanics(t, func() {
+		verifyErr = VerifyTorrentFiles(t.Context(), dir, true, log.New())
+	})
+	require.Error(t, verifyErr)
+}
+
 func TestVerifyTorrentFilesRejectsMissingPieceHashes(t *testing.T) {
 	dir := t.TempDir()
 	dataPath := filepath.Join(dir, "test.seg")

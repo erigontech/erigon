@@ -38,7 +38,7 @@ func TestPrepareIntegrityCacheDoesNotHitForFailedPieces(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
 	seedIntegrityCache(t, cachePath, "test", validPath, failedPath)
 
-	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, false, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, log.New())
 	require.Error(t, err)
 	valid, err := fingerprintsOf(validPath)
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestPrepareIntegrityCacheSavesOnlyVerifiedFiles(t *testing.T) {
 	writeTorrentPair(t, dir, "failed.seg", true)
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
-	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, false, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, log.New())
 	require.Error(t, err)
 	valid, err := fingerprintsOf(validPath)
 	require.NoError(t, err)
@@ -74,13 +74,14 @@ func TestPrepareIntegrityCacheSavesOnlyVerifiedFiles(t *testing.T) {
 	require.False(t, failedCached, "failed piece verification must not be saved in the cache")
 }
 
-func TestPrepareIntegrityCacheSkipsWhenTorrentPiecesAreSkipped(t *testing.T) {
+func TestPrepareIntegrityCacheLoadsCacheFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "snapshots")
-	cachePath := t.TempDir()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
 
-	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, true, false, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, log.New())
 	require.NoError(t, err)
-	require.Nil(t, cache, "skipping TorrentPieces must disable the cache")
+	require.NotNil(t, cache)
 }
 
 func TestPrepareIntegrityCacheMatchesSymlinkedSnapshotPaths(t *testing.T) {
@@ -91,7 +92,7 @@ func TestPrepareIntegrityCacheMatchesSymlinkedSnapshotPaths(t *testing.T) {
 	require.NoError(t, os.Symlink(target, link))
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
-	cache, err := PrepareIntegrityCache(t.Context(), cachePath, link, false, true, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, link, true, log.New())
 	require.NoError(t, err)
 	fps, err := fingerprintsOf(filepath.Join(link, "valid.seg"))
 	require.NoError(t, err)
@@ -125,7 +126,7 @@ func TestIntegrityCacheFileAliases(t *testing.T) {
 	require.NoError(t, dir2.RemoveFile(alias))
 	require.NoError(t, os.Symlink(valid, alias))
 
-	cache, err := PrepareIntegrityCache(t.Context(), cacheFile, dir, false, false, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cacheFile, dir, false, log.New())
 	require.ErrorContains(t, err, "hash mismatch at piece 0, file: alias.seg")
 	good, err := fingerprintsOf(valid)
 	require.NoError(t, err)
@@ -169,6 +170,42 @@ func TestIntegrityCacheRejectsLegacyFormat(t *testing.T) {
 	require.True(t, strings.HasPrefix(string(saved), "integrity-cache-v1\n"))
 }
 
+func TestIntegrityCachePreservesNewerFormat(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	original := "integrity-cache-v2\nfuture-entry\n"
+	require.NoError(t, os.WriteFile(cachePath, []byte(original), 0o644))
+
+	cache, err := LoadIntegrityCache(cachePath)
+	require.NoError(t, err)
+	require.Empty(t, cache.entries)
+	cache.add("test", []fileFingerprint{{basename: "test.seg", hash: [20]byte{1}}})
+	require.NoError(t, cache.Save())
+	saved, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	require.Equal(t, original, string(saved))
+}
+
+func TestIntegrityCacheHitsWithRelativeDirUnderSymlinkedCwd(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	snapshots := filepath.Join(target, "snapshots")
+	cwdLink := filepath.Join(root, "cwd")
+	require.NoError(t, os.MkdirAll(snapshots, 0o755))
+	require.NoError(t, os.Symlink(target, cwdLink))
+	writeTorrentPair(t, snapshots, "valid.seg", false)
+
+	cachePath := filepath.Join(root, "integrity.cache")
+	seedIntegrityCache(t, cachePath, "test", filepath.Join(snapshots, "valid.seg"))
+	t.Chdir(cwdLink)
+	t.Setenv("PWD", cwdLink)
+
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, "snapshots", true, log.New())
+	require.NoError(t, err)
+	fps, err := fingerprintsOf(filepath.Join("snapshots", "valid.seg"))
+	require.NoError(t, err)
+	require.True(t, cache.has("test", fps))
+}
+
 func TestIntegrityCacheKeepsSuppliedVerifiedPath(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.seg")
@@ -200,7 +237,7 @@ func TestIntegrityCacheKeepsAllVerifiedHashesForResolvedPath(t *testing.T) {
 
 	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
 	seedIntegrityCache(t, cachePath, "seed", aliasOne, aliasTwo)
-	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, false, true, log.New())
+	cache, err := PrepareIntegrityCache(t.Context(), cachePath, dir, true, log.New())
 	require.NoError(t, err)
 	fpsOne, err := fingerprintsOf(aliasOne)
 	require.NoError(t, err)
