@@ -2661,16 +2661,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 type BlockAccessListBuilder struct {
 	ac   map[accounts.Address]*accountState
 	slab []accountState
-	// recent holds the last accounts looked up: a tx touches few accounts, each on
-	// several paths, and a probe of ac misses the CPU cache once ac holds a whole block.
-	recent   [4]recentAccount
-	recentAt uint
-	next     int
-}
-
-type recentAccount struct {
-	addr    accounts.Address
-	account *accountState
+	next int
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
@@ -3078,18 +3069,6 @@ func registerAddrs[V any](b *BlockAccessListBuilder, writes map[accounts.Address
 const accountSlabSize = 128
 
 func (b *BlockAccessListBuilder) account(addr accounts.Address) *accountState {
-	for i := range b.recent {
-		if r := &b.recent[i]; r.addr == addr && r.account != nil {
-			return r.account
-		}
-	}
-	account := b.lookup(addr)
-	b.recentAt = (b.recentAt + 1) % uint(len(b.recent))
-	b.recent[b.recentAt] = recentAccount{addr, account}
-	return account
-}
-
-func (b *BlockAccessListBuilder) lookup(addr accounts.Address) *accountState {
 	if account, ok := b.ac[addr]; ok {
 		return account
 	}
