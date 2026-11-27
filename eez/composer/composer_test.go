@@ -1986,7 +1986,8 @@ func TestComposerAuditsAPostingSupersededAndPruned(t *testing.T) {
 }
 
 // TestComposerAttributesPastPrunedSettlements: settlements derivation pruned
-// before they were attributed are skipped, not waited for.
+// before they were attributed are skipped, not waited for; those L1
+// finalized after are no longer watched for replacement.
 func TestComposerAttributesPastPrunedSettlements(t *testing.T) {
 	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{}})
 	var from atomic.Uint64
@@ -2008,6 +2009,10 @@ func TestComposerAttributesPastPrunedSettlements(t *testing.T) {
 	from.Store(9)
 	h.cursor.Store(12)
 	h.c.RecoverFailed(t.Context())
+	require.Len(t, h.c.attributed, 1)
+	h.final.Store(12)
+	h.c.RecoverFailed(t.Context())
+	require.Empty(t, h.c.attributed)
 	h.c.Close()
 	out := lines.String()
 	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
@@ -2287,4 +2292,53 @@ func TestComposerAttributesEachSettlementOnce(t *testing.T) {
 	require.NotContains(t, out, "event=eez.composer.batch.confirmed to=4 ", "before the first call")
 	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=8 "), out)
 	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+}
+
+// TestComposerAttributesReplacedSettlements: a settlement an L1 reorg
+// replaced, the cursor never seen to move back, is attributed again with
+// those after it; one unchanged is not. A settlement missing below the
+// cursor, derivation retreating before it moves the cursor back, is not
+// taken for final.
+func TestComposerAttributesReplacedSettlements(t *testing.T) {
+	other := common.Address{0xe}
+	h := newHarness(t, newTestChain(t, 12), 12, senders{from: map[common.Hash]common.Address{{0xe}: other, {0xf}: other}})
+	ours := []deriver.Record{
+		{TxHash: common.Hash{0x4}, LastL2Block: 4, L1Block: 9, L1BlockHash: common.Hash{0x09}},
+		{TxHash: common.Hash{0x8}, LastL2Block: 8, L1Block: 10, L1BlockHash: common.Hash{0x0a}},
+		{TxHash: common.Hash{0xc}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x0b}},
+	}
+	var index atomic.Pointer[[]deriver.Record]
+	index.Store(&ours)
+	h.c.Settlements(func(n uint64) (deriver.Record, bool) { return settlements(*index.Load()...)(n) })
+	for _, r := range ours[1:] {
+		h.c.ledger.Begin(Posted[*Held]{Height: r.LastL2Block, Post: r.TxHash})
+	}
+	lines := captureLogs(h.c)
+	h.cursor.Store(4)
+	h.c.RecoverFailed(t.Context())
+	h.cursor.Store(12)
+	h.c.RecoverFailed(t.Context())
+	// A reorg of L1 block 11: another poster settles the same height.
+	replaced := []deriver.Record{ours[0], ours[1], {TxHash: common.Hash{0xe}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x1b}}}
+	index.Store(&replaced)
+	h.c.RecoverFailed(t.Context())
+	// A reorg of L1 blocks 10 and 11, seen with the cursor not yet moved back.
+	retreated := ours[:1]
+	index.Store(&retreated)
+	h.c.RecoverFailed(t.Context())
+	// Derived again: another poster settles up to 10 first.
+	deeper := []deriver.Record{
+		ours[0],
+		{TxHash: common.Hash{0xf}, LastL2Block: 10, L1Block: 10, L1BlockHash: common.Hash{0x2a}},
+		{TxHash: common.Hash{0xe}, LastL2Block: 12, L1Block: 11, L1BlockHash: common.Hash{0x2b}},
+	}
+	index.Store(&deeper)
+	h.c.RecoverFailed(t.Context())
+	h.c.RecoverFailed(t.Context())
+	h.c.Close()
+	out := lines.String()
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=8 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.confirmed to=12 "), out)
+	require.Equal(t, 1, strings.Count(out, "event=eez.composer.batch.external.unexpected to=10 "), out)
+	require.Equal(t, 2, strings.Count(out, "event=eez.composer.batch.external.unexpected to=12 "), out)
 }

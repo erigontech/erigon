@@ -123,12 +123,14 @@ type Composer struct {
 	pending emission
 	// last is the cursor RecoverFailed saw last.
 	last uint64
-	// settlement returns derivation's settlement covering a block;
-	// attributed is the cursor up to which settlements were attributed,
-	// once attributing.
-	settlement  func(number uint64) (deriver.Record, bool)
-	attributed  uint64
-	attributing bool
+	// settlement returns derivation's settlement covering a block. Once
+	// attributing, attributed holds the settlements attributed that
+	// derivation keeps, oldest first, and attributedTo the block
+	// attribution resumes after when none is left.
+	settlement   func(number uint64) (deriver.Record, bool)
+	attributed   []deriver.Record
+	attributedTo uint64
+	attributing  bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -779,17 +781,19 @@ func (c *Composer) head() (uint64, bool) {
 // attribute logs the poster of each settlement derivation passed up to
 // cursor since the last call: this composer, by the posting its ledger
 // recorded or, for one posted before a restart, by its address; else
-// another poster, an error unless ExpectExternal. Settlements before the
-// first call are not attributed.
+// another poster, an error unless ExpectExternal. A settlement an L1 reorg
+// replaced is attributed again with those after it, whether or not the
+// cursor was seen to move back. Settlements before the first call are not
+// attributed.
 func (c *Composer) attribute(cursor uint64) {
 	if c.settlement == nil {
 		return
 	}
-	if !c.attributing || cursor <= c.attributed {
-		c.attributing, c.attributed = true, cursor
+	if !c.attributing {
+		c.attributing, c.attributedTo = true, cursor
 		return
 	}
-	n := c.attributed + 1
+	n := c.unreplaced(cursor) + 1
 	// A settlement derivation has yet to pass whole waits for a later call.
 	for n <= cursor {
 		r, ok := c.settlement(n)
@@ -812,13 +816,35 @@ func (c *Composer) attribute(cursor uint64) {
 			break
 		}
 		n = r.LastL2Block + 1
+		c.attributed = append(c.attributed, r)
 		if c.ledger.Posts(r.LastL2Block, r.TxHash) {
 			c.confirmed(r)
 			continue
 		}
 		c.wg.Go(func() { c.attributeAfar(r) })
 	}
-	c.attributed = n - 1
+}
+
+// unreplaced drops from attributed the settlements L1 finalized and those
+// derivation no longer holds as attributed, and returns the block
+// attribution resumes after. A reorg replaces the latest settlements: the
+// last one held as attributed, so are those before it. Finality, not a
+// settlement missing below the cursor, marks one final: derivation drops
+// those a reorg retreats from before it moves the cursor back.
+func (c *Composer) unreplaced(cursor uint64) uint64 {
+	finalized := c.finalized()
+	for len(c.attributed) > 0 && c.attributed[0].LastL2Block <= finalized {
+		c.attributedTo, c.attributed = c.attributed[0].LastL2Block, c.attributed[1:]
+	}
+	for len(c.attributed) > 0 {
+		r := c.attributed[len(c.attributed)-1]
+		if now, ok := c.settlement(r.LastL2Block); ok && now == r && r.LastL2Block <= cursor {
+			return r.LastL2Block
+		}
+		c.attributed = c.attributed[:len(c.attributed)-1]
+	}
+	c.attributedTo = min(c.attributedTo, cursor)
+	return c.attributedTo
 }
 
 // attributeAfar attributes r, a settlement the ledger did not post, by the
