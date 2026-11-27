@@ -268,6 +268,7 @@ func ExecV3(ctx context.Context,
 	lastHeader, applyTx, execErr = pe.exec(ctx, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
+	npCons.log(logger, pe.lastCommittedBlockNum.Load())
 	out = execV3Outcome{
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),

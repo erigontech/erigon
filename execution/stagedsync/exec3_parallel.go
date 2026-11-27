@@ -377,6 +377,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	pe.consumers.register("commitResults", commitResults)
 	pe.maxBlockNum = maxBlockNum
 
+	npCons.clear()
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 
@@ -970,6 +971,8 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 }
 
 func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
+	npResetT0 := time.Now()
+	defer func() { npCons.reset.Add(int64(time.Since(npResetT0))) }()
 	pe.Lock()
 	defer pe.Unlock()
 
@@ -1665,6 +1668,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		poolSize = 1
 	}
 	var err error
+	npPoolT0 := time.Now()
+	defer func() { npCons.pool.Add(int64(time.Since(npPoolT0))) }()
 	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
 		workersCtx, true, pe.cfg.db, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
@@ -1695,7 +1700,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// Join the scheduler before draining workers: it may still add to runWG.
 		_ = pe.wait()
 		pe.runWG.Wait()
+		npStopT0 := time.Now()
 		pe.stopWorkers()
+		npCons.stop.Add(int64(time.Since(npStopT0)))
 	}, nil
 }
 

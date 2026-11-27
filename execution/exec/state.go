@@ -172,7 +172,9 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		readMetrics:  kvmetrics.NewDomainMetrics(),
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
+	npT0 := time.Now()
 	w.ibs = state.New(w.stateReader)
+	npIbs(npT0)
 	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
 	return w
 }
@@ -334,12 +336,14 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	npT0 := time.Now()
 	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
 		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
 		rw.ibs = state.New(rw.stateReader)
 	}
+	npIbs(npT0)
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -358,8 +362,10 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
+	npT0 := time.Now()
 	rw.ibs.Close()
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
+	npIbs(npT0)
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
@@ -469,4 +475,12 @@ func NewWorkersPool(ctx context.Context, background bool, chainDb kv.TemporalRoD
 	applyWorker = NewWorkerContext(ctx, false, nil, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
 
 	return reconWorkers, applyWorker, clear, err
+}
+
+// NpIbsNs and NpIbsN sum the wall time and count of worker IntraBlockState Close+New (probe).
+var NpIbsNs, NpIbsN atomic.Int64
+
+func npIbs(t0 time.Time) {
+	NpIbsNs.Add(int64(time.Since(t0)))
+	NpIbsN.Add(1)
 }
