@@ -69,9 +69,8 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	}
 }
 
-// promoteUnrealizedCheckpoints runs the epoch-start promotion of the unrealized checkpoints once
-// per epoch. A tick advances the time before it takes f.mu, so a block import that takes f.mu
-// first runs the promotion before its admission checks, and the tick then skips it.
+// promoteUnrealizedCheckpoints runs the epoch-start promotion of the unrealized checkpoints at most
+// once per epoch.
 func (f *ForkChoiceStore) promoteUnrealizedCheckpoints(epoch uint64) {
 	if epoch <= f.checkpointPromotionEpoch {
 		return

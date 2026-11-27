@@ -149,20 +149,28 @@ func TestEpochStartSkipsPromotionWhileHighestSeenLags(t *testing.T) {
 	require.Equal(t, justified, f.justifiedCheckpoint.Load().(solid.Checkpoint))
 }
 
+// importBellatrixBeforeJustifyingBlock imports the Bellatrix fixture blocks before the one that advances
+// unrealized justification and moves the time into that block's slot.
+func importBellatrixBeforeJustifyingBlock(t *testing.T) (*ForkChoiceStore, *state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	const justifyingIndex = 84
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	f := newBlockTestStore(t, anchor)
+	for _, block := range blocks[:justifyingIndex] {
+		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+		require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	}
+	block := blocks[justifyingIndex]
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+	return f, anchor, block
+}
+
 // The epoch tick can advance the store time after the import captured it and before the block is
 // applied. The block must leave the checkpoints as on_block at the captured time followed by that
 // tick does: the tick promotes the block's advance.
 func TestEpochTickBetweenTimeCaptureAndApplyPromotesTheBlock(t *testing.T) {
-	const targetIndex = 84 // advances unrealized justification in the fixture
 	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
-		blocks, anchor, _ := tests.GetBellatrixRandom()
-		f := newBlockTestStore(t, anchor)
-		for _, block := range blocks[:targetIndex] {
-			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
-			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
-		}
-		block := blocks[targetIndex]
-		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+		f, _, block := importBellatrixBeforeJustifyingBlock(t)
 		slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
 		require.NotZero(t, block.Block.Slot%slotsPerEpoch)
 		nextEpochMs := slotStartTimeMs(f, (block.Block.Slot/slotsPerEpoch+1)*slotsPerEpoch) + 100
@@ -229,15 +237,7 @@ func TestBlockConflictingWithPendingPromotedFinalityIsRejected(t *testing.T) {
 			name = "tick during the EL call"
 		}
 		t.Run(name, func(t *testing.T) {
-			const targetIndex = 84
-			blocks, anchor, _ := tests.GetBellatrixRandom()
-			f := newBlockTestStore(t, anchor)
-			for _, block := range blocks[:targetIndex] {
-				f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
-				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
-			}
-			block := blocks[targetIndex]
-			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+			f, anchor, block := importBellatrixBeforeJustifyingBlock(t)
 			slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
 			epoch := block.Block.Slot / slotsPerEpoch
 			anchorRoot, err := anchor.BlockRoot()
