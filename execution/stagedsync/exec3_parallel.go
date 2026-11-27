@@ -571,10 +571,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// Exec loop closed the channel — batch complete. Drain calculator
 					// results, then exit. Skip the drain if rootResults already closed
 					// (ranging a nil channel hangs forever).
+					npC0 := time.Now()
 					if !rootResultsClosed {
 						for cr := range rootResults {
 							processCommit(cr)
 						}
+					}
+					if logNpPhases {
+						pe.logger.Info("[np-split] aclose", "closeUs", npC0.UnixMicro(), "drain", time.Since(npC0))
 					}
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
@@ -682,6 +686,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					npB0 := time.Now()
+					var npAcc, npBalW time.Time
+					var npBalDur time.Duration
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
@@ -770,7 +777,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
+						npBp := time.Now()
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						npBalDur = time.Since(npBp)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -809,12 +818,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					npAcc = time.Now()
 					<-balDone
+					npBalW = time.Now()
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
+					}
+					if logNpPhases {
+						pe.logger.Info("[np-split] apply", "blk", applyResult.BlockNum, "recvUs", npB0.UnixMicro(), "pre+acc", npAcc.Sub(npB0), "balWait", npBalW.Sub(npAcc), "valWait", time.Since(npBalW), "balProcess", npBalDur, "total", time.Since(npB0))
 					}
 
 					if balErr != nil {
@@ -870,14 +884,20 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}()
 
+	npE0 := time.Now()
 	executorCancel(nil)
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
 	}
+	npE1 := time.Now()
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(); waitErr != nil {
+	waitErr := pe.wait()
+	if logNpPhases {
+		pe.logger.Info("[np-split] tail", "applyEndUs", npE0.UnixMicro(), "cancel+log", npE1.Sub(npE0), "wait", time.Since(npE1))
+	}
+	if waitErr != nil {
 		if execErr == nil {
 			execErr = waitErr
 		} else {
@@ -1196,6 +1216,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					// The calculator drains commitResults on its own uncancelled ctx;
 					// trigger the batch commitment, then deferred closeApplyChannels
 					// closes commitResults → applyResults.
+					if logNpPhases {
+						pe.logger.Info("[np-split] trig", "blk", blockResult.BlockNum, "atUs", time.Now().UnixMicro())
+					}
 					pe.triggerBatchCommitment()
 					return nil
 				}
