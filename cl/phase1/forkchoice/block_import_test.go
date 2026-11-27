@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
@@ -194,4 +196,75 @@ func TestEpochTickBetweenTimeCaptureAndApplyPromotesTheBlock(t *testing.T) {
 	f.onTickPerSlot(nextEpochMs)
 
 	requireSameCheckpoints(t, serial, f)
+}
+
+// A tick that advanced the time into an epoch start but still waits for f.mu runs its promotion
+// before on_block in the spec. A block at the slot of the finalized checkpoint that promotion sets
+// is at the finalized horizon and must not be imported.
+func TestBlockOvertakenByPendingPromotedFinalityIsNotImported(t *testing.T) {
+	anchor, block := epochStartBlock(t)
+	f := newBlockTestStore(t, anchor)
+	epoch := block.Block.Slot / f.beaconCfg.SlotsPerEpoch
+	f.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{Epoch: epoch, Root: block.Block.ParentRoot})
+	f.timeMs.Store(slotStartTimeMs(f, block.Block.Slot) + 100)
+
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, epoch, f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
+	_, imported := f.forkGraph.GetHeader(root)
+	require.False(t, imported)
+}
+
+// A block that does not descend from the finalized checkpoint a pending epoch-start promotion
+// sets must be rejected, also when the tick advances the time while the EL validates the payload.
+func TestBlockConflictingWithPendingPromotedFinalityIsRejected(t *testing.T) {
+	for _, duringEL := range []bool{false, true} {
+		name := "tick before the call"
+		if duringEL {
+			name = "tick during the EL call"
+		}
+		t.Run(name, func(t *testing.T) {
+			const targetIndex = 84
+			blocks, anchor, _ := tests.GetBellatrixRandom()
+			f := newBlockTestStore(t, anchor)
+			for _, block := range blocks[:targetIndex] {
+				f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+			}
+			block := blocks[targetIndex]
+			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+			slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
+			epoch := block.Block.Slot / slotsPerEpoch
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			// A checkpoint of the block's epoch whose root is not the block's ancestor at that epoch start.
+			conflicting := solid.Checkpoint{Epoch: epoch, Root: anchorRoot}
+			require.NotEqual(t, conflicting.Root, f.getAncestor(f.getNodeForRoot(block.Block.ParentRoot), epoch*slotsPerEpoch).Root)
+			f.unrealizedFinalizedCheckpoint.Store(conflicting)
+			// The epoch tick advances the time; its slot-start work waits for f.mu.
+			pendingTick := func() { f.timeMs.Store(slotStartTimeMs(f, (epoch+1)*slotsPerEpoch) + 100) }
+
+			if !duringEL {
+				pendingTick()
+				err = f.OnBlock(t.Context(), block, false, true, false)
+			} else {
+				engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+				f.engine = engine
+				onBlockDone := make(chan error, 1)
+				go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+				awaitSignal(t, elEntered, "NewPayload to start")
+				pendingTick()
+				close(releaseEL)
+				err = <-onBlockDone
+			}
+
+			require.ErrorIs(t, err, ErrNotFinalizedDescendant)
+			root, hashErr := block.Block.HashSSZ()
+			require.NoError(t, hashErr)
+			_, imported := f.forkGraph.GetHeader(root)
+			require.False(t, imported)
+		})
+	}
 }

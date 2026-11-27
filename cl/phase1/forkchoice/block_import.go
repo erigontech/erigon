@@ -109,7 +109,6 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	postState *state.CachingBeaconState,
 	prepared *preparedPostState,
 ) (pendingEnvelopeFound bool, err error) {
-	f.promoteUnrealizedCheckpoints(f.computeEpochAtSlot(f.slotAtTimeMs(storeTimeMs)))
 	blockEpoch := f.computeEpochAtSlot(block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	f.updateChildren(block.Slot-1, block.ParentRoot, blockRoot) // parent slot can be innacurate
