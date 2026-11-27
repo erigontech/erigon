@@ -65,6 +65,20 @@ func TestDebugTraceCallBlockOverrideKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("repeated outer keys", func(t *testing.T) {
+		client, callArgs, blockTime := dialDebug(t, chain.AllProtocolChanges)
+		ts := `"` + blockTime.String() + `"`
+		for _, config := range []string{
+			`{"tracer":"callTracer","blockOverrides":{"fooBar":"0x1","time":` + ts + `,"Time":` + ts + `},"BlockOverrides":{}}`,
+			`{"tracer":"callTracer","blockOverrides":{"fooBar":"0x1"},"blockOverrides":{}}`,
+			`{"tracer":"callTracer","blockOverrides":{"time":` + ts + `},"BlockOverrides":{"Time":` + ts + `}}`,
+		} {
+			var res json.RawMessage
+			err := client.CallContext(t.Context(), &res, "debug_traceCall", callArgs, "latest", json.RawMessage(config))
+			requireErrorCode(t, err, -32602)
+		}
+	})
+
 	t.Run("before the merge", func(t *testing.T) {
 		client, callArgs, _ := dialDebug(t, chain.TestChainBerlinConfig)
 		require.NoError(t, traceCall(client, callArgs, `{"difficulty":"0x1"}`))

@@ -17,11 +17,13 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -386,14 +388,30 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 type DebugTraceCallConfig tracersConfig.TraceConfig
 
 func (c *DebugTraceCallConfig) UnmarshalJSON(input []byte) error {
-	var dec struct {
-		BlockOverrides json.RawMessage `json:"blockOverrides"`
-	}
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	if err := checkOverrideKeys(dec.BlockOverrides, reflect.TypeFor[ethapi.BlockOverrides](), "block override"); err != nil {
-		return err
+	dec := json.NewDecoder(bytes.NewReader(input))
+	if tok, err := dec.Token(); err == nil && tok == json.Delim('{') {
+		var prevKey string
+		for dec.More() {
+			tok, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := tok.(string)
+			var value json.RawMessage
+			if err := dec.Decode(&value); err != nil {
+				return err
+			}
+			if !strings.EqualFold(key, "blockOverrides") {
+				continue
+			}
+			if prevKey != "" {
+				return fmt.Errorf("keys %q and %q in trace config name the same field", prevKey, key)
+			}
+			prevKey = key
+			if err := checkOverrideKeys(value, reflect.TypeFor[ethapi.BlockOverrides](), "block override"); err != nil {
+				return err
+			}
+		}
 	}
 	return json.Unmarshal(input, (*tracersConfig.TraceConfig)(c))
 }
