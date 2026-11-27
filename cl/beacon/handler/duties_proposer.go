@@ -295,6 +295,26 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return duties, nil
 	}
 
+	if a.beaconChainCfg.GetCurrentStateVersion(epoch) >= clparams.FuluVersion && epoch > a.beaconChainCfg.FuluForkEpoch {
+		epochData, err := state_accessors.ReadEpochData(stateGetter, expectedSlot, a.beaconChainCfg)
+		if err != nil {
+			return nil, err
+		}
+		if epochData == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
+		}
+		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+		for i := range duties {
+			index := epochData.ProposerLookahead.Get(i)
+			pubkey, err := a.syncedData.ValidatorPublicKeyByIndex(int(index))
+			if err != nil {
+				return nil, err
+			}
+			duties[i] = proposerDuties{Pubkey: pubkey, ValidatorIndex: index, Slot: expectedSlot + uint64(i)}
+		}
+		return duties, nil
+	}
+
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
 	if err != nil {
 		return nil, err
@@ -307,19 +327,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	historicalState.SetValidators(validatorSet)
 
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-	if historicalState.Version() >= clparams.FuluVersion {
-		epochData, err := state_accessors.ReadEpochData(stateGetter, expectedSlot, a.beaconChainCfg)
-		if err != nil {
-			return nil, err
-		}
-		if epochData == nil {
-			return nil, fmt.Errorf("epoch data not found for slot %d", expectedSlot)
-		}
-		if err := fillProposerDuties(duties, historicalState, expectedSlot, epochData.ProposerLookahead.Get); err != nil {
-			return nil, err
-		}
-		return duties, nil
-	}
 
 	activeIndices := make([]uint64, 0, validatorSet.Length())
 	validatorSet.Range(func(validatorIndex int, validator solid.Validator, _ int) bool {
