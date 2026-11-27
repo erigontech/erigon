@@ -1048,7 +1048,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 	m, testChain := newV3HistoryTestExecModule(t)
 	runHeadCaptureOverParentRecords(t, m, testChain)
 
-	t.Run("task2 chain collapse traces", func(t *testing.T) {
+	t.Run("collapse chain", func(t *testing.T) {
 		golden := newWitnessGoldenRun(t)
 		runHeadCaptureOverParentRecords(t, golden.m, golden.chain)
 	})

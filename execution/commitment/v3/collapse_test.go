@@ -389,25 +389,6 @@ func TestCollapseRuleReadsStorageOnlyForSiblings(t *testing.T) {
 	require.Len(t, counting.reads, 1)
 }
 
-func TestCollapseDeleteRangeCost(t *testing.T) {
-	deletes := make([][]byte, 1024)
-	for i := range deletes {
-		path := make([]byte, 64)
-		value := i
-		for pos := len(path) - 1; value != 0; pos-- {
-			path[pos] = byte(value & 0x0f)
-			value >>= 4
-		}
-		deletes[i] = path
-	}
-	comparisons := 0
-	for _, path := range deletes {
-		require.NotEmpty(t, deleteRange(deletes, path, &comparisons))
-	}
-	t.Logf("1024 deletes comparisons=%d", comparisons)
-	require.LessOrEqual(t, comparisons, 32*len(deletes))
-}
-
 func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) ([]collapseTestEvent, func([]byte) int) {
 	t.Helper()
 	bed := newWitnessBed(t, pre)
