@@ -85,6 +85,7 @@ func (f *ForkChoiceStore) promoteUnrealizedCheckpoints(epoch uint64) {
 	// ErrNotFinalizedDescendant for subsequent blocks.
 	if f.nearChainTip(f.computeStartSlotAtEpoch(epoch)) {
 		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		f.invalidateCachedHead()
 	}
 }
 

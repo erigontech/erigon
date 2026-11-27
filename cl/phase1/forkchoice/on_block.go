@@ -214,10 +214,17 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 // admitBlockLocked runs the admission checks of a block under the write lock. A tick that advanced
 // the time into an epoch start can still wait for f.mu, and on_tick runs before on_block, so its
 // promotion of the unrealized checkpoints comes first: it can move the finalized checkpoint the
-// block has to descend from.
+// block has to descend from. A tick can also advance the time during the checks and admit a block
+// of its epoch, so the checks run again after that epoch's promotion.
 func (f *ForkChoiceStore) admitBlockLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
-	f.promoteUnrealizedCheckpoints(f.computeEpochAtSlot(f.Slot()))
-	return f.validateBlockAdmissionLocked(block, rejectEquivocation, requireEngineAcceptance)
+	for {
+		epoch := f.computeEpochAtSlot(f.Slot())
+		f.promoteUnrealizedCheckpoints(epoch)
+		root, version, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, requireEngineAcceptance)
+		if f.computeEpochAtSlot(f.Slot()) == epoch {
+			return root, version, err
+		}
+	}
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {

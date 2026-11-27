@@ -207,8 +207,11 @@ func TestBlockOvertakenByPendingPromotedFinalityIsNotImported(t *testing.T) {
 	epoch := block.Block.Slot / f.beaconCfg.SlotsPerEpoch
 	f.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{Epoch: epoch, Root: block.Block.ParentRoot})
 	f.timeMs.Store(slotStartTimeMs(f, block.Block.Slot) + 100)
+	f.headHash = block.Block.ParentRoot // a head cached before the promotion
 
 	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+
+	require.Zero(t, f.headHash, "the promotion must drop the cached head")
 
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -248,7 +251,9 @@ func TestBlockConflictingWithPendingPromotedFinalityIsRejected(t *testing.T) {
 
 			if !duringEL {
 				pendingTick()
+				f.headHash = block.Block.ParentRoot // a head cached before the promotion
 				err = f.OnBlock(t.Context(), block, false, true, false)
+				require.Zero(t, f.headHash, "the promotion must drop the cached head")
 			} else {
 				engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 				f.engine = engine
@@ -267,4 +272,43 @@ func TestBlockConflictingWithPendingPromotedFinalityIsRejected(t *testing.T) {
 			require.False(t, imported)
 		})
 	}
+}
+
+// equivocationCheckHookForkGraph runs hook once at the first equivocation check, which admission
+// runs before its slot check.
+type equivocationCheckHookForkGraph struct {
+	productionTestForkGraph
+	hook func()
+}
+
+func (g *equivocationCheckHookForkGraph) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	if hook := g.hook; hook != nil {
+		g.hook = nil
+		hook()
+	}
+	return g.productionTestForkGraph.HasBlockEquivocation(slot, proposerIndex, exceptRoot)
+}
+
+// The epoch tick can advance the time into the block's slot after admission ran the pending
+// promotion for the previous epoch and before its slot check. The block must still be admitted
+// only after the promotion of its own epoch.
+func TestEpochTickDuringAdmissionRunsThePromotionFirst(t *testing.T) {
+	anchor, block := epochStartBlock(t)
+	tickMs := func(f *ForkChoiceStore) uint64 { return slotStartTimeMs(f, block.Block.Slot) + 100 }
+
+	serial := newBlockTestStore(t, anchor)
+	serial.OnTick(tickMs(serial))
+	require.NoError(t, serial.OnBlock(t.Context(), block, false, true, false))
+
+	f := newBlockTestStore(t, anchor)
+	f.OnTick(tickMs(f) - f.beaconCfg.SecondsPerSlot*1000)
+	f.forkGraph = &equivocationCheckHookForkGraph{
+		productionTestForkGraph: f.forkGraph.(productionTestForkGraph),
+		hook:                    func() { f.timeMs.Store(tickMs(f)) }, // the epoch tick's slot-start work waits for f.mu
+	}
+	require.NoError(t, f.OnBlockWithEquivocationCheck(t.Context(), block, false, true, false))
+	f.timeMs.Store(tickMs(f) - 200)
+	f.onTickPerSlot(tickMs(f))
+
+	requireSameCheckpoints(t, serial, f)
 }
