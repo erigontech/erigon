@@ -157,7 +157,10 @@ func (d *typeFilterDrops) unparsableItem(name string) {
 func (d *typeFilterDrops) unparsedItem(name, afterVersion string) {
 	_, afterFrom, _ := strings.Cut(afterVersion, "-")
 	_, typeToken, _ := strings.Cut(afterFrom, "-")
-	typeToken, _, _ = strings.Cut(typeToken, ".")
+	typeToken = strings.TrimSuffix(typeToken, filepath.Ext(typeToken))
+	for ext := filepath.Ext(typeToken); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(typeToken) {
+		typeToken = strings.TrimSuffix(typeToken, ext)
+	}
 	if _, registered := snaptype.ParseEnum(typeToken); registered {
 		d.unparsableItem(name)
 		return
@@ -290,7 +293,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			continue
 		}
 		if dot < lastSep {
-			drops.unparsableItem(p.Name)
+			drops.unparsedItem(p.Name, name)
 			continue
 		}
 

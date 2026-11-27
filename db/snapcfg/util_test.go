@@ -322,12 +322,17 @@ func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
 		{Name: "v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx", Hash: "registered-index"},
 		{Name: "caplin/v1.1-bad-000050-BlockRoot.seg", Hash: "registered-caplin"},
 		{Name: "v1.1-bad-000050-future-beaconblocks.seg", Hash: "unknown"},
+		{Name: "v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx.torrent", Hash: "registered-index-inner-extension"},
+		{Name: "v1.1-bad-000050-BlockRoot.future-kind.seg", Hash: "unknown-hyphenated-inner-extension"},
+		{Name: "caplin/v1.1-000000-000050-BlockRoot.future-kind.seg", Hash: "unknown-caplin-inner-extension"},
+		{Name: "v1.1-bad-000050-future.seg-backup", Hash: "unknown-hyphenated-extension"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
-	require.Equal(t, 1, drops.unreadable)
+	require.Equal(t, 4, drops.unreadable)
 	require.Equal(t, []string{
 		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",
 		"caplin/v1.1-bad-000050-BlockRoot.seg",
+		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx.torrent",
 	}, drops.unparsableNames)
 }
