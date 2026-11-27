@@ -324,6 +324,9 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	}
 	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
+	if epoch == a.beaconChainCfg.FuluForkEpoch && historicalState.Version() >= clparams.FuluVersion {
+		historicalState.SetVersion(clparams.FuluVersion)
+	}
 	historicalState.SetValidators(validatorSet)
 
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)

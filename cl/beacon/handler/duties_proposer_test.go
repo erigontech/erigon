@@ -114,6 +114,54 @@ func TestGetDutiesProposerHistoricalFuluForkEpochUsesRecomputed(t *testing.T) {
 	requireProposerDuties(t, response.Data, archivedState, slot, expected)
 }
 
+func TestGetDutiesProposerHistoricalFuluAndGloasForkEpochUsesRecomputed(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	epoch := uint64(3)
+	slot := epoch * cfg.SlotsPerEpoch
+	fcu.FinalizedSlotVal = slot
+
+	var archivedState *state.CachingBeaconState
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		archivedState, err = handler.stateReader.ReadHistoricalState(t.Context(), tx, slot)
+		return err
+	}))
+	require.NotNil(t, archivedState)
+	cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = epoch, epoch, epoch, epoch, epoch
+	cfg.InitializeForkSchedule()
+	archivedState.SetVersion(clparams.FuluVersion)
+	recomputed, err := archivedState.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+	slashed := recomputed[0]
+	require.True(t, archivedState.ValidatorSet().Get(int(slashed)).Active(epoch))
+	require.NoError(t, archivedState.SetValidatorSlashed(int(slashed), true))
+	archivedState.SetVersion(clparams.ElectraVersion)
+	var encoded bytes.Buffer
+	require.NoError(t, state_accessors.EpochDataFromBeaconState(archivedState).Serialize(&encoded))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(slot), encoded.Bytes())
+	}))
+	validators := state_accessors.NewStaticValidatorTable()
+	archivedState.ValidatorSet().Range(func(index int, validator solid.Validator, _ int) bool {
+		require.NoError(t, validators.AddValidator(validator, uint64(index), 0))
+		return true
+	})
+	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(cfg, nil, validators, preState, nil, handler.syncedData)
+	require.NoError(t, archivedState.UpgradeToFulu())
+	expected := firstEpochProposers(archivedState)
+	require.Equal(t, slashed, expected[0])
+	require.NoError(t, archivedState.UpgradeToGloas())
+	require.Equal(t, expected, firstEpochProposers(archivedState))
+	gloasRecomputed, err := archivedState.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+	require.NotEqual(t, expected, gloasRecomputed)
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.Equal(t, clparams.GloasVersion.String(), response.Version)
+	requireProposerDuties(t, response.Data, archivedState, slot, expected)
+}
+
 func TestGetDutiesProposerHistoricalFuluMissingEpochData(t *testing.T) {
 	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	cfg := handler.beaconChainCfg
