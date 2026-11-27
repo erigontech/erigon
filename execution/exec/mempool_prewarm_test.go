@@ -56,12 +56,15 @@ func TestMempoolPrewarmReadsContractAndDropsWrites(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	stateCache := newTestStateCache()
 	t.Cleanup(stateCache.Close)
-	config := chain.TestChainBerlinConfig
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 1_000_000, Coinbase: common.Address{19: 1}}
+	config := chain.TestChainOsakaConfig
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 1_000_000, Coinbase: common.Address{19: 1}, BaseFee: uint256.NewInt(1000)}
+	child := mempoolPrewarmChild(header)
+	child.BaseFee = uint256.NewInt(875)
+	child.ExcessBlobGas = new(uint64)
 	to := common.Address{19: 2, 18: 1}
 	from := common.Address{19: 3}
 	bytecode := []byte{0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0x00}
-	sender := accounts.SerialiseV3(&accounts.Account{Balance: *uint256.NewInt(1_000_000)})
+	sender := accounts.SerialiseV3(&accounts.Account{Balance: *uint256.NewInt(1_000_000_000_000)})
 	contract := accounts.SerialiseV3(&accounts.Account{CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(bytecode))})
 	slot := make([]byte, 52)
 	copy(slot, to[:])
@@ -82,12 +85,12 @@ func TestMempoolPrewarmReadsContractAndDropsWrites(t *testing.T) {
 	require.NoError(t, domains.Commit(ctx, rwTx))
 	stateCache.Applier().Clear()
 
-	txn := types.NewTransaction(0, to, new(uint256.Int), 60_000, uint256.NewInt(1), nil)
+	txn := types.NewTransaction(0, to, new(uint256.Int), 60_000, uint256.NewInt(900), nil)
 	txn.SetSender(accounts.InternAddress(from))
 	bra := NewBlockReadAheader()
 	bra.SetStateCache(stateCache)
 	offered := false
-	bra.PrewarmMempool(ctx, db, nil, config, nil, header, func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+	bra.PrewarmMempool(ctx, db, nil, config, nil, child, func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
 		if offered {
 			cancel()
 			return nil, nil
@@ -176,7 +179,7 @@ func runMempoolPrewarmTest(t *testing.T, candidates func(round int, txn func(uin
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
 	var round int
-	bra.PrewarmMempool(ctx, db, nil, chain.TestChainBerlinConfig, nil, head, func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+	bra.PrewarmMempool(ctx, db, nil, chain.TestChainBerlinConfig, nil, mempoolPrewarmChild(head), func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
 		round++
 		txns := candidates(round, func(nonce uint64, to common.Address) types.Transaction {
 			txn := types.NewTransaction(nonce, to, new(uint256.Int), 21_000, uint256.NewInt(1), nil)
@@ -256,7 +259,7 @@ func TestMempoolPrewarmWalksV3AccountAndSlot(t *testing.T) {
 		branchCacheUsed = branchCacheUsed || opts.BranchCache()
 	}}
 	offered := false
-	NewBlockReadAheader().PrewarmMempool(ctx, counted, nil, chain.TestChainBerlinConfig, nil, head, func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+	NewBlockReadAheader().PrewarmMempool(ctx, counted, nil, chain.TestChainBerlinConfig, nil, mempoolPrewarmChild(head), func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
 		if offered {
 			cancel()
 			return nil, nil
@@ -289,7 +292,7 @@ func TestMempoolPrewarmWaitsForV3WalkOnCancel(t *testing.T) {
 	}}
 	go func() {
 		defer close(passDone)
-		NewBlockReadAheader().PrewarmMempool(ctx, blocking, nil, chain.TestChainBerlinConfig, nil, head, func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+		NewBlockReadAheader().PrewarmMempool(ctx, blocking, nil, chain.TestChainBerlinConfig, nil, mempoolPrewarmChild(head), func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
 			return types.Transactions{txn}, nil
 		}, log.New())
 	}()
@@ -374,4 +377,10 @@ func newMempoolV3Contract(t *testing.T) (kv.TemporalRoDB, *types.Header, types.T
 	txn := types.NewTransaction(0, to, new(uint256.Int), 60_000, uint256.NewInt(1), nil)
 	txn.SetSender(accounts.InternAddress(from))
 	return db, head, txn, accountNode, storageNode
+}
+
+func mempoolPrewarmChild(parent *types.Header) *types.Header {
+	child := &types.Header{ParentHash: parent.Hash(), GasLimit: parent.GasLimit, Coinbase: parent.Coinbase, Time: parent.Time + 12}
+	child.Number.AddUint64(&parent.Number, 1)
+	return child
 }

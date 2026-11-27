@@ -69,6 +69,11 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.pending.Len())
 
 	pool.pendingBlobFee.Store(slot.GetBlobFeeCap().Uint64() + 1)
+	prewarmed, err := pool.PrewarmTxns(ctx, common.Hash{}, 0, 30_000_000, 10, nil)
+	require.NoError(t, err)
+	require.Empty(t, prewarmed)
+	require.Equal(t, 1, pool.pending.Len(), "a prewarm scan must not demote")
+	require.Zero(t, pool.baseFee.Len())
 	require.Zero(t, bestOf(t, pool))
 	require.Zero(t, pool.pending.Len())
 	require.Equal(t, 1, pool.baseFee.Len())

@@ -359,6 +359,7 @@ func TestMempoolPrewarmFlagOff(t *testing.T) {
 		called <- struct{}{}
 		return nil, nil
 	})
+	require.Nil(t, module.ExecModule.BeginPayload(), "the flag off must not install the prewarm guard")
 	applyMempoolPrewarmHead(t, module)
 	module.ExecModule.Drain()
 	require.Empty(t, called)

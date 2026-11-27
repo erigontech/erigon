@@ -1014,7 +1014,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 	isAmsterdam := p.isAmsterdam()
 	minTxGas := mdgas.MinTxGas(isAmsterdam)
 
-	txns.Resize(uint(min(n, len(best.ms))))
+	if prewarmCtx == nil {
+		txns.Resize(uint(min(n, len(best.ms))))
+	}
 	var toDiscard, toDemote []*metaTxn
 	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
 	count := 0
@@ -1112,6 +1114,7 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		// The gas limits determine whether a transaction fits. Until it executes,
 		// estimate the execution gas left for later candidates by deducting its
 		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
+		// Prewarm deducts at least the declared gas limit.
 		if !isFrame {
 			to := slot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender
@@ -1123,7 +1126,11 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		chargedGas := intrinsicGas
 		if prewarmCtx != nil {
-			chargedGas = max(chargedGas, slot.GetGas())
+			declaredGas := slot.GetGas()
+			if isFrame {
+				declaredGas = limits.Total()
+			}
+			chargedGas = max(chargedGas, declaredGas)
 		}
 		if chargedGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -1132,6 +1139,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		availableGas.Execution -= chargedGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= wireSize
+		if prewarmCtx != nil {
+			txns.Resize(uint(count + 1))
+		}
 		txns.Txns[count] = slot.Rlp
 		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])

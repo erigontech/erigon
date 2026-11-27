@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -462,6 +463,7 @@ func TestBeginPayloadStopsMempoolPrewarmBetweenRounds(t *testing.T) {
 		var rounds int
 		module := &ExecModule{
 			backgroundCtx: t.Context(),
+			config:        chain.TestChainBerlinConfig,
 			readAheader:   exec.NewBlockReadAheader(),
 			logger:        log.New(),
 			mempoolPrewarm: &mempoolPrewarm{provide: func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
@@ -489,5 +491,28 @@ func TestBeginPayloadStopsMempoolPrewarmBetweenRounds(t *testing.T) {
 		}
 		require.Equal(t, start, time.Now(), "BeginPayload should wake the pass before the next timer tick")
 		require.Equal(t, 1, rounds)
+	})
+}
+
+func TestMempoolPrewarmSkipsACallbackPreparedBeforeANewerPayload(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var rounds int
+		module := &ExecModule{
+			backgroundCtx: t.Context(),
+			config:        chain.TestChainBerlinConfig,
+			readAheader:   exec.NewBlockReadAheader(),
+			logger:        log.New(),
+			mempoolPrewarm: &mempoolPrewarm{provide: func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+				rounds++
+				return nil, nil
+			}},
+		}
+		defer module.stopMempoolPrewarm()
+		start := module.prepareMempoolPrewarm()
+		module.BeginPayload()()
+		start(&types.Header{})
+		synctest.Wait()
+		require.Zero(t, rounds, "a callback prepared before a newer payload must not start a pass")
+		require.Nil(t, module.mempoolPrewarm.done)
 	})
 }

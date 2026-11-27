@@ -646,6 +646,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			restoreStateChanges = nil
 		}
+		if prewarm != nil && !belowFinality && result.Status == ExecutionStatusSuccess {
+			prewarm(fcuHeader)
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}
@@ -949,7 +952,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				if err := e.runPostForkchoice(initialCycle); err != nil {
 					return err
 				}
-				if prewarm != nil && !initialCycle {
+				if prewarm != nil {
 					prewarm(fcuHeader)
 				}
 				return nil
@@ -960,7 +963,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = append(commitTimings, pruneTimings...)
-			if prewarm != nil && !initialCycle {
+			if prewarm != nil {
 				prewarm(fcuHeader)
 			}
 		}

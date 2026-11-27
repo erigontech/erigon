@@ -94,16 +94,17 @@ func (e *ExecModule) prepareMempoolPrewarm() func(*types.Header) {
 	return func(head *types.Header) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if p.active != 0 || p.generation != generation || e.backgroundCtx.Err() != nil {
+		if p.active != 0 || p.generation != generation || p.cancel != nil || e.backgroundCtx.Err() != nil {
 			return
 		}
+		child := builder.MakeEmptyHeader(head, e.config, head.Time+e.config.SecondsPerSlot(), nil)
 		ctx, cancel := context.WithCancel(e.backgroundCtx)
 		done := make(chan struct{})
 		p.cancel, p.done = cancel, done
 		go func() {
 			defer close(done)
 			defer cancel()
-			e.readAheader.PrewarmMempool(ctx, e.db, e.blockReader, e.config, e.engine, head, p.provide, e.logger)
+			e.readAheader.PrewarmMempool(ctx, e.db, e.blockReader, e.config, e.engine, child, p.provide, e.logger)
 		}()
 	}
 }
