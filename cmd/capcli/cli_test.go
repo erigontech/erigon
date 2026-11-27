@@ -827,6 +827,8 @@ func TestArchiveSanitizerRejectsInvalidStateRoots(t *testing.T) {
 	}{
 		{"zero root", `{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`, http.StatusOK, "no state root found"},
 		{"duplicate null root", `{"data":{"root":"0x` + strings.Repeat("0", 63) + `1","root":null}}`, http.StatusOK, "no state root found"},
+		{"null before valid root", `{"data":{"root":null,"root":"0x` + strings.Repeat("0", 63) + `1"}}`, http.StatusOK, "no state root found"},
+		{"empty before valid root", `{"data":{"root":"","root":"0x` + strings.Repeat("0", 63) + `1"}}`, http.StatusOK, "no state root found"},
 		{"duplicate after malformed root", `{"data":{"root":"0x12","root":"0x` + strings.Repeat("0", 63) + `1"}}`, http.StatusOK, "beacon eth/v1/beacon/states/1/root: "},
 		{"not found", "", http.StatusNotFound, ""},
 	} {
