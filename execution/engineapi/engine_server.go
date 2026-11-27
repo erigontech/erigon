@@ -366,16 +366,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	npT0 := time.Now()
-	npMem := []metrics.Sample{{Name: "/gc/heap/allocs:objects"}, {Name: "/gc/heap/allocs:bytes"}, {Name: "/gc/cycles/total:gc-cycles"}}
+	npMem := []metrics.Sample{{Name: "/gc/heap/allocs:objects"}, {Name: "/gc/heap/allocs:bytes"}, {Name: "/gc/cycles/total:gc-cycles"}, {Name: "/cpu/classes/gc/total:cpu-seconds"}}
 	metrics.Read(npMem)
 	npMem0 := [3]uint64{npMem[0].Value.Uint64(), npMem[1].Value.Uint64(), npMem[2].Value.Uint64()}
+	npGcCPU0 := npMem[3].Value.Float64()
 	var npBal, npTx, npHash, npQuick, npLock time.Time
 	defer func() {
 		if req == nil {
 			return
 		}
 		metrics.Read(npMem)
-		e.logger.Info("[np-alloc] np", "blk", req.BlockNumber.Uint64(), "objs", npMem[0].Value.Uint64()-npMem0[0], "bytes", npMem[1].Value.Uint64()-npMem0[1], "gcs", npMem[2].Value.Uint64()-npMem0[2])
+		e.logger.Info("[np-alloc] np", "blk", req.BlockNumber.Uint64(), "objs", npMem[0].Value.Uint64()-npMem0[0], "bytes", npMem[1].Value.Uint64()-npMem0[1], "gcs", npMem[2].Value.Uint64()-npMem0[2], "gcCpuMs", (npMem[3].Value.Float64()-npGcCPU0)*1000)
 		e.logger.Info("[np-split] np", "blk", req.BlockNumber.Uint64(), "entryUs", npT0.UnixMicro(), "endUs", time.Now().UnixMicro(), "bal", npSince(npT0, npBal), "txdec", npSince(npBal, npTx), "hash", npSince(npTx, npHash), "checks", npSince(npHash, npQuick), "lock", npSince(npQuick, npLock), "total", time.Since(npT0))
 	}()
 	if req == nil {
