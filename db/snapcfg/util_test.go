@@ -10,8 +10,23 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-var _ = snaptype.RegisterType(snaptype.MinCoreEnum+3, "transactions", snaptype.Versions{}, nil,
-	[]snaptype.Index{{Name: "transactions"}, {Name: "transactions-to-block", Offset: 1}}, nil)
+var testTransactions = snaptype.RegisterType(snaptype.MinCoreEnum+3, "transactions", version.V1_0_standart, nil,
+	[]snaptype.Index{
+		{Name: "transactions", Version: version.V1_0_standart},
+		{Name: "transactions-to-block", Version: version.Versions{Current: version.V2_0, MinSupported: version.V2_0}, Offset: 1},
+	}, nil)
+
+func TestTypedPicksTheSecondTransactionIndexWindow(t *testing.T) {
+	const toBlock = "v2.0-000000-000500-transactions-to-block.idx"
+	names := make([]string, 0, 1)
+	for _, item := range (Preverified{Items: PreverifiedItems{
+		{Name: toBlock, Hash: "to-block"},
+		{Name: "v2.0-000000-000500-transactions.idx", Hash: "outside-first-window"},
+	}}).Typed([]snaptype.Type{testTransactions}).Items {
+		names = append(names, item.Name)
+	}
+	require.Equal(t, []string{toBlock}, names)
+}
 
 func typedNames(t *testing.T, items PreverifiedItems) []string {
 	t.Helper()
@@ -341,10 +356,12 @@ func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
 		{Name: "v1.1-beaconblocks.0-32.idx-backup", Hash: "registered-state-name-hyphenated-extension"},
 		{Name: "caplin/v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-caplin-state-name-overflow"},
 		{Name: "v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-state-name-overflow"},
+		{Name: "v1.1-bad-000050-beaconblocks.seg-backup/", Hash: "unknown-trailing-slash"},
+		{Name: "v1.1-000000-000050-beaconblocks.seg-backup/", Hash: "unknown-trailing-slash-valid-range"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
-	require.Equal(t, 8, drops.unreadable)
+	require.Equal(t, 10, drops.unreadable)
 	require.Equal(t, 6, drops.unparsable)
 	require.Equal(t, []string{
 		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",

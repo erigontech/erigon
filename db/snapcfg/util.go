@@ -158,7 +158,7 @@ func (d *typeFilterDrops) unregistered(name string, parsed snaptype.FileInfo) bo
 	if parsed.Type != nil {
 		return false
 	}
-	if parsed.TypeString == "" && registeredTypeToken(name) {
+	if parsed.TypeString == "" && registeredTypeToken(name, parsed.Ext) {
 		d.unparsableItem(name)
 	} else {
 		d.unreadable++
@@ -166,9 +166,9 @@ func (d *typeFilterDrops) unregistered(name string, parsed snaptype.FileInfo) bo
 	return true
 }
 
-func registeredTypeToken(name string) bool {
+func registeredTypeToken(name, ext string) bool {
 	_, afterVersion, _ := strings.Cut(filepath.Base(name), "-")
-	afterVersion = strings.TrimSuffix(afterVersion, filepath.Ext(afterVersion))
+	afterVersion = strings.TrimSuffix(afterVersion, ext)
 	_, afterFrom, _ := strings.Cut(afterVersion, "-")
 	_, typeToken, _ := strings.Cut(afterFrom, "-")
 	for ext := filepath.Ext(typeToken); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(typeToken) {
@@ -255,7 +255,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		}
 
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
-			caplinFile, _, _ := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
+			caplinFile, _, _ := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(p.Name))
 			if drops.unregistered(p.Name, caplinFile) {
 				continue
 			}
