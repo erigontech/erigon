@@ -323,9 +323,9 @@ func TestBlockAppliedBeforePendingSlotStartGetsBoost(t *testing.T) {
 	assert.Equal(t, root, f.ProposerBoostRoot())
 }
 
-// on_tick resets the boost before on_block computes the head that decides the boost of the block, so
-// the import must not see the boost of the previous slot when a tick has advanced the time but not
-// yet taken f.mu.
+// A tick can advance the store time into the block's slot before it takes f.mu. The import must
+// already have reset the boost of the previous slot while the EL validates the payload, and the
+// timely block must then get the boost.
 func TestPendingSlotStartResetRunsBeforeTheBlockImport(t *testing.T) {
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	f, block := importParent(t, engine)
