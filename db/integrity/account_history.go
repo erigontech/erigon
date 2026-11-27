@@ -348,13 +348,14 @@ func reportCodeMismatch(probs *problems, failFast bool, addr, codeHash, code []b
 type accountChangeVisitor func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error
 
 type accountChanges struct {
-	addr   []byte
-	txNums []uint64
+	addr    []byte
+	txNums  []uint64
+	befores [][]byte // the account before the change at txNums[i]
 }
 
 // walkAccountHistory calls visit for every change of the sampled accounts in the accounts
-// history files, with the account before and after the change. Each file is scanned by one
-// goroutine, and the sampled accounts are visited by a pool of workers.
+// history files, with the account before and after the change. Each file is read
+// sequentially by one goroutine, and the sampled accounts are visited by a pool of workers.
 func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, check Check, visit accountChangeVisitor) error {
 	files, err := historyIndexFiles(ctx, db, kv.AccountsDomain, fromStep)
 	if err != nil {
@@ -437,11 +438,6 @@ func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.Tempora
 		return err
 	}
 	defer tx.Rollback()
-	it, err := tx.Debug().HistoryKeyTxNumRange(kv.AccountsDomain, int(f.StartRootNum()), int(f.EndRootNum()), order.Asc, -1)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
 
 	const batchChanges = 4096
 	var batch []accountChanges
@@ -460,17 +456,13 @@ func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.Tempora
 	}
 	sampled := false
 	var addr []byte
-	for it.HasNext() {
-		k, txNum, err := it.Next()
-		if err != nil {
-			return err
-		}
+	err = state.AggTx(tx).ScanHistory(ctx, kv.AccountsDomain, f.StartRootNum(), f.EndRootNum(), func(k []byte, txNum uint64, before []byte) error {
 		if !bytes.Equal(k, addr) {
 			addr = append(addr[:0], k...)
 			if sampled = !sampler.CanSkip(); sampled {
 				if batchLen >= batchChanges {
-					if err := send(); err != nil {
-						return err
+					if sendErr := send(); sendErr != nil {
+						return sendErr
 					}
 				}
 				batch = append(batch, accountChanges{addr: bytes.Clone(k)})
@@ -478,35 +470,29 @@ func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.Tempora
 		}
 		if sampled {
 			last := &batch[len(batch)-1]
-			last.txNums = append(last.txNums, txNum)
+			last.txNums, last.befores = append(last.txNums, txNum), append(last.befores, bytes.Clone(before))
 			batchLen++
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	return send()
 }
 
-// visitAccountChanges reads each change's after-value as the next change's before-value, so
-// an account costs one history read per change.
+// visitAccountChanges takes each change's after-value from the next change's before-value,
+// so an account costs one history read per file: the after-value of its last change.
 func visitAccountChanges(tx kv.TemporalTx, acc accountChanges, visit accountChangeVisitor) error {
-	before, _, err := tx.GetAsOf(kv.AccountsDomain, acc.addr, acc.txNums[0])
+	last := len(acc.txNums) - 1
+	for i, txNum := range acc.txNums[:last] {
+		if err := visit(tx, acc.addr, txNum, acc.befores[i], acc.befores[i+1]); err != nil {
+			return err
+		}
+	}
+	after, _, err := tx.GetAsOf(kv.AccountsDomain, acc.addr, acc.txNums[last]+1)
 	if err != nil {
 		return err
 	}
-	before = bytes.Clone(before)
-	for i, txNum := range acc.txNums {
-		nextTxNum := txNum + 1
-		if i+1 < len(acc.txNums) {
-			nextTxNum = acc.txNums[i+1]
-		}
-		after, _, err := tx.GetAsOf(kv.AccountsDomain, acc.addr, nextTxNum)
-		if err != nil {
-			return err
-		}
-		after = bytes.Clone(after)
-		if err := visit(tx, acc.addr, txNum, before, after); err != nil {
-			return err
-		}
-		before = after
-	}
-	return nil
+	return visit(tx, acc.addr, acc.txNums[last], acc.befores[last], bytes.Clone(after))
 }

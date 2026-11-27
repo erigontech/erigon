@@ -41,7 +41,7 @@ type accountHistoryFaults struct {
 
 // buildAccountHistory writes, in files of 10-tx steps: a contract with two storage slots
 // destroyed at txNum 15 and re-created at 17 with one slot, and an EOA whose delegation is
-// cleared at txNum 25. One fault wipes the storage at the re-create before the destroy is
+// cleared at txNum 25 and which changes again at 27. One fault wipes the storage at the re-create before the destroy is
 // written, which leaves the destroy nothing to wipe; the other skips the code delete at the
 // clear.
 func buildAccountHistory(t *testing.T, faults accountHistoryFaults) kv.TemporalRwDB {
@@ -95,6 +95,7 @@ func buildAccountHistory(t *testing.T, faults accountHistoryFaults) kv.TemporalR
 	if !faults.codeKeptAfterClear {
 		del(kv.CodeDomain, eoa[:], 25)
 	}
+	put(kv.AccountsDomain, eoa[:], account(3, nil), 27)
 
 	filler := common.HexToAddress("0xf0")
 	for txNum := uint64(30); txNum < txs; txNum++ {
