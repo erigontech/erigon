@@ -253,11 +253,12 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 	for _, name := range []string{
 		"v1.0-000000-000500-headers",
 		"v1.0-a.b-c-d",
+		"v1-000000-000500-beaconblocks",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var typed Preverified
 			require.NotPanics(t, func() {
-				typed = Preverified{Items: PreverifiedItems{{Name: name, Hash: "aa"}}}.Typed(nil)
+				typed = Preverified{Items: PreverifiedItems{{Name: name, Hash: "aa"}}}.Typed(snaptype.CaplinSnapshotTypes)
 			})
 			require.Empty(t, typed.Items)
 		})
@@ -326,6 +327,8 @@ func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
 		{Name: "v1.1-bad-000050-BlockRoot.future-kind.seg", Hash: "unknown-hyphenated-inner-extension"},
 		{Name: "caplin/v1.1-000000-000050-BlockRoot.future-kind.seg", Hash: "unknown-caplin-inner-extension"},
 		{Name: "v1.1-bad-000050-future.seg-backup", Hash: "unknown-hyphenated-extension"},
+		{Name: "v1.1-bad-000050-beaconblocks.seg-backup", Hash: "registered-hyphenated-extension"},
+		{Name: "caplin/archive-old/v1.1-bad-000050-BlockRoot.seg", Hash: "registered-caplin-hyphenated-dir"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
@@ -334,5 +337,7 @@ func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
 		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",
 		"caplin/v1.1-bad-000050-BlockRoot.seg",
 		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx.torrent",
+		"v1.1-bad-000050-beaconblocks.seg-backup",
+		"caplin/archive-old/v1.1-bad-000050-BlockRoot.seg",
 	}, drops.unparsableNames)
 }

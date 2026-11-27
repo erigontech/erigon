@@ -154,7 +154,8 @@ func (d *typeFilterDrops) unparsableItem(name string) {
 	}
 }
 
-func (d *typeFilterDrops) unparsedItem(name, afterVersion string) {
+func (d *typeFilterDrops) unparsedItem(name string) {
+	_, afterVersion, _ := strings.Cut(filepath.Base(name), "-")
 	_, afterFrom, _ := strings.Cut(afterVersion, "-")
 	_, typeToken, _ := strings.Cut(afterFrom, "-")
 	typeToken = strings.TrimSuffix(typeToken, filepath.Ext(typeToken))
@@ -247,7 +248,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
 			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
 			if !known || caplinFile.Type == nil {
-				drops.unparsedItem(p.Name, name)
+				drops.unparsedItem(p.Name)
 				continue
 			}
 
@@ -293,7 +294,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			continue
 		}
 		if dot < lastSep {
-			drops.unparsedItem(p.Name, name)
+			drops.unparsedItem(p.Name)
 			continue
 		}
 
@@ -314,7 +315,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			drops.unreadable++
 			continue
 		default:
-			drops.unparsedItem(p.Name, name)
+			drops.unparsedItem(p.Name)
 			continue
 		}
 
