@@ -71,6 +71,9 @@ func TestNodePeersListsPeersWithoutENR(t *testing.T) {
 	encoded, err := json.Marshal(resp.Data.([]peer)[1])
 	require.NoError(t, err)
 	require.JSONEq(t, `{"peer_id":"inbound","enr":null,"last_seen_p2p_address":"","state":"connected","direction":"inbound","agent_version":"b"}`, string(encoded))
+	dialed := resp.Data.([]peer)[0]
+	require.NotNil(t, dialed.Enr)
+	require.Equal(t, "enr:-dialed", *dialed.Enr)
 }
 
 func TestNodePeersFiltersByEveryRequestedValue(t *testing.T) {
@@ -82,6 +85,10 @@ func TestNodePeersFiltersByEveryRequestedValue(t *testing.T) {
 		{query: "?state=connected&state=disconnected&direction=inbound", want: []string{"inbound", "gone"}},
 		{query: "?state=connected", want: []string{"dialed", "inbound"}},
 		{query: "?state=connecting", want: []string{}},
+		{query: "?state=connected,disconnected", want: []string{"dialed", "inbound", "gone"}},
+		{query: "?state=connected,disconnected&state=connecting&direction=inbound", want: []string{"inbound", "gone"}},
+		{query: "?state=&direction=", want: []string{"dialed", "inbound", "gone"}},
+		{query: "?state=&state=disconnected", want: []string{"gone"}},
 	} {
 		t.Run(test.query, func(t *testing.T) {
 			resp, err := getPeers(t, test.query)
@@ -92,7 +99,7 @@ func TestNodePeersFiltersByEveryRequestedValue(t *testing.T) {
 }
 
 func TestNodePeersRejectsUnknownFilterValues(t *testing.T) {
-	for _, query := range []string{"?state=online", "?direction=sideways"} {
+	for _, query := range []string{"?state=online", "?direction=unknown", "?state=connected,unknown"} {
 		_, err := getPeers(t, query)
 		var endpointErr *beaconhttp.EndpointError
 		require.ErrorAs(t, err, &endpointErr, query)

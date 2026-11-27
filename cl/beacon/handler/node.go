@@ -92,22 +92,28 @@ var (
 	peerDirections = []string{"inbound", "outbound"}
 )
 
-// peerFilter reads a repeated query parameter. An empty filter matches every value.
-func peerFilter(r *http.Request, name string, allowed []string) (map[string]struct{}, error) {
-	values := r.URL.Query()[name]
-	filter := make(map[string]struct{}, len(values))
+// peerFilter reads a list query parameter, repeated or comma-separated. Empty values are skipped, and an
+// empty filter matches every value.
+func peerFilter(r *http.Request, name string, allowed []string) ([]string, error) {
+	values, err := beaconhttp.StringListFromQueryParams(r, name)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	filter := make([]string, 0, len(values))
 	for _, value := range values {
+		if value == "" {
+			continue
+		}
 		if !slices.Contains(allowed, value) {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid %s: %q", name, value))
 		}
-		filter[value] = struct{}{}
+		filter = append(filter, value)
 	}
 	return filter, nil
 }
 
-func matchesPeerFilter(filter map[string]struct{}, value string) bool {
-	_, ok := filter[value]
-	return len(filter) == 0 || ok
+func matchesPeerFilter(filter []string, value string) bool {
+	return len(filter) == 0 || slices.Contains(filter, value)
 }
 
 func newPeer(p *sentinelproto.Peer) peer {

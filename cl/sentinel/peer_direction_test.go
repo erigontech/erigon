@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	ecrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -430,13 +431,18 @@ func TestSelectPeersToPrunePrefersPeersOffSubnetsBelowSearchTarget(t *testing.T)
 
 func peersInfoDirection(t *testing.T, s *Sentinel, pid peer.ID) string {
 	t.Helper()
+	return peersInfoEntry(t, s, pid).Direction
+}
+
+func peersInfoEntry(t *testing.T, s *Sentinel, pid peer.ID) *sentinelproto.Peer {
+	t.Helper()
 	for _, p := range s.GetPeersInfos().Peers {
 		if p.Pid == pid.String() {
-			return p.Direction
+			return p
 		}
 	}
 	t.Fatalf("peer %s is not listed", pid)
-	return ""
+	return nil
 }
 
 func TestPeersInfoTakesTheDirectionFromAnOpenConnection(t *testing.T) {
@@ -454,9 +460,12 @@ func TestPeersInfoKeepsTheDirectionOfAPeerWithoutAnOpenConnection(t *testing.T) 
 	local := newListeningHost(t)
 	s := testSentinel(t, local)
 	pid := connectInbound(t, local).ID()
+	require.Equal(t, "connected", peersInfoEntry(t, s, pid).State)
 	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid}}}
 
-	require.Equal(t, "inbound", peersInfoDirection(t, s, pid))
+	entry := peersInfoEntry(t, s, pid)
+	require.Equal(t, "inbound", entry.Direction)
+	require.Equal(t, "disconnected", entry.State, "a peer with only closed connections")
 }
 
 // emptiedNetwork removes a peer's connections after the first ConnsToPeer call, as libp2p does when
