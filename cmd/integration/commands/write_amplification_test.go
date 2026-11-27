@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -42,9 +43,13 @@ func corruptAccountsKV(t *testing.T) kv.TemporalRwDB {
 	kvFiles, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*accounts*.kv"))
 	require.NoError(t, err)
 	require.NotEmpty(t, kvFiles)
-	// the open aggregator keeps the original mapped; only a fresh open of the path fails
-	require.NoError(t, os.Rename(kvFiles[0], kvFiles[0]+".orig"))
-	require.NoError(t, os.WriteFile(kvFiles[0], []byte("broken"), 0o644))
+	// Windows cannot rename or truncate a mapped file, so overwrite the header in place: the open
+	// aggregator parsed it already, only a fresh open of the path sees the oversized dictionary.
+	f, err := os.OpenFile(kvFiles[0], os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = f.WriteAt(bytes.Repeat([]byte{0x7f}, 24), 0)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
 	return db
 }
 
