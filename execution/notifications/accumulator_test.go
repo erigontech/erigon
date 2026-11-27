@@ -17,6 +17,7 @@
 package notifications
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -143,5 +144,71 @@ func TestAccumulatorAppendPreservesChanges(t *testing.T) {
 			require.Len(t, last.Changes[0].StorageChanges, 1)
 			require.Equal(t, []byte{3}, last.Changes[0].StorageChanges[0].Data)
 		})
+	}
+}
+
+func TestAccumulatorDeleteAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		actions []Action
+	}{
+		{name: "absent"},
+		{name: "storage", actions: []Action{ActionStorage}},
+		{name: "account", actions: []Action{ActionUpsert}},
+		{name: "code", actions: []Action{ActionCode}},
+		{name: "account_code_storage", actions: []Action{ActionUpsert, ActionCode, ActionStorage}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewAccumulator()
+			address := common.Address{1}
+			a.StartChange(&types.Header{}, nil, false)
+			for _, action := range tc.actions {
+				switch action {
+				case ActionStorage:
+					a.ChangeStorage(address, 1, common.Hash{2}, []byte{3})
+				case ActionUpsert:
+					a.ChangeAccount(address, 1, []byte{4})
+				case ActionCode:
+					a.ChangeCode(address, 1, []byte{5})
+				}
+			}
+			for range 2 {
+				require.NotPanics(t, func() { a.DeleteAccount(address) })
+				require.Len(t, a.Changes()[0].Changes, 1)
+				change := a.Changes()[0].Changes[0]
+				require.Equal(t, ActionRemove, change.Action)
+				require.Empty(t, change.Data)
+				require.Empty(t, change.Code)
+				require.Empty(t, change.StorageChanges)
+			}
+		})
+	}
+}
+
+func TestAccumulatorRecreateAccount(t *testing.T) {
+	for _, incarnation := range []uint64{0, 1} {
+		for _, first := range []Action{ActionUpsert, ActionCode, ActionStorage} {
+			t.Run(fmt.Sprintf("incarnation_%d/first_%d", incarnation, first), func(t *testing.T) {
+				a := NewAccumulator()
+				address, slot := common.Address{1}, common.Hash{2}
+				a.StartChange(&types.Header{}, nil, false)
+				a.ChangeStorage(address, 1, slot, []byte{3})
+				a.DeleteAccount(address)
+				switch first {
+				case ActionCode:
+					a.ChangeCode(address, incarnation, []byte{4})
+				case ActionStorage:
+					a.ChangeStorage(address, incarnation, slot, []byte{6})
+				}
+				a.ChangeAccount(address, incarnation, []byte{5})
+				a.ChangeCode(address, incarnation, []byte{4})
+				a.ChangeStorage(address, incarnation, slot, []byte{6})
+				require.Equal(t, []AccountChange{{Address: address, Incarnation: 1, Action: ActionRemove}, {
+					Address: address, Incarnation: incarnation, Action: ActionUpsertCode,
+					Data: []byte{5}, Code: []byte{4},
+					StorageChanges: []StorageChange{{Location: slot, Data: []byte{6}}},
+				}}, a.Changes()[0].Changes)
+			})
+		}
 	}
 }
