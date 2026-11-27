@@ -463,12 +463,16 @@ func TestResetBlockStartHashReader(t *testing.T) {
 
 type historicalHashEngine struct {
 	rules.Engine
-	contract accounts.Address
-	want     common.Hash
+	contract    accounts.Address
+	want        common.Hash
+	ignoreError bool
 }
 
 func (e *historicalHashEngine) check(syscall rules.SystemCall) error {
 	got, err := syscall(e.contract, nil)
+	if e.ignoreError {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -525,12 +529,22 @@ func TestHistoricalSystemCallUsesLocalReader(t *testing.T) {
 		name      string
 		index     int
 		nilEngine bool
+		missing   bool
 	}{
-		{"initialize", -1, false}, {"finalize", 0, false}, {"finalize_nil_task_engine", 0, true},
+		{"initialize", -1, false, false},
+		{"finalize", 0, false, false},
+		{"finalize_nil_task_engine", 0, true, false},
+		{"initialize_missing_ancestor", -1, false, true},
+		{"finalize_missing_ancestor", 0, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			engine.ignoreError = tc.missing
+			taskHeader := types.CopyHeader(header)
+			if tc.missing {
+				taskHeader.ParentHash = common.Hash{1}
+			}
 			task := &TxTask{
-				TxNum: 1, TxIndex: tc.index, Header: header, Config: cfg.ChainConfig, Engine: engine,
+				TxNum: 1, TxIndex: tc.index, Header: taskHeader, Config: cfg.ChainConfig, Engine: engine,
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 3, GetHash: func(uint64) (common.Hash, error) { return common.Hash{}, errors.New("producer reader used") }},
 			}
 			if tc.nilEngine {
@@ -542,6 +556,10 @@ func TestHistoricalSystemCallUsesLocalReader(t *testing.T) {
 				defer worker.ibs.Close()
 				worker.ResetTx(tx)
 				result := worker.RunTxTask(task)
+				if tc.missing {
+					require.ErrorContains(t, result.Err, "header 2")
+					return
+				}
 				require.NoError(t, result.Err)
 				return
 			}
@@ -550,8 +568,15 @@ func TestHistoricalSystemCallUsesLocalReader(t *testing.T) {
 			_, err := queue.Drain(t.Context(), result)
 			require.NoError(t, err)
 			processor := &historicalResultProcessor{}
-			consumer := TraceConsumerFunc(func(*BlockResult, *TxResult, kv.TemporalTx) error { return nil })
+			called := false
+			consumer := TraceConsumerFunc(func(*BlockResult, *TxResult, kv.TemporalTx) error { called = true; return nil })
 			require.NotPanics(t, func() { _, _, err = processor.processResults(consumer, cfg, queue, task.TxNum, tx, false, logger) })
+			if tc.missing {
+				require.ErrorContains(t, err, "header 2")
+				require.False(t, called)
+				require.False(t, processor.blockResult.Complete)
+				return
+			}
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 		})

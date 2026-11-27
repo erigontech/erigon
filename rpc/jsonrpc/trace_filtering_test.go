@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -40,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -724,4 +727,28 @@ func requireFastJSONMatchesReflection(t *testing.T, name string, ts jsonstream.M
 	got, err := jsonstream.Marshal(ts)
 	require.NoError(t, err, name)
 	require.Equal(t, string(want), string(got), name)
+}
+
+func TestCallBlockRewardSystemCallHashError(t *testing.T) {
+	contract := common.HexToAddress("0xc0de")
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.STOP)}
+	genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	generated, err := m.GenerateChain(3, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	api := newTraceApiForTest(m)
+	readErr := errors.New("ancestor lookup failed")
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: m.BlockReader, blockNumber: 1, err: readErr}
+	called := false
+	_, _, err = api.callBlock(t.Context(), tx, generated.Blocks[2], nil, m.ChainConfig, nil, func(syscall protocolrules.SystemCall) error {
+		called = true
+		_, _ = syscall(accounts.InternAddress(contract), nil)
+		return nil
+	})
+	require.True(t, called)
+	require.ErrorIs(t, err, readErr)
 }

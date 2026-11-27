@@ -872,6 +872,9 @@ func (api *TraceAPIImpl) callBlock(
 		if err := withSyscall(syscall); err != nil {
 			return nil, nil, err
 		}
+		if err := ibs.StateReadError(); err != nil {
+			return nil, nil, err
+		}
 	}
 	return traces, wdiffs, nil
 }

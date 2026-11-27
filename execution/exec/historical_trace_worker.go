@@ -194,6 +194,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		}
 		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		if result.Err == nil {
+			result.Err = ibs.StateReadError()
+		}
+		if result.Err == nil {
 			ibs.EndTransaction()
 		}
 	case txTask.IsBlockEnd():
@@ -393,6 +396,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
+				var stateErr error
 				func() {
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
@@ -407,13 +411,18 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					}
 
 					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+					if stateErr = ibs.StateReadError(); stateErr != nil {
+						return
+					}
 					if err != nil {
 						result.Err = err
 						return
 					}
-
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 				}()
+				if stateErr != nil {
+					return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, stateErr)
+				}
 			}
 
 			p.blockResult.Complete = true
