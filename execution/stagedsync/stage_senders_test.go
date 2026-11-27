@@ -247,7 +247,7 @@ func writeSignedBlock(t *testing.T, tx kv.RwTx, header *types.Header, key *ecdsa
 	return hash, body
 }
 
-func TestSendersAttachesSendersToCachedBody(t *testing.T) {
+func TestSendersDetachesTheRecoveryOfACachedBody(t *testing.T) {
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -258,16 +258,21 @@ func TestSendersAttachesSendersToCachedBody(t *testing.T) {
 	hash, body := writeSignedBlock(t, tx, header, key)
 	readAheader := exec.NewBlockReadAheader()
 	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, body)
-	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
+	recovery := exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions)
+	readAheader.AddSendersRecovery(hash, recovery)
 
 	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
 	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
 
-	cached, ok := readAheader.ReadBodyWithTransactions(hash)
-	require.True(t, ok)
-	sender, ok := cached.Transactions[0].GetSender()
-	require.True(t, ok, "the cached body is what execution reads, so the stage must leave the senders on its txs")
-	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), sender.Value())
+	require.Same(t, recovery, readAheader.DetachedSendersRecovery(hash), "exec reads the senders per tx from the recovery")
+	_, ok := readAheader.ReadBlockWithSenders(hash)
+	require.True(t, ok, "exec reads the cached block although its txs have no senders yet")
+	has, err := m.BlockReader.HasSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.False(t, has, "the Execution stage writes the senders of a detached recovery")
+	progress, err := stages.GetStageProgress(tx, stages.Senders)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), progress)
 }
 
 func TestSendersWritesBALBlockSenders(t *testing.T) {
@@ -294,7 +299,6 @@ func TestSendersWritesBALBlockSenders(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, stored.HasNonEmptyBAL(), "the stage reads the header back from the DB")
 	readAheader := exec.NewBlockReadAheader()
-	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, body)
 	readAheader.AddBlockAccessList(hash, types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
 	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
 

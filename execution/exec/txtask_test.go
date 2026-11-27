@@ -311,6 +311,38 @@ func TestTxSenderInvalidSignatureInvalidatesBlock(t *testing.T) {
 	require.ErrorIs(t, err, rules.ErrInvalidBlock)
 }
 
+// A tx whose sender is not cached waits for its own recovery slot, not for the whole block, and does not recover the sender itself.
+func TestTxSenderWaitsForItsRecoverySlot(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	unrecoverable := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(27)}, GasPrice: *uint256.NewInt(1)}
+	other := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+	recovery := pendingSendersRecovery(2)
+	task := &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{unrecoverable, other}, Senders: recovery}
+
+	type result struct {
+		msg *types.Message
+		err error
+	}
+	done := make(chan result)
+	go func() {
+		msg, err := task.TxMessage()
+		done <- result{msg, err}
+	}()
+	select {
+	case <-done:
+		t.Fatal("the tx ran before its sender slot was filled")
+	case <-time.After(50 * time.Millisecond):
+	}
+	recovery.fill(0, sender)
+	res := <-done
+	require.NoError(t, res.err)
+	require.Equal(t, sender, res.msg.From())
+	cached, ok := unrecoverable.GetSender()
+	require.True(t, ok)
+	require.Equal(t, sender, cached)
+}
+
 // A bad signature must win over the tx's own validity checks, as it did when senders were recovered before execution.
 func TestTxMessageReportsBadSignatureFirst(t *testing.T) {
 	to := common.HexToAddress("0xbb")

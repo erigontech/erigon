@@ -220,6 +220,8 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
+	Senders *SendersRecovery // optional: the block's sender recovery, still running
+
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -265,6 +267,12 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
 		return sender, nil
+	}
+	if t.Senders != nil {
+		if sender, ok := t.Senders.Sender(t.TxIndex); ok {
+			t.Tx().SetSender(sender)
+			return sender, nil
+		}
 	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)

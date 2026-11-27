@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +40,9 @@ type BlockReadAheader struct {
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
 	recoveries *lru.Cache[common.Hash, *SendersRecovery]
+
+	detachedMu sync.Mutex
+	detached   map[common.Hash]DetachedSenders // exec reads these per tx; kv.Senders is written after exec
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -282,8 +288,17 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 type SendersRecovery struct {
 	done     chan struct{}
 	senders  []accounts.Address
+	ready    []atomic.Bool // ready[i] publishes senders[i] before the whole recovery ends
 	err      error
 	failedTx int
+}
+
+type DetachedSenders struct {
+	BlockNum  uint64
+	BlockHash common.Hash
+	Signer    *types.Signer
+	Txns      types.Transactions
+	Recovery  *SendersRecovery
 }
 
 type senderError struct {
@@ -303,7 +318,7 @@ func StartBatchSendersRecovery(ctx context.Context, signers []*types.Signer, txn
 }
 
 func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer, txns types.Transactions) *SendersRecovery {
-	r := &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, len(txns)), failedTx: -1}
+	r := &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, len(txns)), ready: make([]atomic.Bool, len(txns)), failedTx: -1}
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
@@ -320,6 +335,7 @@ func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer,
 						return &senderError{txIndex: i, err: fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txns[i].Hash(), err)}
 					}
 					r.senders[i] = from
+					r.ready[i].Store(true)
 				}
 				return nil
 			})
@@ -341,6 +357,26 @@ func (r *SendersRecovery) Wait(ctx context.Context) ([]accounts.Address, error) 
 	}
 }
 
+// Sender waits only for the sender of txns[i]. ok is false when the recovery ended without it.
+func (r *SendersRecovery) Sender(i int) (accounts.Address, bool) {
+	if i < 0 || i >= len(r.ready) {
+		return accounts.NilAddress, false
+	}
+	for !r.ready[i].Load() {
+		select {
+		case <-r.done:
+			if !r.ready[i].Load() {
+				return accounts.NilAddress, false
+			}
+		default:
+			runtime.Gosched()
+		}
+	}
+	return r.senders[i], true
+}
+
+func (r *SendersRecovery) Len() int { return len(r.senders) }
+
 func (r *SendersRecovery) FailedTx() int {
 	return r.failedTx
 }
@@ -355,6 +391,29 @@ func (bra *BlockReadAheader) TakeSendersRecovery(blockHash common.Hash) (*Sender
 		bra.recoveries.Remove(blockHash)
 	}
 	return r, ok
+}
+
+func (bra *BlockReadAheader) DetachSendersRecovery(d DetachedSenders) {
+	bra.detachedMu.Lock()
+	defer bra.detachedMu.Unlock()
+	if bra.detached == nil {
+		bra.detached = map[common.Hash]DetachedSenders{}
+	}
+	bra.detached[d.BlockHash] = d
+}
+
+func (bra *BlockReadAheader) DetachedSendersRecovery(blockHash common.Hash) *SendersRecovery {
+	bra.detachedMu.Lock()
+	defer bra.detachedMu.Unlock()
+	return bra.detached[blockHash].Recovery
+}
+
+func (bra *BlockReadAheader) TakeDetachedSenders() []DetachedSenders {
+	bra.detachedMu.Lock()
+	defer bra.detachedMu.Unlock()
+	out := slices.Collect(maps.Values(bra.detached))
+	clear(bra.detached)
+	return out
 }
 
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
@@ -703,9 +762,11 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	if body == nil || !ok {
 		return nil, false
 	}
-	for _, txn := range body.Transactions {
-		if _, ok := txn.GetSender(); !ok {
-			return nil, false
+	if bra.DetachedSendersRecovery(blockHash) == nil {
+		for _, txn := range body.Transactions {
+			if _, ok := txn.GetSender(); !ok {
+				return nil, false
+			}
 		}
 	}
 	bal, _ := bra.bals.Get(blockHash)

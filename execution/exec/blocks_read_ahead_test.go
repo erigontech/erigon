@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1278,4 +1279,43 @@ func TestBALHexTrieWarmupsByVariant(t *testing.T) {
 	require.True(t, balHexTrieWarmups(commitment.VariantParallelHexPatricia))
 	require.True(t, balHexTrieWarmups(commitment.VariantHexPatriciaTrie))
 	require.False(t, balHexTrieWarmups(commitment.VariantCommitmentV3))
+}
+
+func pendingSendersRecovery(n int) *SendersRecovery {
+	return &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, n), ready: make([]atomic.Bool, n), failedTx: -1}
+}
+
+func (r *SendersRecovery) fill(i int, sender accounts.Address) {
+	r.senders[i] = sender
+	r.ready[i].Store(true)
+}
+
+func TestSendersRecoverySenderWaitsOnlyForItsSlot(t *testing.T) {
+	first := accounts.InternAddress(common.HexToAddress("0x01"))
+	second := accounts.InternAddress(common.HexToAddress("0x02"))
+	r := pendingSendersRecovery(3)
+	r.fill(1, second)
+
+	got, ok := r.Sender(1)
+	require.True(t, ok, "slot 1 is ready while slot 0 is still pending")
+	require.Equal(t, second, got)
+
+	waited := make(chan accounts.Address)
+	go func() {
+		sender, _ := r.Sender(0)
+		waited <- sender
+	}()
+	select {
+	case <-waited:
+		t.Fatal("Sender returned before its slot was filled")
+	case <-time.After(50 * time.Millisecond):
+	}
+	r.fill(0, first)
+	require.Equal(t, first, <-waited)
+
+	close(r.done)
+	_, ok = r.Sender(2)
+	require.False(t, ok, "a recovery that ended without the slot does not block")
+	_, ok = r.Sender(3)
+	require.False(t, ok)
 }

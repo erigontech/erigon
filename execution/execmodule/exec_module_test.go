@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -4480,4 +4481,70 @@ func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
 	validation, err := m.ValidateChain(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
+}
+
+// newPayload hands over a running sender recovery: exec reads each sender from it per tx, and kv.Senders is still written.
+func TestValidateChainExecutesWithDetachedSendersRecovery(t *testing.T) {
+	t.Run("running", func(t *testing.T) { testValidateChainWithDetachedSendersRecovery(t, t.Context()) })
+	t.Run("cancelled", func(t *testing.T) {
+		recoveryCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		testValidateChainWithDetachedSendersRecovery(t, recoveryCtx)
+	})
+}
+
+func testValidateChainWithDetachedSendersRecovery(t *testing.T, recoveryCtx context.Context) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc:  types.GenesisAlloc{senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	const txCount = 3
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		for nonce := range uint64(txCount) {
+			txn, err := types.SignTx(
+				types.NewTransaction(nonce, common.Address{0x01}, uint256.NewInt(1), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(nil),
+				privKey,
+			)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	generated := chainPack.Blocks[0]
+	txns := make(types.Transactions, 0, txCount)
+	for _, txn := range generated.Transactions() {
+		var data bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&data))
+		decoded, err := types.DecodeTransaction(data.Bytes())
+		require.NoError(t, err)
+		_, ok := decoded.GetSender()
+		require.False(t, ok)
+		txns = append(txns, decoded)
+	}
+	block := types.NewBlockFromStorage(generated.Hash(), generated.Header(), txns, generated.Uncles(), generated.Withdrawals(), nil)
+
+	insertRes, err := m.InsertBlocks(ctx, []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	signer := types.MakeSigner(m.ChainConfig, block.NumberU64(), block.Time())
+	m.ExecModule.AddSendersRecovery(block.Hash(), exec.StartSendersRecovery(recoveryCtx, signer, txns))
+	validation, err := m.ValidateChain(ctx, block)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
+	fcu, err := m.UpdateForkChoice(ctx, block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		data, err := tx.GetOne(kv.Senders, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+		require.NoError(t, err)
+		require.Equal(t, bytes.Repeat(senderAddr[:], txCount), data)
+		return nil
+	}))
 }

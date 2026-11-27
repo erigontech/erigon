@@ -222,6 +222,10 @@ func (b *sendersBatch) add(cfg SendersCfg, header *types.Header, hash common.Has
 		first:  len(b.txns),
 	}
 	if r, ok := cfg.readAheader.TakeSendersRecovery(hash); ok {
+		if cached && r.Len() == len(body.Transactions) {
+			cfg.readAheader.DetachSendersRecovery(exec.DetachedSenders{BlockNum: blk.number, BlockHash: hash, Signer: blk.signer, Txns: body.Transactions, Recovery: r})
+			return
+		}
 		blk.registered = r
 	} else {
 		b.txns = append(b.txns, body.Transactions...)
@@ -287,6 +291,26 @@ func sendersBytes(senders []accounts.Address) []byte {
 		out = append(out, addr[:]...)
 	}
 	return out
+}
+
+// writeDetachedSenders writes kv.Senders for the blocks whose recovery exec read per tx.
+func writeDetachedSenders(ctx context.Context, tx kv.Putter, detached []exec.DetachedSenders) error {
+	for _, d := range detached {
+		senders, err := d.Recovery.Wait(ctx)
+		if err != nil {
+			senders, err = exec.StartSendersRecovery(ctx, d.Signer, d.Txns).Wait(ctx)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if err := tx.Put(kv.Senders, dbutils.BlockBodyKey(d.BlockNum, d.BlockHash), sendersBytes(senders)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg) (err error) {

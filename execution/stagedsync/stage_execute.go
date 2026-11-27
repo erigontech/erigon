@@ -480,6 +480,18 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	if cfg.readAheader != nil {
+		detached := cfg.readAheader.TakeDetachedSenders()
+		if execErr == nil {
+			sendersTx := kv.RwTx(rwTx)
+			if out.applyTx != nil {
+				sendersTx = out.applyTx
+			}
+			if err := writeDetachedSenders(ctx, sendersTx, detached); err != nil {
+				return err
+			}
+		}
+	}
 
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
