@@ -96,19 +96,24 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
 		return nil
 	}
 	lastFcu := head
-	insert := func(ctx context.Context, blocks []*types.Block) error {
+	insert := func(ctx context.Context, blocks []*types.Block) (bool, error) {
 		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
-			return err
+			return false, err
 		}
 		last := blocks[len(blocks)-1]
 		head = last.NumberU64()
-		if head-lastFcu >= cfg.FcuInterval || head >= cfg.TargetBlock {
-			if err := commitHead(ctx, logger, cfg, last); err != nil {
-				return err
-			}
-			lastFcu = head
+		if head-lastFcu < cfg.FcuInterval && head < cfg.TargetBlock {
+			return false, nil
 		}
-		return nil
+		if err := commitHead(ctx, logger, cfg.ChainRW, last); err != nil {
+			if bad, ok := errors.AsType[*badBlockError](err); ok {
+				head = bad.lastValid.Number.Uint64()
+				lastFcu = head
+			}
+			return false, err
+		}
+		lastFcu = head
+		return true, nil
 	}
 	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, insert); err != nil {
 		return err
@@ -117,11 +122,16 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
 	return nil
 }
 
+type forkChoiceUpdater interface {
+	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error)
+	GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header
+}
+
 // commitHead advances the canonical head via the exec module, retrying while the
 // module is busy (e.g. startup snapshot catch-up holding the semaphore).
-func commitHead(ctx context.Context, logger log.Logger, cfg Config, head *types.Block) error {
+func commitHead(ctx context.Context, logger log.Logger, chain forkChoiceUpdater, head *types.Block) error {
 	for {
-		status, valErr, _, err := cfg.ChainRW.UpdateForkChoice(ctx, head.Hash(), common.Hash{}, common.Hash{})
+		status, valErr, latestValid, err := chain.UpdateForkChoice(ctx, head.Hash(), common.Hash{}, common.Hash{})
 		if err != nil {
 			return err
 		}
@@ -133,6 +143,11 @@ func commitHead(ctx context.Context, logger log.Logger, cfg Config, head *types.
 				return err
 			}
 			continue
+		case execmodule.ExecutionStatusBadBlock:
+			if lastValid := chain.GetHeaderByHash(ctx, latestValid); lastValid != nil {
+				return &badBlockError{lastValid: lastValid}
+			}
+			fallthrough
 		default:
 			msg := ""
 			if valErr != nil {

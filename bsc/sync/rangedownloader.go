@@ -18,15 +18,17 @@ package bscsync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
-	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -42,12 +44,36 @@ import (
 // so RAM/worker ≈ rangeSize × estBlockSize.
 const estBlockSize = 1 * datasize.MB
 
-// insertFunc persists an ascending, gap-free batch of blocks. It is the seam
-// bor filled with store.InsertBlocks; here it wraps the exec-module client.
-type insertFunc func(ctx context.Context, blocks []*types.Block) error
+// insertFunc persists an ascending, gap-free batch of blocks and reports whether
+// the batch was committed as the canonical head. It is the seam bor filled with
+// store.InsertBlocks; here it wraps the exec-module client.
+type insertFunc func(ctx context.Context, blocks []*types.Block) (committed bool, err error)
+
+// badBlockError reports that execution rejected an inserted block; lastValid is
+// the canonical head that execution kept.
+type badBlockError struct {
+	lastValid *types.Header
+}
+
+func (e *badBlockError) Error() string {
+	return fmt.Sprintf("bad block after %d (%x)", e.lastValid.Number.Uint64(), e.lastValid.Hash())
+}
+
+type rangeService interface {
+	ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId
+	FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error)
+	Penalize(ctx context.Context, peerId *p2p.PeerId) error
+}
 
 type blockRange struct {
 	from, to uint64 // inclusive
+}
+
+// rangeSource records the peer that sent an inserted range.
+type rangeSource struct {
+	blockRange
+	peer *p2p.PeerId
 }
 
 // downloadRanges fetches [from,to] forward in parallel range-chunks, calling
@@ -56,11 +82,12 @@ type blockRange struct {
 // only at genesis. It returns when the range is fully inserted or ctx is
 // cancelled. Peer backoff uses peerBackoff (poll for peers, not bor's 1m
 // steady-state wait).
-func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service, from, to uint64, parent *types.Header, insert insertFunc) error {
+func downloadRanges(ctx context.Context, logger log.Logger, svc rangeService, from, to uint64, parent *types.Header, insert insertFunc) error {
 	maxWorkers := estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
 	prev := parent
 	fetchStart := time.Now()
 	var done uint64
+	var uncommitted []rangeSource
 
 	// Ranges are generated lazily from a cursor rather than materialized up front:
 	// a full-chain sync (0 → ~126M at 1024/range) would otherwise pre-allocate
@@ -119,11 +146,13 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service,
 				break
 			}
 			if err := verifyChain(prev, blocks); err != nil {
-				logger.Debug("[bsc] range verify failed, will retry", "from", r.from, "to", r.to, "err", err)
+				logger.Debug("[bsc] range verify failed, will retry", "from", r.from, "to", r.to, "peer", peers[i], "err", err)
+				penalize(ctx, logger, svc, peers[i])
 				advanceTo = r.from
 				break
 			}
 			assembled = append(assembled, blocks...)
+			uncommitted = append(uncommitted, rangeSource{blockRange{r.from, blocks[len(blocks)-1].NumberU64()}, peers[i]})
 			prev = blocks[len(blocks)-1].HeaderNoCopy()
 		}
 		nextFrom = advanceTo
@@ -132,8 +161,25 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service,
 			continue
 		}
 
-		if err := insert(ctx, assembled); err != nil {
+		committed, err := insert(ctx, assembled)
+		if bad, ok := errors.AsType[*badBlockError](err); ok {
+			badNum := bad.lastValid.Number.Uint64() + 1
+			logger.Warn("[bsc] execution rejected block, will retry", "block", badNum, "err", err)
+			for _, src := range uncommitted {
+				if src.from <= badNum && badNum <= src.to {
+					penalize(ctx, logger, svc, src.peer)
+				}
+			}
+			uncommitted = nil
+			prev = bad.lastValid
+			nextFrom = badNum
+			continue
+		}
+		if err != nil {
 			return err
+		}
+		if committed {
+			uncommitted = nil
 		}
 
 		done += uint64(len(assembled))
@@ -143,4 +189,10 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc *bscp2p.Service,
 			"blk/s", uint64(float64(done)/time.Since(fetchStart).Seconds()))
 	}
 	return nil
+}
+
+func penalize(ctx context.Context, logger log.Logger, svc rangeService, peer *p2p.PeerId) {
+	if err := svc.Penalize(ctx, peer); err != nil {
+		logger.Debug("[bsc] failed to penalize peer", "peer", peer, "err", err)
+	}
 }
