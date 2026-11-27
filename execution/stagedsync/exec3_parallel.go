@@ -884,6 +884,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			execErr = errors.Join(execErr, waitErr)
 		}
 	}
+	pe.progress.FlushReruns(&pe.txExecutor)
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -1111,8 +1112,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 			if ok {
 				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-				pe.execCount.Add(int64(blockExecutor.cntExec))
-				pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
@@ -1127,10 +1126,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
-						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
+						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec.Load(),
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
-						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec.Load()))/1e3))
 					npWait, npProc = 0, 0
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
@@ -2559,7 +2558,8 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntValidationFail int
+	cntSpecExec, cntValidationFail int
+	cntExec                        atomic.Int64
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -3669,7 +3669,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 			// Re-execution reuses the existing pool task, so the scheduler must not
 			// create another task for the same transaction.
 			if be.selfLoopDispatched[nextTx] {
-				be.cntExec++
 				dispatched++
 				continue
 			}
@@ -3683,7 +3682,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 			if !isNextValidated {
 				be.cntSpecExec++
 			}
-			be.cntExec++
 			dispatched++
 		}
 		return dispatched
