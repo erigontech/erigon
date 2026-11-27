@@ -1760,7 +1760,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
-	// dependency and pauses until this tx commits.
+	// dependency and re-runs once this tx validates.
 	be.versionMap.FlushWrites(result.TxOut, false)
 }
 
@@ -2626,13 +2626,13 @@ type blockExecutor struct {
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
+	// re-queues wakeAt[F] and wakeValidated[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
-	// wakeValidated maps a task to the named re-runs waiting for it to validate; finalizing
-	// F also re-queues wakeValidated[F]. validatedTasks holds the tasks validated since
-	// their last re-exec signal.
+	// wakeValidated maps a task to the named re-runs waiting for it to validate.
+	// validatedTasks holds the tasks validated since their last re-exec signal and not
+	// yet committed.
 	wakeValidated  map[int][]*poolTask
 	validatedTasks map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
@@ -3028,6 +3028,7 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
 	delete(be.wakeValidated, tx)
+	delete(be.validatedTasks, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3084,15 +3085,21 @@ func (be *blockExecutor) signalValidated(tx int) {
 }
 
 // requeueAtValidated registers pt to be re-queued when target validates or commits.
-// Returns false when target already did; the caller then continues in place.
+// Returns false when target already committed; the caller then continues in place.
 func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 	be.checkWaitTarget(tx, target)
 	be.wakeMu.Lock()
 	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target || be.validatedTasks[target] {
+	if int(be.committedFrontier.Load()) >= target {
 		return false
 	}
-	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	// A dependency that survives the writer's validation (a fee recipient's cells stay
+	// provisional) settles only at the writer's commit.
+	if be.validatedTasks[target] {
+		be.wakeAt[target] = append(be.wakeAt[target], pt)
+	} else {
+		be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	}
 	return true
 }
 

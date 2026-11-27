@@ -336,7 +336,7 @@ func TestPoolNamedRerunWakesWhenWriterValidates(t *testing.T) {
 	require.Same(t, pt, pe.pool.pop())
 
 	pt2 := newPoolUnitTask(be, 2)
-	require.True(t, pt2.rerunAfter(1), "a writer that already validated must not park the reader")
+	require.False(t, pt2.rerunAfter(1), "a dependency that survives the writer's validation waits for its commit")
 
 	be.signalSelfLoopReexec(1)
 	pt3 := newPoolUnitTask(be, 3)
@@ -444,4 +444,39 @@ func TestPoolResetFailureIsNoDependency(t *testing.T) {
 	require.Len(t, pe.results, 1, "the final run's error is the tx's verdict")
 	require.Empty(t, be.wakeValidated)
 	require.Empty(t, be.wakeAt)
+}
+
+// A fee recipient's cells stay provisional after its writer validates, so a re-run named on that
+// writer waits for the writer's commit instead of re-reading the same provisional cell.
+func TestNamedRerunWaitsForAFeeRecipientCellToSettle(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 3)
+	feeRecipient := accounts.ZeroAddress
+	writer := state.Version{TxIndex: 1}
+	balance := *uint256.NewInt(7)
+
+	be.versionMap.WriteBalance(feeRecipient, writer, balance, false)
+	writes := &state.WriteSet{}
+	writes.SetBalance(feeRecipient, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: feeRecipient, Path: state.BalancePath, Version: writer},
+		Val:         balance,
+	})
+	be.versionMap.MarkWritesValidated(writes, func(addr accounts.Address) bool { return addr == feeRecipient })
+	be.signalValidated(1)
+	_, read, _ := be.versionMap.ReadBalance(feeRecipient, 3)
+	require.Equal(t, state.MVReadResultDependency, read.Status())
+	require.Equal(t, 1, read.DepIdx())
+	require.False(t, pt.rerunAfter(read.DepIdx()), "validation did not settle the fee recipient cell, so the reader must wait")
+	be.signalCommitted(0)
+	require.Zero(t, be.pool.queue.Len(), "the reader waits for its writer, not for an earlier commit")
+	be.signalCommitted(1)
+	require.Same(t, pt, be.pool.pop())
+}
+
+// A commit drops the task's validated mark: the commit frontier covers it from then on.
+func TestCommitDropsTheValidatedMark(t *testing.T) {
+	_, be := newPoolUnit(t, 2)
+	be.signalValidated(0)
+	be.signalCommitted(0)
+	require.NotContains(t, be.validatedTasks, 0)
 }

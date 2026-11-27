@@ -124,10 +124,10 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 		require.NoError(t, err)
 	} else {
 		require.ErrorIs(t, err, integrity.ErrSkipped)
-		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 		require.NoError(t, err)
-		require.NotZero(t, check.Records)
-		require.Equal(t, endTxNum-1, check.TxNum)
+		require.NotZero(t, checks[0].Records)
+		require.Equal(t, endTxNum-1, checks[0].TxNum)
 	}
 }
 

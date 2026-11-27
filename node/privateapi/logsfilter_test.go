@@ -22,6 +22,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -54,6 +55,8 @@ type testServer struct {
 	sent             []*remoteproto.SubscribeLogsReply
 	sendErr          error
 	sendCalls        int
+	recvs            int
+	ackedAfter       []int // the number of requests received when each ack was sent
 	ctx              context.Context
 	grpc.ServerStream
 }
@@ -82,6 +85,10 @@ func newFailingTestServer(ctx context.Context) *failingTestServer {
 }
 
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
+	if m.FilterApplied {
+		ts.ackedAfter = append(ts.ackedAfter, ts.recvs)
+		return nil
+	}
 	ts.sendCalls++
 	if ts.sendErr != nil {
 		return ts.sendErr
@@ -104,6 +111,7 @@ func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
 	if !ok {
 		return nil, io.EOF
 	}
+	ts.recvs++
 	return request, nil
 }
 
@@ -141,8 +149,10 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 		Addresses:    nil,
 		AllTopics:    false,
 		Topics:       nil,
+		Ack:          true,
 	}
 	srv.received <- req1
+	srv.received <- &remoteproto.LogsFilterRequest{}
 
 	go func() {
 		err := agg.subscribeLogs(srv)
@@ -152,6 +162,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	}()
 
 	<-srv.receiveCompleted
+	require.Equal(t, []int{1}, srv.ackedAfter, "only the first request asks for an ack")
 
 	// now see if a log would be sent or not
 	lg := createLog()
@@ -360,8 +371,8 @@ func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
 	healthyID, _ := agg.insertLogsFilter(healthySrv)
 
 	req := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
-	agg.updateLogsFilter(brokenID, req)
-	agg.updateLogsFilter(healthyID, req)
+	require.NoError(t, agg.updateLogsFilter(brokenID, req))
+	require.NoError(t, agg.updateLogsFilter(healthyID, req))
 
 	agg.distributeLogs([]*notifications.LogNotification{createLog()})
 
@@ -387,11 +398,11 @@ func TestLogsFilter_UpdateAfterFailedSendKeepsOtherSubscriber(t *testing.T) {
 	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
 	healthyID, _ := agg.insertLogsFilter(healthySrv)
 	all := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
-	agg.updateLogsFilter(brokenID, all)
-	agg.updateLogsFilter(healthyID, all)
+	require.NoError(t, agg.updateLogsFilter(brokenID, all))
+	require.NoError(t, agg.updateLogsFilter(healthyID, all))
 
 	agg.distributeLogs([]*notifications.LogNotification{createLog()})
-	agg.updateLogsFilter(brokenID, &remoteproto.LogsFilterRequest{AllAddresses: true, Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(common.Hash{0xbb})}})
+	require.NoError(t, agg.updateLogsFilter(brokenID, &remoteproto.LogsFilterRequest{AllAddresses: true, Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(common.Hash{0xbb})}}))
 	agg.removeLogsFilter(brokenID, brokenFilter)
 	agg.distributeLogs([]*notifications.LogNotification{createLog()})
 
