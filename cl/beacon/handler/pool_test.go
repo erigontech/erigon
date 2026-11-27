@@ -456,6 +456,155 @@ func newAttesterSlashingTestHandler(t *testing.T, cfg *clparams.BeaconChainConfi
 	return &ApiHandler{beaconChainCfg: cfg, ethClock: clock, forkchoiceStore: store}, store
 }
 
+func TestPostPoolBodyLimits(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxCommitteesPerSlot = 1
+	cfg.MaxValidatorsPerCommittee = 1
+	ctrl := gomock.NewController(t)
+	exitService := services_mock.NewMockVoluntaryExitService(ctrl)
+	exitService.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).AnyTimes()
+	slashingService := services_mock.NewMockProposerSlashingService(ctrl)
+	slashingService.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).AnyTimes()
+	handler := &ApiHandler{
+		beaconChainCfg:          &cfg,
+		operationsPool:          pool.NewOperationsPool(&cfg),
+		voluntaryExitService:    exitService,
+		proposerSlashingService: slashingService,
+	}
+	exit, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{}})
+	require.NoError(t, err)
+	slashing, err := json.Marshal(&cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		Header2: &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+	})
+	require.NoError(t, err)
+	emptyList := []byte("[]")
+
+	for _, tc := range []struct {
+		name    string
+		post    http.HandlerFunc
+		version string
+		body    []byte
+		limit   int64
+	}{
+		{
+			name: "v1 attestations", post: handler.PostEthV1BeaconPoolAttestations, body: emptyList,
+			limit: maxPoolJSONSize(maxAttestationsPerSlot(&cfg), attestationJSONBytes+hexBitlistJSONBytes(cfg.MaxValidatorsPerCommittee)),
+		},
+		{
+			name: "v2 attestations", post: handler.PostEthV2BeaconPoolAttestations, version: "electra", body: emptyList,
+			limit: maxPoolJSONSize(maxAttestationsPerSlot(&cfg), singleAttestationJSONBytes),
+		},
+		{
+			name: "voluntary exit", post: handler.PostEthV1BeaconPoolVoluntaryExits, body: exit,
+			limit: maxPoolJSONSize(1, voluntaryExitJSONBytes),
+		},
+		{
+			name: "proposer slashing", post: handler.PostEthV1BeaconPoolProposerSlashings, body: slashing,
+			limit: maxPoolJSONSize(1, proposerSlashingJSONBytes),
+		},
+		{
+			name: "bls to execution changes", post: handler.PostEthV1BeaconPoolBlsToExecutionChanges, body: emptyList,
+			limit: maxPoolJSONSize(maxBLSToExecutionChangesPerRequest, blsToExecutionChangeJSONBytes),
+		},
+		{
+			name: "aggregates and proofs", post: handler.PostEthV1ValidatorAggregatesAndProof, body: emptyList,
+			limit: maxPoolJSONSize(cfg.MaxCommitteesPerSlot*cfg.TargetAggregatorsPerCommittee, aggregateAndProofJSONBytes+hexBitlistJSONBytes(maxAttestationsPerSlot(&cfg))),
+		},
+		{
+			name: "sync committee messages", post: handler.PostEthV1BeaconPoolSyncCommittees, body: emptyList,
+			limit: maxPoolJSONSize(cfg.SyncCommitteeSize, syncCommitteeMessageJSONBytes),
+		},
+		{
+			name: "contributions and proofs", post: handler.PostEthV1ValidatorContributionsAndProofs, body: emptyList,
+			limit: maxPoolJSONSize(cfg.SyncCommitteeSize, contributionAndProofJSONBytes+2*uint64(cfg.SyncCommitteeAggregationBitsSize())),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			post := func(size int64) *httptest.ResponseRecorder {
+				// Leading padding makes the decoder read the whole body before the value ends.
+				body := append(bytes.Repeat([]byte(" "), int(size)-len(tc.body)), tc.body...)
+				resp := httptest.NewRecorder()
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+				req.Header.Set("Eth-Consensus-Version", tc.version)
+				tc.post(resp, req)
+				return resp
+			}
+			resp := post(tc.limit)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			resp = post(tc.limit + 1)
+			require.Equal(t, http.StatusBadRequest, resp.Code)
+			require.Contains(t, resp.Body.String(), "request body too large")
+		})
+	}
+}
+
+func TestPoolJSONElementBudgets(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	const widest = math.MaxUint64
+	data := &solid.AttestationData{Slot: widest, CommitteeIndex: widest, Source: solid.Checkpoint{Epoch: widest}, Target: solid.Checkpoint{Epoch: widest}}
+	attestation := func(maxBits uint64) *solid.Attestation {
+		return &solid.Attestation{
+			AggregationBits: solid.NewBitList(int(maxBits/8+1), int(maxBits)),
+			Data:            data,
+			CommitteeBits:   solid.NewBitVector(int(cfg.MaxCommitteesPerSlot)),
+		}
+	}
+	header := func() *cltypes.SignedBeaconBlockHeader {
+		return &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: widest, ProposerIndex: widest}}
+	}
+	for _, tc := range []struct {
+		name    string
+		element any
+		budget  uint64
+	}{
+		{
+			name: "attestation", element: attestation(cfg.MaxValidatorsPerCommittee),
+			budget: attestationJSONBytes + hexBitlistJSONBytes(cfg.MaxValidatorsPerCommittee),
+		},
+		{
+			name: "single attestation", element: &solid.SingleAttestation{CommitteeIndex: widest, AttesterIndex: widest, Data: data},
+			budget: singleAttestationJSONBytes,
+		},
+		{
+			name: "voluntary exit", element: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: widest, ValidatorIndex: widest}},
+			budget: voluntaryExitJSONBytes,
+		},
+		{
+			name: "proposer slashing", element: &cltypes.ProposerSlashing{Header1: header(), Header2: header()},
+			budget: proposerSlashingJSONBytes,
+		},
+		{
+			name: "bls to execution change", element: &cltypes.SignedBLSToExecutionChange{Message: &cltypes.BLSToExecutionChange{ValidatorIndex: widest}},
+			budget: blsToExecutionChangeJSONBytes,
+		},
+		{
+			name:    "aggregate and proof",
+			element: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{AggregatorIndex: widest, Aggregate: attestation(maxAttestationsPerSlot(&cfg))}},
+			budget:  aggregateAndProofJSONBytes + hexBitlistJSONBytes(maxAttestationsPerSlot(&cfg)),
+		},
+		{
+			name: "sync committee message", element: &cltypes.SyncCommitteeMessage{Slot: widest, ValidatorIndex: widest},
+			budget: syncCommitteeMessageJSONBytes,
+		},
+		{
+			name: "contribution and proof",
+			element: &cltypes.SignedContributionAndProof{Message: &cltypes.ContributionAndProof{
+				AggregatorIndex: widest,
+				Contribution:    &cltypes.Contribution{Slot: widest, SubcommitteeIndex: widest, AggregationBits: make([]byte, cfg.SyncCommitteeAggregationBitsSize())},
+			}},
+			budget: contributionAndProofJSONBytes + 2*uint64(cfg.SyncCommitteeAggregationBitsSize()),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Indented as an element of an indented array.
+			encoded, err := json.MarshalIndent(tc.element, "    ", "    ")
+			require.NoError(t, err)
+			require.LessOrEqual(t, uint64(len(encoded)), tc.budget)
+		})
+	}
+}
+
 func TestPoolProposerSlashings(t *testing.T) {
 	proposerSlashing := &cltypes.ProposerSlashing{
 		Header1: &cltypes.SignedBeaconBlockHeader{
