@@ -116,6 +116,7 @@ func TestNewReaderUsesHeader(t *testing.T) {
 		// (CompressKeys|CompressVals) must be ignored.
 		g := d.MakeGetter()
 		r := NewReader(g, CompressKeys|CompressVals)
+		require.Equal(t, CompressNone, r.Compression())
 		r.Reset(0)
 
 		for i, want := range pairs {
@@ -129,34 +130,6 @@ func TestNewReaderUsesHeader(t *testing.T) {
 		}
 		require.False(t, r.HasNext(), "no more words expected")
 	})
-}
-
-// A Compressor carrying word-level flags from an earlier Writer must not leak
-// them into the next Writer's header: the bitmask describes one file's layout,
-// and a stale bit routes every read of that file through the wrong path.
-func TestNewWriterReplacesWordLevelFlags(t *testing.T) {
-	c, err := NewCompressor(context.Background(), "test", filepath.Join(t.TempDir(), "test.seg"),
-		t.TempDir(), DefaultCfg, log.LvlDebug, log.New())
-	require.NoError(t, err)
-	defer c.Close()
-
-	NewWriter(c, CompressKeys|CompressVals)
-	NewWriter(c, CompressNone)
-
-	require.False(t, c.featureFlagBitmask.Has(WordLevelKeyCompressionEnabled))
-	require.False(t, c.featureFlagBitmask.Has(WordLevelValCompressionEnabled))
-}
-
-func TestNewWriterPanicsOnFlagChangeAfterWords(t *testing.T) {
-	c, err := NewCompressor(context.Background(), "test", filepath.Join(t.TempDir(), "test.seg"),
-		t.TempDir(), DefaultCfg, log.LvlDebug, log.New())
-	require.NoError(t, err)
-	defer c.Close()
-
-	_, err = NewWriter(c, CompressKeys|CompressVals).Write([]byte("word"))
-	require.NoError(t, err)
-	require.NotPanics(t, func() { NewWriter(c, CompressKeys|CompressVals) })
-	require.Panics(t, func() { NewWriter(c, CompressNone) })
 }
 
 // writeKVFile builds a key/value seg file under the given compression and
@@ -305,9 +278,9 @@ func readAllWords(t *testing.T, file string) [][]byte {
 	return got
 }
 
-func newTestCompressor(t *testing.T) (*Compressor, string) {
+func newTestCompressor(t *testing.T, name string) (*Compressor, string) {
 	t.Helper()
-	file := filepath.Join(t.TempDir(), "test.seg")
+	file := filepath.Join(t.TempDir(), name)
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
@@ -317,8 +290,41 @@ func newTestCompressor(t *testing.T) (*Compressor, string) {
 	return c, file
 }
 
+// legacyReadWords reads like older releases: with the caller's compression, ignoring the header.
+func legacyReadWords(t *testing.T, file string, fc FileCompression) [][]byte {
+	t.Helper()
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+	var got [][]byte
+	for i := 0; g.HasNext(); i++ {
+		var w []byte
+		if (i%2 == 0 && fc.Has(CompressKeys)) || (i%2 == 1 && fc.Has(CompressVals)) {
+			w, _ = g.Next(nil)
+		} else {
+			w, _ = g.NextUncompressed()
+		}
+		got = append(got, bytes.Clone(w))
+	}
+	return got
+}
+
+func TestNewWriterKeepsWordsAsCallerAsks(t *testing.T) {
+	c, file := newTestCompressor(t, "v1.0-logaddrs.0-1024.ef")
+	words := repetitiveWords(200)
+	w := NewWriter(c, CompressVals)
+	for _, word := range words {
+		_, err := w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	require.Equal(t, words, legacyReadWords(t, file, CompressVals), "older releases read with the caller's compression")
+	require.Equal(t, words, readAllWords(t, file))
+}
+
 func TestNewWriterKeepsParityAfterOddCount(t *testing.T) {
-	c, file := newTestCompressor(t)
+	c, file := newTestCompressor(t, "v1.0-storage.0-1024.kv")
 	words := repetitiveWords(200)
 	_, err := NewWriter(c, CompressKeys).Write(words[0])
 	require.NoError(t, err)
@@ -328,20 +334,15 @@ func TestNewWriterKeepsParityAfterOddCount(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, c.Compress())
+	require.Equal(t, words, legacyReadWords(t, file, CompressKeys))
 	require.Equal(t, words, readAllWords(t, file))
 }
 
-func TestStaleWriterFollowsHeader(t *testing.T) {
-	c, file := newTestCompressor(t)
-	words := repetitiveWords(200)
-	stale := NewWriter(c, CompressKeys|CompressVals)
-	NewWriter(c, CompressNone)
-	for _, word := range words {
-		_, err := stale.Write(word)
-		require.NoError(t, err)
-	}
-	require.NoError(t, c.Compress())
-	require.Equal(t, words, readAllWords(t, file))
+func TestSecondWriterWithOtherCompressionPanics(t *testing.T) {
+	c, _ := newTestCompressor(t, "test.seg")
+	NewWriter(c, CompressKeys|CompressVals)
+	require.NotPanics(t, func() { NewWriter(c, CompressKeys|CompressVals) })
+	require.Panics(t, func() { NewWriter(c, CompressNone) })
 }
 
 func TestPagedReaderNext2KeepsHeapBuffer(t *testing.T) {
