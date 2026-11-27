@@ -1090,8 +1090,23 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 	// concurrent OpenIdxIfNeed on it, which race on its index slice.
 	seen := make(map[string]struct{}, len(fileNames))
 	pendingUnlink := s.pendingUnlinkNames()
+	for _, fName := range fileNames {
+		if _, dead := pendingUnlink[fName]; dead {
+			continue
+		}
+		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok || isState || f.Type == nil || f.Ext != ".seg" {
+			continue
+		}
+		if !s.HasType(f.Type) || s.isInProgress(f.Type.Enum(), f.From, f.To) {
+			continue
+		}
+		if snaptype.IsCaplinType(f.Type.Enum()) && !f.Version.IsZero() && !f.Type.Versions().Supports(f.Version) {
+			f.Type.Versions().MustSupport(f.Version, fName)
+		}
+	}
+
 	var unsupported *DirtySegment
-	var unsupportedVersion snaptype.Version
 	var openErr error
 
 	for _, fName := range fileNames {
@@ -1139,20 +1154,10 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			}
 		}
 
-		openedVersion := sn.Version()
-		if open {
-			openedFile, _, ok := snaptype.ParseFileName(s.dir, sn.FileName())
-			if ok {
-				openedVersion = openedFile.Version
-			}
-		}
-		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Type().Versions().Supports(openedVersion) {
-			if unsupported == nil {
-				unsupported = sn
-				unsupportedVersion = openedVersion
-			}
+		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Version().IsZero() && !sn.Type().Versions().Supports(sn.Version()) {
 			sn.closeSeg()
-			continue
+			unsupported = sn
+			break
 		}
 
 		if !exists {
@@ -1174,7 +1179,7 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 
 	waitErr := wg.Wait()
 	if unsupported != nil {
-		unsupported.Type().Versions().MustSupport(unsupportedVersion, unsupported.FileName())
+		unsupported.Type().Versions().MustSupport(unsupported.Version(), unsupported.FileName())
 	}
 	if openErr != nil {
 		return openErr
