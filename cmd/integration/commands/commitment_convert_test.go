@@ -95,7 +95,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
-		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
+		require.ErrorContains(t, root.ExecuteContext(t.Context()), "set ERIGON_COMMITMENT_V3=false", mode)
 	}
 
 	statecfg.ExperimentalCommitmentV3, convertSqueeze, convertNibblesV2 = false, false, false
@@ -275,7 +275,7 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		statecfg.SetCommitmentV3(true)
 
 		require.NoError(t, open(t, dirs))
-		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are legacy and ERIGON_COMMITMENT_V3=true")
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first, or set ERIGON_COMMITMENT_V3=false to keep the legacy trie")
 	})
 
 	t.Run("v3 history, legacy domain, v3 off", func(t *testing.T) {
