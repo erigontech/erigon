@@ -2912,13 +2912,14 @@ type accountState struct {
 	balance             fieldTracker[uint256.Int]
 	nonce               fieldTracker[uint64]
 	code                fieldTracker[accounts.Code]
-	balanceValue        g.Option[uint256.Int]               // tracks latest seen balance
-	initialBalanceValue g.Option[uint256.Int]               // tracks pre-block balance for net-zero detection
-	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
-	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
-	initialCodeEmpty    bool                                // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
+	balanceValue        g.Option[uint256.Int]       // tracks latest seen balance
+	initialBalanceValue g.Option[uint256.Int]       // tracks pre-block balance for net-zero detection
+	readValues          []slotValue                 // first read value per slot, for net-zero detection
+	readValueAt         map[accounts.StorageKey]int // slot -> index into readValues, built past slotIndexMin
+	slotWrites          map[accounts.StorageKey]int // slot -> index into changes.StorageChanges, built past slotIndexMin
+	storageReads        []accounts.StorageKey       // copied into changes.StorageReads by finalize
+	slotReads           map[accounts.StorageKey]int // slot -> index into storageReads, built with slotWrites
+	initialCodeEmpty    bool                        // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
 }
 
 // matches compares the account with a sidecar entry without building and sorting its lists.
@@ -2945,7 +2946,7 @@ func (account *accountState) matchesStorage(want *types.AccountChanges) bool {
 			return false
 		}
 		key := accounts.InternKey(read)
-		if _, wasRead := account.storageReadValues[key]; !wasRead || account.hasStorageWrite(key) {
+		if _, wasRead := account.readValue(key); !wasRead || account.hasStorageWrite(key) {
 			return false
 		}
 	}
@@ -3090,7 +3091,7 @@ func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint
 	// the original read value, it's a no-op that should remain as a read.
 	at := account.storageWriteIndex(key)
 	if at < 0 {
-		if origVal, wasRead := account.storageReadValues[key]; wasRead && val.Eq(&origVal) {
+		if origVal, wasRead := account.readValue(key); wasRead && val.Eq(&origVal) {
 			return
 		}
 	}
@@ -3139,13 +3140,18 @@ func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint
 func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint256.Int) {
 	// Record the original read value for net-zero detection.
 	// Only the first read for each slot is recorded (the original value).
-	if account.storageReadValues == nil {
-		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
-	}
-	if _, seen := account.storageReadValues[key]; seen {
+	if _, seen := account.readValue(key); seen {
 		return
 	}
-	account.storageReadValues[key] = val
+	account.readValues = append(account.readValues, slotValue{key, val})
+	if account.readValueAt != nil {
+		account.readValueAt[key] = len(account.readValues) - 1
+	} else if len(account.readValues) >= slotIndexMin {
+		account.readValueAt = make(map[accounts.StorageKey]int, len(account.readValues))
+		for i := range account.readValues {
+			account.readValueAt[account.readValues[i].slot] = i
+		}
+	}
 	if account.hasStorageWrite(key) {
 		return
 	}
@@ -3167,6 +3173,26 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	if len(account.balance.changes.entries) == 0 {
 		account.balanceValue.Set(val)
 	}
+}
+
+type slotValue struct {
+	slot  accounts.StorageKey
+	value uint256.Int
+}
+
+func (account *accountState) readValue(slot accounts.StorageKey) (uint256.Int, bool) {
+	if account.readValueAt != nil {
+		if i, ok := account.readValueAt[slot]; ok {
+			return account.readValues[i].value, true
+		}
+		return uint256.Int{}, false
+	}
+	for i := range account.readValues {
+		if account.readValues[i].slot == slot {
+			return account.readValues[i].value, true
+		}
+	}
+	return uint256.Int{}, false
 }
 
 // slotIndexMin is where scanning the slot lists stops being cheaper than a map
