@@ -50,19 +50,19 @@ func JoinIndexRanges(q IndexQuery, indexRange func(name InvertedIdx, k []byte, f
 			return nil, ErrEmptyIndexQuery
 		}
 	}
-	var opened []stream.U64
 	var res stream.U64
 	for _, clause := range q.Clauses {
 		var union stream.U64
 		for _, k := range clause {
 			it, err := indexRange(k.Idx, k.Key, q.FromTs, q.ToTs, q.Asc, Unlim)
 			if err != nil {
-				for _, o := range opened {
-					o.Close()
+				for _, s := range []stream.U64{res, union} {
+					if s != nil {
+						s.Close()
+					}
 				}
 				return nil, err
 			}
-			opened = append(opened, it)
 			union = stream.Union[uint64](union, it, q.Asc, Unlim)
 		}
 		if res == nil {
@@ -71,26 +71,5 @@ func JoinIndexRanges(q IndexQuery, indexRange func(name InvertedIdx, k []byte, f
 		}
 		res = stream.Intersect[uint64](res, union, q.Asc, Unlim)
 	}
-	return &joinedIndexRanges{U64: res, opened: opened}, nil
-}
-
-// joinedIndexRanges closes every opened stream: Union and Intersect drop empty inputs without closing them.
-type joinedIndexRanges struct {
-	stream.U64
-	opened []stream.U64
-}
-
-func (j *joinedIndexRanges) CanSeek() bool {
-	s, ok := j.U64.(stream.Seeker[uint64])
-	return ok && s.CanSeek()
-}
-
-func (j *joinedIndexRanges) Seek(v uint64) error {
-	return j.U64.(stream.Seeker[uint64]).Seek(v)
-}
-
-func (j *joinedIndexRanges) Close() {
-	for _, o := range j.opened {
-		o.Close()
-	}
+	return res, nil
 }
