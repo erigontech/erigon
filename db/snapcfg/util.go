@@ -154,6 +154,17 @@ func (d *typeFilterDrops) unparsableItem(name string) {
 	}
 }
 
+func (d *typeFilterDrops) unparsedItem(name, afterVersion string) {
+	_, afterFrom, _ := strings.Cut(afterVersion, "-")
+	_, typeToken, _ := strings.Cut(afterFrom, "-")
+	typeToken, _, _ = strings.Cut(typeToken, ".")
+	if _, registered := snaptype.ParseEnum(typeToken); registered {
+		d.unparsableItem(name)
+		return
+	}
+	d.unreadable++
+}
+
 // droppedNames returns the names in all that kept no longer contains, capped at
 // limit, along with the total dropped count.
 func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
@@ -233,7 +244,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
 			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
 			if !known || caplinFile.Type == nil {
-				drops.unreadable++
+				drops.unparsedItem(p.Name, name)
 				continue
 			}
 
@@ -283,16 +294,14 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			continue
 		}
 
-		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
-		typeName := name[lastSep+1 : dot]
+		var typeName string
 		include := false
 		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
 			idxIndex = 1
-			typeName = "transactions"
 		}
 		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
-		switch _, registered := snaptype.ParseEnum(typeName); {
+		switch {
 		case parsedOK && parsed.Type != nil && strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) && spellsRegisteredName(parsed.Type, parsed.TypeString):
 			typeName = parsed.Type.Name()
 		case parsedOK && parsed.Type != nil:
@@ -301,8 +310,8 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		case parsed.TypeString != "":
 			drops.unreadable++
 			continue
-		case registered:
-			drops.unparsableItem(p.Name)
+		default:
+			drops.unparsedItem(p.Name, name)
 			continue
 		}
 

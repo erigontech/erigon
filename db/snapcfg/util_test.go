@@ -10,6 +10,9 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
+var _ = snaptype.RegisterType(snaptype.MinCoreEnum+3, "transactions", snaptype.Versions{}, nil,
+	[]snaptype.Index{{Name: "transactions"}, {Name: "transactions-to-block", Offset: 1}}, nil)
+
 func typedNames(t *testing.T, items PreverifiedItems) []string {
 	t.Helper()
 	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
@@ -303,9 +306,28 @@ func TestTypedCountsUnknownTypeWithRegisteredSuffixAsUnreadable(t *testing.T) {
 	items := PreverifiedItems{
 		{Name: "v1.1-000000-000100-future-beaconblocks.seg", Hash: "unknown"},
 		{Name: "v1.1-000000-000100-BLOCKSIDECARS.idx", Hash: "misspelled"},
+		{Name: "v1.1-000000-000100-TRANSACTIONS-TO-BLOCK.idx", Hash: "misspelled-index"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
 	require.Equal(t, 1, drops.unreadable)
-	require.Equal(t, []string{"v1.1-000000-000100-BLOCKSIDECARS.idx"}, drops.unparsableNames)
+	require.Equal(t, []string{
+		"v1.1-000000-000100-BLOCKSIDECARS.idx",
+		"v1.1-000000-000100-TRANSACTIONS-TO-BLOCK.idx",
+	}, drops.unparsableNames)
+}
+
+func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx", Hash: "registered-index"},
+		{Name: "caplin/v1.1-bad-000050-BlockRoot.seg", Hash: "registered-caplin"},
+		{Name: "v1.1-bad-000050-future-beaconblocks.seg", Hash: "unknown"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, 1, drops.unreadable)
+	require.Equal(t, []string{
+		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",
+		"caplin/v1.1-bad-000050-BlockRoot.seg",
+	}, drops.unparsableNames)
 }
