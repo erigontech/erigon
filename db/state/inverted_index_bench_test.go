@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -15,8 +14,7 @@ import (
 // Run with II_LRU_ENABLED=false to bypass the seek cache, otherwise the cache short-circuits
 // before the sequence decoding this is meant to measure.
 func BenchmarkInvertedIndexSeekInFiles(b *testing.B) {
-	logger := log.New()
-	db, ii, txs := filledInvIndexOfSize(b, 1000, 16, 31, logger)
+	db, ii, txs := filledInvIndexOfSize(b, 1000, 16, 31)
 	ctx := b.Context()
 
 	tx, err := db.BeginRw(ctx)
@@ -82,7 +80,7 @@ func requireIISeekCache(b *testing.B) {
 
 func BenchmarkInvertedIndexIntersectOnFiles(b *testing.B) {
 	const txs, sparseEvery = 1 << 16, 1000
-	db, ii := testDbAndInvertedIndex(b, 1024, log.New())
+	db, ii := testDbAndInvertedIndex(b, 1024)
 	dense, sparse := []byte("dense"), []byte("sparse")
 	err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		iit := ii.beginForTests()

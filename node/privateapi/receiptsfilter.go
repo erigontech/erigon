@@ -100,12 +100,14 @@ func (a *ReceiptsFilterAggregator) removeReceiptsFilterLocked(filterId uint64) {
 	a.checkEmpty()
 }
 
-func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) {
+// updateReceiptsFilter applies filterReq and, if it asks, acks it on the stream. The ack
+// is sent under receiptsFilterLock like every receipt, so the stream has one sender at a time.
+func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) error {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filter, ok := a.receiptsFilters[filterId]
 	if !ok {
-		return
+		return nil
 	}
 	a.subtractReceiptsFilters(filter)
 	filter.txHashes = make(map[common.Hash]int)
@@ -128,6 +130,10 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterR
 
 	a.addReceiptsFilters(filter)
 	a.checkEmpty()
+	if !filterReq.GetAck() {
+		return nil
+	}
+	return filter.sender.Send(&remoteproto.SubscribeReceiptsReply{FilterApplied: true})
 }
 
 func (a *ReceiptsFilterAggregator) addReceiptsFilters(filter *ReceiptsFilter) {
@@ -153,7 +159,9 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	var filterReq *remoteproto.ReceiptsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
-		a.updateReceiptsFilter(filterId, filterReq)
+		if err := a.updateReceiptsFilter(filterId, filterReq); err != nil {
+			return fmt.Errorf("acking receipts filter request: %w", err)
+		}
 	}
 	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)

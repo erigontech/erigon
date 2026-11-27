@@ -427,3 +427,34 @@ func TestSelectPeersToPrunePrefersPeersOffSubnetsBelowSearchTarget(t *testing.T)
 
 	require.Equal(t, []peer.ID{"wellCovered"}, selectPeersToPrune(candidates, coverage, 1, 0))
 }
+
+func peersInfoDirection(t *testing.T, s *Sentinel, pid peer.ID) string {
+	t.Helper()
+	for _, p := range s.GetPeersInfos().Peers {
+		if p.Pid == pid.String() {
+			return p.Direction
+		}
+	}
+	t.Fatalf("peer %s is not listed", pid)
+	return ""
+}
+
+func TestPeersInfoTakesTheDirectionFromAnOpenConnection(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectBothWays(t, local)
+
+	require.Equal(t, "outbound", peersInfoDirection(t, s, pid), "the oldest open connection is outbound")
+
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid, outboundOnly: true}}}
+	require.Equal(t, "inbound", peersInfoDirection(t, s, pid), "a closed outbound connection is still listed first")
+}
+
+func TestPeersInfoKeepsTheDirectionOfAPeerWithoutAnOpenConnection(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectInbound(t, local).ID()
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid}}}
+
+	require.Equal(t, "inbound", peersInfoDirection(t, s, pid))
+}
