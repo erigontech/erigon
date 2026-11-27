@@ -586,9 +586,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	currentList := make([]byte, validatorSetLength*8)
-	_, err = io.ReadFull(zstdReader, currentList)
+	readBytes, err := io.ReadFull(zstdReader, currentList)
 	base_encoding.PutZstdReader(zstdReader)
-	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || dumpSlot >= slot) {
+	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || dumpSlot >= slot || readBytes%8 != 0) {
 		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("%w: %w", state_accessors.ErrHistoryRebuildRequired, err)
 		}

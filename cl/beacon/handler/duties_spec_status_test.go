@@ -752,6 +752,7 @@ func TestHistoricalProposerShortBalanceDump(t *testing.T) {
 		{"exact", 1536, 1536, 1536, http.StatusInternalServerError},
 		{"backward", 2560, 3072, 3073, http.StatusInternalServerError},
 		{"forward", 1568, 1536, 1568, http.StatusOK},
+		{"partial forward", 1568, 1536, 1568, http.StatusInternalServerError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, _, _, preState, postState, h, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -792,6 +793,9 @@ func TestHistoricalProposerShortBalanceDump(t *testing.T) {
 				}
 				require.Greater(t, len(full), 8)
 				short := full[:len(full)-8]
+				if tc.name == "partial forward" {
+					short = full[:9]
+				}
 				encoder, err := zstd.NewWriter(nil)
 				if err != nil {
 					return err
