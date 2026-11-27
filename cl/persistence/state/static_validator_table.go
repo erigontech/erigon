@@ -276,6 +276,7 @@ type StaticValidatorTable struct {
 	validatorTable []*StaticValidator
 	slot           uint64
 	replayDisabled bool
+	archiveStates  bool
 	sync           sync.RWMutex // Mutex for safe concurrent access.
 }
 
@@ -283,6 +284,7 @@ type StaticValidatorTable struct {
 func NewStaticValidatorTable() *StaticValidatorTable {
 	return &StaticValidatorTable{
 		validatorTable: make([]*StaticValidator, 0, 2400), // Preallocating memory for efficiency.
+		archiveStates:  true,
 	}
 }
 
@@ -400,13 +402,11 @@ var (
 func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit int) (*solid.ValidatorSet, error) {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
-	if !s.replayDisabled {
-		if slot > s.slot {
-			return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
-		}
-		if uint64(len(s.validatorTable)) < length {
-			return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
-		}
+	if !s.replayDisabled && slot > s.slot {
+		return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
+	}
+	if s.archiveStates && uint64(len(s.validatorTable)) < length {
+		return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
 	}
 	out := solid.NewValidatorSetWithLength(limit, int(length))
 	for i, validator := range s.validatorTable[:min(uint64(len(s.validatorTable)), length)] {

@@ -106,3 +106,45 @@ func TestReadValidatorsTableGap(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestLoadedValidatorTableChecks(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	var data bytes.Buffer
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&data))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, index := range []uint64{0, 2} {
+			if err := tx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(index), data.Bytes()); err != nil {
+				return err
+			}
+		}
+		return SetStateProcessingProgress(tx, 96)
+	}))
+	for _, tc := range []struct {
+		name            string
+		archive, replay bool
+		slot            uint64
+		want            error
+	}{
+		{"archive no replay truncated", true, false, 96, ErrValidatorTableTruncated},
+		{"archive no replay ahead and truncated", true, false, 97, ErrValidatorTableTruncated},
+		{"archive replay behind", true, true, 97, ErrValidatorTableBehind},
+		{"archive replay truncated", true, true, 96, ErrValidatorTableTruncated},
+		{"no archive", false, false, 97, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				table, err := LoadStaticValidatorTable(tx, tc.archive, tc.replay)
+				require.NoError(t, err)
+				validators, err := table.CopyValidatorsAtSlot(tc.slot, 3, 10)
+				if tc.want != nil {
+					require.ErrorIs(t, err, tc.want)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, 3, validators.Length())
+					require.Equal(t, [48]byte{}, validators.Get(1).PublicKey())
+				}
+				return nil
+			}))
+		})
+	}
+}

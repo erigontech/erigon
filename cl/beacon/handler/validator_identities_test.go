@@ -238,8 +238,12 @@ func TestHistoricalValidatorEndpointsWithoutArchiveRetainedProgress(t *testing.T
 	}))
 	for _, tableSlot := range []uint64{0, slot + 1} {
 		t.Run("table at "+strconv.FormatUint(tableSlot, 10), func(t *testing.T) {
-			table := state_accessors.NewStaticValidatorTable()
-			table.SetReplayEnabled(false)
+			var table *state_accessors.StaticValidatorTable
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				table, err = state_accessors.LoadStaticValidatorTable(tx, false, false)
+				return err
+			}))
 			table.SetSlot(tableSlot)
 			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
 			for _, stateSlot := range []uint64{slot, 0} {
