@@ -364,6 +364,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	onValid func(blockHash common.Hash, witness *jsonrpc.ExecutionWitnessResult),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	npT0 := time.Now()
+	var npBal, npTx, npHash, npQuick, npLock time.Time
+	defer func() {
+		if req == nil {
+			return
+		}
+		e.logger.Info("[np-split] np", "blk", req.BlockNumber.Uint64(), "entryUs", npT0.UnixMicro(), "endUs", time.Now().UnixMicro(), "bal", npSince(npT0, npBal), "txdec", npSince(npBal, npTx), "hash", npSince(npTx, npHash), "checks", npSince(npHash, npQuick), "lock", npSince(npQuick, npLock), "total", time.Since(npT0))
+	}()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -510,6 +518,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
+	npBal = time.Now()
 	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
 		return &engine_types.PayloadStatus{
@@ -538,6 +547,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
 	txs, transactions, expectedBlobHashes, invalidTransactionStatus := e.decodePayloadTransactions(req.Transactions, uint64(req.GasLimit), e.config.IsAmsterdam(uint64(req.Timestamp)), deriveBlobHashes, expectedBlobHashes)
+	npTx = time.Now()
 
 	var sendersRecovery *exec.SendersRecovery
 	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 {
@@ -546,7 +556,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
 
 	blockHash := req.BlockHash
-	if header.Hash() != blockHash {
+	npHashOK := header.Hash() == blockHash
+	npHash = time.Now()
+	if !npHashOK {
 		e.logger.Error(
 			"[NewPayload] invalid block hash",
 			"stated", blockHash,
@@ -602,6 +614,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, true, defaultReadinessWait)
+	npQuick = time.Now()
 	if err != nil {
 		return nil, err
 	}
@@ -623,6 +636,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}()
 	e.lock.Lock()
+	npLock = time.Now()
 	defer e.lock.Unlock()
 
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
@@ -1206,6 +1220,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
+	hT0 := time.Now()
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
@@ -1221,7 +1236,9 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	hIns := time.Now()
 	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witness)
+	e.logger.Info("[np-split] hnp", "blk", headerNumber, "insert", hIns.Sub(hT0), "vc", time.Since(hIns))
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1641,4 +1658,12 @@ func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func
 		}
 	}
 	return true, nil
+}
+
+// npSince is b-a, or -1 when a border was not reached.
+func npSince(a, b time.Time) time.Duration {
+	if a.IsZero() || b.IsZero() {
+		return -1
+	}
+	return b.Sub(a)
 }
