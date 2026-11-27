@@ -857,6 +857,44 @@ func TestFramePoolReplacementBatchCountsFundsAtItsStart(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 }
 
+// Replacing a frame that another account pays for releases no reservation of the sender, so the
+// replacement must fit the sender's own spare funds.
+func TestFramePoolOrdinaryReplacesSponsoredFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra uint64 // what the replacement costs beyond the sender's spare funds
+		want  txpoolcfg.DiscardReason
+	}{
+		{"fits spare funds", 0, txpoolcfg.Success},
+		{"exceeds spare funds", 1, txpoolcfg.InsufficientFunds},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+			sender := common.Address{2}
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, payer, sender)
+			change.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			frame := framePoolSlotWithNonce(t, sender, 0, 1, common.GWei)
+			require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
+			const spare = 1_000_000_000_000_000
+			next := newTestTxnSlot(1, 0, 1, 1, 21_000)
+			next.Txn.GetValue().SetUint64(uint64(common.Ether) - spare - 21_000)
+			next.IDHash[0] = 1
+			require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, next)[0])
+
+			const feeCap = 2 * common.GWei
+			replacement := newTestTxnSlot(0, 0, feeCap, feeCap, 21_000)
+			replacement.Txn.GetValue().SetUint64(spare - 21_000*feeCap + tc.extra)
+			replacement.IDHash[0] = 2
+			require.Equal(t, tc.want, addTestTxns(t, pool, sender, true, replacement)[0])
+			_, framePooled := pool.byHash[string(frame.IDHash[:])]
+			require.Equal(t, tc.want != txpoolcfg.Success, framePooled)
+		})
+	}
+}
+
 func TestFramePoolReservationExcludesReplacedOrdinary(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether

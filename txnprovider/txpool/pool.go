@@ -2339,7 +2339,7 @@ func (p *TxPool) addLocked(prefixes map[uint64]*fundedPrefix, mt *metaTxn, annou
 	return txpoolcfg.NotSet
 }
 
-// discardOverflow evicts mt from pending or the base fee sub-pool for capacity. The sender's txns after mt,
+// discardOverflow discards mt, which pending or base fee overflow has popped. The sender's txns after mt,
 // up to the next nonce gap, now follow a gap. They lose NoNonceGaps and move to queued at once, so that
 // they free their slots before the next eviction. Their other markers wait for the sender's next refresh,
 // which every block runs for senders with queued txns.

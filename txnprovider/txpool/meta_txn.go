@@ -139,9 +139,10 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 // compares the sub-pool markers first and then the fees. The fees rank by the sub-pool that the shared
 // markers qualify for, whatever sub-pool each transaction is in: the effective tip for pending, the fee
 // cap for the base fee sub-pool. So an overflow discards the transactions that selection and promotion
-// value least, and a comparison across sub-pools does not depend on its direction. Unlike better, worse
-// keeps the local marker of a transaction that follows a remote one of its sender, so an overflow can
-// evict the remote transaction first and leave a nonce gap; discardOverflow handles the gap.
+// value least, and two transactions in different sub-pools are never both worse than each other. Unlike
+// better, worse keeps the local marker of a transaction that follows a remote one of its sender, so an
+// overflow can evict the remote transaction first and leave a nonce gap; for pending and base fee
+// overflow, discardOverflow handles the gap.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool

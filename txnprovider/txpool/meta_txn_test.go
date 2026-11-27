@@ -165,7 +165,10 @@ func TestOverflowQueuesSuccessorOfEvictedTxn(t *testing.T) {
 			requireSuccessorsIn := func(subPool SubPoolType) {
 				t.Helper()
 				for _, txn := range successors {
-					require.Equal(t, subPool, pool.byHash[string(txn.IDHash[:])].currentSubPool)
+					mt := pool.byHash[string(txn.IDHash[:])]
+					require.Equal(t, subPool, mt.currentSubPool)
+					// A queued successor has lost NoNonceGaps, so no promotion returns it before its sender is refreshed.
+					require.Equal(t, subPool != QueuedSubPool, mt.subPool&NoNonceGaps != 0)
 				}
 			}
 			requireSuccessorsIn(tc.nextSubPool)
