@@ -154,7 +154,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 
 	resp := []attesterDutyResponse{}
 
-	epochStartSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
+	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	lowestAvailableSlot := a.forkchoiceStore.LowestAvailableSlot()
 	var dependentRoot common.Hash
 	var optimistic, useHistory bool
@@ -165,7 +165,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("attestation duties for epoch %d are not available while the head is in epoch %d", epoch, headEpoch))
 		}
 		optimistic = a.forkchoiceStore.IsRootOptimistic(headRoot)
-		useHistory = epoch < headEpoch && epochStartSlot < lowestAvailableSlot
+		useHistory = epoch < headEpoch && expectedSlot < lowestAvailableSlot
 		if useHistory {
 			return nil
 		}
@@ -181,7 +181,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		// get active validator indicies
 		committeeCount := s.CommitteeCount(epoch)
 		// now start obtaining the committees from the head state
-		for currSlot := epochStartSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+		for currSlot := expectedSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 			for committeeIndex := range committeeCount {
 				idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
 				if err != nil {
@@ -226,7 +226,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	if epochStartSlot >= stageStateProgress {
+	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
@@ -246,7 +246,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(
 		stateGetter,
-		epochStartSlot,
+		epoch*a.beaconChainCfg.SlotsPerEpoch,
 	)
 	if err != nil {
 		return nil, err
@@ -255,12 +255,12 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	committeesPerSlot := max(min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize), 1)
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epochStartSlot, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
 	}
 
-	for currSlot := epochStartSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 		for committeeIndex := range committeesPerSlot {
 			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch

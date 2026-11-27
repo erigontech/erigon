@@ -71,13 +71,14 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
+	lowestAvailableSlot := a.forkchoiceStore.LowestAvailableSlot()
 	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 	var (
 		dependentRoot  common.Hash
 		duties         []proposerDuties
 		optimistic     bool
+		useHistory     bool
 		stateToAdvance *state.CachingBeaconState
-		advanceWarning string
 	)
 
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
@@ -85,7 +86,8 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if epoch > stateEpoch+maxEpochsLookaheadForDuties {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
 		}
-		if epoch < stateEpoch && (isFinalized || expectedSlot < a.forkchoiceStore.LowestAvailableSlot()) {
+		useHistory = epoch < stateEpoch && (isFinalized || expectedSlot < lowestAvailableSlot)
+		if useHistory {
 			return nil
 		}
 		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
@@ -100,7 +102,6 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		duties = make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
 		if targetVersion.After(s.Version()) {
-			advanceWarning = "getDutiesProposer: failed to advance state to target fork"
 			stateToAdvance, err = a.copyHeadStateForDuties(s)
 			return err
 		}
@@ -135,7 +136,6 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 		// Advance a copy to apply epoch updates before computing duties beyond the lookahead vector.
 		if s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead {
-			advanceWarning = "getDutiesProposer: failed to advance state for epoch beyond lookahead"
 			stateToAdvance, err = a.copyHeadStateForDuties(s)
 			return err
 		}
@@ -159,7 +159,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		return nil, err
 	}
 
-	if duties == nil {
+	if useHistory {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -172,11 +172,11 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
 
-		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
+		dependentRoot, err = a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
 			return nil, err
 		}
-		duties, err := a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
+		duties, err = a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
 		if err != nil {
 			return nil, err
 		}
@@ -185,8 +185,9 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 	if stateToAdvance != nil {
 		headEpoch := state.Epoch(stateToAdvance)
+		stateVersion := stateToAdvance.Version()
 		if err := transition.DefaultMachine.ProcessSlots(stateToAdvance, expectedSlot); err != nil {
-			log.Warn(advanceWarning, "epoch", epoch, "headEpoch", headEpoch, "err", err)
+			log.Warn("getDutiesProposer: failed to advance state", "epoch", epoch, "headEpoch", headEpoch, "stateVersion", stateVersion, "targetVersion", targetVersion, "err", err)
 			return nil, err
 		}
 		if err := fillProposerDutiesFromState(duties, stateToAdvance, epoch, expectedSlot); err != nil {
