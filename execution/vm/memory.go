@@ -54,7 +54,7 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
-		copy(m.store[offset:offset+size], value)
+		copyChunked(m.store[offset:offset+size], value)
 	}
 }
 
@@ -69,19 +69,8 @@ func (m *Memory) SetFromData(memOffset, size, dataOffset uint64, data []byte) {
 		panic("invalid memory: store empty")
 	}
 	dst := m.store[memOffset : memOffset+size]
-	dataLen := uint64(len(data))
-	if dataOffset >= dataLen {
-		// All zeros.
-		clear(dst)
-		return
-	}
-	avail := dataLen - dataOffset
-	if avail >= size {
-		copy(dst, data[dataOffset:dataOffset+size])
-	} else {
-		copy(dst[:avail], data[dataOffset:dataOffset+avail])
-		clear(dst[avail:])
-	}
+	n := copyChunked(dst, data[min(dataOffset, uint64(len(data))):])
+	clear(dst[n:])
 }
 
 // Set32 sets the 32 bytes starting at offset to the value of val, left-padded with zeroes to
@@ -184,5 +173,23 @@ func (m *Memory) Copy(dst, src, len uint64) {
 	if len == 0 {
 		return
 	}
-	copy(m.store[dst:], m.store[src:src+len])
+	// Forward chunks would overwrite the source of an overlapping copy to a higher address.
+	if dst > src && dst-src < len {
+		copy(m.store[dst:], m.store[src:src+len])
+		return
+	}
+	copyChunked(m.store[dst:dst+len], m.store[src:src+len])
+}
+
+// memmoveChunk keeps each copy below 1 MiB: from there Go's amd64 memmove uses
+// non-temporal stores on AMD CPUs, which bypass the cache and send every byte to DRAM.
+const memmoveChunk = 512 * 1024
+
+// copyChunked is copy for non-overlapping or downward-overlapping slices.
+func copyChunked(dst, src []byte) (n int) {
+	for min(len(dst), len(src)) > memmoveChunk {
+		n += copy(dst, src[:memmoveChunk])
+		dst, src = dst[memmoveChunk:], src[memmoveChunk:]
+	}
+	return n + copy(dst, src)
 }
