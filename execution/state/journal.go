@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -372,15 +373,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			s.writes.DelCode(je.account)
 			s.writes.DelCodeSize(je.account)
 		} else {
-			if _, ok := s.writes.GetCode(je.account); ok {
-				s.writes.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
-			}
-			if _, ok := s.writes.GetCodeHash(je.account); ok {
-				s.writes.updateCodeHash(je.account, prevhash)
-			}
-			if _, ok := s.writes.GetCodeSize(je.account); ok {
-				s.writes.updateCodeSize(je.account, len(prevcode))
-			}
+			s.writeCodeCells(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode}, false, tracing.CodeChangeReason(je.aux))
 		}
 		if je.extra != nil && je.extra.undoCodeChange != nil {
 			je.extra.undoCodeChange()

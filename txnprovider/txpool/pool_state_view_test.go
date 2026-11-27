@@ -68,7 +68,7 @@ func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 					account := accounts.Account{
 						Nonce:    1,
 						Balance:  *uint256.NewInt(common.Ether),
-						CodeHash: testDelegationCodeHash(),
+						CodeHash: testDelegation.Hash,
 					}
 					encoded := accounts.SerialiseV3(&account)
 					writeTestSenderState(t, ctx, coreDB, pool.logger, sender, encoded, 1)
@@ -83,7 +83,8 @@ func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 							BlockHeight: height,
 							BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 							Changes: []*remoteproto.AccountChange{{
-								Action:  remoteproto.Action_UPSERT,
+								Action:  remoteproto.Action_UPSERT_CODE,
+								Code:    testDelegation.Bytes,
 								Address: gointerfaces.ConvertAddressToH160(sender),
 								Data:    encoded,
 							}},

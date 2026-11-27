@@ -356,24 +356,12 @@ func (*ecrecoverAccountCode) RunState(ibs *state.IntraBlockState, output []byte,
 		return nil, gas, nil
 	}
 	signer := accounts.InternAddress(common.BytesToAddress(output))
-	if tracer != nil && tracer.OnAccountAccess != nil {
-		tracer.OnAccountAccess(signer)
-	}
-	accessGas := params.ExtCodeWarmAccessGasEIP8038
-	if !ibs.AddressInAccessList(signer) {
-		accessGas += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
-	}
+	accessGas := codeAccessGas(ibs, signer, tracer)
 	remaining, _, ok := useMdGas(gas, accessGas, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
 	if !ok {
 		return nil, gas, ErrOutOfGas
 	}
-	ibs.AddAddressToAccessList(signer)
-	// Paid reads remain in the block access list when execution reverts.
-	// Account warmth rolls back separately.
-	ibs.MarkAddressAccess(signer, false)
-	if tracer != nil && tracer.OnAccountRead != nil {
-		tracer.OnAccountRead(signer)
-	}
+	recordCodeAccess(ibs, signer, tracer)
 	code, err := ibs.GetCode(signer)
 	if err != nil {
 		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -382,6 +370,26 @@ func (*ecrecoverAccountCode) RunState(ibs *state.IntraBlockState, output []byte,
 		return nil, remaining, nil
 	}
 	return output, remaining, nil
+}
+
+func codeAccessGas(ibs *state.IntraBlockState, address accounts.Address, tracer *tracing.Hooks) uint64 {
+	if tracer != nil && tracer.OnAccountAccess != nil {
+		tracer.OnAccountAccess(address)
+	}
+	gasCost := params.ExtCodeWarmAccessGasEIP8038
+	if !ibs.AddressInAccessList(address) {
+		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
+	}
+	return gasCost
+}
+
+func recordCodeAccess(ibs *state.IntraBlockState, address accounts.Address, tracer *tracing.Hooks) {
+	ibs.AddAddressToAccessList(address)
+	// A paid code read stays in the block access list after a revert.
+	ibs.MarkAddressAccess(address, false)
+	if tracer != nil && tracer.OnAccountRead != nil {
+		tracer.OnAccountRead(address)
+	}
 }
 
 // SHA256 implemented as a native contract.

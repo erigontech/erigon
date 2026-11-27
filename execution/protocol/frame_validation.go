@@ -41,14 +41,15 @@ import (
 // MaxCost is the amount debited from the payer at payment approval using the
 // simulated fees. The pool reserves the full signed MaxFee, which can be higher.
 type FrameValidation struct {
-	Payer          common.Address
-	MaxCost        uint256.Int
-	PayerBalance   uint256.Int
-	Paymaster      bool
-	Deadline       uint64
-	Dependencies   []common.Address
-	CreationNonces []FrameCreationNonce
-	RecentRoots    []RecentRootReference
+	Payer             common.Address
+	MaxCost           uint256.Int
+	PayerBalance      uint256.Int
+	Paymaster         bool
+	Deadline          uint64
+	Dependencies      []common.Address
+	ProxyDependencies []common.Address
+	CreationNonces    []FrameCreationNonce
+	RecentRoots       []RecentRootReference
 }
 
 // FrameCreationNonce bounds the creator nonce that preserves validation. CREATE
@@ -76,6 +77,7 @@ type frameValidationTracer struct {
 	evm          *vm.EVM
 	err          error
 	dependencies map[common.Address]struct{}
+	codeKinds    map[accounts.CodeHash]validationCodeKind
 	creations    map[common.Address]frameCreationTrace
 }
 
@@ -129,6 +131,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 		FrameValidation: FrameValidation{Deadline: prefix.deadline},
 		framePrefix:     prefix,
 		evm:             evm,
+		codeKinds:       make(map[accounts.CodeHash]validationCodeKind),
 	}
 	if validation.recentRootFrame >= 0 {
 		validation.RecentRoots = recentRootReferences(tx.Frames[validation.recentRootFrame].Data)
@@ -262,24 +265,75 @@ func (v *frameValidationTracer) checkTarget(address accounts.Address, top bool) 
 	}
 	ctx := v.evm.FrameContext
 	sender := address.Value() == ctx.Transaction.SenderAddress
-	delegated, ok, err := v.evm.IntraBlockState().GetDelegatedDesignation(address)
+	ibs := v.evm.IntraBlockState()
+	code, err := ibs.GetCodeWithHash(address)
 	if err != nil {
 		v.fail(err)
 		return
 	}
-	if ok {
+	directSender := top && sender
+	if delegated, ok := types.ParseDelegation(code.Bytes); ok {
 		if !top || !sender {
 			v.fail(errors.New("delegated validation target"))
 			return
 		}
 		v.dependencies[delegated.Value()] = struct{}{}
+		address = delegated
+		directSender = false
+		code, err = ibs.GetCodeWithHash(delegated)
+		if err != nil {
+			v.fail(err)
+			return
+		}
 	}
-	codeHash, err := v.evm.IntraBlockState().GetCodeHash(address)
-	if err != nil {
-		v.fail(err)
-	} else if codeHash.IsEmpty() && !sender && !(top && ctx.Transaction.Frames[ctx.Index].Mode == types.FrameVerify) {
-		v.fail(errors.New("validation target has no code"))
+	if code.IsEmpty() {
+		if !sender && !(top && ctx.Transaction.Frames[ctx.Index].Mode == types.FrameVerify) {
+			v.fail(errors.New("validation target has no code"))
+		}
+		return
 	}
+	if _, delegated := types.ParseDelegation(code.Bytes); delegated || directSender {
+		return
+	}
+	kind, known := v.codeKinds[code.Hash]
+	if !known {
+		kind = classifyValidationCode(code.Bytes)
+		v.codeKinds[code.Hash] = kind
+	}
+	if kind == mutableValidationCode {
+		v.fail(errors.New("mutable validation target"))
+	} else if kind == proxyValidationCode && !slices.Contains(v.ProxyDependencies, address.Value()) {
+		v.ProxyDependencies = append(v.ProxyDependencies, address.Value())
+	}
+}
+
+type validationCodeKind byte
+
+const (
+	fixedValidationCode validationCodeKind = iota
+	proxyValidationCode
+	mutableValidationCode
+)
+
+func classifyValidationCode(code []byte) validationCodeKind {
+	kind := fixedValidationCode
+	for pc := 0; pc < len(code); pc++ {
+		op := vm.OpCode(code[pc])
+		switch {
+		case op == vm.SETCODEFROM:
+			return mutableValidationCode
+		case op == vm.DELEGATECALL || op == vm.CALLCODE:
+			kind = proxyValidationCode
+		case op.IsPushWithImmediateArgs():
+			pc += int(op-vm.PUSH1) + 1
+		case op == vm.DUPN || op == vm.SWAPN || op == vm.EXCHANGE:
+			// A PUSH is not a valid immediate, and the jump analysis reads it as an instruction.
+			if pc+1 < len(code) && !vm.OpCode(code[pc+1]).IsPushWithImmediateArgs() {
+				pc++
+			}
+		}
+	}
+	return kind
 }
 
 func (v *frameValidationTracer) beforeFrame() error {
@@ -346,7 +400,7 @@ func (v *frameValidationTracer) onAccountRead(addr accounts.Address) {
 }
 
 func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, opErr error) {
-	if v.err != nil || opErr != nil {
+	if v.err != nil || (opErr != nil && vm.OpCode(op) != vm.SETCODEFROM) {
 		return
 	}
 	ctx := v.evm.FrameContext
@@ -355,7 +409,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 	stack := scope.StackData()
 	banned := false
 	switch vm.OpCode(op) {
-	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE:
+	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.INVALID, vm.SELFDESTRUCT, vm.SETCODEFROM, vm.BALANCE, vm.SELFBALANCE:
 		banned = true
 	case vm.SLOTNUM:
 		banned = !inRecentRootVerifier

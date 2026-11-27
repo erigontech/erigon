@@ -75,6 +75,7 @@ func TestFrameValidationKeyedNonceDependency(t *testing.T) {
 func TestFrameValidationPolicy(t *testing.T) {
 	t.Parallel()
 	for name, code := range map[string][]byte{
+		"code adoption":   program.New().Push0().Op(vm.SETCODEFROM, vm.POP).Bytes(),
 		"timestamp":       program.New().Op(vm.TIMESTAMP, vm.POP).Bytes(),
 		"gas observation": program.New().Op(vm.GAS, vm.POP).Bytes(),
 		"empty helper":    program.New().DelegateCall(uint256.NewInt(1_000), common.HexToAddress("0x2000"), 0, 0, 0, 0).Op(vm.POP).Bytes(),
@@ -137,6 +138,59 @@ func TestFrameValidationCodeAccess(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestFrameValidationSetCodeFrom(t *testing.T) {
+	helper := common.HexToAddress("0x2000")
+	for _, tc := range []struct {
+		name       string
+		helperCode []byte
+		wantErr    bool
+		proxy      bool
+	}{
+		{"mutable helper", []byte{byte(vm.STOP), byte(vm.SETCODEFROM)}, true, false},
+		{"push immediate", []byte{byte(vm.PUSH1), byte(vm.SETCODEFROM)}, false, false},
+		{"dupn immediate", []byte{byte(vm.DUPN), byte(vm.SETCODEFROM)}, false, false},
+		{"swapn immediate", []byte{byte(vm.SWAPN), byte(vm.SETCODEFROM)}, false, false},
+		{"exchange immediate", []byte{byte(vm.EXCHANGE), byte(vm.DELEGATECALL)}, false, false},
+		{"push data after dupn", []byte{byte(vm.DUPN), byte(vm.PUSH1), byte(vm.SETCODEFROM)}, false, false},
+		{"push data after swapn", []byte{byte(vm.SWAPN), byte(vm.PUSH1), byte(vm.CALLCODE)}, false, false},
+		{"push data after exchange", []byte{byte(vm.EXCHANGE), byte(vm.PUSH1), byte(vm.DELEGATECALL)}, false, false},
+		{"proxy helper", []byte{byte(vm.STOP), byte(vm.DELEGATECALL)}, false, true},
+		{"mutable proxy helper", []byte{byte(vm.DELEGATECALL), byte(vm.SETCODEFROM)}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(helper), tc.helperCode, tracing.CodeChangeUnspecified))
+			senderCode := program.New().Push(helper).Op(vm.EXTCODESIZE, vm.POP).
+				Push(3).Push0().Push0().Op(vm.APPROVE, vm.STOP, vm.SETCODEFROM).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), senderCode, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 20_000}}}
+			result, err := ValidateFrameTransaction(evm, tx)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "mutable validation target")
+			} else {
+				require.NoError(t, err)
+				require.Contains(t, result.Dependencies, helper)
+				if tc.proxy {
+					require.Equal(t, []common.Address{helper}, result.ProxyDependencies)
+				} else {
+					require.Empty(t, result.ProxyDependencies)
+				}
+			}
+		})
+	}
+}
+
+func TestFrameValidationSenderCodeIsNotProxyDependency(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	code := program.New().Push(3).Push0().Push0().Op(vm.APPROVE, vm.DELEGATECALL).Bytes()
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(tx.SenderAddress), code, tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 20_000}}}
+	result, err := ValidateFrameTransaction(evm, tx)
+	require.NoError(t, err)
+	require.Empty(t, result.ProxyDependencies)
 }
 
 func TestFrameValidationEcrecoverDependency(t *testing.T) {

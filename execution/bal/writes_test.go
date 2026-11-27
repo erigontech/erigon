@@ -29,6 +29,24 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func TestToWriteSetPreservesAdoptedCodeHash(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{1})
+	code := accounts.NewCode([]byte{0})
+	bl := types.BlockAccessList{{
+		Address: addr.Value(), CodeChanges: []*types.CodeChange{{Index: 1, CodeHash: code.Hash}},
+	}}
+	writes := ToWriteSet(bl, 1)
+	hash, ok := writes.GetCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, code.Hash, hash.Val)
+	_, ok = writes.GetCode(addr)
+	require.False(t, ok)
+
+	_, ok = ToWriteSetAfter(bl, 1, 2).GetCodeHash(addr)
+	require.False(t, ok, "the checkpoint already includes the adoption")
+}
+
 func TestFinalChange(t *testing.T) {
 	t.Parallel()
 
