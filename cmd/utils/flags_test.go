@@ -636,8 +636,7 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	require.False(t, v3)
 	require.Contains(t, logs, warning)
 	command := "erigon seg reset --datadir=\"" + legacyDirs.DataDir + "\" --chain=sepolia"
-	escapedCommand := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(command)
-	require.Contains(t, logs, `command="`+escapedCommand+`"`)
+	require.Contains(t, logs, "[commitment] to move this node to the v3 trie: stop erigon, run the command below, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: "+command)
 
 	v3, logs = run(legacyDirs, "dev")
 	require.False(t, v3)
