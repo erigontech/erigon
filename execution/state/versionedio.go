@@ -2663,7 +2663,7 @@ type BlockAccessListBuilder struct {
 	slab []accountState
 	// recent holds the last accounts looked up: a tx touches few accounts, each on
 	// several paths, and a probe of ac misses the CPU cache once ac holds a whole block.
-	recent   [4]recentAccount
+	recent   [1]recentAccount
 	recentAt uint
 	next     int
 }
