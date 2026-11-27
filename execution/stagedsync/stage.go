@@ -188,11 +188,11 @@ func (u *UnwindState) Done(db kv.Putter) error {
 }
 
 type PruneState struct {
-	ID              stages.SyncStage
-	ForwardProgress uint64 // progress of stage forward move
-	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
-	state           *Sync
-	FinalityCtx     kv.FinalityContext
+	ID                stages.SyncStage
+	ForwardProgress   uint64 // progress of stage forward move
+	PruneProgress     uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
+	state             *Sync
+	IrreversibleBlock uint64 // the highest block the chain treats as final; see execfinality.IrreversibleBlock
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }

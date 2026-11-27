@@ -32,6 +32,27 @@ func TestRawUint64ListDecodeSSZAcceptsLimit(t *testing.T) {
 	require.Equal(t, 1, list.Length())
 }
 
+func TestRawUint64ListEncodeSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewRawUint64List(2, []uint64{1, 2})
+	encoded, err := list.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Len(t, encoded, 16)
+
+	list.Append(3)
+	_, err = list.EncodeSSZ(nil)
+	require.ErrorContains(t, err, "uint64 list length exceeds limit: 3 > 2")
+}
+
+func TestRawUint64ListHashSSZProgressiveIgnoresLimit(t *testing.T) {
+	values := []uint64{1, 2, 3}
+	want, err := solid.NewRawUint64List(len(values), values).HashSSZProgressive()
+	require.NoError(t, err)
+
+	got, err := solid.NewRawUint64List(1, values).HashSSZProgressive()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestRawUint64ListHashSSZAfterDecodeSSZ(t *testing.T) {
 	values := []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 	var encoded []byte

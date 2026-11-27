@@ -200,7 +200,7 @@ func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
 		},
 	}, nil, PruneOrder{stages.Bodies}, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
-	require.ErrorIs(t, state.RunPrune(t.Context(), tx, false, nil, 0), pruneErr)
+	require.ErrorIs(t, state.RunPrune(t.Context(), tx, false, 0, 0), pruneErr)
 
 	_, err := state.Run(nil, tx, false, false)
 	require.NoError(t, err)

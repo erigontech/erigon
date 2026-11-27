@@ -341,6 +341,11 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 	other.FlushWrites(ws, true)
 	require.NoError(t, cc.emitTouched(cc.foldView(other, 100+txIdx+1, base), newTestUpdates()))
 	require.Equal(t, readsBeforeFold+1, base.reads, "a fold over another block must read its own base")
+
+	uncached := accounts.InternAddress([20]byte{0xf3})
+	_, err := cc.foldView(vm, txIdx+1, base).ReadAccountData(uncached)
+	require.NoError(t, err)
+	require.NotContains(t, cc.baseAccounts, uncached, "the fold must not fill the block-base map")
 }
 
 // TestEmitTouched_FoldReusesFirstTouchKeyHash pins that the fold inserts each key under
@@ -376,4 +381,39 @@ func TestEmitTouched_FoldReusesFirstTouchKeyHash(t *testing.T) {
 	for _, pk := range []string{acctPlainKey(addr), storPlainKey(addr, slot)} {
 		require.Equal(t, commitment.KeyToHexNibbleHash([]byte(pk)), got[pk], "key %x", pk)
 	}
+}
+
+func TestMemoAccountReader_ReadsEachAccountOnce(t *testing.T) {
+	t.Parallel()
+
+	present, absent := accounts.InternAddress([20]byte{1}), accounts.InternAddress([20]byte{2})
+	acc := &accounts.Account{Nonce: 7}
+	inner := &countingAccountReader{mapStateReader: newMapStateReader()}
+	inner.accounts[present] = acc
+	r := newMemoAccountReader(inner)
+	for range 3 {
+		got, err := r.ReadAccountData(present)
+		require.NoError(t, err)
+		require.Equal(t, acc, got)
+		got, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	}
+	require.Equal(t, 2, inner.reads)
+}
+
+func TestMemoAccountReader_DoesNotCacheAFailedRead(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress([20]byte{3})
+	acc := &accounts.Account{Nonce: 7}
+	failing := &failingAccountReader{mapStateReader: newMapStateReader(), err: errors.New("read failed")}
+	failing.accounts[addr] = acc
+	r := newMemoAccountReader(failing)
+	_, err := r.ReadAccountData(addr)
+	require.ErrorIs(t, err, failing.err)
+	failing.err = nil
+	got, err := r.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, acc, got)
 }

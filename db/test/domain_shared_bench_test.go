@@ -110,7 +110,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
 			if i/stepSize > 3 {
-				err = agg.BuildFiles(db, i-(2*stepSize), unboundedFinalityCtx)
+				err = agg.BuildFiles(db, i-(2*stepSize), allIrreversible)
 				require.NoError(t, err)
 			}
 		}
@@ -365,7 +365,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	domains.Close()
 
 	// Build snapshot files so there is data to prune
-	err = agg.BuildFiles(db, maxTx, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, maxTx, allIrreversible)
 	require.NoError(b, err)
 
 	b.ResetTimer()

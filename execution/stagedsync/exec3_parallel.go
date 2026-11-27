@@ -1744,7 +1744,8 @@ type txResult struct {
 // sweep, broadcast the advanced frontier.
 //
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
-// is re-queued once the commit frontier reaches its predecessor.
+// is re-queued once that writer validates, and after the named re-run limit once the
+// commit frontier reaches its predecessor.
 
 // selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
 // writes of the previous run that this run no longer makes.
@@ -1753,7 +1754,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
-	// dependency and pauses until this tx commits.
+	// dependency and re-runs once this tx validates.
 	be.versionMap.FlushWrites(result.TxOut, false)
 }
 
@@ -2433,6 +2434,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
+	// A speculative run that read an unfinished write is re-run anyway, so recordDep cancels it.
+	ibs.SetCancel(evm.Cancel)
+	defer func() {
+		ibs.SetCancel(nil)
+		// The cancel must not reach this worker's next task, which may run without a Reset.
+		evm.Reset(evm.TxContext, evm.IntraBlockState())
+	}()
 	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
@@ -2614,10 +2622,13 @@ type blockExecutor struct {
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
+	// re-queues wakeAt[F] and wakeValidated[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
+	// wakeValidated maps a task to the named re-runs waiting for it to validate; a waiter
+	// added after that validation waits for the commit, which also drains this queue.
+	wakeValidated map[int][]*poolTask
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2667,6 +2678,8 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
+		wakeAt:              map[int][]*poolTask{},
+		wakeValidated:       map[int][]*poolTask{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3005,7 +3018,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
 	waiters := be.wakeAt[tx]
+	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
+	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3027,7 +3042,7 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	if pt.parked {
 		pt.parked = false
 		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt) {
+		if !be.requeueAt(tx, tx-1, pt, be.wakeAt) {
 			be.pool.push(pt)
 		}
 		return
@@ -3045,6 +3060,18 @@ func (be *blockExecutor) finishTask(tx int) {
 	}
 }
 
+// signalValidated wakes the named re-runs waiting for tx: its writes are now
+// Validated, which a reader continues on.
+func (be *blockExecutor) signalValidated(tx int) {
+	be.wakeMu.Lock()
+	waiters := be.wakeValidated[tx]
+	delete(be.wakeValidated, tx)
+	be.wakeMu.Unlock()
+	for _, pt := range waiters {
+		be.pool.push(pt)
+	}
+}
+
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
@@ -3056,9 +3083,20 @@ func (be *blockExecutor) dispatchLimit(workers int) int {
 	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
-// requeueAt registers pt to be re-queued when the frontier reaches target. Returns
+// requeueAt registers pt in queue (wakeAt or wakeValidated) under target. Returns
 // false when the frontier is already there; the caller then continues in place.
-func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
+func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask, queue map[int][]*poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target {
+		return false
+	}
+	queue[target] = append(queue[target], pt)
+	return true
+}
+
+func (be *blockExecutor) checkWaitTarget(tx, target int) {
 	// A target beyond the last task can never be signalled — the worker would park
 	// forever. That means a versionMap (block-TxIndex) dependency reached here
 	// without a taskIndexOf translation; fail loud at the exact site.
@@ -3073,13 +3111,6 @@ func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
-	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3208,6 +3239,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
+				be.signalValidated(tx)
 				// Validated against current state; only a later write to one of its
 				// read cells (markReadersDirty) re-flags it for finalize re-validation.
 				delete(be.revalidate, tx)
@@ -3626,7 +3658,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
-		be.wakeAt = map[int][]*poolTask{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()

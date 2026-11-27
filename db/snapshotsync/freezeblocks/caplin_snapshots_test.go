@@ -87,14 +87,9 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	require.ErrorContains(t, err, "skipped too many blocks in a row")
 }
 
-// dumpBeaconBlocksRange indexes the segment it just compressed, which is only safe because
-// Compress fsyncs and renames before returning.
-func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
-	ctx := t.Context()
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	dirs := datadir.New(t.TempDir())
-
-	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+func writeSparseCanonicalChain(t *testing.T, db kv.RwDB, bodylessSlot uint64) (bodylessRoot common.Hash) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		var prevRoot common.Hash
 		// One block every 500 slots keeps skippedInARow below its 1000 limit.
 		for slot := uint64(0); slot < snaptype.CaplinMergeLimit; slot += 500 {
@@ -106,13 +101,27 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
 				return err
 			}
+			prevRoot = root
+			if slot == bodylessSlot {
+				bodylessRoot = root
+				continue
+			}
 			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
 				return err
 			}
-			prevRoot = root
 		}
 		return nil
 	}))
+	return bodylessRoot
+}
+
+// dumpBeaconBlocksRange indexes the segment it just compressed, which is only safe because
+// Compress fsyncs and renames before returning.
+func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
+	ctx := t.Context()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeSparseCanonicalChain(t, db, math.MaxUint64)
 
 	require.NoError(t, dumpBeaconBlocksRange(ctx, db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New()))
 
@@ -133,6 +142,34 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 	require.NoError(t, err)
 	defer idx.Close()
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), idx.KeyCount())
+}
+
+func TestDumpBeaconBlocksRangeFailsOnCanonicalRootWithoutBody(t *testing.T) {
+	for name, tc := range map[string]struct {
+		slot      uint64
+		emptyBody bool
+	}{
+		"first":            {slot: 0},
+		"last":             {slot: snaptype.CaplinMergeLimit - 500},
+		"last, empty body": {slot: snaptype.CaplinMergeLimit - 500, emptyBody: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			dirs := datadir.New(t.TempDir())
+			root := writeSparseCanonicalChain(t, db, tc.slot)
+			if tc.emptyBody {
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(tc.slot, root), []byte{})
+				}))
+			}
+
+			err := dumpBeaconBlocksRange(t.Context(), db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New())
+			require.ErrorContains(t, err, "has no body", "slot %d", tc.slot)
+			files, globErr := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*"))
+			require.NoError(t, globErr)
+			require.Empty(t, files, "slot %d", tc.slot)
+		})
+	}
 }
 
 // Pre-Deneb chains never freeze blobs, so the answer must be 0 regardless of visible segments.

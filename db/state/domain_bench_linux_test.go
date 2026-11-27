@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -36,7 +35,7 @@ func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
 	prev := domainExistenceForceRandom
 	domainExistenceForceRandom = []string{kv.AccountsDomain.String()} // build mapped filters
 	b.Cleanup(func() { domainExistenceForceRandom = prev })
-	db, d := testDbAndDomain(b, log.New())
+	db, d := testDbAndDomain(b)
 	tx, err := db.BeginRw(b.Context())
 	require.NoError(b, err)
 	defer tx.Rollback()
