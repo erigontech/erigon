@@ -1587,7 +1587,8 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 }
 
 // recordDep records that this run read through tx dep's unfinished or vanished write: its result is void, so
-// its run is cancelled at the next jump or call.
+// its run is cancelled: a call made after that fails, and each frame stops at its next jump. Writes made before a
+// frame stops are thrown away with the run.
 func (ibs *IntraBlockState) recordDep(dep int) {
 	ibs.dep = max(ibs.dep, dep)
 	if ibs.HadInvalidRead() && ibs.cancel != nil {

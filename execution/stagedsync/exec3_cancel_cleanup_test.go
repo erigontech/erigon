@@ -26,12 +26,14 @@ type readsUnfinishedWrite struct {
 
 type panicsAfterDependencyRead struct {
 	readsUnfinishedWrite
+	cancelledBeforePanic bool
 }
 
-func (r *panicsAfterDependencyRead) Execute(_ *vm.EVM, _ rules.Engine, _ *types.Genesis, ibs *state.IntraBlockState,
+func (r *panicsAfterDependencyRead) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, ibs *state.IntraBlockState,
 	_ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
 ) *exec.TxResult {
 	_, _ = ibs.GetBalance(r.addr)
+	r.cancelledBeforePanic = evm.Cancelled()
 	panic("task panic after reading a dependency")
 }
 
@@ -45,12 +47,13 @@ func TestSpeculativeRunPanicClearsWorkerCancellation(t *testing.T) {
 	ibs.SetTxContext(1, 2)
 
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{})
-	task := &panicsAfterDependencyRead{readsUnfinishedWrite{addr: addr}}
+	task := &panicsAfterDependencyRead{readsUnfinishedWrite: readsUnfinishedWrite{addr: addr}}
 	tv := &taskVersion{execTask: &execTask{Task: task}, version: state.Version{TxIndex: 2}, versionMap: versions}
 
 	require.Panics(t, func() {
 		tv.Execute(evm, nil, nil, ibs, chain.AllProtocolChanges, nil, datadir.Dirs{}, false)
 	})
 	require.Equal(t, 1, ibs.DepTxIndex())
+	require.True(t, task.cancelledBeforePanic, "the dependency read must cancel the run")
 	require.False(t, evm.Cancelled(), "a recovered task panic must not leave the worker's EVM cancelled")
 }

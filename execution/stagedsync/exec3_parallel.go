@@ -2440,7 +2440,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
-	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
+	// A speculative run that read an unfinished write is re-run anyway, so recordDep cancels it.
 	ibs.SetCancel(evm.Cancel)
 	defer func() {
 		ibs.SetCancel(nil)
