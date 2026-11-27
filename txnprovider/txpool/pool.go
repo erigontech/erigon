@@ -2017,7 +2017,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false)
 			if err != nil {
 				return err
 			}
@@ -2049,11 +2049,10 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
-// addTxns adds newTxns to the pool and returns one discard reason per txn, indexed like
-// newTxns.Txns: DuplicateHash if the pool already holds the hash, the addLocked reason if the
-// txn was rejected, and NotSet if it was admitted, even if this call then discards it.
+// addTxns returns results in input order. On reload, it queues rows rejected at
+// insertion. discardLocked queues rows for transactions evicted later.
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, fromDB bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -2072,7 +2071,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
-			if collect && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
+			if !fromDB && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
@@ -2080,6 +2079,10 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
 		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+			if fromDB {
+				mt.TxnSlot = &TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}
+				p.deletedTxns = append(p.deletedTxns, mt)
+			}
 			discardReasons[i] = reason
 			continue
 		}
@@ -3422,18 +3425,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	_, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false)
-	if err != nil {
+	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
+		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true); err != nil {
 		return err
-	}
-	// A rejected txn never entered the pool, so its row is queued here. The row of an admitted
-	// txn that addTxns then discarded is already queued by discardLocked.
-	for i, reason := range reasons {
-		if reason != txpoolcfg.NotSet && reason != txpoolcfg.DuplicateHash {
-			txn := txns.Txns[i]
-			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
-		}
 	}
 
 	// Restore persisted dormancy state. On the first run after this feature was introduced

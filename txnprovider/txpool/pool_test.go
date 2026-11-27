@@ -610,6 +610,7 @@ func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 // memory but still makes the hash look known.
 func TestFromDBDeletesRejectedRows(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
+	pool.cfg.MaxNonceGap = 1
 	sender := common.Address{1}
 	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
 	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
@@ -617,8 +618,9 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	nonceTooLow := newTestTxnSlot(0, 0, 1, 2, 21_000)
 	valid := newTestTxnSlot(1, 0, 1, 2, 21_000)
 	insufficientFunds := newTestTxnSlot(2, 0, 1, 100_000_000_000_000, 21_000)
+	nonceGap := newTestTxnSlot(10, 0, 1, 2, 21_000)
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-		for _, txn := range []*TxnSlot{nonceTooLow, valid, insufficientFunds} {
+		for _, txn := range []*TxnSlot{nonceTooLow, valid, insufficientFunds, nonceGap} {
 			var encoded bytes.Buffer
 			if err := txn.Txn.MarshalBinary(&encoded); err != nil {
 				return err
@@ -635,6 +637,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	reset.StateVersionId = 1
 	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.fromDB(ctx))
+	require.Len(t, pool.deletedTxns, 3, "each rejected or evicted row must be queued once")
 	_, err := pool.flush(ctx)
 	require.NoError(t, err)
 
@@ -646,6 +649,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 			"nonce too low":      {nonceTooLow, false},
 			"valid":              {valid, true},
 			"insufficient funds": {insufficientFunds, false},
+			"evicted nonce gap":  {nonceGap, false},
 		} {
 			hash := want.txn.Txn.Hash()
 			has, err := tx.Has(kv.PoolTransaction, hash[:])
@@ -3572,6 +3576,7 @@ func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidAuthorizationNonce}, reasons)
 
+	require.Empty(t, pool.deletedTxns, "a rejected submission has no stored row to delete")
 	require.Contains(t, pool.byHash, string(original.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
 	pending, baseFee, queued := pool.CountContent()
