@@ -116,7 +116,9 @@ func TestGetBlobsReturnsCommitmentOrder(t *testing.T) {
 	require.True(t, strings.HasPrefix(out.Data[1], "0x03"))
 }
 
-func TestGetBlobsRepeatedCommitmentReturnsEveryMatchingBlob(t *testing.T) {
+func TestGetBlobsRepeatedCommitmentReturnsFirstMatchingBlob(t *testing.T) {
+	// beacon-APIs#676: one blob per requested versioned hash, in the order of
+	// the first occurrence of its commitment, also when the block repeats it.
 	f := setupBlobsTestWithCommitments(t, []cltypes.KZGCommitment{{69}, {1}, {69}})
 	require.Equal(t, f.versionedHashes[0], f.versionedHashes[2])
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
@@ -129,10 +131,21 @@ func TestGetBlobsRepeatedCommitmentReturnsEveryMatchingBlob(t *testing.T) {
 	}
 
 	out := getBeaconBlobs(t, f, "versioned_hashes="+f.versionedHashes[0].Hex())
+	require.Len(t, out.Data, 1)
+	require.True(t, strings.HasPrefix(out.Data[0], "0x01"))
 
+	// order follows the first occurrence in the block, not the request
+	out = getBeaconBlobs(t, f, "versioned_hashes="+f.versionedHashes[1].Hex()+","+f.versionedHashes[0].Hex())
 	require.Len(t, out.Data, 2)
 	require.True(t, strings.HasPrefix(out.Data[0], "0x01"))
-	require.True(t, strings.HasPrefix(out.Data[1], "0x03"))
+	require.True(t, strings.HasPrefix(out.Data[1], "0x02"))
+
+	// without versioned_hashes every blob is returned, repeats included
+	out = getBeaconBlobs(t, f, "")
+	require.Len(t, out.Data, 3)
+	require.True(t, strings.HasPrefix(out.Data[0], "0x01"))
+	require.True(t, strings.HasPrefix(out.Data[1], "0x02"))
+	require.True(t, strings.HasPrefix(out.Data[2], "0x03"))
 }
 
 func TestGetBlobsIgnoresUnknownVersionedHash(t *testing.T) {

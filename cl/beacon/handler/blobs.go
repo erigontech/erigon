@@ -279,16 +279,23 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 			indicies[i] = uint64(i)
 		}
 	} else {
-		// take the blobs by the versioned hashes
+		// take the blobs by the versioned hashes: one blob per requested hash,
+		// at the first index of its commitment, even if the block repeats it
 		filtered := make([]uint64, 0, len(selectedHashes))
+		taken := make(map[common.Hash]struct{}, len(selectedHashes))
 		commitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 			hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 			if err != nil {
 				return false
 			}
-			if _, ok := selectedHashes[hash]; ok {
-				filtered = append(filtered, uint64(index))
+			if _, ok := selectedHashes[hash]; !ok {
+				return true
 			}
+			if _, ok := taken[hash]; ok {
+				return true
+			}
+			taken[hash] = struct{}{}
+			filtered = append(filtered, uint64(index))
 			return true
 		})
 		indicies = filtered
