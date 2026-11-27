@@ -496,19 +496,30 @@ func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, jus
 		return ForkChoiceNode{}, 0, false, err
 	}
 
-	// Retrieve att
-	f.headHash = justifiedCheckpoint.Root
+	head, headSlot, weights, err := f.selectHeadLocked(justifiedCheckpoint, votes, currentSlot)
+	if err != nil {
+		return ForkChoiceNode{}, 0, false, err
+	}
+	f.headHash, f.headSlot, f.weights = head, headSlot, weights
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint, currentSlot)
+	f.publishSelectedHead(f.headHash, f.headSlot)
+	return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, true, nil
+}
+
+// selectHeadLocked runs the pre-Gloas get_head walk from the justified checkpoint over the current store
+// and returns the head, its slot and the branch weights. It leaves the cached head unchanged.
+func (f *ForkChoiceStore) selectHeadLocked(justifiedCheckpoint solid.Checkpoint, votes map[common.Hash]uint64, currentSlot uint64) (common.Hash, uint64, map[common.Hash]uint64, error) {
+	head := justifiedCheckpoint.Root
+	blocks := f.getFilteredBlockTree(head, justifiedCheckpoint, currentSlot)
 	// Account for weights on each head fork
-	f.weights = make(map[common.Hash]uint64)
-	for head := range f.headSet {
-		f.accountWeights(votes, f.weights, justifiedCheckpoint.Root, head)
+	weights := make(map[common.Hash]uint64)
+	for leaf := range f.headSet {
+		f.accountWeights(votes, weights, justifiedCheckpoint.Root, leaf)
 	}
 
 	for {
 		// Filter out current head children.
-		unfilteredChildren := f.children(f.headHash)
+		unfilteredChildren := f.children(head)
 		children := []common.Hash{}
 		for _, child := range unfilteredChildren {
 			if _, ok := blocks[child]; ok {
@@ -517,18 +528,16 @@ func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, jus
 		}
 		// Stop if we dont have any more children
 		if len(children) == 0 {
-			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
+			header, hasHeader := f.forkGraph.GetHeader(head)
 			if !hasHeader {
-				return ForkChoiceNode{}, 0, false, errors.New("no slot for head is stored")
+				return common.Hash{}, 0, nil, errors.New("no slot for head is stored")
 			}
-			f.headSlot = header.Slot
-			f.publishSelectedHead(f.headHash, f.headSlot)
-			return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, true, nil
+			return head, header.Slot, weights, nil
 		}
 
 		// Average case scenario.
 		if len(children) == 1 {
-			f.headHash = children[0]
+			head = children[0]
 			continue
 		}
 		// Sort children by lexigographical order
@@ -536,17 +545,39 @@ func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, jus
 			return bytes.Compare(a[:], b[:])
 		})
 		// After sorting is done determine best fit.
-		f.headHash = children[0]
-		maxWeight := f.weights[children[0]]
+		head = children[0]
+		maxWeight := weights[children[0]]
 		for i := 1; i < len(children); i++ {
-			weight := f.weights[children[i]]
+			weight := weights[children[i]]
 			// Lexicographical order is king.
 			if weight >= maxWeight {
-				f.headHash = children[i]
+				head = children[i]
 				maxWeight = weight
 			}
 		}
 	}
+}
+
+// headBeforeBlockPreGloasLocked returns the pre-Gloas head before a block of currentSlot is added, or a root
+// with the same shuffling dependent root, which is all update_proposer_boost_root reads. Every head descends
+// from the justified checkpoint block, so while that block is not older than the dependent slot, it stands in
+// for the head and the votes are not counted.
+func (f *ForkChoiceStore) headBeforeBlockPreGloasLocked(currentSlot uint64) (common.Hash, error) {
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	header, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
+	if !hasJustified {
+		return f.forkGraph.AnchorRoot(), nil
+	}
+	dependentSlot := computeShufflingDependentSlot(f.computeEpochAtSlot(currentSlot), f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	if header.Slot >= dependentSlot {
+		return justifiedCheckpoint.Root, nil
+	}
+	justificationState, err := f.getCheckpointStateLocked(justifiedCheckpoint)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	head, _, _, err := f.selectHeadLocked(justifiedCheckpoint, f.computeVotes(justifiedCheckpoint, justificationState, nil), currentSlot)
+	return head, err
 }
 
 func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {

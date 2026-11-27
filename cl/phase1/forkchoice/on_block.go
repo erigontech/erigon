@@ -279,6 +279,12 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			return err
 		}
 		headBeforeBlock = head.Root
+	} else if f.Slot() == block.Block.Slot {
+		head, headErr := f.headBeforeBlockPreGloasLocked(block.Block.Slot)
+		if headErr != nil {
+			log.Debug("[OnBlock] head before the block unavailable, no proposer boost", "slot", block.Block.Slot, "err", headErr)
+		}
+		headBeforeBlock = head
 	}
 
 	// Pre-GLOAS execution payload processing.

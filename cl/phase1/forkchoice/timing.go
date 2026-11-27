@@ -118,14 +118,8 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoo
 		return
 	}
 
-	epoch := f.computeEpochAtSlot(currentSlot)
-	if f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
-		if headRoot == (common.Hash{}) {
-			return
-		}
-		if f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
-			return
-		}
+	if headRoot == (common.Hash{}) || f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
+		return
 	}
 
 	f.proposerBoostRoot.Store(blockRoot)

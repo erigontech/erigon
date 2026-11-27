@@ -53,7 +53,7 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 		prepared := preparePostState(postState, block.Block)
 		require.True(t, store.timeMs.CompareAndSwap(storeTimeMs, storeTimeMs+store.beaconCfg.SecondsPerSlot*1000))
 
-		_, err = store.applyBlockImportLocked(block.Block, blockRoot, common.Hash{}, storeTimeMs, postState, prepared)
+		_, err = store.applyBlockImportLocked(block.Block, blockRoot, block.Block.ParentRoot, storeTimeMs, postState, prepared)
 		require.NoError(t, err)
 	}()
 
