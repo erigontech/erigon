@@ -1330,6 +1330,32 @@ func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlo
 	f.MarkPayloadStatus(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
 }
 
+// OnHeadPayloadValidated handles a VALID forkchoice update for a pre-Gloas head whose payload has the hash
+// executionHead: the EL has validated the payloads of the head and its ancestors, so none of them is
+// optimistically imported anymore.
+func (f *ForkChoiceStore) OnHeadPayloadValidated(headRoot, executionHead common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	head, ok := f.forkGraph.GetBlock(headRoot)
+	if !ok || head == nil || head.Block.Body.ExecutionPayload == nil || head.Block.Body.ExecutionPayload.BlockHash != executionHead {
+		return
+	}
+	if err := f.optimisticStore.ValidateBlock(headRoot, head.Block); err != nil {
+		log.Debug("[OnHeadPayloadValidated] optimistic store update failed", "root", headRoot, "err", err)
+	}
+	root, block := headRoot, head
+	for {
+		if status, known := f.payloadStatusAuthority(root); !known || status != execution_client.PayloadStatusNotValidated {
+			return
+		}
+		f.markPayloadStatusLocked(root, block.Block.Body.ExecutionPayload.BlockHash, execution_client.PayloadStatusValidated)
+		root = block.Block.ParentRoot
+		if block, ok = f.forkGraph.GetBlock(root); !ok || block == nil || block.Block.Body.ExecutionPayload == nil {
+			return
+		}
+	}
+}
+
 func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
 	return f.markPayloadStatus(blockRoot, executionBlockHash, status, nil)
 }

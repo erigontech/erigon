@@ -2122,7 +2122,9 @@ type testExecutionEngine struct {
 	newPayloadFn     func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error)
 	forkChoiceHeads  []common.Hash
 	forkChoiceErr    error
-	forkChoiceFn     func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error)
+	// forkChoiceHeadValid is what ForkChoiceUpdateHead reports for a successful update.
+	forkChoiceHeadValid bool
+	forkChoiceFn        func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error)
 }
 
 func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
@@ -2154,6 +2156,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, s
 		return t.forkChoiceFn(ctx, finalized, safe, head, attr, version)
 	}
 	return nil, t.forkChoiceErr
+}
+
+func (t *testExecutionEngine) ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) (bool, error) {
+	_, err := t.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+	return err == nil && t.forkChoiceHeadValid, err
 }
 
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }

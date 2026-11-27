@@ -610,8 +610,8 @@ func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
-		Return(nil, nil).Times(2)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.Phase0Version).
+		Return(false, nil).Times(2)
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 	require.NoError(t, err)
@@ -688,8 +688,8 @@ func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.GloasVersion).
-		Return(nil, nil)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.GloasVersion).
+		Return(false, nil)
 
 	_, computedRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 
@@ -2345,4 +2345,46 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		return 0, common.Hash{}, err
 	}
 	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
+}
+
+// A VALID answer to the forkchoice update for an optimistic head means the EL validated it, so the head is no
+// longer optimistic when the head event and the beacon API read it.
+func TestForkChoiceUpdateValidForHeadClearsOptimisticHead(t *testing.T) {
+	for _, headValid := range []bool{true, false} {
+		t.Run(fmt.Sprintf("head valid %t", headValid), func(t *testing.T) {
+			blocks, anchor, _ := tests.GetBellatrixRandom()
+			beaconCfg := anchor.BeaconConfig()
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			gomock.InOrder(
+				engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil),
+				engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+			)
+			clock := eth_clock.NewEthereumClock(anchor.GenesisTime(), anchor.GenesisValidatorsRoot(), beaconCfg)
+			graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(clock, anchor, engine, pool.NewOperationsPool(beaconCfg), graph,
+				beaconevents.NewEventEmitter(), synced_data.NewSyncedDataManager(beaconCfg, true), nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+			require.NoError(t, err)
+			for _, block := range blocks[:2] {
+				store.OnTick((anchor.GenesisTime()+block.Block.Slot*beaconCfg.SecondsPerSlot)*1000 + 1)
+				require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
+			}
+			head := blocks[1]
+			headRoot, err := head.Block.HashSSZ()
+			require.NoError(t, err)
+			require.True(t, store.IsRootOptimistic(headRoot))
+			engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), gomock.Any(), gomock.Any(), head.Block.Body.ExecutionPayload.BlockHash, gomock.Any()).
+				Return(headValid, nil)
+			cfg := &Cfg{
+				forkChoice: store,
+				beaconCfg:  beaconCfg,
+				rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, beaconCfg, clock),
+			}
+
+			require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, forkchoice.ForkChoiceNode{Root: headRoot}, head.Block.Slot))
+
+			require.Equal(t, !headValid, store.IsRootOptimistic(headRoot))
+		})
+	}
 }
