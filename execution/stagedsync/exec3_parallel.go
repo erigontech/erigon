@@ -1131,6 +1131,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"afterFrame", blockExecutor.afterFrameRuns.Load(), "recipientFallback", blockExecutor.recipientFallbacks.Load(),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -2607,6 +2608,8 @@ type blockExecutor struct {
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
+	// afterFrameRuns and recipientFallbacks count runs without the recipient credit and those of them that reran in order.
+	afterFrameRuns, recipientFallbacks atomic.Int32
 
 	// coinbase is the block's fee recipient, cached from the first tx result so
 	// dependency-ordered validation can gate coinbase readers.

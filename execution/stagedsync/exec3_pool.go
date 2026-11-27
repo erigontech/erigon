@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 const (
@@ -239,9 +240,17 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
 	result := wk.w.RunTxTask(tv)
-	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
-		(result.Err != nil || touchedSenderAccount(txTask, result) || touchedRecipientBalance(txTask, result)) {
-		return pt.rerunAfter(tv.index - 1)
+	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) {
+		touchedRecipient := result.Err == nil && touchedRecipientBalance(txTask, result)
+		if result.ExecutionResult.RecipientCredit == evmtypes.RecipientCreditAfterFrame {
+			be.afterFrameRuns.Add(1)
+			if touchedRecipient {
+				be.recipientFallbacks.Add(1)
+			}
+		}
+		if result.Err != nil || touchedSenderAccount(txTask, result) || touchedRecipient {
+			return pt.rerunAfter(tv.index - 1)
+		}
 	}
 	if result.Err != nil {
 		if finalExec {
