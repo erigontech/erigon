@@ -674,8 +674,11 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		return
 
 	default:
-		if _, ok := n.(*HashNode); ok && prefixExhausted {
-			return true, nil
+		if prefixExhausted {
+			switch n.(type) {
+			case HashNode, *HashNode:
+				return true, nil
+			}
 		}
 		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}

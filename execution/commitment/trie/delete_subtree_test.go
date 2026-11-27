@@ -100,6 +100,9 @@ func TestTrieDeleteSubtree_UnresolvedHash(t *testing.T) {
 		{name: "root", root: &HashNode{hash: make([]byte, 32)}},
 		{name: "extension boundary", root: NewShortNode([]byte{6, 1}, &HashNode{hash: make([]byte, 32)}), prefix: []byte("a")},
 		{name: "prefix continues", root: NewShortNode([]byte{6, 1}, &HashNode{hash: make([]byte, 32)}), prefix: []byte("ab"), panics: true},
+		{name: "value root", root: HashNode{hash: make([]byte, 32)}},
+		{name: "value extension boundary", root: NewShortNode([]byte{6, 1}, HashNode{hash: make([]byte, 32)}), prefix: []byte("a")},
+		{name: "value prefix continues", root: NewShortNode([]byte{6, 1}, HashNode{hash: make([]byte, 32)}), prefix: []byte("ab"), panics: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := NewInMemoryTrie(tc.root)
