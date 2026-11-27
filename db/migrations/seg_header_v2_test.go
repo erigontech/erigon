@@ -19,12 +19,14 @@ package migrations
 import (
 	"context"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/seg"
 )
 
@@ -129,26 +131,36 @@ func TestUpgradeSegHeadersV2(t *testing.T) {
 	}
 }
 
-// TestUpgradeSegHeadersV2_MissingDir ensures a non-existent snapshot dir is a no-op.
-func TestUpgradeSegHeadersV2_MissingDir(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	require.NoError(t, walkSegDir(missing, func(string) error {
-		t.Fatal("fn must not be called for a missing dir")
-		return nil
-	}))
+func TestUpgradeSegHeadersV2_MissingDirs(t *testing.T) {
+	require.NoError(t, UpgradeSegHeadersV2(t.Context(), datadir.New(t.TempDir()), log.New()))
 }
 
-func TestUpgradeSegHeadersV2_EmptySampleKeepsV1(t *testing.T) {
-	pairs := append(make([][2]string, seg.DetectCompressSamplePairs), manyPairs()...)
-	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
-	writeV1SegFile(t, path, seg.CompressKeys|seg.CompressVals, pairs)
+func requireHeader(t *testing.T, path string, want seg.FileCompression) {
+	t.Helper()
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	fc, ok := d.WordLevelCompression()
+	require.True(t, ok, "%s still has a V1 header", filepath.Base(path))
+	require.Equal(t, want, fc)
+}
 
-	require.NoError(t, upgradeSegFileToV2(path, log.New()))
-
+func requireV1(t *testing.T, path string) {
+	t.Helper()
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
 	defer d.Close()
 	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
+}
+
+func TestUpgradeSegHeadersV2_EmptySample(t *testing.T) {
+	pairs := append(make([][2]string, 100), manyPairs()...)
+	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
+	writeV1SegFile(t, path, seg.CompressKeys|seg.CompressVals, pairs)
+
+	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	requireHeader(t, path, seg.CompressKeys|seg.CompressVals)
+	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
 func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
@@ -171,7 +183,7 @@ func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
-func TestUpgradeSegHeadersV2_LatePatternsAbort(t *testing.T) {
+func TestUpgradeSegHeadersV2_LatePatterns(t *testing.T) {
 	rnd := rand.New(rand.NewPCG(1, 2))
 	var pairs [][2]string
 	for range 2_000 {
@@ -185,10 +197,70 @@ func TestUpgradeSegHeadersV2_LatePatternsAbort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-storage.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressKeys, pairs)
 
-	require.Error(t, upgradeSegFileToV2(path, log.New()))
+	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	requireHeader(t, path, seg.CompressKeys)
+	require.Equal(t, pairs, readBackPairs(t, path))
+}
 
-	d, err := seg.NewDecompressor(path)
+func TestUpgradeSegHeadersV2_SymlinkedDirs(t *testing.T) {
+	root := t.TempDir()
+	external := filepath.Join(root, "external")
+	require.NoError(t, os.MkdirAll(filepath.Join(external, "domain"), 0o755))
+	dataDir := filepath.Join(root, "datadir")
+	require.NoError(t, os.MkdirAll(dataDir, 0o755))
+	require.NoError(t, os.Symlink(external, filepath.Join(dataDir, "snapshots")))
+	dirs := datadir.New(dataDir)
+
+	other := filepath.Join(root, "other-disk")
+	require.NoError(t, os.MkdirAll(other, 0o755))
+	require.NoError(t, os.Remove(dirs.SnapCaplin))
+	require.NoError(t, os.Symlink(other, dirs.SnapCaplin))
+
+	kvPath := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
+	segPath := filepath.Join(dirs.SnapCaplin, "v1.0-000000-000010-randaomixes.seg")
+	writeV1SegFile(t, kvPath, seg.CompressVals, manyPairs())
+	writeV1SegFile(t, segPath, seg.CompressKeys|seg.CompressVals, manyPairs())
+
+	require.NoError(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
+	requireHeader(t, kvPath, seg.CompressVals)
+	requireHeader(t, segPath, seg.CompressKeys|seg.CompressVals)
+}
+
+func TestUpgradeSegHeadersV2_BadFileKeepsGoing(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	good := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, good, seg.CompressVals, manyPairs())
+
+	truncated := filepath.Join(dirs.SnapDomain, "v1.0-code.1024-2048.kv")
+	writeV1SegFile(t, truncated, seg.CompressVals, manyPairs())
+	d, err := seg.NewDecompressor(truncated)
 	require.NoError(t, err)
-	defer d.Close()
-	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
+	g := d.MakeGetter()
+	var lastStart, end uint64
+	for g.HasNext() {
+		lastStart = end
+		_, end = g.Next(nil)
+	}
+	size := d.Size()
+	d.Close()
+	require.NoError(t, os.Chmod(truncated, 0o644))
+	require.NoError(t, os.Truncate(truncated, size-int64(end-lastStart))) // drop the last word at its boundary
+
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-code.2048-3072.kv"), nil, 0o644))
+
+	require.NoError(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
+	requireHeader(t, good, seg.CompressVals)
+	requireV1(t, truncated)
+}
+
+func TestUpgradeSegHeadersV2_TorrentRemovalFails(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	path := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
+	require.NoError(t, os.WriteFile(path+".torrent", []byte("stale"), 0o644))
+	require.NoError(t, os.Chmod(dirs.SnapDomain, 0o555))
+	defer os.Chmod(dirs.SnapDomain, 0o755) //nolint:errcheck
+
+	require.Error(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
+	requireV1(t, path)
 }

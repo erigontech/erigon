@@ -254,12 +254,8 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer func() {
-					if err := l.Unlock(); err != nil {
-						logger.Warn("[snapshots] releasing the datadir lock", "err", err)
-					}
-				}()
-				return migrations.UpgradeSegHeadersV2(dirs, logger)
+				defer unlockDatadir(logger, l)
+				return migrations.UpgradeSegHeadersV2(ctx, dirs, logger)
 			},
 			Usage: "Patch all V1 snapshot files to V2 header format (sets word-level compression bits). Run once after upgrading to the version that introduced this format. One-way: older releases cannot read patched files, and patched files get new torrent hashes.",
 			Flags: joinFlags([]cli.Flag{
