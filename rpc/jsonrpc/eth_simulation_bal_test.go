@@ -396,22 +396,26 @@ func TestSimulateV1SystemCallBlockHash(t *testing.T) {
 	require.NoError(t, m.InsertChain(pack))
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	code := hexutil.Bytes{
-		byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0d, byte(vm.JUMPI),
-		byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH),
-		byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
-		byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.SLOAD), byte(vm.PUSH0), byte(vm.MSTORE),
+	code := hexutil.Bytes{byte(vm.CALLER), byte(vm.PUSH20)}
+	systemAddress := params.SystemAddress.Value()
+	code = append(code, systemAddress[:]...)
+	code = append(code, byte(vm.EQ), byte(vm.PUSH1), 0x23, byte(vm.JUMPI),
+		byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.SLOAD), byte(vm.PUSH0), byte(vm.MSTORE),
 		byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN),
-	}
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH),
+		byte(vm.NUMBER), byte(vm.SSTORE), byte(vm.STOP))
 	beaconRoots := params.BeaconRootsAddress.Value()
-	readSlot := ethapi.CallArgs{From: &bankAddr, To: &beaconRoots}
+	readSlot := func(slot byte) ethapi.CallArgs {
+		input := hexutil.Bytes(common.LeftPadBytes([]byte{slot}, 32))
+		return ethapi.CallArgs{From: &bankAddr, To: &beaconRoots, Input: &input}
+	}
 	result, err := api.SimulateV1(t.Context(), SimulationRequest{
 		BlockStateCalls: []SimulatedBlock{
 			{
 				StateOverrides: &ethapi.StateOverrides{params.BeaconRootsAddress: {Code: &code}},
-				Calls:          []ethapi.CallArgs{readSlot},
+				Calls:          []ethapi.CallArgs{readSlot(2)},
 			},
-			{BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(4))}, Calls: []ethapi.CallArgs{readSlot}},
+			{BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(4))}, Calls: []ethapi.CallArgs{readSlot(3), readSlot(4)}},
 		},
 	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 	require.NoError(t, err)
@@ -419,8 +423,9 @@ func TestSimulateV1SystemCallBlockHash(t *testing.T) {
 	require.Len(t, result[0].Calls, 1)
 	require.Equal(t, m.Genesis.Hash().Hex(), result[0].Calls[0].ReturnData)
 	require.NotNil(t, result[0].Hash)
-	require.Len(t, result[2].Calls, 1)
-	require.Equal(t, result[0].Hash.Hex(), result[2].Calls[0].ReturnData)
+	require.Len(t, result[2].Calls, 2)
+	require.Equal(t, pack.Blocks[0].Hash().Hex(), result[2].Calls[0].ReturnData)
+	require.Equal(t, result[0].Hash.Hex(), result[2].Calls[1].ReturnData)
 }
 
 func TestSimulateV1WithdrawalSystemCallBlockHash(t *testing.T) {
