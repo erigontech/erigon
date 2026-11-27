@@ -150,14 +150,18 @@ func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	// flags, so V2 files are only created here — never by direct Compressor use.
 	// The bits are replaced rather than OR-ed: the header has to describe this
 	// Writer's compression, not that of an earlier one over the same Compressor.
-	kv.version = FileCompressionFormatV2
-	kv.featureFlagBitmask &^= FeatureFlagBitmask(WordLevelKeyCompressionEnabled | WordLevelValCompressionEnabled)
+	bitmask := kv.featureFlagBitmask &^ FeatureFlagBitmask(WordLevelKeyCompressionEnabled|WordLevelValCompressionEnabled)
 	if compress.Has(CompressKeys) {
-		kv.featureFlagBitmask.Set(WordLevelKeyCompressionEnabled)
+		bitmask.Set(WordLevelKeyCompressionEnabled)
 	}
 	if compress.Has(CompressVals) {
-		kv.featureFlagBitmask.Set(WordLevelValCompressionEnabled)
+		bitmask.Set(WordLevelValCompressionEnabled)
 	}
+	if kv.Count() > 0 && (kv.version != FileCompressionFormatV2 || bitmask != kv.featureFlagBitmask) {
+		panic("seg.NewWriter: the header would not describe the words already written")
+	}
+	kv.version = FileCompressionFormatV2
+	kv.featureFlagBitmask = bitmask
 	return &Writer{kv, false, compress}
 }
 
@@ -209,9 +213,6 @@ func (c *Writer) Close() {
 	}
 }
 
-// DetectCompressSamplePairs is how many key/value pairs DetectCompressType reads.
-const DetectCompressSamplePairs = 100
-
 func DetectCompressType(getter *Getter) (compressed FileCompression) {
 	keyCompressed := func() (compressed bool) {
 		defer func() {
@@ -220,7 +221,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for range DetectCompressSamplePairs {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.SkipUncompressed()
 			}
@@ -238,7 +239,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for range DetectCompressSamplePairs {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.Skip()
 			}

@@ -148,6 +148,18 @@ func TestNewWriterReplacesWordLevelFlags(t *testing.T) {
 	require.False(t, c.featureFlagBitmask.Has(WordLevelValCompressionEnabled))
 }
 
+func TestNewWriterPanicsOnFlagChangeAfterWords(t *testing.T) {
+	c, err := NewCompressor(context.Background(), "test", filepath.Join(t.TempDir(), "test.seg"),
+		t.TempDir(), DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+
+	_, err = NewWriter(c, CompressKeys|CompressVals).Write([]byte("word"))
+	require.NoError(t, err)
+	require.NotPanics(t, func() { NewWriter(c, CompressKeys|CompressVals) })
+	require.Panics(t, func() { NewWriter(c, CompressNone) })
+}
+
 // writeKVFile builds a key/value seg file under the given compression and
 // returns its path.
 func writeKVFile(t *testing.T, compression FileCompression, words [][]byte) string {
