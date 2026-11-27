@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -29,7 +30,9 @@ type replacementDecision struct {
 	rebroadcast bool
 }
 
-// checkReplacement requires the pool lock and leaves pool state unchanged.
+// checkReplacement checks the replacement rules other than funding: the fee bumps, and the rules for blob
+// and frame transactions. It requires the pool lock and leaves pool state unchanged. addLocked checks the
+// funding afterwards, with keepsSenderFunded.
 func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDecision {
 	newTxn, oldTxn := replacement.TxnSlot, previous.TxnSlot
 	if newTxn.TxType() == FrameTxnType || oldTxn.TxType() == FrameTxnType {
@@ -69,10 +72,6 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	feecapThreshold.Mul(oldTxn.GetFeeCap(), uint256.NewInt(100+priceBump))
 	feecapThreshold.Div(feecapThreshold, &u256.N100)
 
-	if newTxn.GetValue().Cmp(oldTxn.GetValue()) > 0 {
-		// Potential latent overdraft attack
-		tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(newTxn.SenderID))))
-	}
 	if newTxn.GetTipCap().Cmp(tipThreshold) < 0 || newTxn.GetFeeCap().Cmp(feecapThreshold) < 0 {
 		rebroadcast := replacement.subPool&IsLocal != 0 && (previous.currentSubPool == PendingSubPool || previous.currentSubPool == BaseFeeSubPool)
 		return replacementDecision{
@@ -81,6 +80,110 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 		}
 	}
 	return replacementDecision{}
+}
+
+// fundedPrefix is the run of a sender's transactions that its balance covers after frame reservations:
+// account nonces from start, the sender's state nonce, up to end, exclusive, with no gap. spent is what
+// the run costs, and balance is the sender's balance in the batch's state view.
+type fundedPrefix struct {
+	start, end uint64
+	spent      uint256.Int
+	balance    uint256.Int
+}
+
+// covers reports whether mt is one of the transactions in the prefix.
+func (f *fundedPrefix) covers(mt *metaTxn) bool {
+	return !mt.keyedNonce && mt.TxnSlot.Nonce >= f.start && mt.TxnSlot.Nonce < f.end
+}
+
+// batchFundedPrefixes records, before a batch of additions changes anything, the funded prefix of each
+// sender that may replace one of its pooled transactions: a transaction of the batch takes the account
+// nonce of a pooled one and passes the price bump against it. So each prefix is what the balance covers
+// when the batch starts. A transaction that the batch adds, or funds with a cheaper replacement or a
+// released reservation, is not covered; none of them can be pending before the batch ends. A sender whose
+// state cannot be read gets a nil prefix, and addLocked rejects its replacements.
+func (p *TxPool) batchFundedPrefixes(cacheView kvcache.CacheView, txns TxnSlots) map[uint64]*fundedPrefix {
+	prefixes := make(map[uint64]*fundedPrefix)
+	for i, txn := range txns.Txns {
+		if _, ok := prefixes[txn.SenderID]; ok || txn.hasKeyedNonce() {
+			continue
+		}
+		pooled := p.all.get(txn.SenderID, txn.Nonce)
+		if pooled == nil || p.checkReplacement(newMetaTxn(txn, txns.IsLocal[i], 0), pooled).reason != txpoolcfg.NotSet {
+			continue
+		}
+		senderNonce, balance, _, err := p.senders.info(cacheView, txn.SenderID)
+		if err != nil {
+			p.logger.Warn("[txpool] batchFundedPrefixes: sender info", "err", err)
+			prefixes[txn.SenderID] = nil
+			continue
+		}
+		// As in onSenderStateChange, frame reservations come out of the balance first.
+		reserved := p.frameReservations[p.senders.senderID2Addr[txn.SenderID]].cost
+		prefix := p.newFundedPrefix(txn.SenderID, senderNonce, unreservedFunds(balance, reserved))
+		prefix.balance = balance
+		prefixes[txn.SenderID] = prefix
+	}
+	return prefixes
+}
+
+// keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
+// takes the place of previous. If so, it counts the replacement in the prefix, and the caller must make
+// the replacement. A replacement that does not raise the cost, or that replaces a transaction outside the
+// prefix, is always accepted, as is one from a sender with no prefix. Updating the prefix lets a batch walk
+// the sender's transactions only once.
+func (p *TxPool) keepsSenderFunded(prefix *fundedPrefix, replacement *TxnSlot, previous *metaTxn) bool {
+	if prefix == nil || !prefix.covers(previous) {
+		return true
+	}
+	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
+	var spent uint256.Int
+	spent.Sub(&prefix.spent, oldCost)
+	_, overflow := spent.AddOverflow(&spent, newCost)
+	if newCost.Gt(oldCost) {
+		sender := p.senders.senderID2Addr[replacement.SenderID]
+		reserved := p.frameReservations[sender].cost
+		// A replaced frame that the sender pays for releases its reservation, which can fund the replacement.
+		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == sender {
+			reserved.Sub(&reserved, frameMaxFee(previous.TxnSlot))
+		}
+		if funds := unreservedFunds(prefix.balance, reserved); overflow || spent.Gt(&funds) {
+			return false
+		}
+	}
+	prefix.spent = spent
+	return true
+}
+
+// newFundedPrefix walks the sender's account-nonce transactions from senderNonce for as long as they have
+// no gap and funds cover their total cost.
+func (p *TxPool) newFundedPrefix(senderID, senderNonce uint64, funds uint256.Int) *fundedPrefix {
+	prefix := &fundedPrefix{start: senderNonce, end: senderNonce}
+	p.all.ascend(senderID, func(mt *metaTxn) bool {
+		if mt.keyedNonce || mt.TxnSlot.Nonce < senderNonce {
+			return true
+		}
+		if mt.TxnSlot.Nonce != prefix.end {
+			return false
+		}
+		var spent uint256.Int
+		if _, overflow := spent.AddOverflow(&prefix.spent, requiredBalance(mt.TxnSlot)); overflow || spent.Gt(&funds) {
+			return false
+		}
+		prefix.spent = spent
+		prefix.end++
+		return true
+	})
+	return prefix
+}
+
+// unreservedFunds returns what balance leaves after reserved, or zero if reserved exceeds balance.
+func unreservedFunds(balance, reserved uint256.Int) uint256.Int {
+	var funds uint256.Int
+	if balance.Gt(&reserved) {
+		funds.Sub(&balance, &reserved)
+	}
+	return funds
 }
 
 // validateFrameReplacement checks replacements involving at least one frame.

@@ -2052,6 +2052,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	installed := make([]*metaTxn, len(newTxns.Txns))
 	announcements := Announcements{}
+	prefixes := p.batchFundedPrefixes(cacheView, newTxns)
 	for i, txn := range newTxns.Txns {
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
@@ -2063,7 +2064,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -2116,12 +2117,13 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// be returned into the transaction pool.
 	sendersWithActivity := map[uint64]struct{}{}
 	announcements := Announcements{}
+	prefixes := p.batchFundedPrefixes(cacheView, newTxns)
 	for i, txn := range newTxns.Txns {
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(prefixes, mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -2227,7 +2229,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(prefixes map[uint64]*fundedPrefix, mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
@@ -2281,6 +2283,15 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	}
 
 	if found != nil {
+		// Checked last: an accepted replacement is already counted in the sender's funded prefix, so no
+		// later check may reject it.
+		prefix, recorded := prefixes[mt.TxnSlot.SenderID]
+		if recorded && prefix == nil {
+			return txpoolcfg.ErrGetSenderInfo
+		}
+		if !p.keepsSenderFunded(prefix, mt.TxnSlot, found) {
+			return txpoolcfg.InsufficientFunds
+		}
 		p.removeFromSubPool(found, "add")
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
@@ -2324,6 +2335,29 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
 	return txpoolcfg.NotSet
+}
+
+// discardOverflow discards mt, which pending or base fee overflow has popped. A txn at the sender's next
+// nonce then follows a nonce gap, and the balance no longer has to cover mt, so discardOverflow refreshes
+// the sender at once, as the next block would. The txns that thus leave pending or the base fee sub-pool
+// move to queued at once, so that they free their slots before the next eviction.
+func (p *TxPool) discardOverflow(cacheView kvcache.CacheView, mt *metaTxn, reason txpoolcfg.DiscardReason) error {
+	p.discardLocked(mt, reason)
+	senderID := mt.TxnSlot.SenderID
+	if mt.keyedNonce || p.all.get(senderID, mt.TxnSlot.Nonce+1) == nil {
+		return nil
+	}
+	if err := p.refreshSender(cacheView, senderID); err != nil {
+		return err
+	}
+	p.all.ascend(senderID, func(next *metaTxn) bool {
+		if next.subPool < BaseFeePoolBits && (next.currentSubPool == PendingSubPool || next.currentSubPool == BaseFeeSubPool) {
+			p.removeFromSubPool(next, "nonce gap")
+			p.queued.Add(next, "nonce gap", p.logger)
+		}
+		return true
+	})
+	return nil
 }
 
 // discardLocked removes the entry from the pool indexes and queues its database
@@ -2675,12 +2709,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	// A legacy frame awaiting restoration or revalidation cannot advance the account
 	// nonce. Keep its chain queued and defer gap eviction until it is usable or removed.
 	nonceChainBlocked := p.hasParkedLegacyFrame(senderID)
-	reserved := p.frameReservations[sender]
-	if senderBalance.Gt(&reserved.cost) {
-		senderBalance.Sub(&senderBalance, &reserved.cost)
-	} else {
-		senderBalance.Clear()
-	}
+	senderBalance = unreservedFunds(senderBalance, p.frameReservations[sender].cost)
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -2833,7 +2862,9 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 		if err := p.refreshFrameAccounts(cacheView); err != nil {
 			return err
 		}
-		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements)
+		if err := p.promoteSubPools(cacheView, pendingBaseFee, pendingBlobFee, announcements); err != nil {
+			return err
+		}
 		// Eviction can release payer funds or break a sender's nonce chain.
 		// Refresh affected accounts before finishing promotion.
 		if len(p.frameAccountsToRefresh) == 0 {
@@ -2856,7 +2887,7 @@ func coversPendingFees(mt *metaTxn, frameGasLimit, pendingBaseFee, pendingBlobFe
 		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
 }
 
-func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
+func (p *TxPool) promoteSubPools(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) error {
 	coversFees := func(mt *metaTxn) bool {
 		return coversPendingFees(mt, mt.TxnSlot.GetGas(), pendingBaseFee, pendingBlobFee)
 	}
@@ -2910,13 +2941,17 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
+		if err := p.discardOverflow(cacheView, tx, txpoolcfg.PendingPoolOverflow); err != nil {
+			return err
+		}
 	}
 
-	// Discard worst transactions from pending sub pool until it is within capacity limits
+	// Discard worst transactions from the base fee sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
-		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
+		if err := p.discardOverflow(cacheView, tx, txpoolcfg.BaseFeePoolOverflow); err != nil {
+			return err
+		}
 	}
 
 	// A parked frame temporarily blocks its account-nonce chain. Count that chain
@@ -2940,6 +2975,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.queued.Add(tx, "frame validation pending", p.logger)
 	}
 	p.enforceTotalCapacity(pendingBaseFee)
+	return nil
 }
 
 // Run - does:

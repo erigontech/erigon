@@ -17,10 +17,42 @@
 package txpool
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
+
+// Each batch replaces every transaction of a sender whose balance covers all of them.
+func BenchmarkReplacementBatch(b *testing.B) {
+	for _, n := range []uint64{100, 400, 1600} {
+		b.Run(fmt.Sprintf("txns=%d", n), func(b *testing.B) {
+			ctx, pool, _, _ := newTestPool(b)
+			sender := common.Address{1}
+			require.NoError(b, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			add := func(value uint64) {
+				txns := make([]*TxnSlot, 0, n)
+				for nonce := range n {
+					txn := newTestTxnSlot(nonce, 0, 0, 1, 21_000)
+					txn.Txn.GetValue().SetUint64(value)
+					binary.BigEndian.PutUint64(txn.IDHash[:], value)
+					binary.BigEndian.PutUint64(txn.IDHash[8:], nonce)
+					txns = append(txns, txn)
+				}
+				addTestTxns(b, pool, sender, true, txns...)
+			}
+			add(0)
+			for value := uint64(1); b.Loop(); value++ {
+				add(value)
+			}
+			require.Equal(b, int(n), pool.pending.Len())
+		})
+	}
+}
 
 func BenchmarkFrameReplacementFee(b *testing.B) {
 	maximum := *new(uint256.Int).SetAllOne()

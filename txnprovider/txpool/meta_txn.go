@@ -135,6 +135,14 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp < than.timestamp
 }
 
+// worse orders transactions for eviction: an overflow discards the worst one first. Like better, it
+// compares the sub-pool markers first and then the fees. The fees rank by the sub-pool that the shared
+// markers qualify for, whatever sub-pool each transaction is in: the effective tip for pending, the fee
+// cap for the base fee sub-pool. So an overflow discards the transactions that selection and promotion
+// value least, and two transactions in different sub-pools are never both worse than each other. Unlike
+// better, worse keeps the local marker of a transaction that follows a remote one of its sender, so an
+// overflow can evict the remote transaction first and leave a nonce gap; for pending and base fee
+// overflow, discardOverflow handles the gap.
 func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
@@ -148,26 +156,28 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 		return subPool < thanSubPool
 	}
 
-	switch mt.currentSubPool {
-	case 0, PendingSubPool:
-		// Parked frames have no sub-pool. Keep pending fee ordering while their
-		// eligibility markers qualify, even though they cannot be selected yet.
-		if (mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock) && mt.minFeeCap != than.minFeeCap {
-			return mt.minFeeCap.Cmp(&than.minFeeCap) < 0
+	switch {
+	case subPool >= BaseFeePoolBits+EnoughFeeCapBlock: // qualifies for pending
+		mtTip := effectiveTip(&mt.minFeeCap, &pendingBaseFee, mt.minTip)
+		thanTip := effectiveTip(&than.minFeeCap, &pendingBaseFee, than.minTip)
+		if cmp := mtTip.Cmp(&thanTip); cmp != 0 {
+			return cmp < 0
 		}
-		if mt.nonceDistance != than.nonceDistance {
-			return mt.nonceDistance > than.nonceDistance
+		// Of two equal tips, a base fee rise moves the transaction with the lower fee cap out of
+		// pending first, so that one is worse.
+		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
+			return cmp < 0
 		}
-		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
-			return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
+	case subPool >= BaseFeePoolBits: // qualifies for the base fee sub-pool
+		if cmp := mt.minFeeCap.Cmp(&than.minFeeCap); cmp != 0 {
+			return cmp < 0
 		}
-	case BaseFeeSubPool, QueuedSubPool:
-		if mt.nonceDistance != than.nonceDistance {
-			return mt.nonceDistance > than.nonceDistance
-		}
-		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
-			return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
-		}
+	}
+	if mt.nonceDistance != than.nonceDistance {
+		return mt.nonceDistance > than.nonceDistance
+	}
+	if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
+		return mt.cumulativeBalanceDistance > than.cumulativeBalanceDistance
 	}
 	return mt.timestamp > than.timestamp
 }

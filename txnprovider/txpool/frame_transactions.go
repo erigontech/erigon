@@ -148,7 +148,8 @@ func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*
 		if reason == txpoolcfg.Success {
 			txn.frameValidation = nil
 			mt := newMetaTxn(txn, isLocal, blockNum)
-			if reason = p.addLocked(mt, &announcements, cells); reason == txpoolcfg.NotSet {
+			// A restored frame never replaces a pooled txn, so it needs no funded prefix.
+			if reason = p.addLocked(nil, mt, &announcements, cells); reason == txpoolcfg.NotSet {
 				p.senderLastActivity[txn.SenderID] = blockNum
 				p.frameAccountsToRefresh[sender] = struct{}{}
 				parked = append(parked, mt)

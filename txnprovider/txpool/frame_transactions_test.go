@@ -730,19 +730,19 @@ func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, add(frame, sender))
 	frameCost := frame.Txn.(*types.FrameTransaction).Fees.MaxFee.Uint64()
 	for _, tc := range []struct {
-		fee      uint64
-		cost     uint64
-		wantPool SubPoolType
+		fee  uint64
+		cost uint64
+		want txpoolcfg.DiscardReason
 	}{
-		{2, common.Ether - frameCost, PendingSubPool},
-		{4, common.Ether, QueuedSubPool},
-		{8, common.Ether - frameCost, PendingSubPool},
+		{2, common.Ether - frameCost, txpoolcfg.Success},
+		{4, common.Ether, txpoolcfg.InsufficientFunds},
+		{8, common.Ether - frameCost, txpoolcfg.Success},
 	} {
 		ordinary := newTestTxnSlot(0, 0, tc.fee, tc.fee, 21_000)
 		ordinary.IDHash[0] = byte(tc.fee)
 		ordinary.Txn.GetValue().SetUint64(tc.cost - 21_000*tc.fee)
-		require.Equal(t, txpoolcfg.Success, add(ordinary, payer))
-		require.Equal(t, tc.wantPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+		require.Equal(t, tc.want, add(ordinary, payer))
+		require.Equal(t, PendingSubPool, pool.all.get(ordinary.SenderID, 0).currentSubPool)
 		require.Equal(t, frame.Txn.(*types.FrameTransaction).Fees.MaxFee, pool.frameReservations[payer].cost)
 	}
 
@@ -759,6 +759,165 @@ func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Equal(t, replacement.Txn.(*types.FrameTransaction).Fees.MaxFee, pool.frameReservations[payer].cost)
 	require.Equal(t, 2, pool.pending.Len())
+}
+
+// The sender's next transaction spends all funds the frame reservation leaves, so the
+// replacement is funded only by the reservation it releases.
+func TestFramePoolOrdinaryReplacementUsesReleasedReservation(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	const feePerGas = common.GWei
+	tx := &types.FrameTransaction{
+		ChainID: *uint256.NewInt(1), SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100_000}}},
+		Fees:   types.FrameFees{TipCap: *uint256.NewInt(1)},
+	}
+	tx.Fees.MaxFee.Mul(uint256.NewInt(tx.GetGasLimit()), uint256.NewInt(feePerGas))
+	frame := framePoolSlotFromTransaction(t, tx)
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
+	next := newTestTxnSlot(1, 0, 1, 1, 21_000)
+	next.IDHash[0] = 1
+	next.Txn.GetValue().SetUint64(common.Ether - tx.Fees.MaxFee.Uint64() - 21_000)
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, next)[0])
+	require.Equal(t, 2, pool.pending.Len())
+
+	replacement := newTestTxnSlot(0, 0, 2, 2*feePerGas, 21_000)
+	replacement.IDHash[0] = 2
+	require.Less(t, requiredBalance(replacement).Uint64(), tx.Fees.MaxFee.Uint64())
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, replacement)[0])
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
+	require.Equal(t, 2, pool.pending.Len())
+}
+
+// Nonce 2 is unfunded only because the frame reservation is paid first. The funding check must not
+// count it against the funds that a costlier replacement of nonce 0 needs.
+func TestFramePoolReplacementIgnoresTxnUnfundedByReservation(t *testing.T) {
+	_, pool, payer := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	sender := common.Address{2}
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
+	frameCost := frame.Txn.(*types.FrameTransaction).Fees.MaxFee.Uint64()
+	var txns []*TxnSlot
+	for nonce := range uint64(3) {
+		txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+		txn.IDHash[0] = byte(nonce + 1)
+		txns = append(txns, txn)
+	}
+	// Together they cost the balance minus half the reservation: more than the reservation leaves,
+	// so nonce 2 is unfunded, but within the balance.
+	txns[2].Txn.GetValue().SetUint64(common.Ether - frameCost/2 - 3*42_000)
+	for _, txn := range txns {
+		require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, txn)[0])
+	}
+	require.Equal(t, QueuedSubPool, pool.byHash[string(txns[2].IDHash[:])].currentSubPool)
+
+	replacement := newTestTxnSlot(0, 0, 2, 3, 21_000)
+	replacement.IDHash[0] = 4
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, replacement)[0])
+	require.Equal(t, PendingSubPool, pool.byHash[string(replacement.IDHash[:])].currentSubPool)
+}
+
+// A batch protects what the payer's balance covers when the batch starts, also after another sender's
+// replacement releases a reservation of the payer earlier in the batch.
+func TestFramePoolReplacementBatchCountsFundsAtItsStart(t *testing.T) {
+	ctx, pool, payer := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	sponsored := common.Address{2}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, payer, sponsored)
+	change.ChangeBatch[0].BlockHeight = 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	frame := framePoolSlotWithNonce(t, sponsored, 0, 1, common.GWei)
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sponsored, true, frame)[0])
+	slot := func(nonce, feeCap, cost uint64, id byte) *TxnSlot {
+		txn := newTestTxnSlot(nonce, 0, 1, feeCap, 21_000)
+		txn.Txn.GetValue().SetUint64(cost - 21_000*feeCap)
+		txn.IDHash[0] = id
+		return txn
+	}
+	quarter := uint64(common.Ether / 4)
+	// Together they cost the whole balance, so the frame's reservation leaves nonce 1 unfunded.
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, slot(0, 10, quarter, 1))[0])
+	require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, payer, true, slot(1, 10, 3*quarter, 2))[0])
+	payerID, _ := pool.senders.getID(payer)
+	require.Equal(t, QueuedSubPool, pool.all.get(payerID, 1).currentSubPool)
+
+	// Replacing the frame releases the reservation, which would fund nonce 1. The costlier replacement of
+	// nonce 0 still fits, because nonce 1 was not funded when the batch started.
+	release := newTestTxnSlot(0, 0, 2*common.GWei, 2*common.GWei, 21_000)
+	release.IDHash[0] = 3
+	var txns TxnSlots
+	txns.Append(release, sponsored[:], true)
+	txns.Append(slot(0, 11, 3*quarter, 4), payer[:], true)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Empty(t, pool.frameReservations)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+}
+
+// Replacing a frame that another account pays for releases no reservation of the sender, so the
+// replacement must fit the sender's own spare funds.
+func TestFramePoolOrdinaryReplacesSponsoredFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra uint64 // what the replacement costs beyond the sender's spare funds
+		want  txpoolcfg.DiscardReason
+	}{
+		{"fits spare funds", 0, txpoolcfg.Success},
+		{"exceeds spare funds", 1, txpoolcfg.InsufficientFunds},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+			sender := common.Address{2}
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, payer, sender)
+			change.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			frame := framePoolSlotWithNonce(t, sender, 0, 1, common.GWei)
+			require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, frame)[0])
+			const spare = 1_000_000_000_000_000
+			next := newTestTxnSlot(1, 0, 1, 1, 21_000)
+			next.Txn.GetValue().SetUint64(uint64(common.Ether) - spare - 21_000)
+			next.IDHash[0] = 1
+			require.Equal(t, txpoolcfg.Success, addTestTxns(t, pool, sender, true, next)[0])
+
+			const feeCap = 2 * common.GWei
+			replacement := newTestTxnSlot(0, 0, feeCap, feeCap, 21_000)
+			replacement.Txn.GetValue().SetUint64(spare - 21_000*feeCap + tc.extra)
+			replacement.IDHash[0] = 2
+			require.Equal(t, tc.want, addTestTxns(t, pool, sender, true, replacement)[0])
+			_, framePooled := pool.byHash[string(frame.IDHash[:])]
+			require.Equal(t, tc.want != txpoolcfg.Success, framePooled)
+		})
+	}
+}
+
+// A sender whose state cannot be read fails only its own txns, not the whole batch.
+func TestFramePoolUnreadableSenderKeepsBatch(t *testing.T) {
+	ctx, pool, _ := keyedFramePoolEnv(t)
+	sponsored, healthy := common.Address{2}, common.Address{3}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, healthy)
+	change.ChangeBatch[0].BlockHeight = 1
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(sponsored),
+		Data:    []byte{0, 0, 0}, // a truncated account record
+	})
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// The payer's balance in the validation result cannot cover the frame.
+	frame := framePoolSlotWithNonce(t, sponsored, 0, 1, common.GWei)
+	payment := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	payment.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(frame, sponsored[:], true)
+	txns.Append(payment, healthy[:], true)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InsufficientFunds, txpoolcfg.Success}, reasons)
 }
 
 func TestFramePoolReservationExcludesReplacedOrdinary(t *testing.T) {
@@ -2474,6 +2633,54 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 	require.Len(t, pool.byHash, capacity)
 	require.Len(t, pool.all.senderIDFrameTxn, capacity)
 	require.Equal(t, reserved, pool.frameReservations[payer].cost)
+}
+
+// Parked frames compete for total capacity by the fees of the sub-pool their markers qualify for.
+func TestFramePoolParkedFeeEvictionPriority(t *testing.T) {
+	type fees struct{ tip, feePerGas uint64 }
+	for _, tc := range []struct {
+		name     string
+		baseFee  uint64
+		frames   [2]fees // the first one ranks lower but arrives first, so arrival order would keep it
+		ordinary fees
+		subPool  SubPoolType
+	}{
+		{"below the base fee", 10, [2]fees{{1, 2}, {1, 8}}, fees{1, 5}, BaseFeeSubPool},
+		{"above the base fee", 1, [2]fees{{1, 100}, {5, 10}}, fees{50, 100}, PendingSubPool},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.balance = common.Ether
+			ordinarySender := common.Address{2}
+			newBlock := func(height uint64) {
+				change := newBlockChangeForAccounts(common.Hash{byte(height)}, 0, payer, ordinarySender)
+				change.PendingBlockBaseFee = tc.baseFee
+				change.ChangeBatch[0].BlockHeight = height
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			}
+			newBlock(1)
+			pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 1, 0
+
+			var frames []*TxnSlot
+			for i, f := range tc.frames {
+				backend.err = nil
+				sender := common.Address{100, byte(i)}
+				frame := framePoolSlot(t, sender, f.tip, f.feePerGas, uint256.Int{1})
+				frames = append(frames, frame)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, sender, false, frame))
+				backend.err = context.DeadlineExceeded
+				newBlock(uint64(i) + 2)
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+			}
+
+			ordinary := newTestTxnSlot(0, 0, tc.ordinary.tip, tc.ordinary.feePerGas, 21_000)
+			ordinary.IDHash[0] = 1
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, ordinarySender, false, ordinary))
+			require.Equal(t, tc.subPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+			requireEvicted(t, pool, frames[0], frames[1])
+		})
+	}
 }
 
 func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {

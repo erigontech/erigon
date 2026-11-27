@@ -120,7 +120,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPool(t *testing.T, configs ...*chain.Config) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
+func newTestPool(t testing.TB, configs ...*chain.Config) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
 
 	chainConfig := chain.AllProtocolChanges
