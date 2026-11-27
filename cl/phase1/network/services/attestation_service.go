@@ -173,6 +173,7 @@ func attestationSignatureData(
 }
 
 type attestationService struct {
+	enableFastConfirmation bool
 	ctx                    context.Context
 	forkchoiceStore        forkchoice.ForkChoiceStorage
 	aggregationPool        aggregation.AggregationPool
@@ -211,8 +212,10 @@ func NewAttestationService(
 	netCfg *clparams.NetworkConfig,
 	emitters *beaconevents.EventEmitter,
 	batchSignatureVerifier *BatchSignatureVerifier,
+	enableFastConfirmation bool,
 ) AttestationService {
 	a := &attestationService{
+		enableFastConfirmation: enableFastConfirmation,
 		ctx:                    ctx,
 		forkchoiceStore:        forkchoiceStore,
 		aggregationPool:        aggregationPool,
@@ -489,7 +492,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:         [][]byte{pubKey[:]},
 		SendingPeer: att.Receiver,
 	}
+	applyVote := s.enableFastConfirmation && blockHeader.Slot <= slot
 	aggregateVerificationData.F = func() {
+		if applyVote {
+			s.forkchoiceStore.ProcessAttestingIndicies(attestation, []uint64{vIndex})
+		}
 		s.onVerifiedAttestation(vIndex, targetEpoch, attestation, att, aggregateVerificationData.VerifiedSignature(0))
 	}
 
@@ -524,10 +531,18 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	} else if err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
 		log.Warn("could not add attestation to the aggregation pool", "slot", attestation.Data.Slot, "err", err)
 	}
-	// send to subscribers
+	// FCR waits for the verification callbacks, so event delivery must not block them.
 	if att.Attestation != nil {
-		s.emitters.Operation().SendAttestation(att.Attestation)
+		if s.enableFastConfirmation {
+			s.emitters.Operation().TrySendAttestation(att.Attestation)
+		} else {
+			s.emitters.Operation().SendAttestation(att.Attestation)
+		}
 	} else if att.SingleAttestation != nil {
-		s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+		if s.enableFastConfirmation {
+			s.emitters.Operation().TrySendSingleAttestation(att.SingleAttestation)
+		} else {
+			s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+		}
 	}
 }

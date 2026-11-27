@@ -75,6 +75,7 @@ type aggregateAndProofServiceImpl struct {
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
+	enableFastConfirmation bool
 
 	awaitingBlock *blockArrivalQueue
 }
@@ -88,6 +89,7 @@ func NewAggregateAndProofService(
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
+	enableFastConfirmation bool,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
@@ -103,6 +105,7 @@ func NewAggregateAndProofService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
 		targetStateBuildClaims: newTargetStateBuildClaims(),
+		enableFastConfirmation: enableFastConfirmation,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
 			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
@@ -381,10 +384,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 		)
-		a.forkchoiceStore.ProcessAttestingIndicies(
-			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			attestingIndices,
-		)
+		if !a.enableFastConfirmation || blockHeader.Slot <= slot {
+			a.forkchoiceStore.ProcessAttestingIndicies(
+				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
+				attestingIndices,
+			)
+		}
 		// Keep the root of the first aggregate validated for this aggregator and epoch.
 		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}

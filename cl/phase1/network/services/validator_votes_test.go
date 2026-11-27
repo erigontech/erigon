@@ -74,7 +74,7 @@ func TestAttestationServiceSizesTheVoteWindowFromItsConfigs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	netCfg, beaconCfg := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	service := NewAttestationService(ctx, nil, nil, nil, nil, beaconCfg, netCfg, nil, nil).(*attestationService)
+	service := NewAttestationService(ctx, nil, nil, nil, nil, beaconCfg, netCfg, nil, nil, false).(*attestationService)
 
 	require.Equal(t, uint64(2), service.validatorVotes.epochs)
 }

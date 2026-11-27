@@ -61,10 +61,14 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	f.mu.Lock()
 	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
+	if f.fastConfirmation != nil {
+		f.applyPendingVotes(currentSlot)
+	}
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
-	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
+	epochStart := f.computeSlotsSinceEpochStart(currentSlot) == 0
+	if epochStart {
 		// Only promote unrealized checkpoints when the node is synced (processing
 		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
 		// far behind the wall clock.  Promoting unrealized finalization at that point
@@ -73,6 +77,11 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 		// ErrNotFinalizedDescendant for subsequent blocks.
 		if f.nearChainTip(currentSlot) {
 			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		}
+	}
+	if tracker := f.fastConfirmation; tracker != nil {
+		if result := tracker.result.Load(); result != nil && (epochStart || currentSlot == result.reconfirmBySlot+1) {
+			tracker.notifyChanged()
 		}
 	}
 }

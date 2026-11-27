@@ -44,6 +44,7 @@ import (
 var LatestFinalizedStateFileName = "finalized.ssz_snappy"
 
 type CaplinConfig struct {
+	EnableFastConfirmation bool
 	// Archive related config
 	ArchiveBlocks             bool
 	ArchiveBlobs              bool

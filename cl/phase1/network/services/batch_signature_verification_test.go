@@ -812,6 +812,21 @@ func TestBatchSignatureVerifierWaitReturnsIgnoreOnContextCancel(t *testing.T) {
 	require.ErrorIs(t, err, ErrIgnore)
 }
 
+func TestBatchSignatureVerifierFlushWaitsForAttestationCallbacks(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+	applied := make(chan struct{}, 2)
+	for _, queue := range []chan *AggregateVerificationData{verifier.attVerifyAndExecute, verifier.aggregateProofVerify} {
+		entry := newRepeatedSignatureEntry(1, 1)
+		entry.F = func() { applied <- struct{}{} }
+		queue <- entry
+		verifier.startVerifier(queue, time.Hour)
+	}
+	require.NoError(t, verifier.FlushAttestations(t.Context()))
+	require.Len(t, applied, 2)
+}
+
 func TestBatchVerificationHandsEachItemItsDecompressedSignatures(t *testing.T) {
 	root := make([]byte, 32)
 	items := make([]*AggregateVerificationData, 3)

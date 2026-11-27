@@ -325,7 +325,7 @@ func subscribeEventStream(emitters *event.EventEmitter, topics mapset.Set[event.
 		case validTopics[topic] == operationFeed:
 			if s.op == nil {
 				s.op = make(chan *event.EventStream, eventStreamFeedBuffer)
-				s.opSub = emitters.Operation().Subscribe(s.op)
+				s.opSub = emitters.Operation().SubscribeTopics(s.op, topics.ContainsOne)
 			}
 		}
 	}

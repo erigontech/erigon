@@ -996,6 +996,10 @@ var (
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
 	}
+	EnableFastConfirmationFlag = cli.BoolFlag{
+		Name:  "enable-fast-confirmation",
+		Usage: "Use Caplin fast confirmations for the execution RPC safe block tag",
+	}
 	CaplinPayloadPreparationDisableFlag = cli.BoolFlag{
 		Name:  "caplin.payload-preparation.disable",
 		Usage: "disable speculative payload preparation while keeping the validator API and normal block production enabled",
@@ -1892,6 +1896,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 }
 
 func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.EnableFastConfirmation = ctx.Bool(EnableFastConfirmationFlag.Name)
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
 	cfg.CaplinConfig.DisableIPBlockLimits = ctx.Bool(CaplinIPBlockLimitsDisableFlag.Name)
 	trustedCIDRs := ctx.StringSlice(CaplinIPBlockLimitsTrustedCIDRsFlag.Name)

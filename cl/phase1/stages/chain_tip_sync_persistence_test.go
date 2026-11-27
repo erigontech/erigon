@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -53,9 +54,15 @@ type blockWriteErrorDB struct {
 	failures     int
 	writes       int
 	onWriteError func()
+	beforeUpdate func(context.Context) error
 }
 
 func (db *blockWriteErrorDB) Update(ctx context.Context, fn func(kv.RwTx) error) error {
+	if db.beforeUpdate != nil {
+		if err := db.beforeUpdate(ctx); err != nil {
+			return err
+		}
+	}
 	db.writes++
 	if db.writes <= db.failures {
 		if db.onWriteError != nil {
@@ -76,7 +83,7 @@ func TestChainTipBatchDoesNotRejectAcceptedBlockAfterWriteFailure(t *testing.T) 
 	require.NoError(t, err)
 	rejected := make(map[common.Hash]error)
 
-	reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: block.Block.Slot}, []*cltypes.SignedBeaconBlock{block}, make(map[common.Hash]struct{}), rejected)
+	reachedTarget := processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: block.Block.Slot}, []*cltypes.SignedBeaconBlock{block}, make(map[common.Hash]struct{}), rejected)
 
 	require.False(t, reachedTarget)
 	_, accepted := cfg.forkChoice.GetHeader(root)
@@ -101,7 +108,7 @@ func TestChainTipListenerRetriesWriteWithoutAnotherBatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, Args{targetSlot: block.Block.Slot}, respCh, make(chan error))
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, Args{targetSlot: block.Block.Slot}, respCh, make(chan error))
 
 	require.NoError(t, err)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -135,7 +142,7 @@ func TestChainTipSyncRetriesWriteAfterStageCancellation(t *testing.T) {
 	db.onWriteError = cancel
 	args := Args{targetSlot: block.Block.Slot, hasDownloaded: true, peers: 1}
 
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, args, respCh, make(chan error))
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, args, respCh, make(chan error))
 
 	require.ErrorIs(t, err, context.Canceled)
 	args.seenSlot = cfg.forkChoice.HighestSeen()
@@ -314,4 +321,71 @@ func newForwardSyncPersistenceFixture(t *testing.T) (*Cfg, *chainTipBatchForkGra
 	cfg.indiciesDB = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg.forkChoice.OnTick((fixture.headState.GenesisTime() + block.Block.Slot*cfg.beaconCfg.SecondsPerSlot) * 1000)
 	return cfg, graph, block, engine
+}
+
+func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
+	for _, stage := range []StageName{ChainTipSync, SleepForSlot} {
+		t.Run(stage, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				hash := common.Hash{0x41}
+				engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+				fixture := newLockOrderFixtureWithConfig(t, 0, engine, hash, false, nil)
+				cfg := fixture.cfg
+				store := cfg.forkChoice
+				store.EnableFastConfirmation(store.FinalizedCheckpoint())
+				now := (store.GenesisTime()+cfg.beaconCfg.SecondsPerSlot)*1000 - 1
+				store.OnTick(now)
+				require.NoError(t, store.OnFastConfirmation(t.Context(), now, nil))
+				args := Args{hasDownloaded: true, peers: 1, targetSlot: 1}
+				graph := ConsensusClStages()
+				started := time.Now()
+				if stage == ChainTipSync {
+					require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), t.Context(), log.Root(), cfg, args, nil, nil))
+				} else {
+					require.NoError(t, graph.Stages[stage].ActionFunc(t.Context(), log.Root(), cfg, args))
+				}
+				require.Equal(t, started, time.Now(), "safe changes must wake publication immediately")
+				require.Empty(t, store.FastConfirmationChanged(), "the wake was consumed")
+				cfg.pendingBlockWrite = &pendingBlockWrite{}
+				require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
+				cfg.pendingBlockWrite = nil
+				publishPending := func(t *testing.T) {
+					t.Helper()
+					next := graph.Stages[stage].TransitionFunc(cfg, args, nil)
+					if stage == SleepForSlot {
+						require.Equal(t, ChainTipSync, next, "retry execution recovery before publishing again")
+						require.NoError(t, graph.Stages[next].ActionFunc(t.Context(), log.Root(), cfg, args))
+						next = graph.Stages[next].TransitionFunc(cfg, args, nil)
+					}
+					require.Equal(t, ForkChoice, next, "safe-only changes must publish without another block")
+				}
+				var lastAttempt time.Time
+				for attempt, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateBusy} {
+					publishPending(t)
+					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, responseErr)
+					started := time.Now()
+					_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
+					require.NoError(t, err)
+					require.True(t, cfg.safeUpdatePending, "a deferred update must remain pending")
+					if attempt == 0 {
+						require.Zero(t, time.Since(started))
+					} else {
+						require.GreaterOrEqual(t, time.Since(lastAttempt), sleepForSlotRewakeInterval, "retries must be throttled")
+					}
+					lastAttempt = time.Now()
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				_, _, err := computeAndNotifyServicesOfNewForkChoice(ctx, log.Root(), cfg)
+				require.ErrorIs(t, err, context.Canceled)
+				require.True(t, cfg.safeUpdatePending)
+				publishPending(t)
+				engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, nil)
+				_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
+				require.NoError(t, err)
+				require.False(t, cfg.safeUpdatePending)
+				require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil), "publication consumes the pending wake")
+			})
+		})
+	}
 }

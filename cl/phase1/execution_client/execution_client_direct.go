@@ -43,8 +43,9 @@ import (
 const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
-	chainRW chainreader.ChainReaderWriterEth1
-	txpool  txpoolproto.TxpoolClient
+	EnableFastConfirmation bool
+	chainRW                chainreader.ChainReaderWriterEth1
+	txpool                 txpoolproto.TxpoolClient
 }
 
 func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
@@ -160,10 +161,25 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("forkchoice reorg is too deep")
 	}
 	if attr == nil {
-		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
-			return nil, ErrForkChoiceUpdateBusy
+		if !cc.EnableFastConfirmation {
+			if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+				return nil, ErrForkChoiceUpdateBusy
+			}
+			return nil, nil
 		}
-		return nil, nil
+		switch result.Status {
+		case execmodule.ExecutionStatusSuccess:
+			return nil, nil
+		case execmodule.ExecutionStatusBusy:
+			if result.UpdateInProgress {
+				return nil, ErrForkChoiceUpdateTimeout
+			}
+			return nil, ErrForkChoiceUpdateBusy
+		case execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
+			return nil, ErrForkChoiceUpdateSyncing
+		default:
+			return nil, fmt.Errorf("forkchoice update failed: %s", result.Status)
+		}
 	}
 	// The forkchoice update answers before its commit releases the execution semaphore, so the
 	// build that follows it is usually busy for tens of milliseconds.

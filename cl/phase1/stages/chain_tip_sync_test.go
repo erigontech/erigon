@@ -90,7 +90,7 @@ func TestStartFetchingBlocksMissedByGossipPacesSuccessfulPolls(t *testing.T) {
 			}
 		}()
 
-		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, time.Second/2, respCh, make(chan error, 1))
 		close(respCh)
 
 		require.LessOrEqual(t, sentinel.calls, 3, "polls that return no new block must be paced")
@@ -131,7 +131,7 @@ func TestStartFetchingBlocksMissedByGossipCrossesSkippedSlots(t *testing.T) {
 			}
 		}()
 
-		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, time.Second/2, respCh, make(chan error, 1))
 		close(respCh)
 
 		require.GreaterOrEqual(t, len(sentinel.starts), 2)
@@ -155,7 +155,7 @@ func TestStartFetchingBlocksMissedByGossipResumesAcrossAttempts(t *testing.T) {
 		attempt := func() {
 			ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
 			defer cancel()
-			startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+			startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, time.Second/2, respCh, make(chan error, 1))
 		}
 
 		attempt()
@@ -182,7 +182,7 @@ func TestStartFetchingBlocksMissedByGossipKeepsAnUnfetchedWindow(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 800*time.Millisecond)
 		defer cancel()
 
-		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1))
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, time.Second/2, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1))
 
 		require.Zero(t, cfg.chainTipResumeSlot.Load(), "a window that was never fetched must be asked for again")
 	})
@@ -206,7 +206,7 @@ func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, errCh)
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, time.Second/2, respCh, errCh)
 	}()
 
 	// Cancel only after a request has failed; cancelling during the initial wait returns before the error send.
@@ -338,7 +338,7 @@ func newChainTipListenerFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock)
 func listenInBackground(ctx context.Context, cfg *Cfg, targetSlot uint64) <-chan error {
 	done := make(chan error, 1)
 	go func() {
-		done <- listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, Args{targetSlot: targetSlot}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]), make(chan error))
+		done <- listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, Args{targetSlot: targetSlot}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]), make(chan error))
 	}()
 	return done
 }

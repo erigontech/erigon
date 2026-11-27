@@ -117,6 +117,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 
 func newCaplinConfig(cliCtx *cli.Command, cfg *caplincli.CaplinCliCfg) clparams.CaplinConfig {
 	return clparams.CaplinConfig{
+		EnableFastConfirmation:    cfg.EnableFastConfirmation,
 		SentinelAddr:              cliCtx.String(sentinelflags.SentinelServerAddr.Name),
 		SentinelPort:              uint64(cliCtx.Int(sentinelflags.SentinelServerPort.Name)),
 		CaplinDiscoveryAddr:       cfg.Addr,

@@ -497,6 +497,10 @@ func (f blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoi
 	return common.Hash{}, true
 }
 
+func (sleepForSlotForkChoiceFake) FastConfirmationChanged() <-chan struct{} { return nil }
+
+func (blockingSleepForSlotForkChoiceFake) FastConfirmationChanged() <-chan struct{} { return nil }
+
 type columnRetryLog struct {
 	mu       sync.Mutex
 	minSlots []uint64

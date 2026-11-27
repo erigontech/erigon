@@ -129,7 +129,7 @@ type overlapTestStore struct {
 	events  chan *beaconevents.EventStream
 }
 
-func newOverlapTestStore(t *testing.T, anchor *state.CachingBeaconState, engine execution_client.ExecutionEngine, serial bool) *overlapTestStore {
+func newOverlapTestStore(t testing.TB, anchor *state.CachingBeaconState, engine execution_client.ExecutionEngine, serial bool) *overlapTestStore {
 	t.Helper()
 	cfg := anchor.BeaconConfig()
 	manager := synced_data.NewSyncedDataManager(cfg, true)

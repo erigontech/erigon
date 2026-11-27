@@ -16,6 +16,11 @@ func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscripti
 	return f.feed.Subscribe(channel)
 }
 
+// SubscribeTopics filters nonblocking sends before they reach the subscriber.
+func (f *operationFeed) SubscribeTopics(channel chan *EventStream, accepts func(EventTopic) bool) ethevent.Subscription {
+	return f.feed.SubscribeWithTrySendFilter(channel, func(value any) bool { return accepts(value.(*EventStream).Event) })
+}
+
 // SubscribeExecutionPayload subscribes channel to execution_payload events only.
 func (f *operationFeed) SubscribeExecutionPayload(channel chan *EventStream) ethevent.Subscription {
 	return f.payload.Subscribe(channel)
@@ -33,11 +38,19 @@ func (f *operationFeed) SendAttestation(value *AttestationData) int {
 	})
 }
 
+func (f *operationFeed) TrySendAttestation(value *AttestationData) int {
+	return f.feed.TrySendOrFail(&EventStream{Event: OpAttestation, Data: value})
+}
+
 func (f *operationFeed) SendSingleAttestation(value *SingleAttestationData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpSingleAttestation,
 		Data:  value,
 	})
+}
+
+func (f *operationFeed) TrySendSingleAttestation(value *SingleAttestationData) int {
+	return f.feed.TrySendOrFail(&EventStream{Event: OpSingleAttestation, Data: value})
 }
 
 func (f *operationFeed) SendVoluntaryExit(value *VoluntaryExitData) int {
