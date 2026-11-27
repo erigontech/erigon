@@ -820,3 +820,40 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 
 	return nil
 }
+
+var stubSendersBAL = dbg.EnvString("STUB_SENDERS_BAL", "")
+
+// SendersFromBAL is a probe: each tx's sender is the one account with a BAL nonce change at its index, so
+// exec never waits for ecrecover. STUB_SENDERS_BAL=bg still runs the recovery and drops it, for its CPU.
+// nil when the stub is off or the BAL does not name exactly one nonce change per tx.
+func SendersFromBAL(ctx context.Context, bal types.BlockAccessList, signer *types.Signer, txns types.Transactions) *SendersRecovery {
+	if stubSendersBAL == "" || len(bal) == 0 {
+		return nil
+	}
+	senders := make([]accounts.Address, len(txns))
+	seen := make([]bool, len(txns))
+	for _, ac := range bal {
+		for _, nc := range ac.NonceChanges {
+			i := int(nc.Index) - 1
+			if i < 0 || i >= len(txns) {
+				continue
+			}
+			if seen[i] {
+				return nil
+			}
+			seen[i] = true
+			senders[i] = accounts.InternAddress(ac.Address)
+		}
+	}
+	for _, ok := range seen {
+		if !ok {
+			return nil
+		}
+	}
+	if stubSendersBAL == "bg" {
+		StartSendersRecovery(ctx, signer, txns)
+	}
+	r := &SendersRecovery{done: make(chan struct{}), senders: senders, failedTx: -1}
+	close(r.done)
+	return r
+}

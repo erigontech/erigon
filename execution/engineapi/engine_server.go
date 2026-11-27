@@ -552,7 +552,15 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var sendersRecovery *exec.SendersRecovery
 	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 {
-		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
+		signer := types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp))
+		if blockAccessList != nil {
+			sendersRecovery = exec.SendersFromBAL(ctx, blockAccessList.BlockAccessList(), signer, transactions)
+		}
+		if sendersRecovery == nil {
+			sendersRecovery = exec.StartSendersRecovery(ctx, signer, transactions)
+		} else {
+			e.logger.Info("[np-split] senders from BAL", "txs", len(transactions))
+		}
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
 
