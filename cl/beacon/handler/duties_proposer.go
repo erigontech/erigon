@@ -110,9 +110,6 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		stateEpoch := state.Epoch(s)
-		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
-			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
-		}
 
 		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if targetVersion.After(s.Version()) {
@@ -171,6 +168,9 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		}
 
 		// Lets do proposer index computation (pre-Fulu or when epoch is within range)
+		if epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+		}
 		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 			a.beaconChainCfg.EpochsPerHistoricalVector
 

@@ -232,7 +232,7 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
@@ -255,10 +255,32 @@ func TestGetDutiesProposerFuluEpochBounds(t *testing.T) {
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(fuluHead, headRoot))
 
 	t.Run("beyond_seed", func(t *testing.T) {
-		path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
-		recorder := httptest.NewRecorder()
-		handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-		require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+		for _, offset := range []uint64{3, 4} {
+			epoch := headEpoch + offset
+			t.Run(strconv.FormatUint(epoch, 10), func(t *testing.T) {
+				setDutiesClockEpoch(handler, epoch)
+				targetSlot := epoch * cfg.SlotsPerEpoch
+				advancedState, err := fuluHead.Copy()
+				require.NoError(t, err)
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+				expected, err := advancedState.GetBeaconProposerIndices(epoch)
+				require.NoError(t, err)
+				for _, version := range []string{"v1", "v2"} {
+					t.Run(version, func(t *testing.T) {
+						path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
+						response := getProposerDutiesForPath(t, handler, path)
+						require.Len(t, response.Data, len(expected))
+						for i, duty := range response.Data {
+							require.Equal(t, targetSlot+uint64(i), duty.Slot)
+							require.Equal(t, expected[i], duty.ValidatorIndex)
+							pubkey, err := advancedState.ValidatorPublicKey(int(expected[i]))
+							require.NoError(t, err)
+							require.Equal(t, pubkey, duty.Pubkey)
+						}
+					})
+				}
+			})
+		}
 	})
 	t.Run("at_seed_boundary", func(t *testing.T) {
 		getProposerDutiesForEpoch(t, handler, targetEpoch)
