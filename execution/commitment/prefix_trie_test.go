@@ -394,7 +394,7 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 
 func TestParallelUpdateLifecycle(t *testing.T) {
 	t.Run("construction", func(t *testing.T) {
-		pu := NewParallelUpdate()
+		pu := newParallelUpdate()
 		require.NotNil(t, pu)
 		require.NotNil(t, pu.Trie, "trie must be allocated")
 		require.NotNil(t, pu.Trie.Root, "trie root must be allocated")
@@ -402,7 +402,7 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 	})
 
 	t.Run("close", func(t *testing.T) {
-		pu := NewParallelUpdate()
+		pu := newParallelUpdate()
 		pu.Collect(nibs(0x01, 0x02), nil, nil)
 		pu.DeferredCombined = append(pu.DeferredCombined, &DeferredBranchUpdate{})
 
@@ -414,7 +414,7 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 }
 
 func TestParallelUpdateInsertDelegates(t *testing.T) {
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 
 	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
 	pu.Collect(nibs(0x01, 0x02, 0x04), nil, nil)
@@ -433,7 +433,7 @@ func TestParallelUpdateInsertDelegates(t *testing.T) {
 }
 
 func TestParallelUpdateResetClearsAllState(t *testing.T) {
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 
 	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
 	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
@@ -455,7 +455,7 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 }
 
 func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 
 	pu.AppendDeferred(nil)
 	pu.AppendDeferred([]*DeferredBranchUpdate{})
@@ -475,7 +475,7 @@ func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
 }
 
 func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 
 	const (
 		workers      = 16

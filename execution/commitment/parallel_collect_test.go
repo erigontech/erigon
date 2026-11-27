@@ -71,7 +71,7 @@ func collectAll(pu *ParallelUpdate, cases []touchEntry) {
 }
 
 func buildChunked(cases []touchEntry) (*ParallelUpdate, bool) {
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 	collectAll(pu, cases)
 	backgrounded := pu.spare != nil
 	pu.Build()
@@ -125,7 +125,7 @@ func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 	t.Parallel()
 
 	cases := randomTouchCases(777, touchChunkKeys+8, 0)
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 	buffers := func() []uintptr {
 		return []uintptr{uintptr(unsafe.Pointer(unsafe.SliceData(pu.pending))), uintptr(unsafe.Pointer(unsafe.SliceData(pu.spare)))}
 	}
@@ -186,7 +186,7 @@ func TestChunkBuild_AbandonedCollectionLeavesNoGoroutine(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		collectAll(NewParallelUpdate(), randomTouchCases(5, touchChunkKeys, 0))
+		collectAll(newParallelUpdate(), randomTouchCases(5, touchChunkKeys, 0))
 		synctest.Wait()
 	})
 }

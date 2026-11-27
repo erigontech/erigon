@@ -482,7 +482,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.treeIdx = make(map[string]*KeyUpdate)
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
-		t.Parallel = NewParallelUpdate()
+		t.Parallel = newParallelUpdate()
 	case ModeCollect:
 		t.treeIdx = make(map[string]*KeyUpdate)
 	}
@@ -506,7 +506,7 @@ func (t *Updates) SetMode(m Mode) {
 			t.keys = make(map[string]struct{})
 		}
 		if t.Parallel == nil {
-			t.Parallel = NewParallelUpdate()
+			t.Parallel = newParallelUpdate()
 		}
 	}
 	t.Reset()

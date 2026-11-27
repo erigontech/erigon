@@ -578,7 +578,9 @@ func absentDeleteCorpus(freshRegion bool) (k1 [][]byte, u1 []commitment.Update, 
 }
 
 func TestForkWalk_SplitsExcludesTheNodesOwnKey(t *testing.T) {
-	pu := commitment.NewParallelUpdate()
+	upd := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	defer upd.Close()
+	pu := upd.Parallel
 	pu.Collect(nibs(0x01, 0x02), []byte("pk-D"), nil)
 	pu.Collect(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
 	pu.Collect(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)

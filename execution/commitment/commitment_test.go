@@ -827,7 +827,7 @@ func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
 func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
 	t.Parallel()
 
-	pu := NewParallelUpdate()
+	pu := newParallelUpdate()
 	pu.AppendDeferred([]*DeferredBranchUpdate{
 		GetDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
 		GetDeferredUpdate([]byte{2}, make([]byte, 4096), nil),

@@ -68,7 +68,7 @@ type ParallelUpdate struct {
 	keyArena plainKeyArena
 }
 
-func NewParallelUpdate() *ParallelUpdate {
+func newParallelUpdate() *ParallelUpdate {
 	return &ParallelUpdate{Trie: newPrefixTrie()}
 }
 
