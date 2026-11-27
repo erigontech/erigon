@@ -146,3 +146,52 @@ func TestEpochStartSkipsPromotionWhileHighestSeenLags(t *testing.T) {
 
 	require.Equal(t, justified, f.justifiedCheckpoint.Load().(solid.Checkpoint))
 }
+
+// The epoch tick can advance the store time after the import captured it and before the block is
+// applied. The block must leave the checkpoints as on_block at the captured time followed by that
+// tick does: the tick promotes the block's advance.
+func TestEpochTickBetweenTimeCaptureAndApplyPromotesTheBlock(t *testing.T) {
+	const targetIndex = 84 // advances unrealized justification in the fixture
+	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
+		blocks, anchor, _ := tests.GetBellatrixRandom()
+		f := newBlockTestStore(t, anchor)
+		for _, block := range blocks[:targetIndex] {
+			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+		}
+		block := blocks[targetIndex]
+		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+		slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
+		require.NotZero(t, block.Block.Slot%slotsPerEpoch)
+		nextEpochMs := slotStartTimeMs(f, (block.Block.Slot/slotsPerEpoch+1)*slotsPerEpoch) + 100
+		return f, block, nextEpochMs
+	}
+
+	serial, serialBlock, nextEpochMs := importUpTo(t)
+	justifiedBefore := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
+	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
+	serial.OnTick(nextEpochMs)
+	require.Greater(t, serial.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch, justifiedBefore.Epoch,
+		"the fixture block must advance justification")
+
+	f, block, _ := importUpTo(t)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		postState, status, err := f.forkGraph.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, fork_graph.Success, status)
+		storeTimeMs := f.timeMs.Load()
+		prepared := preparePostState(postState, block.Block)
+		// The epoch tick advances the time; its slot-start work waits for f.mu.
+		require.True(t, f.timeMs.CompareAndSwap(storeTimeMs, nextEpochMs))
+		_, err = f.applyBlockImportLocked(block.Block, blockRoot, common.Hash{}, storeTimeMs, postState, prepared)
+		require.NoError(t, err)
+	}()
+	f.timeMs.Store(nextEpochMs - 200)
+	f.onTickPerSlot(nextEpochMs)
+
+	requireSameCheckpoints(t, serial, f)
+}
