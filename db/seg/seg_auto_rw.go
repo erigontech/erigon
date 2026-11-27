@@ -112,6 +112,7 @@ func (g *Reader) nextIsCompressed() bool {
 	}
 	return g.c.Has(CompressKeys)
 }
+
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	compressed := g.nextIsCompressed()
 	g.nextValue = !g.nextValue

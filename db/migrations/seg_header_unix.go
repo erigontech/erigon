@@ -23,6 +23,10 @@ import (
 	"syscall"
 )
 
+// replacesSharedFiles: renaming a patched copy over a hardlinked file leaves the other
+// links unchanged, permissions included.
+const replacesSharedFiles = true
+
 func sharesInode(_ string, info os.FileInfo) bool {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	return ok && st.Nlink > 1

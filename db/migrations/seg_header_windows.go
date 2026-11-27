@@ -22,6 +22,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// replacesSharedFiles: all links of a file share its read-only flag, so replacing a
+// read-only hardlinked file changes the flag of the other links too.
+const replacesSharedFiles = false
+
 func sharesInode(path string, _ os.FileInfo) bool {
 	f, err := os.Open(path)
 	if err != nil {

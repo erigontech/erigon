@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/seg"
@@ -215,7 +216,7 @@ func TestUpgradeSegHeaders_SymlinkedDirs(t *testing.T) {
 
 	other := filepath.Join(root, "other-disk")
 	require.NoError(t, os.MkdirAll(other, 0o755))
-	require.NoError(t, os.Remove(dirs.SnapCaplin))
+	require.NoError(t, dir.RemoveAll(dirs.SnapCaplin))
 	require.NoError(t, os.Symlink(other, dirs.SnapCaplin))
 
 	kvPath := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
@@ -259,9 +260,8 @@ func TestUpgradeSegHeaders_TorrentRemovalFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
-	require.NoError(t, os.WriteFile(path+".torrent", []byte("stale"), 0o644))
-	require.NoError(t, os.Chmod(dirs.SnapDomain, 0o555))
-	defer os.Chmod(dirs.SnapDomain, 0o755) //nolint:errcheck
+	require.NoError(t, os.MkdirAll(path+".torrent", 0o755)) // a non-empty dir fails to delete on every OS
+	require.NoError(t, os.WriteFile(filepath.Join(path+".torrent", "x"), nil, 0o644))
 
 	require.Error(t, UpgradeSegHeaders(t.Context(), dirs, log.New()))
 	requireNotPatched(t, path)
@@ -306,7 +306,7 @@ func TestUpgradeSegHeaders_HardlinkedMirrorKeepsBytes(t *testing.T) {
 
 	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 
-	requireHeader(t, path, seg.CompressVals)
+	requirePatchedIfReplaceable(t, path, seg.CompressVals)
 	after, err := os.ReadFile(mirror)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "a hardlinked mirror must not change")
@@ -316,6 +316,17 @@ func TestUpgradeSegHeaders_HardlinkedMirrorKeepsBytes(t *testing.T) {
 	pathMode, err := os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, modeBefore.Mode(), pathMode.Mode())
+}
+
+// requirePatchedIfReplaceable checks a hardlinked file: patched where the OS can replace it
+// without changing the other links, otherwise left as it was.
+func requirePatchedIfReplaceable(t *testing.T, path string, want seg.FileCompression) {
+	t.Helper()
+	if replacesSharedFiles {
+		requireHeader(t, path, want)
+	} else {
+		requireNotPatched(t, path)
+	}
 }
 
 func TestUpgradeSegHeaders_CanceledKeepsHeader(t *testing.T) {
@@ -337,7 +348,7 @@ func TestUpgradeSegHeaders_HardlinkKeepsExistingTmp(t *testing.T) {
 
 	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
 
-	requireHeader(t, path, seg.CompressVals)
+	requirePatchedIfReplaceable(t, path, seg.CompressVals)
 	tmp, err := os.ReadFile(path + ".tmp")
 	require.NoError(t, err)
 	require.Equal(t, "keep", string(tmp))

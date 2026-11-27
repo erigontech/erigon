@@ -649,7 +649,7 @@ func TestReadOwnedFollowsHeaderCompression(t *testing.T) {
 	for i := range 64 {
 		word := bytes.Repeat([]byte{byte(i)}, 8+i)
 		want = append(want, word)
-		_, err := w.Write(word)
+		_, err = w.Write(word)
 		require.NoError(t, err)
 	}
 	require.NoError(t, c.Compress())

@@ -20,5 +20,7 @@ package migrations
 
 import "os"
 
-// No link count here, so every file is patched as a private copy.
+// No link count here, so every file counts as hardlinked and keeps its header.
+const replacesSharedFiles = false
+
 func sharesInode(string, os.FileInfo) bool { return true }

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -95,6 +94,15 @@ func upgradeSegHeader(ctx context.Context, path string, logger log.Logger) error
 	fc = seg.CompressionForFile(path, fc)
 	d.Close() // release mmap before writing
 
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	shared := sharesInode(path, info)
+	if shared && !replacesSharedFiles {
+		logger.Warn("[seg_header] keeping the header of a hardlinked file", "file", filepath.Base(path))
+		return nil
+	}
 	// before the patch: a crash after it must not leave a .torrent for the old bytes
 	if err := dir.RemoveFilesByMask(path + ".torrent*"); err != nil {
 		return err
@@ -102,7 +110,7 @@ func upgradeSegHeader(ctx context.Context, path string, logger log.Logger) error
 	if err := dir.FsyncDir(filepath.Dir(path)); err != nil {
 		return err
 	}
-	if err := setWordLevelFlags(path, fc); err != nil {
+	if err := setWordLevelFlags(path, info, shared, fc); err != nil {
 		return err
 	}
 	logger.Info("[seg_header] upgraded", "file", filepath.Base(path), "compression", fc)
@@ -162,12 +170,8 @@ func readsUncompressed(g *seg.Getter, offset uint64, want []byte, wantEnd uint64
 // setWordLevelFlags adds WordLevelCompressionKnown and the word-level bits of fc to the
 // bitmask byte. Snapshot files are read-only (0444), so it adds the owner-write bit for
 // the write.
-func setWordLevelFlags(path string, fc seg.FileCompression) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if sharesInode(path, info) {
+func setWordLevelFlags(path string, info os.FileInfo, shared bool, fc seg.FileCompression) error {
+	if shared {
 		return patchCopy(path, info.Mode(), fc)
 	}
 	if err := os.Chmod(path, info.Mode()|0o200); err != nil {
@@ -200,25 +204,25 @@ func patchCopy(path string, mode os.FileMode, fc seg.FileCompression) (err error
 			_ = dir.RemoveFile(tmp.Name())
 		}
 	}()
-	if _, err = tmp.ReadFrom(src); err != nil {
+	_, err = tmp.ReadFrom(src)
+	if err != nil {
 		return err
 	}
-	if err = patchFlags(tmp, fc); err != nil {
+	_ = src.Close()
+	err = patchFlags(tmp, fc)
+	if err != nil {
 		return err
 	}
-	if err = tmp.Chmod(mode); err != nil {
+	err = tmp.Chmod(mode)
+	if err != nil {
 		return err
 	}
-	if err = tmp.Close(); err != nil {
+	err = tmp.Close()
+	if err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" { // Windows does not replace a read-only file; Unix needs no write bit on it
-		if err = os.Chmod(path, mode|0o200); err != nil {
-			return err
-		}
-	}
-	if err = os.Rename(tmp.Name(), path); err != nil {
-		_ = os.Chmod(path, mode)
+	err = os.Rename(tmp.Name(), path)
+	if err != nil {
 		return err
 	}
 	return dir.FsyncDir(filepath.Dir(path))
