@@ -1047,14 +1047,14 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, irreversibleTxNum uint64, filesDone <-chan struct{}) error {
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, collateToTxNum uint64, filesDone <-chan struct{}) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	if stepLastTxNum := step.LastTxNum(a.stepSize.Load()); stepLastTxNum > irreversibleTxNum {
-		a.logger.Debug("[snapshots] holding state collation until the step is irreversible",
-			"step", step, "stepLastTxNum", stepLastTxNum, "irreversibleTxNum", irreversibleTxNum,
+	if stepLastTxNum := step.LastTxNum(a.stepSize.Load()); stepLastTxNum > collateToTxNum {
+		a.logger.Debug("[snapshots] holding state collation until no unwind can reach the step",
+			"step", step, "stepLastTxNum", stepLastTxNum, "collateToTxNum", collateToTxNum,
 			"lastStepInDB", lastIdInDB(db, a.d[kv.AccountsDomain]))
 		return errStepNotReady
 	}
@@ -1151,8 +1151,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, i
 	return nil
 }
 
-func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum, irreversibleTxNum uint64) error {
-	finished, _ := a.buildFilesInBackground(db, toTxNum, true, irreversibleTxNum)
+func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum, collateToTxNum uint64) error {
+	finished, _ := a.buildFilesInBackground(db, toTxNum, true, collateToTxNum)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
@@ -1180,7 +1180,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, collateToTxNum uint64, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -1190,7 +1190,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toSt
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, irreversibleTxNum, nil); err != nil {
+			if err := a.buildFiles(ctx, db, step, collateToTxNum, nil); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1726,10 +1726,10 @@ func (a *Aggregator) MaxPrunableStepsBacklog() uint64 {
 
 // CollateAndPrune commits a prune pass before starting bounded file building.
 func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) (uint64, error)) (bool, <-chan struct{}, error) {
-	var irreversibleTxNum uint64
+	var collateToTxNum uint64
 	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		var err error
-		irreversibleTxNum, err = pruneFn(tx)
+		collateToTxNum, err = pruneFn(tx)
 		if err == nil {
 			a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenancePruneReady, PruneTx: tx})
 		}
@@ -1739,7 +1739,7 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		return false, nil, err
 	}
 	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenancePruneCommitted})
-	finished, started := a.buildFilesInBackground(db, a.EndTxNumMinimax()+a.StepSize(), true, irreversibleTxNum)
+	finished, started := a.buildFilesInBackground(db, a.EndTxNumMinimax()+a.StepSize(), true, collateToTxNum)
 	return started, finished, nil
 }
 
@@ -2245,13 +2245,13 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum, irreversibleTxNum uint64) chan struct{} {
-	finished, _ := a.buildFilesInBackground(db, txNum, true, irreversibleTxNum)
+func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum, collateToTxNum uint64) chan struct{} {
+	finished, _ := a.buildFilesInBackground(db, txNum, true, collateToTxNum)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, irreversibleTxNum uint64) (chan struct{}, bool) {
+func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, collateToTxNum uint64) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
@@ -2302,7 +2302,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bo
 			lastIdInDB(db, a.d[kv.CommitmentDomain]),
 		)
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
-			"irreversibleStep", fmt.Sprintf("%.2f", float64(irreversibleTxNum)/float64(a.StepSize())))
+			"collateToStep", fmt.Sprintf("%.2f", float64(collateToTxNum)/float64(a.StepSize())))
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
@@ -2376,7 +2376,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bo
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, irreversibleTxNum, fin); err != nil {
+			if err := a.buildFiles(a.ctx, db, step, collateToTxNum, fin); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

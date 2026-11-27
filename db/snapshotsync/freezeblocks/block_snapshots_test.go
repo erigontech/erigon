@@ -42,7 +42,7 @@ import (
 
 const testMergeLimit = snaptype.Erigon2MergeLimit
 
-func TestBlockRetireUsesTheIrreversibleBlock(t *testing.T) {
+func TestBlockRetireUsesRetireToBlock(t *testing.T) {
 	ctx := context.Background()
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := ethconfig.Defaults
@@ -62,7 +62,7 @@ func TestBlockRetireUsesTheIrreversibleBlock(t *testing.T) {
 	)
 	defer br.Close()
 	blockFrom, blockTo, can := br.canRetire(8_000, 8_999, snaptype.Unknown)
-	require.True(t, can, "the irreversible block itself is retired")
+	require.True(t, can, "retireToBlock itself is retired")
 	require.Equal(t, uint64(8_000), blockFrom)
 	require.Equal(t, uint64(9_000), blockTo)
 	_, _, can = br.canRetire(8_000, 8_998, snaptype.Unknown)

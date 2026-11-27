@@ -1184,7 +1184,7 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 			ctx := t.Context()
 			db, agg := testDbAndAggregatorv3(t, stepSize)
 			for step := range kv.Step(2) {
-				require.NoError(t, agg.buildFiles(ctx, db, step, allIrreversible, nil))
+				require.NoError(t, agg.buildFiles(ctx, db, step, collateAll, nil))
 			}
 			// Each domain merges its values before its own history and history index.
 			// Standalone indexes wait for a pass with no domain value merges.
