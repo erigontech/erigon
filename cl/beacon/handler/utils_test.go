@@ -296,6 +296,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		nil,
 		nil,
 		nil,
+		true,
 	) // TODO: add tests
 	h.o.Do(h.init)
 	return

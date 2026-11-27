@@ -241,9 +241,14 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	stateGetter, err := historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg)
-	if err != nil {
-		return nil, err
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+	if a.archiveStates {
+		stateGetter, err = historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg)
+		if err != nil {
+			return nil, err
+		}
+	} else if slot >= readiness.progress {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
 	dependentRoot, err := a.getHistoricalAttesterDependentRoot(tx, stateGetter, epoch)
@@ -337,25 +342,8 @@ func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) erro
 	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
 }
 
-func (r historicalReadiness) checkRange(first, last uint64, table string) error {
-	if r.reconstructed && first <= r.progress {
-		first = r.progress + 1
-	}
-	for first <= last {
-		if r.view == nil {
-			return r.check(first, first, table)
-		}
-		seg, ok := r.view.VisibleSegment(first, table)
-		if !ok {
-			return r.check(first, first, table)
-		}
-		first = seg.To()
-	}
-	return nil
-}
-
 func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
-	if err := readiness.check(slot, slot, table); err != nil && (table != kv.BlockRoot || beaconhttp.WrapEndpointError(err).Code != http.StatusServiceUnavailable) {
+	if err := readiness.check(slot, slot, table); err != nil && table != kv.BlockRoot {
 		return nil, err
 	}
 	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
@@ -371,7 +359,7 @@ func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot u
 			}
 		}
 		if err := readiness.check(rowSlot, writeSlot, table); err != nil {
-			if table == kv.BlockRoot && beaconhttp.WrapEndpointError(err).Code == http.StatusServiceUnavailable {
+			if table == kv.BlockRoot {
 				root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
 				if rootErr != nil {
 					return nil, rootErr

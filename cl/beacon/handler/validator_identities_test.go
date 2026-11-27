@@ -200,3 +200,14 @@ func TestHistoricalValidatorEndpointsReplayPending(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoricalValidatorEndpointsWithoutArchiveRetainedProgress(t *testing.T) {
+	_, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	slot := blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedSlotVal = slot + 1
+	table := state_accessors.NewStaticValidatorTable()
+	table.SetReplayEnabled(false)
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/validator_identities", "")
+	require.Equal(t, http.StatusOK, status, body)
+}

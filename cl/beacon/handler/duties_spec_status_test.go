@@ -17,13 +17,16 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -659,28 +662,6 @@ func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, status, body)
 }
 
-func TestHistoricalReadinessRangeFindsGapBeforeSnapshot(t *testing.T) {
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	getter := func(uint64) ([]byte, []byte, error) { return nil, []byte{1}, nil }
-	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ValidatorEffectiveBalance: getter}}
-	dumped := dumpDutiesSnapshots(t, dirs, types, 100_000, 50_000, logger)
-	files := dumped.SegFileNames(50_000, 100_000)
-	require.Len(t, files, 1)
-	snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
-	defer snapshots.Close()
-	require.NoError(t, snapshots.OpenList([]string{filepath.Base(files[0])}, false))
-	view := snapshots.View()
-	defer view.Close()
-	readiness := historicalReadiness{progress: 49_983, reconstructed: true, view: view}
-
-	require.NoError(t, readiness.checkRange(49_153, 49_983, kv.ValidatorEffectiveBalance))
-	require.NoError(t, readiness.checkRange(50_000, 50_016, kv.ValidatorEffectiveBalance))
-	err := readiness.checkRange(49_153, 50_016, kv.ValidatorEffectiveBalance)
-	require.Error(t, err)
-	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
-}
-
 func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -757,4 +738,220 @@ func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
 			require.Equal(t, tc.want, status, body)
 		})
 	}
+}
+
+func TestHistoricalProposerShortBalanceDump(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		slot, dumpSlot, progress uint64
+		want                     int
+	}{
+		{"exact", 1536, 1536, 1536, http.StatusInternalServerError},
+		{"backward", 2560, 3072, 3073, http.StatusInternalServerError},
+		{"forward", 1568, 1536, 1568, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, postState, h, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.FinalizedSlotVal = tc.slot + 32
+			head, err := postState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, head.SetSlot(tc.slot+32))
+			root, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+			require.NoError(t, err)
+			require.NoError(t, syncedData.(*synced_data.SyncedDataManager).OnHeadStateWithBlockRoot(head, root))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				data, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+				if err != nil {
+					return err
+				}
+				if err := tx.Put(kv.SlotData, base_encoding.Encode64ToBytes4(tc.slot), data); err != nil {
+					return err
+				}
+				mix, err := tx.GetOne(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64))
+				if err != nil {
+					return err
+				}
+				if err := tx.Put(kv.RandaoMixes, base_encoding.Encode64ToBytes4(tc.slot-64), mix); err != nil {
+					return err
+				}
+				dump, err := tx.GetOne(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(0))
+				if err != nil {
+					return err
+				}
+				decoder, err := zstd.NewReader(nil)
+				if err != nil {
+					return err
+				}
+				full, err := decoder.DecodeAll(dump, nil)
+				decoder.Close()
+				if err != nil {
+					return err
+				}
+				require.Greater(t, len(full), 8)
+				short := full[:len(full)-8]
+				encoder, err := zstd.NewWriter(nil)
+				if err != nil {
+					return err
+				}
+				encoded := encoder.EncodeAll(short, nil)
+				encoder.Close()
+				if err := tx.Put(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(tc.dumpSlot), encoded); err != nil {
+					return err
+				}
+				if tc.name == "forward" {
+					var diff bytes.Buffer
+					if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(&diff, short, full); err != nil {
+						return err
+					}
+					if err := tx.Put(kv.ValidatorEffectiveBalance, base_encoding.Encode64ToBytes4(tc.slot), diff.Bytes()); err != nil {
+						return err
+					}
+				}
+				if err := beacon_indicies.MarkRootCanonical(tx, tc.slot-1, common.Hash{1}); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
+			}))
+			table := state_accessors.NewStaticValidatorTable()
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, table) }))
+			table.SetSlot(tc.slot)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			status, _ := dutiesSpecStatusRequest(t, h, http.MethodGet, fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", tc.slot/32), "")
+			require.Equal(t, tc.want, status)
+			if tc.name == "forward" {
+				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+					validators, err := h.stateReader.ReadValidatorsForHistoricalState(tx, state_accessors.GetValFnTxAndSnapshot(tx, nil), tc.slot)
+					require.NoError(t, err)
+					last := validators.Length() - 1
+					validator, err := preState.ValidatorForValidatorIndex(last)
+					require.NoError(t, err)
+					require.Equal(t, validator.EffectiveBalance(), validators.Get(last).EffectiveBalance())
+					return nil
+				}))
+			}
+		})
+	}
+}
+
+func TestHistoricalDutiesWithoutArchive(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, body string
+		root                     bool
+		want                     int
+	}{
+		{"attester", http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`, false, http.StatusBadRequest},
+		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, http.StatusNotFound},
+		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, http.StatusNotFound},
+		{"proposer with root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", true, http.StatusBadRequest},
+		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			h.archiveStates = false
+			fcu.FinalizedSlotVal = 127
+			lowest := uint64(97)
+			fcu.LowestAvailableSlotVal = &lowest
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey); err != nil {
+					return err
+				}
+				for slot := uint64(0); slot <= 95; slot++ {
+					if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+					if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+				}
+				if tc.root {
+					return beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1})
+				}
+				return nil
+			}))
+			status, body := dutiesSpecStatusRequest(t, h, tc.method, tc.path, tc.body)
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerWithoutArchiveRetainedProgress(t *testing.T) {
+	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	h.archiveStates = false
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 96)
+	}))
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, state_accessors.NewStaticValidatorTable(), preState, nil, h.syncedData)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusBadRequest, status, body)
+}
+
+func TestHistoricalProposerBalanceDiffPending(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, h.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+	h.caplinStateSnapshots = dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 96")
+}
+
+func TestHistoricalDutiesWithArchiveWithoutProgress(t *testing.T) {
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	lowest := uint64(97)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+	}))
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`},
+		{http.MethodGet, "/eth/v1/validator/duties/proposer/3", ""},
+		{http.MethodGet, "/eth/v2/validator/duties/proposer/3", ""},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, tc.method, tc.path, tc.body)
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	h.beaconChainCfg.CapellaForkEpoch = 0
+	h.beaconChainCfg.DenebForkEpoch = 0
+	h.beaconChainCfg.ElectraForkEpoch = 0
+	h.beaconChainCfg.FuluForkEpoch = 0
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= 63; slot++ {
+			if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, h.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+	h.caplinStateSnapshots = dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v2/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusInternalServerError, status, body)
+	require.Contains(t, body, "dependent root not found")
 }

@@ -596,6 +596,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	vTables := state_accessors.NewStaticValidatorTable()
+	vTables.SetReplayEnabled(config.ArchiveStates)
 	// Read the current table
 	if config.ArchiveStates {
 		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
@@ -669,6 +670,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 			envelopeRebuilder,
+			config.ArchiveStates,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
 		apiHandler.StartPayloadAttributes(ctx)

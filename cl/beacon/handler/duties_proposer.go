@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -93,28 +92,29 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if err != nil {
 			return nil, err
 		}
-		stateGetter, err := historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg)
-		if err != nil {
-			return nil, err
-		}
-		if expectedSlot != a.beaconChainCfg.GenesisSlot {
-			if !a.stateReader.ValidatorTableCovers(expectedSlot) {
-				return nil, validatorReplayPending(expectedSlot)
-			}
-			balances := historical_states_reader.SelectDiffedListRange(expectedSlot, readiness.progress)
-			if err := readiness.check(balances.DumpSlot, balances.DumpSlot, kv.EffectiveBalancesDump); err != nil {
+		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+		if a.archiveStates {
+			stateGetter, err = historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg)
+			if err != nil {
 				return nil, err
 			}
-			if balances.HasDiffs {
-				if err := readiness.checkRange(balances.FirstDiffSlot, balances.LastDiffSlot, kv.ValidatorEffectiveBalance); err != nil {
-					return nil, err
-				}
+			if expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot) {
+				return nil, validatorReplayPending(expectedSlot)
 			}
 		}
 
 		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
 			return nil, err
+		}
+		if !a.archiveStates {
+			progress := readiness.progress
+			if a.caplinStateSnapshots != nil {
+				progress = max(progress, a.caplinStateSnapshots.BlocksAvailable())
+			}
+			if expectedSlot > progress || (expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot)) {
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
+			}
 		}
 		duties, err := a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
 		if err != nil {
@@ -275,7 +275,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalProposerMissingRootStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -307,7 +307,14 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalProposerMissingRootStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
+}
+
+func (a *ApiHandler) historicalProposerMissingRootStatus() int {
+	if !a.archiveStates {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
 }
 
 func validatorReplayPending(slot uint64) error {
@@ -331,9 +338,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	}
 
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
-	if errors.Is(err, state_accessors.ErrValidatorTableBehind) {
-		return nil, validatorReplayPending(expectedSlot)
-	}
 	if err != nil {
 		return nil, err
 	}

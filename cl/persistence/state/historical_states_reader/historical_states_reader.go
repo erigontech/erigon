@@ -556,33 +556,19 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_access
 	return nil
 }
 
-type DiffedListRange struct {
-	DumpSlot      uint64
-	Forward       bool
-	FirstDiffSlot uint64
-	LastDiffSlot  uint64
-	HasDiffs      bool
-}
-
-func SelectDiffedListRange(slot, stateProgress uint64) DiffedListRange {
-	remainder := slot % clparams.SlotsPerDump
-	freshDumpSlot := slot - remainder
-	if remainder <= clparams.SlotsPerDump/2 || stateProgress <= freshDumpSlot+clparams.SlotsPerDump {
-		return DiffedListRange{DumpSlot: freshDumpSlot, Forward: true, FirstDiffSlot: freshDumpSlot + 1, LastDiffSlot: slot, HasDiffs: remainder != 0}
-	}
-	dumpSlot := freshDumpSlot + clparams.SlotsPerDump
-	return DiffedListRange{DumpSlot: dumpSlot, FirstDiffSlot: slot + 1, LastDiffSlot: dumpSlot, HasDiffs: true}
-}
-
 func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
 	}
-	diffRange := SelectDiffedListRange(slot, currentStageProgress)
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	forward := diffRange.Forward
-	compressed, err := kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(diffRange.DumpSlot))
+	remainder := slot % clparams.SlotsPerDump
+	freshDumpSlot := slot - remainder
+	forward := remainder <= clparams.SlotsPerDump/2 || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	dumpSlot := freshDumpSlot
+	if !forward {
+		dumpSlot += clparams.SlotsPerDump
+	}
+	compressed, err := kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(dumpSlot))
 	if err != nil {
 		return nil, err
 	}
@@ -598,7 +584,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 	currentList := make([]byte, validatorSetLength*8)
 	_, err = io.ReadFull(zstdReader, currentList)
 	base_encoding.PutZstdReader(zstdReader)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || dumpSlot >= slot) {
 		return nil, err
 	}
 
