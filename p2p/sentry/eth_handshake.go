@@ -98,8 +98,9 @@ func checkCompatibility(networkID uint64, protocolVersion uint32, genesis common
 }
 
 // isBscNetwork reports whether the network runs Parlia, which diverges from the
-// eth protocol in two ways: eth/68 carries an extra UpgradeStatusMsg round, and
-// eth/70 uses its own status layout.
+// eth protocol in three ways: eth/68 carries an extra UpgradeStatusMsg round,
+// eth/70 uses its own status layout, and peers keep sending NewBlock and
+// NewBlockHashes on eth/69 and later.
 func isBscNetwork(networkID uint64) bool {
 	switch networkID {
 	case 56, 97, 714: // bsc mainnet, chapel, rialto

@@ -429,6 +429,7 @@ func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
 	cap p2p.Cap,
+	allowBlockAnnouncements bool,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
 	send func(msgId sentryproto.MessageId, peerID [64]byte, b []byte),
@@ -478,7 +479,7 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
-		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
+		if protocol >= direct.ETH69 && !allowBlockAnnouncements && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
 			msg.Discard()
 			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
 		}
@@ -816,6 +817,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				ctx,
 				peerID,
 				cap,
+				isBscNetwork(status.NetworkId),
 				rw,
 				peerInfo,
 				ss.send,
