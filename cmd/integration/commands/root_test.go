@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"maps"
 	"os"
 	"os/exec"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
-	"github.com/erigontech/erigon/node/debug"
 )
 
 const uncleanShutdownPathEnv = "ERIGON_TEST_UNCLEAN_SHUTDOWN_PATH"
@@ -51,7 +51,7 @@ func TestOpenRawDBCreatesTableForPendingMigration(t *testing.T) {
 
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
@@ -81,7 +81,7 @@ func TestOpenRawDBCreatesTableAfterUncleanShutdown(t *testing.T) {
 	require.ErrorIs(t, err, mdbxWannaRecovery)
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
@@ -118,7 +118,7 @@ func TestOpenRawDBRejectsMissingDatabaseForPendingMigration(t *testing.T) {
 	dataDir := useTestDatadir(t)
 	missingPath := filepath.Join(dataDir, "missing-chaindata")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, missingPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, missingPath), true, logger)
 	if db != nil {
 		t.Cleanup(db.Close)
 	}
@@ -137,7 +137,7 @@ func TestOpenRawDBRejectsEmptyDatabaseForPendingMigration(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(databasePath, "mdbx.dat"), nil, 0o600))
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, databasePath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, databasePath), true, logger)
 	if db != nil {
 		db.Close()
 	}
@@ -155,7 +155,7 @@ func TestOpenRawDBRejectsNonChaindataForPendingMigration(t *testing.T) {
 	beforeSize := databaseFileSize(t, databasePath)
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, databasePath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, databasePath), true, logger)
 	if db != nil {
 		db.Close()
 	}
@@ -273,15 +273,26 @@ func TestCommandsReturnErrors(t *testing.T) {
 	walk(integrationRoot())
 }
 
-func TestFailedCommandReturnsErrorAndStopsProfiling(t *testing.T) {
+func TestFailedCommandReturnsError(t *testing.T) {
 	dataDir := useTestDatadir(t)
 	root := integrationRoot()
-	t.Cleanup(func() {
-		cpu := root.PersistentFlags().Lookup("pprof.cpuprofile")
-		_ = cpu.Value.Set("")
-		cpu.Changed = false
-	})
-	root.SetArgs([]string{"--log.dir.disable", "--pprof.cpuprofile", filepath.Join(t.TempDir(), "cpu.out"), "commitment", "print", "--chain", "mainnet", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
+	var stderr bytes.Buffer
+	root.SetErr(&stderr)
+	t.Cleanup(func() { root.SetErr(nil) })
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "print", "--chain", "mainnet", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
 	require.ErrorIs(t, root.ExecuteContext(t.Context()), kv2.ErrDBDoesNotExists)
-	require.ErrorContains(t, debug.Handler.StopCPUProfile(), "not in progress")
+	require.Empty(t, stderr.String(), "main prints the error, cobra must not")
+}
+
+func TestAllocRequiresSize(t *testing.T) {
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "alloc"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "accepts 1 arg(s), received 0")
+}
+
+func TestPrintTableSizesReturnsMissingDBError(t *testing.T) {
+	dataDir := useTestDatadir(t)
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "print_table_sizes", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
+	require.ErrorIs(t, root.ExecuteContext(t.Context()), kv2.ErrDBDoesNotExists)
 }

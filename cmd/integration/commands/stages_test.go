@@ -21,12 +21,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	chain2 "github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestRunMigrationsForDBRejectsMissingChaindataWithoutPendingMigration(t *testing.T) {
@@ -76,4 +83,30 @@ func TestRunMigrationsForDBCreatesMissingConsensusTable(t *testing.T) {
 
 	require.NoError(t, runMigrationsForDB(dbcfg.ConsensusDB, consensusPath, logger))
 	require.Contains(t, tableNames(t, inspectOpts), kv.PtcWindowEpochTable)
+}
+
+func TestStageHeadersAndBodiesRequireUnwindOrReset(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	useTestBlockReader(t, dirs)
+	require.ErrorContains(t, stageHeaders(db, t.Context(), log.New()), "only works with --unwind or --reset")
+	require.ErrorContains(t, stageBodies(db, t.Context(), log.New()), "only works with --unwind or --reset")
+}
+
+func TestCheckSendersReturnsSendersCountMismatch(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	useTestBlockReader(t, dirs)
+	br, _ := blocksIO(db, log.New())
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header := &types.Header{Difficulty: *uint256.NewInt(1)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 0))
+	txn := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil)
+	require.NoError(t, rawdb.WriteBody(tx, header.Hash(), 0, &types.Body{Transactions: []types.Transaction{txn}}))
+
+	require.ErrorContains(t, checkSenders(t.Context(), tx, br, chain2.AllProtocolChanges, 0, log.New()), "not equal amount of senders")
 }

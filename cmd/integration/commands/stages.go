@@ -135,6 +135,7 @@ var (
 var cmdAlloc = &cobra.Command{
 	Use:          "alloc",
 	Example:      "integration allocates and holds 1Gb (or given size)",
+	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
@@ -264,7 +265,7 @@ func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
 	if err := checkExistingDB(cfg); err != nil {
 		return err
 	}
-	db, err := openRawDB(cfg, true, logger)
+	db, err := openRawDB(context.Background(), cfg, true, logger)
 	if err != nil {
 		return err
 	}
@@ -413,8 +414,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	}
 
 	if !(unwind > 0 || reset) {
-		logger.Error("This command only works with --unwind or --reset options")
-		return nil
+		return errors.New("this command only works with --unwind or --reset options")
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -489,6 +489,9 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
 		})
 	}
+	if unwind == 0 {
+		return errors.New("this command only works with --unwind or --reset options")
+	}
 
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
@@ -497,25 +500,21 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, stages.Bodies)
 
-		if unwind > 0 {
-			if unwind > s.BlockNumber {
-				return errors.New("cannot unwind past 0")
-			}
-
-			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
-			cfg := stagedsync.StageBodiesCfg(br, bw)
-			if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
-				return err
-			}
-
-			progress, err := stages.GetStageProgress(tx, stages.Bodies)
-			if err != nil {
-				return fmt.Errorf("re-read Bodies progress: %w", err)
-			}
-			logger.Info("Progress", "bodies", progress)
-			return nil
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
 		}
-		logger.Info("This command only works with --unwind or --reset option")
+
+		u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
+		cfg := stagedsync.StageBodiesCfg(br, bw)
+		if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
+			return err
+		}
+
+		progress, err := stages.GetStageProgress(tx, stages.Bodies)
+		if err != nil {
+			return fmt.Errorf("re-read Bodies progress: %w", err)
+		}
+		logger.Info("Progress", "bodies", progress)
 		return nil
 	}); err != nil {
 		return err
@@ -544,44 +543,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	defer tx.Rollback()
 
 	if integritySlow {
-		secp256k1.ContextForThread(1)
-		for i := block; ; i++ {
-			if err := common.Stopped(ctx.Done()); err != nil {
-				return err
-			}
-			h, _ := br.HeaderByNumber(ctx, tx, i)
-			if h == nil {
-				break
-			}
-			withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
-			if err != nil {
-				return err
-			}
-			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
-			txs := withoutSenders.Transactions()
-			if txs.Len() != len(senders) {
-				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
-				return nil
-			}
-			if txs.Len() == 0 {
-				continue
-			}
-			signer := types.MakeSigner(chainConfig, i, h.Time)
-			for j := 0; j < txs.Len(); j++ {
-				from, err := signer.Sender(txs[j])
-				if err != nil {
-					return err
-				}
-				fromValue := from.Value()
-				if !bytes.Equal(fromValue[:], senders[j][:]) {
-					logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
-				}
-			}
-			if i%10 == 0 {
-				logger.Info("checked", "block", i)
-			}
-		}
-		return nil
+		return checkSenders(ctx, tx, br, chainConfig, block, logger)
 	}
 
 	s := stage(sync, tx, stages.Senders)
@@ -706,6 +668,46 @@ func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logge
 		return err
 	}
 	return dbstate.CompleteExecReset(dirs, logger)
+}
+
+func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, chainConfig *chain2.Config, fromBlock uint64, logger log.Logger) error {
+	secp256k1.ContextForThread(1)
+	for i := fromBlock; ; i++ {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+		h, _ := br.HeaderByNumber(ctx, tx, i)
+		if h == nil {
+			break
+		}
+		withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		withoutSenders.Body().SendersFromTxs() // remove senders info from txs
+		txs := withoutSenders.Transactions()
+		if txs.Len() != len(senders) {
+			return fmt.Errorf("not equal amount of senders: block %d, db %d, expect %d", i, len(senders), txs.Len())
+		}
+		if txs.Len() == 0 {
+			continue
+		}
+		signer := types.MakeSigner(chainConfig, i, h.Time)
+		for j := 0; j < txs.Len(); j++ {
+			from, err := signer.Sender(txs[j])
+			if err != nil {
+				return err
+			}
+			fromValue := from.Value()
+			if !bytes.Equal(fromValue[:], senders[j][:]) {
+				logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
+			}
+		}
+		if i%10 == 0 {
+			logger.Info("checked", "block", i)
+		}
+	}
+	return nil
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
