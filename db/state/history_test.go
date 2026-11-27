@@ -2550,7 +2550,7 @@ func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
 
 func TestHistoryPagersValueRejectsAKeyMissingFromItsPage(t *testing.T) {
 	values := generateTestData(t, length.Addr, length.Addr+length.Hash, 64, 8, 10)
-	db, h := filledHistoryValues(t, false, values, log.New())
+	db, h := filledHistoryValues(t, false, values)
 	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(16)
 	h.HistoryValuesOnCompressedPage = 16
 	collateAndMergeHistory(t, db, h, 64, false)
@@ -2565,7 +2565,7 @@ func TestHistoryPagersValueRejectsAKeyMissingFromItsPage(t *testing.T) {
 
 func TestHistoryValueAtRejectsAKeyMissingFromItsPage(t *testing.T) {
 	values := generateTestData(t, length.Addr, length.Addr+length.Hash, 64, 8, 10)
-	db, h := filledHistoryValues(t, false, values, log.New())
+	db, h := filledHistoryValues(t, false, values)
 	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(16)
 	h.HistoryValuesOnCompressedPage = 16
 	collateAndMergeHistory(t, db, h, 64, false)
