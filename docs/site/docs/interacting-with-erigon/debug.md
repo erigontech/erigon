@@ -86,9 +86,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawHeader","params":["0x1234
 
 #### Returns
 
-| Type | Description                                                   |
-| ---- | ------------------------------------------------------------- |
-| DATA | RLP-encoded block header, or `null` if the block is not found |
+| Type | Description                                                 |
+| ---- | ----------------------------------------------------------- |
+| DATA | RLP-encoded block header, or `0x` if the block is not found |
 
 ### debug\_getRawBlock
 
@@ -108,9 +108,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawBlock","params":["0x12345
 
 #### Returns
 
-| Type | Description                                            |
-| ---- | ------------------------------------------------------ |
-| DATA | RLP-encoded block, or `null` if the block is not found |
+| Type | Description                                          |
+| ---- | ---------------------------------------------------- |
+| DATA | RLP-encoded block, or `0x` if the block is not found |
 
 ### debug\_getRawBlockAccessList
 
@@ -130,9 +130,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawBlockAccessList","params"
 
 #### Returns
 
-| Type | Description                                                                                                                           |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| DATA | RLP-encoded block access list. If the block has no stored access list, the call fails with error code `-32001` (`Resource not found`) |
+| Type | Description                                                                                                                                                                                                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| DATA | RLP-encoded block access list. A list that is not stored is regenerated. The call fails with error code `-32001` (`Resource not found`) for an unknown or pending block or a block before Amsterdam, and with `4444` (`Pruned history unavailable`) when the history needed to regenerate the list has been pruned |
 
 ### debug\_getRawTransaction
 
@@ -152,9 +152,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawTransaction","params":["0
 
 #### Returns
 
-| Type | Description                                                           |
-| ---- | --------------------------------------------------------------------- |
-| DATA | Binary-encoded transaction, or `null` if the transaction is not found |
+| Type | Description                                                         |
+| ---- | ------------------------------------------------------------------- |
+| DATA | Binary-encoded transaction, or `0x` if the transaction is not found |
 
 ### debug\_getBadBlocks
 
