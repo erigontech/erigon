@@ -154,19 +154,7 @@ func TestHeadBeforeBlockMatchesGetHead(t *testing.T) {
 // When the head before a block needs the votes, the import builds the justified checkpoint state while
 // f.mu is released for the EL call, not under f.mu.
 func TestImportBuildsJustifiedStateWhileLockIsReleased(t *testing.T) {
-	blocks, anchor, _ := tests.GetBellatrixRandom()
-	f := newBlockTestStore(t, anchor)
-	slotMs := func(slot uint64) uint64 { return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000 }
-	var block *cltypes.SignedBeaconBlock
-	for _, candidate := range blocks {
-		f.OnTick(slotMs(candidate.Block.Slot) + 100)
-		if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), candidate.Block.Slot); !standsIn {
-			block = candidate
-			break
-		}
-		require.NoError(t, f.OnBlock(t.Context(), candidate, false, true, false))
-	}
-	require.NotNil(t, block, "the fixture must count the votes before some block")
+	f, block := importUntilHeadCountsVotes(t)
 	justified := f.JustifiedCheckpoint()
 	f.checkpointStates.Delete(justified)
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
@@ -186,6 +174,38 @@ func TestImportBuildsJustifiedStateWhileLockIsReleased(t *testing.T) {
 	require.NoError(t, awaitOnBlock(t, onBlockDone))
 	require.True(t, built)
 	require.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
+}
+
+// importUntilHeadCountsVotes imports the Bellatrix fixture up to the first block whose head before it needs
+// the votes, and moves the time 100 ms into that block's slot.
+func importUntilHeadCountsVotes(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	f := newBlockTestStore(t, anchor)
+	for _, candidate := range blocks {
+		f.OnTick(slotStartTimeMs(f, candidate.Block.Slot) + 100)
+		if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), candidate.Block.Slot); !standsIn {
+			return f, candidate
+		}
+		require.NoError(t, f.OnBlock(t.Context(), candidate, false, true, false))
+	}
+	t.Fatal("the fixture must count the votes before some block")
+	return nil, nil
+}
+
+// A block already past the attestation deadline gets no head before it, so its import does not build the
+// justified state for one.
+func TestLateBlockDoesNotWarmTheJustifiedState(t *testing.T) {
+	f, block := importUntilHeadCountsVotes(t)
+	f.checkpointStates.Delete(f.JustifiedCheckpoint())
+	slot := block.Block.Slot
+	deadlineMs := slotStartTimeMs(f, slot) + f.getAttestationDueMs(f.computeEpochAtSlot(slot))
+
+	_, warm := f.headCheckpointToWarmLocked(slot)
+	require.True(t, warm)
+	f.timeMs.Store(deadlineMs)
+	_, warm = f.headCheckpointToWarmLocked(slot)
+	require.False(t, warm)
 }
 
 // epochStartBlock returns the anchor and a block of the epoch's first slot that advances the

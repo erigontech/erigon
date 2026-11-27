@@ -593,7 +593,8 @@ func (f *ForkChoiceStore) preGloasHeadStandInLocked(justifiedCheckpoint solid.Ch
 // headCheckpointToWarmLocked returns the justified checkpoint whose state headBeforeBlockPreGloasLocked would
 // build under f.mu for a pre-Gloas block of slot, so that the import can build it while f.mu is released.
 func (f *ForkChoiceStore) headCheckpointToWarmLocked(slot uint64) (solid.Checkpoint, bool) {
-	if f.Slot() != slot || f.proposerBoostRoot.Load().(common.Hash) != (common.Hash{}) {
+	// A block already past the attestation deadline is late when it is applied too, so it gets no head.
+	if !f.beforeAttestationDeadline(slot, f.timeMs.Load()) || f.proposerBoostRoot.Load().(common.Hash) != (common.Hash{}) {
 		return solid.Checkpoint{}, false
 	}
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
