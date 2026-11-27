@@ -43,6 +43,7 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
+// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
 func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
 		return RunPrecompiledContract(p, input, gas, evm.intraBlockState, tracer)
