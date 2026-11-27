@@ -2664,7 +2664,12 @@ type BlockAccessListBuilder struct {
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
-	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), next: -1}
+	return NewSizedBlockAccessListBuilder(0)
+}
+
+// NewSizedBlockAccessListBuilder reserves room for n accounts.
+func NewSizedBlockAccessListBuilder(n int) *BlockAccessListBuilder {
+	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState, n), next: -1}
 }
 
 // Next is the tx index Add expects; indexes start at -1, the pre-block system calls.
