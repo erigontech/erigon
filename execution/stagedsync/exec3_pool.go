@@ -286,6 +286,14 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 	return pt.publish(p)
 }
 
+func (pt *poolTask) rerunTarget(t int) int {
+	pt.reruns++
+	if pt.reruns > poolNamedReruns {
+		return pt.tv.index - 1
+	}
+	return t
+}
+
 func (pt *poolTask) publish(p *taskPool) bool {
 	pt.send(p, pt.result)
 	pt.result = nil
@@ -293,16 +301,8 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.mu.Lock()
 	if pt.pending {
 		pt.pending = false
-		target := pt.pendingTarget - 1
-		pt.pendingTarget = 0
-		if target < 0 {
-			target = pt.tv.index - 1
-		}
+		target := pt.rerunTarget(pt.pendingTarget)
 		pt.mu.Unlock()
-		pt.reruns++
-		if pt.reruns > poolNamedReruns {
-			target = pt.tv.index - 1
-		}
 		return pt.waitThen(target, psReexec)
 	}
 	pt.parked = true

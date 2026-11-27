@@ -594,3 +594,67 @@ func TestValidateNowNamesHighestWriterPastAnEstimate(t *testing.T) {
 	require.False(t, valid)
 	require.Equal(t, 2, blocker, "the blocker must be the highest stale writer, not the first one the scan meets")
 }
+
+func TestValidateNowNamesTheReadsOwnEstimateWriter(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addrA, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: -1}})
+	reads.SetHeader(addrB, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 1}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 3}, reads)
+	validated := newWS().bal(addrA, state.Version{TxIndex: 0}, *uint256.NewInt(5)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 0}, validated)
+	be.versionMap.FlushWrites(validated, false)
+	be.versionMap.MarkWritesValidated(validated, nil)
+	rerun := newWS().stor(addrB, key, state.Version{TxIndex: 1, Incarnation: 1}, *uint256.NewInt(7)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 1, Incarnation: 1}, rerun)
+	be.versionMap.FlushWrites(rerun, false)
+
+	valid, blocker := be.validateNow(3)
+	require.False(t, valid)
+	require.Equal(t, 1, blocker, "a read whose own writer is re-running must wait for that writer")
+}
+
+func TestSelfLoopEvaluateNamesHighestEstimateWriter(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addrA, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}})
+	reads.SetHeader(addrB, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}})
+	low := newWS().bal(addrA, state.Version{TxIndex: 1}, *uint256.NewInt(5)).build()
+	be.versionMap.FlushWrites(low, false)
+	high := newWS().stor(addrB, key, state.Version{TxIndex: 2}, *uint256.NewInt(7)).build()
+	be.versionMap.FlushWrites(high, false)
+	tv := &taskVersion{execTask: be.tasks[3], version: state.Version{BlockNum: 1, TxIndex: 3}}
+
+	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: reads})
+	require.False(t, valid)
+	require.Equal(t, 2, blocker, "a run that read two estimates must wait for the higher writer")
+}
+
+func TestValidateNowWaitsForPredecessorWhenAnUnnamedCheckFails(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addrA, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: -1}})
+	reads.SetHeader(addrB, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 2}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 3}, reads)
+	validated := newWS().bal(addrA, state.Version{TxIndex: 0}, *uint256.NewInt(5)).build()
+	be.versionMap.FlushWrites(validated, false)
+	be.versionMap.MarkWritesValidated(validated, nil)
+
+	valid, blocker := be.validateNow(3)
+	require.False(t, valid)
+	require.Equal(t, 2, blocker, "a scan stopped by a check that names no writer must fall back to tx-1")
+}

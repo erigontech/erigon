@@ -257,7 +257,9 @@ func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
 		pt := newPoolUnitTask(be, 2)
 		pt.next = psRecheck
 		pt.result = &exec.TxResult{}
-		pt.pending = pending
+		if pending {
+			be.signalSelfLoopReexec(2, 1)
+		}
 
 		pt.step(pe.pool, nil)
 
@@ -457,4 +459,27 @@ func TestNamedRerunWaitsForAFeeRecipientCellToSettle(t *testing.T) {
 	require.Zero(t, be.pool.queue.Len(), "the reader waits for its writer, not for an earlier commit")
 	be.signalCommitted(1)
 	require.Same(t, pt, be.pool.pop())
+}
+
+func TestPoolLatchedSignalKeepsHighestNamedTarget(t *testing.T) {
+	for _, capped := range []bool{false, true} {
+		pe, be := newPoolUnit(t, 4)
+		pt := newPoolUnitTask(be, 3)
+		pt.next = psRecheck
+		pt.result = &exec.TxResult{}
+		if capped {
+			pt.reruns = poolNamedReruns
+		}
+		be.signalSelfLoopReexec(3, 1)
+		be.signalSelfLoopReexec(3, 0)
+
+		pt.step(pe.pool, nil)
+
+		require.False(t, pt.pending, "the latched signal was not consumed")
+		if capped {
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[2], "past the named-rerun limit the re-run waits for tx-1")
+		} else {
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a latched re-run waits for the highest named writer")
+		}
+	}
 }
