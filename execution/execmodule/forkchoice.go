@@ -749,11 +749,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if !initialCycle {
 				return nil
 			}
-			// Catchup: drain the agg-level collation+prune on its own RW tx.
+			// Catchup: CommitCycle prunes once the cycle is committed.
 			roTx.Rollback()
-			if _, _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
-				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
-			}
 			return nil
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
@@ -777,6 +774,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			checkpointStateChanges()
 			restoreRecentReceipts = nil
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
+			// Prune and collate after the commit, so a reorg staged in this cycle is never pruned on the old chain.
+			if _, _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
+			}
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
