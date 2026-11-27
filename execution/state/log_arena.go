@@ -35,20 +35,22 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// The pool never shrinks: all entries a transaction may emit would park 13MB
-	// per arena, while a tenth still holds the ~1700 logs of a p99 block that a
-	// caller resetting per block pools in one go. Arena holds one txn's logs, not a block's.
-	maxPooledLogEntries = maxLogsPerTxn / 10
+	// The pool and the slots hold all entries one transaction may emit, 13MB per
+	// arena, but only while transactions keep using more than the decayed limits.
+	maxPooledLogEntries = maxLogsPerTxn
 	maxPooledLogBytes   = maxLogBytesPerTxn
 
 	// One large log must not take the whole budget and starve the small entries
 	// real traffic is made of.
 	maxPooledLogDataCap = maxPooledLogBytes / 2
 
-	// Slots the arena keeps between resets. The run is a block for a caller that
-	// resets per block, so this is bounded by the memory it costs rather than by
-	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
-	maxRetainedLogSlots = 32 * 1024 / 8
+	// Room for maxLogsPerTxn entries: append grows the run to 48128 slots on the way.
+	maxRetainedLogSlots = 64 * 1024
+
+	// What a reset after a smaller run trims back to: a tenth of the entries
+	// still holds the ~1700 logs of a p99 block, in 32KB of slots.
+	decayedPooledLogEntries = maxLogsPerTxn / 10
+	decayedRetainedLogSlots = 32 * 1024 / 8
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
@@ -123,7 +125,14 @@ func (a *logArena) reset() {
 		a.put(lp)
 		entries[i] = nil
 	}
-	if cap(entries) > maxRetainedLogSlots {
+	small := len(entries) < decayedPooledLogEntries
+	if small && len(a.pool) > decayedPooledLogEntries {
+		for _, lp := range a.pool[decayedPooledLogEntries:] {
+			a.poolBytes -= cap(lp.Data)
+		}
+		a.pool = slices.Clone(a.pool[:decayedPooledLogEntries])
+	}
+	if cap(entries) > maxRetainedLogSlots || small && cap(entries) > decayedRetainedLogSlots {
 		a.entries = nil // an outlier keeps its entries, not the array that held them
 	} else {
 		a.entries = entries[:0]

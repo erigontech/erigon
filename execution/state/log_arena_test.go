@@ -575,3 +575,55 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
 	require.Less(t, held, 4<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
+
+// A transaction that spends its whole gas on logs reuses the entries and the
+// slots the one before it left.
+func TestLogPoolReusesTxMaxLogsAcrossTxs(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	before := make(map[*types.Log]struct{}, maxLogsPerTxn)
+	for range maxLogsPerTxn {
+		before[ibs.AllocLog(common.HexToAddress("0x1"), 0, 0)] = struct{}{}
+	}
+	ibs.Reset()
+	slots := cap(ibs.logs.entries)
+	require.GreaterOrEqual(t, slots, maxLogsPerTxn)
+
+	ibs.SetTxContext(1, 1)
+	reused := 0
+	for range maxLogsPerTxn {
+		if _, ok := before[ibs.AllocLog(common.HexToAddress("0x2"), 0, 0)]; ok {
+			reused++
+		}
+	}
+	require.Equal(t, maxLogsPerTxn, reused)
+	require.Equal(t, slots, cap(ibs.logs.entries), "slots reallocated")
+}
+
+// A log-heavy transaction does not leave its pool and slots to the ones after
+// it: the first reset after a smaller one trims them back.
+func TestResetDecaysLogPoolAfterSmallTx(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	for range maxLogsPerTxn {
+		ibs.AllocLog(common.HexToAddress("0x1"), 0, 8)
+	}
+	ibs.Reset()
+	require.Len(t, ibs.logs.pool, maxLogsPerTxn)
+
+	ibs.SetTxContext(1, 1)
+	ibs.AllocLog(common.HexToAddress("0x2"), 0, 0)
+	ibs.Reset()
+	require.Len(t, ibs.logs.pool, decayedPooledLogEntries)
+	require.Less(t, cap(ibs.logs.pool), maxLogsPerTxn, "the array that held the big pool is kept")
+	require.LessOrEqual(t, cap(ibs.logs.entries), decayedRetainedLogSlots)
+	held := 0
+	for _, lp := range ibs.logs.pool {
+		held += cap(lp.Data)
+	}
+	require.Equal(t, held, ibs.logs.poolBytes)
+}
