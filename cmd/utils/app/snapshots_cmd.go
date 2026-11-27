@@ -261,7 +261,7 @@ var snapshotCommand = cli.Command{
 				}()
 				return migrations.UpgradeSegHeadersV2(dirs, logger)
 			},
-			Usage: "Patch all V1 snapshot files to V2 header format (sets word-level compression bits). Run once after upgrading to the version that introduced this format.",
+			Usage: "Patch all V1 snapshot files to V2 header format (sets word-level compression bits). Run once after upgrading to the version that introduced this format. One-way: older releases cannot read patched files, and patched files get new torrent hashes.",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
