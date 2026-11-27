@@ -3760,7 +3760,7 @@ type duFileInfo struct {
 func duClassifyFile(dir, name string) string {
 	lname := strings.ToLower(name)
 	ldir := strings.ToLower(dir)
-	if strings.EqualFold(ldir, datadir.SnapCaplinDir) {
+	if ldir == datadir.SnapCaplinDir {
 		return duCatCaplin
 	}
 
@@ -3790,20 +3790,16 @@ func duClassifyFile(dir, name string) string {
 	// Files directly under snapshots/ — only known segment extensions are block segments.
 	switch {
 	case strings.HasSuffix(lname, ".seg"), strings.HasSuffix(lname, ".idx"), strings.HasSuffix(lname, ".dat"):
-		if duIsCaplinSegment(lname) {
+		// A segment in the top-level snapshots dir can hold consensus-layer data. Caplin writes
+		// these alongside the execution block segments, but they are retained by the
+		// --caplin.*-archive flags rather than --prune.mode.
+		if snaptype.IsCaplinBlockOrBlobFile(lname) {
 			return duCatCaplin
 		}
 		return duCatBlocks
 	default:
 		return duCatOther
 	}
-}
-
-// duIsCaplinSegment reports whether a segment in the top-level snapshots dir holds
-// consensus-layer data. Caplin writes these alongside the execution block segments,
-// but they are retained by the --caplin.*-archive flags rather than --prune.mode.
-func duIsCaplinSegment(lname string) bool {
-	return snaptype.IsCaplinFile(lname)
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.

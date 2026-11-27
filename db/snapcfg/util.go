@@ -174,6 +174,42 @@ func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropp
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
+	versioned, drops := p.typed(types)
+	if drops.unparsable > 0 {
+		log.Root().Warn("Preverified list has entries the type filter could not parse",
+			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
+	}
+	if drops.outOfWindow > 0 {
+		log.Root().Info("Preverified list has entries outside the versions this binary supports",
+			"count", drops.outOfWindow)
+	}
+	if len(p.Items) != len(versioned) {
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Debug("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
+			"unreadable", drops.unreadable, "superseded", drops.superseded,
+			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
+			"names", strings.Join(names, ","))
+	} else {
+		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
+	}
+	p.Items = versioned
+	return p
+}
+
+func spellsRegisteredName(t snaptype.Type, name string) bool {
+	if name == t.Name() {
+		return true
+	}
+	for _, idx := range t.Indexes() {
+		if name == idx.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilterDrops) {
 	var bestVersions btree.Map[string, PreverifiedItem]
 	var keptVersions btree.Map[string, snaptype.Version]
 	var drops typeFilterDrops
@@ -256,9 +292,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			typeName = "transactions"
 		}
 		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
-		if parsedOK && parsed.Type != nil {
+		if parsedOK && parsed.Type != nil && spellsRegisteredName(parsed.Type, parsed.TypeString) {
 			typeName = parsed.Type.Name()
 		} else if _, registered := snaptype.ParseEnum(typeName); registered {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
@@ -313,26 +350,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
-	if drops.unparsable > 0 {
-		log.Root().Warn("Preverified list has entries the type filter could not parse",
-			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
-	}
-	if drops.outOfWindow > 0 {
-		log.Root().Info("Preverified list has entries outside the versions this binary supports",
-			"count", drops.outOfWindow)
-	}
-	if len(p.Items) != len(versioned) {
-		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
-		log.Root().Debug("Preverified list reduced after applying type filter",
-			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
-			"unreadable", drops.unreadable, "superseded", drops.superseded,
-			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
-			"names", strings.Join(names, ","))
-	} else {
-		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
-	}
-	p.Items = versioned
-	return p
+	return versioned, drops
 }
 
 func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {

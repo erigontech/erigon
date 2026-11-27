@@ -675,7 +675,7 @@ func SnapshotsToDownload(
 	}
 
 	for _, p := range preverifiedBlockSnapshots.Items {
-		caplinFile := strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") || snaptype.IsCaplinFile(p.Name)
+		caplinFile := strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") || snaptype.IsCaplinBlockOrBlobFile(p.Name)
 		if caplin == NoCaplin && caplinFile {
 			continue
 		}

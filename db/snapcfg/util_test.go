@@ -282,3 +282,19 @@ func TestMergeLimitSkipsUnregisteredStateType(t *testing.T) {
 func TestSetTomlRejectsMalformedToml(t *testing.T) {
 	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
 }
+
+func TestTypedReportsUnparsableRegisteredTypeNames(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-bad-000050-blobsidecars.seg", Hash: "bad-from"},
+		{Name: "v1.1-00a000-000100-beaconblocks.seg", Hash: "bad-from-digits"},
+		{Name: "v1.1-000000-000100-BEACONBLOCKS.seg", Hash: "upper-case"},
+		{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "ok"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Equal(t, []PreverifiedItem{{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "ok"}}, kept)
+	require.Equal(t, []string{
+		"v1.1-bad-000050-blobsidecars.seg",
+		"v1.1-00a000-000100-beaconblocks.seg",
+		"v1.1-000000-000100-BEACONBLOCKS.seg",
+	}, drops.unparsableNames)
+}
