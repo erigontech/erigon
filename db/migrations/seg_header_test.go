@@ -296,9 +296,12 @@ func TestUpgradeSegHeaders_HardlinkedMirrorKeepsBytes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "v1.0-code.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
+	require.NoError(t, os.Chmod(path, 0o444)) // snapshot files are read-only
 	mirror := filepath.Join(root, "mirror.kv")
 	require.NoError(t, os.Link(path, mirror))
 	before, err := os.ReadFile(mirror)
+	require.NoError(t, err)
+	modeBefore, err := os.Stat(mirror)
 	require.NoError(t, err)
 
 	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
@@ -307,6 +310,12 @@ func TestUpgradeSegHeaders_HardlinkedMirrorKeepsBytes(t *testing.T) {
 	after, err := os.ReadFile(mirror)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "a hardlinked mirror must not change")
+	modeAfter, err := os.Stat(mirror)
+	require.NoError(t, err)
+	require.Equal(t, modeBefore.Mode(), modeAfter.Mode(), "a hardlinked mirror must keep its permissions")
+	pathMode, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, modeBefore.Mode(), pathMode.Mode())
 }
 
 func TestUpgradeSegHeaders_CanceledKeepsHeader(t *testing.T) {

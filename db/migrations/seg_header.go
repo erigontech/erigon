@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -212,10 +213,13 @@ func patchCopy(path string, mode os.FileMode, fc seg.FileCompression) (err error
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err = os.Chmod(path, mode|0o200); err != nil { // Windows does not replace a read-only file
-		return err
+	if runtime.GOOS == "windows" { // Windows does not replace a read-only file; Unix needs no write bit on it
+		if err = os.Chmod(path, mode|0o200); err != nil {
+			return err
+		}
 	}
 	if err = os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Chmod(path, mode)
 		return err
 	}
 	return dir.FsyncDir(filepath.Dir(path))
