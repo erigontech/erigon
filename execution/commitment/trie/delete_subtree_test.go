@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,7 @@ func TestTrieDeleteSubtree_UnresolvedHash(t *testing.T) {
 		{name: "value root", root: HashNode{hash: make([]byte, 32)}},
 		{name: "value extension boundary", root: NewShortNode([]byte{6, 1}, HashNode{hash: make([]byte, 32)}), prefix: []byte("a")},
 		{name: "value prefix continues", root: NewShortNode([]byte{6, 1}, HashNode{hash: make([]byte, 32)}), prefix: []byte("ab"), panics: true},
+		{name: "branch child", root: NewShortNode([]byte{6}, &DuoNode{mask: 1<<1 | 1<<2, child1: &HashNode{hash: make([]byte, 32)}, child2: &HashNode{hash: bytes.Repeat([]byte{1}, 32)}}), prefix: []byte("a"), panics: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := NewInMemoryTrie(tc.root)
