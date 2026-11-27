@@ -23,20 +23,20 @@ func TestMissingDumpReportsSlotRead(t *testing.T) {
 			if slot == 2560 {
 				expected = 3072
 			}
-			getter := func(_ string, key []byte) ([]byte, error) {
-				require.Equal(t, expected, base_encoding.Decode64FromBytes4(key))
-				return nil, nil
-			}
-			for name, read := range map[string]func() ([]byte, error){
-				"effective": func() ([]byte, error) {
+			for name, read := range map[string]func(state_accessors.GetValFn) ([]byte, error){
+				"effective": func(getter state_accessors.GetValFn) ([]byte, error) {
 					return reader.reconstructDiffedUint64List(tx, getter, 1, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)
 				},
-				"balances": func() ([]byte, error) {
+				"balances": func(getter state_accessors.GetValFn) ([]byte, error) {
 					return reader.reconstructBalances(tx, getter, 1, slot, kv.ValidatorBalance, kv.BalancesDump)
 				},
 			} {
 				t.Run(fmt.Sprintf("%s/%d", name, slot), func(t *testing.T) {
-					_, err := read()
+					getter := func(_ string, key []byte) ([]byte, error) {
+						require.Equal(t, expected, base_encoding.Decode64FromBytes4(key))
+						return nil, nil
+					}
+					_, err := read(getter)
 					require.EqualError(t, err, fmt.Sprintf("dump not found for slot %d", expected))
 				})
 			}
