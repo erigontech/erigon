@@ -90,7 +90,12 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
 	}
-	hb.setTopReference(&s.ref)
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
+	s.ref.len = hb.hashStack[len(hb.hashStack)-length2.Hash-1] - 0x80
+	if s.ref.len > 32 {
+		s.ref.len = hb.hashStack[len(hb.hashStack)-length2.Hash-1] - 0xc0 + 1
+		copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash-1:])
+	}
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -147,7 +152,18 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlp.EncodeListPrefixToBuf(totalLen, hb.lenPrefix[:])
 
-	writer := hb.nodeWriter(totalLen + pt)
+	var writer io.Writer
+	var reader io.Reader
+
+	if totalLen+pt < length2.Hash {
+		// Embedded node
+		hb.byteArrayWriter.Setup(hb.hashBuf[:], 0)
+		writer = hb.byteArrayWriter
+	} else {
+		hb.sha.Reset()
+		writer = hb.sha
+		reader = hb.sha
+	}
 
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -171,41 +187,14 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		return err
 	}
 
-	return hb.finishNode(totalLen+pt, hb.hashBuf[:])
-}
-
-func (hb *HashBuilder) nodeWriter(encodedSize int) io.Writer {
-	if encodedSize < length2.Hash {
-		hb.byteArrayWriter.Setup(hb.hashBuf[:], 0)
-		return hb.byteArrayWriter
+	if reader != nil {
+		hb.hashBuf[0] = 0x80 + length2.Hash
+		if _, err := reader.Read(hb.hashBuf[1:]); err != nil {
+			return err
+		}
 	}
-	hb.sha.Reset()
-	return hb.sha
-}
 
-func (hb *HashBuilder) finishNode(encodedSize int, ref []byte) error {
-	if encodedSize < length2.Hash {
-		copy(ref, hb.hashBuf[:encodedSize])
-		return nil
-	}
-	ref[0] = 0x80 + length2.Hash
-	_, err := hb.sha.Read(ref[1:hashStackStride])
-	return err
-}
-
-func (hb *HashBuilder) setTopReference(dst *nodeRef) {
-	ref := hb.topHash()
-	if len(ref) == hashStackStride {
-		ref = ref[1:]
-	}
-	dst.len = byte(copy(dst.data[:], ref))
-}
-
-func nodeFromStackReference(ref []byte) (Node, error) {
-	if ref[0] == 0x80+length2.Hash {
-		return &HashNode{hash: bytes.Clone(ref[1:hashStackStride])}, nil
-	}
-	return decodeNode(ref[:1+int(ref[0]-rlp.EmptyListCode)])
+	return nil
 }
 
 func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error {
@@ -279,7 +268,8 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if err := hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
-	hb.setTopReference(&s.ref)
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
+	s.ref.len = 32
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
@@ -348,11 +338,8 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *ShortNode
 	switch n := nd.(type) {
 	case nil:
-		child, err := nodeFromStackReference(hb.topHash())
-		if err != nil {
-			return err
-		}
-		s = &ShortNode{Key: bytes.Clone(key), Val: child}
+		branchHash := bytes.Clone(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		s = &ShortNode{Key: bytes.Clone(key), Val: &HashNode{hash: branchHash}}
 	case *FullNode:
 		s = &ShortNode{Key: bytes.Clone(key), Val: n}
 	default:
@@ -362,7 +349,8 @@ func (hb *HashBuilder) extension(key []byte) error {
 	if err := hb.extensionHash(key); err != nil {
 		return err
 	}
-	hb.setTopReference(&s.ref)
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
+	s.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -370,10 +358,12 @@ func (hb *HashBuilder) extension(key []byte) error {
 }
 
 func (hb *HashBuilder) extensionHash(key []byte) error {
+	writer := io.Writer(hb.sha)
+
 	if hb.trace {
 		fmt.Printf("EXTENSIONHASH %x\n", key)
 	}
-	branchHash := hb.topHash()
+	branchHash := hb.hashStack[len(hb.hashStack)-hashStackStride:]
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -403,9 +393,9 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	} else {
 		kl = 1
 	}
-	totalLen := kp + kl + len(branchHash)
+	totalLen := kp + kl + 33
 	pt := rlp.EncodeListPrefixToBuf(totalLen, hb.lenPrefix[:])
-	writer := hb.nodeWriter(totalLen + pt)
+	hb.sha.Reset()
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
@@ -425,14 +415,17 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	var capture []byte //nolint: used for tracing
 	if hb.trace {
-		capture = bytes.Clone(branchHash)
+		capture = bytes.Clone(branchHash[:length2.Hash+1])
 	}
-	if _, err := writer.Write(branchHash); err != nil {
+	if _, err := writer.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
 	}
-	if err := hb.finishNode(totalLen+pt, hb.hashStack[len(hb.hashStack)-hashStackStride:]); err != nil {
+	// Replace previous hash with the new one
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
+
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
 	if hb.trace {
 		fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	}
@@ -458,11 +451,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	for digit := range uint(16) {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				child, err := nodeFromStackReference(hashes[hashStackStride*i : hashStackStride*(i+1)])
-				if err != nil {
-					return err
-				}
-				f.Children[digit] = child
+				f.Children[digit] = &HashNode{hash: bytes.Clone(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -474,7 +463,8 @@ func (hb *HashBuilder) branch(set uint16) error {
 	if err := hb.branchHash(set); err != nil {
 		return err
 	}
-	hb.setTopReference(&f.ref)
+	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
+	f.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -483,6 +473,8 @@ func (hb *HashBuilder) branch(set uint16) error {
 }
 
 func (hb *HashBuilder) branchHash(set uint16) error {
+	writer := io.Writer(hb.sha)
+
 	if hb.trace {
 		fmt.Printf("BRANCHHASH (%b)\n", set)
 	}
@@ -505,8 +497,8 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 			i++
 		}
 	}
+	hb.sha.Reset()
 	pt := rlp.EncodeListPrefixToBuf(totalSize, hb.lenPrefix[:])
-	writer := hb.nodeWriter(totalSize + pt)
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
@@ -546,7 +538,8 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
-	if err := hb.finishNode(totalSize+pt, hb.hashStack[len(hb.hashStack)-hashStackStride:]); err != nil {
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
 
