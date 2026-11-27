@@ -16,7 +16,7 @@ type activeValidatorsCacheKey struct {
 }
 
 type ActiveValidatorsCache struct {
-	cache *lru.Cache[activeValidatorsCacheKey, []uint64]
+	cache *lru.Cache[activeValidatorsCacheKey, []uint32]
 }
 
 var (
@@ -25,7 +25,7 @@ var (
 )
 
 func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
-	cache, err := lru.New[activeValidatorsCacheKey, []uint64](name, size)
+	cache, err := lru.New[activeValidatorsCacheKey, []uint32](name, size)
 	if err != nil {
 		panic(err)
 	}
@@ -34,10 +34,10 @@ func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
 	}
 }
 
-func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, bool) {
+func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint32, bool) {
 	return c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
 }
 
-func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64) {
+func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint32) {
 	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidators)
 }

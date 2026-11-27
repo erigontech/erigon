@@ -45,9 +45,9 @@ type BeaconStateExtension interface {
 	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error)
 	InitiateValidatorExit(index uint64) error
 	InitiateBuilderExit(builderIndex uint64)
-	GetActiveValidatorsIndices(epoch uint64) (indicies []uint64)
+	GetActiveValidatorsIndices(epoch uint64) (indicies []uint32)
 	GetTotalActiveBalance() uint64
-	ComputeCommittee(indicies []uint64, slot uint64, index, count uint64) ([]uint64, error)
+	ComputeCommittee(indicies []uint32, slot uint64, index, count uint64) ([]uint32, error)
 	GetBeaconProposerIndex() (uint64, error)
 	GetBeaconProposerIndices(epoch uint64) ([]uint64, error)
 	BaseRewardPerIncrement() uint64
@@ -55,7 +55,7 @@ type BeaconStateExtension interface {
 	SyncRewards() (proposerReward, participantReward uint64, err error)
 	CommitteeCount(epoch uint64) uint64
 	GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay, parentSlot uint64, skipAssert bool) ([]uint8, error)
-	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
+	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint32, error)
 	ComputeNextSyncCommittee() (*solid.SyncCommittee, error)
 	GetAttestingIndicies(attestation *solid.Attestation, checkBitsLength bool) ([]uint64, error)
 	GetValidatorChurnLimit() uint64

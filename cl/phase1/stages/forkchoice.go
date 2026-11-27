@@ -696,7 +696,7 @@ type shuffleInput struct {
 	beaconConfig *clparams.BeaconChainConfig
 	epoch        uint64
 	blockRoot    common.Hash
-	indicies     []uint64
+	indicies     []uint32
 	mix          common.Hash
 }
 
@@ -741,7 +741,7 @@ func shuffleInputForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainC
 }
 
 func preCacheShuffledSet(in shuffleInput) {
-	shuffledIndicies := make([]uint64, len(in.indicies))
+	shuffledIndicies := make([]uint32, len(in.indicies))
 	start := time.Now()
 	shuffledIndicies = shuffling.ComputeShuffledIndicies(in.beaconConfig, in.mix, shuffledIndicies, in.indicies, in.epoch*in.beaconConfig.SlotsPerEpoch)
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)

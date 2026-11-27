@@ -83,14 +83,14 @@ func TestProcessSlotsSeparatesSameHeaderDifferentRegistries(t *testing.T) {
 
 	sources := [2]*state.CachingBeaconState{base, branch}
 	var wantWindows [2][][]uint64
-	var wantActive [2][]uint64
+	var wantActive [2][]uint32
 	for i, source := range sources {
 		resetCaches()
 		cold, copyErr := source.Copy()
 		require.NoError(t, copyErr)
 		require.NoError(t, transition.DefaultMachine.ProcessSlots(cold, boundarySlot+1))
 		wantWindows[i] = ptcWindowValues(cold)
-		wantActive[i] = append([]uint64(nil), cold.GetActiveValidatorsIndices(targetEpoch)...)
+		wantActive[i] = append([]uint32(nil), cold.GetActiveValidatorsIndices(targetEpoch)...)
 	}
 
 	for _, order := range [][2]int{{0, 1}, {1, 0}} {
@@ -120,13 +120,13 @@ func TestProcessPtcWindowIgnoresCachesWithoutSlotTransitionEvidence(t *testing.T
 	require.NoError(t, base.SetStateRootAt(index, stateRoot))
 	want := coldPtcWindow(t, base, resetCaches)
 
-	activePoison := make([]uint64, base.ValidatorLength()-1)
-	shuffledPoison := make([]uint64, base.ValidatorLength())
+	activePoison := make([]uint32, base.ValidatorLength()-1)
+	shuffledPoison := make([]uint32, base.ValidatorLength())
 	for i := range activePoison {
-		activePoison[i] = uint64(i)
+		activePoison[i] = uint32(i)
 	}
 	for i := range shuffledPoison {
-		shuffledPoison[i] = uint64(len(shuffledPoison) - i - 1)
+		shuffledPoison[i] = uint32(len(shuffledPoison) - i - 1)
 	}
 	resetCaches()
 	for _, root := range []common.Hash{headerRoot, blockRoot, stateRoot} {
@@ -213,8 +213,8 @@ func TestProcessPtcWindowReplaysDoNotEvictMainCaches(t *testing.T) {
 	base := ptcWindowTestState(t, 2_048)
 	epoch := nextPtcEpochFirstSlot(base) / base.BeaconConfig().SlotsPerEpoch
 	root := common.Hash{0xff}
-	active := []uint64{1, 2, 3}
-	shuffled := []uint64{3, 2, 1}
+	active := []uint32{1, 2, 3}
+	shuffled := []uint32{3, 2, 1}
 	caches.ActiveValidatorsCacheGlobal.Put(epoch, root, active)
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, root, shuffled)
 
@@ -237,9 +237,9 @@ func TestUnavailableDecisionRootsStayUncached(t *testing.T) {
 	resetCaches := useFreshValidatorCaches(t)
 	base := ptcWindowTestState(t, 2_048)
 	cfg := base.BeaconConfig()
-	poison := make([]uint64, base.ValidatorLength())
+	poison := make([]uint32, base.ValidatorLength())
 	for i := range poison {
-		poison[i] = math.MaxUint64
+		poison[i] = math.MaxUint32
 	}
 	for _, epoch := range []uint64{0, 1, state.Epoch(base) + 3} {
 		resetCaches()
@@ -252,10 +252,10 @@ func TestUnavailableDecisionRootsStayUncached(t *testing.T) {
 
 		indices := copied.GetActiveValidatorsIndices(epoch)
 		require.Len(t, indices, base.ValidatorLength())
-		require.Equal(t, uint64(0), indices[0])
+		require.Equal(t, uint32(0), indices[0])
 		committee, err := copied.GetBeaconCommitee(epoch*cfg.SlotsPerEpoch, 0)
 		require.NoError(t, err)
-		require.NotEqual(t, uint64(math.MaxUint64), committee[0])
+		require.NotEqual(t, uint32(math.MaxUint32), committee[0])
 		mainActive, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, common.Hash{})
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(poison), unsafe.SliceData(mainActive))
@@ -288,11 +288,11 @@ func TestMainCachesTakePrecedenceOverLookaheadCaches(t *testing.T) {
 	epoch := nextPtcEpochFirstSlot(base) / base.BeaconConfig().SlotsPerEpoch
 	blockRoot := ptcDecisionRoot(t, base)
 	stateRoot := base.StateRoots().Get(int(base.Slot() % base.BeaconConfig().SlotsPerHistoricalRoot))
-	main := make([]uint64, base.ValidatorLength())
-	lookahead := make([]uint64, base.ValidatorLength())
+	main := make([]uint32, base.ValidatorLength())
+	lookahead := make([]uint32, base.ValidatorLength())
 	for i := range main {
-		main[i] = uint64(i)
-		lookahead[i] = uint64(len(lookahead) - i - 1)
+		main[i] = uint32(i)
+		lookahead[i] = uint32(len(lookahead) - i - 1)
 	}
 	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, main)
 	caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, stateRoot, lookahead)

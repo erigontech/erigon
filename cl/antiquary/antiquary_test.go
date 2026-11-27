@@ -675,7 +675,7 @@ func TestBeaconStatesCollector_CollectActiveIndices(t *testing.T) {
 	c := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
 	defer c.close()
 
-	indices := []uint64{0, 1, 5, 10, 100, 999}
+	indices := []uint32{0, 1, 5, 10, 100, 999}
 	epoch := uint64(7)
 	require.NoError(t, c.collectActiveIndices(epoch, indices))
 
@@ -692,9 +692,9 @@ func TestBeaconStatesCollector_CollectActiveIndices(t *testing.T) {
 	require.NotEmpty(t, val)
 
 	// Decode back
-	decoded, err := base_encoding.ReadRabbits(indices[:0], bytes.NewReader(val))
+	decoded, err := base_encoding.ReadRabbits(nil, bytes.NewReader(val))
 	require.NoError(t, err)
-	require.Equal(t, indices, decoded)
+	require.Equal(t, []uint64{0, 1, 5, 10, 100, 999}, decoded)
 }
 
 func TestBeaconStatesCollector_FlushMultipleCollections(t *testing.T) {

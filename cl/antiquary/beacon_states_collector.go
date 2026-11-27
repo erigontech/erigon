@@ -495,7 +495,7 @@ func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot common.H
 	return i.blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 
-func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices []uint64) error {
+func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices []uint32) error {
 	i.buf.Reset()
 	if err := base_encoding.WriteRabbits(activeIndices, i.buf); err != nil {
 		return err

@@ -63,7 +63,7 @@ func TestRabbitReadWireFormat(t *testing.T) {
 
 func TestRabbitEmpty(t *testing.T) {
 	var w bytes.Buffer
-	require.NoError(t, WriteRabbits(nil, &w))
+	require.NoError(t, WriteRabbits[uint64](nil, &w))
 	out, err := ReadRabbits(nil, &w)
 	require.NoError(t, err)
 	require.Empty(t, out)
@@ -161,4 +161,33 @@ func zstdDecompress(t *testing.T, frame []byte) []byte {
 	payload, err := io.ReadAll(dec)
 	require.NoError(t, err)
 	return payload
+}
+
+func TestWriteRabbitsUint32MatchesUint64(t *testing.T) {
+	cases := map[string][]uint32{
+		"empty":           {},
+		"single":          {7},
+		"contiguous":      {0, 1, 2, 3, 4, 5, 6, 7},
+		"gaps":            {0, 1, 4, 5, 6, 10, 100, 101},
+		"starts after 0":  {3, 4, 5},
+		"max uint32":      {5, math.MaxUint32},
+		"only max uint32": {math.MaxUint32},
+		"run to max":      {math.MaxUint32 - 2, math.MaxUint32 - 1, math.MaxUint32},
+	}
+	for name, list := range cases {
+		t.Run(name, func(t *testing.T) {
+			wide := make([]uint64, len(list))
+			for i, v := range list {
+				wide[i] = uint64(v)
+			}
+			var narrowW, wideW bytes.Buffer
+			require.NoError(t, WriteRabbits(list, &narrowW))
+			require.NoError(t, WriteRabbits(wide, &wideW))
+			require.Equal(t, wideW.Bytes(), narrowW.Bytes())
+
+			out, err := ReadRabbits(nil, &narrowW)
+			require.NoError(t, err)
+			require.Equal(t, wide, append([]uint64{}, out...))
+		})
+	}
 }

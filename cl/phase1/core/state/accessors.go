@@ -57,7 +57,7 @@ func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength uint64, slotS
 }
 
 // GetTotalBalance return the sum of all balances within the given validator set.
-func GetTotalBalance(b abstract.BeaconStateBasic, validatorSet []uint64) (uint64, error) {
+func GetTotalBalance(b abstract.BeaconStateBasic, validatorSet []uint32) (uint64, error) {
 	var total uint64
 	for _, validatorIndex := range validatorSet {
 		// Should be in bounds.

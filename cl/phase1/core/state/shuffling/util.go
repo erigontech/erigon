@@ -78,7 +78,7 @@ func GetSeed(mix common.Hash, epoch uint64, domain [4]byte) common.Hash {
 	return crypto.Sha256(input)
 }
 
-func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []uint64, slot uint64) []uint64 {
+func ComputeShuffledIndicies[T uint32 | uint64](beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []T, slot uint64) []T {
 	copy(out, indicies)
 	epoch := slot / beaconConfig.SlotsPerEpoch
 	seed := GetSeed(mix, epoch, beaconConfig.DomainBeaconAttester)

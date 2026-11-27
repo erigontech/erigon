@@ -207,7 +207,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 						}
 						duty := attesterDutyResponse{
 							Pubkey:                  publicKey,
-							ValidatorIndex:          idx,
+							ValidatorIndex:          uint64(idx),
 							CommitteeIndex:          committeeIndex,
 							CommitteeLength:         uint64(len(idxs)),
 							ValidatorCommitteeIndex: uint64(vIdx),

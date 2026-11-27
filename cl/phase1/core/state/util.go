@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+	"math"
 	"slices"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -218,4 +220,11 @@ func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) 
 	}
 
 	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot, nil
+}
+
+// CheckValidatorCountFitsUint32 panics when validator indices of a registry with n entries do not fit in uint32.
+func CheckValidatorCountFitsUint32(n int) {
+	if uint64(n) > math.MaxUint32 {
+		panic(fmt.Sprintf("validator registry length %d does not fit in uint32", n))
+	}
 }

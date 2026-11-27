@@ -127,7 +127,7 @@ func (f *ForkChoiceStore) HeadStateHasTargetShuffling(headState *state.CachingBe
 
 // TargetBeaconCommittee returns a committee from the target checkpoint state.
 // claimBuild is called only by the caller that starts an uncached build, and a false result refuses the build.
-func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint32, uint64, error) {
 	targetState, err := f.targetCheckpointState(target, slot, claimBuild)
 	if err != nil {
 		return nil, 0, err

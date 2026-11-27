@@ -98,9 +98,9 @@ func (h *boundaryHead) freshHead(t *testing.T) *state.CachingBeaconState {
 	return c
 }
 
-func expectedActiveIndices(boundaryEpoch, epoch uint64) []uint64 {
-	want := make([]uint64, 0, activeListTestValidators)
-	for i := range uint64(activeListTestValidators) {
+func expectedActiveIndices(boundaryEpoch, epoch uint64) []uint32 {
+	want := make([]uint32, 0, activeListTestValidators)
+	for i := range uint32(activeListTestValidators) {
 		switch {
 		case i == exitsAtBoundaryEpoch && epoch >= boundaryEpoch,
 			i == activatesAtBoundaryEpoch && epoch < boundaryEpoch,
@@ -157,28 +157,28 @@ func TestPrecachePromotionAcrossForkVersions(t *testing.T) {
 }
 
 func TestPrecacheDoesNotPromoteForeignLookaheadActiveValidators(t *testing.T) {
-	foreign := []uint64{7, 8, 9}
+	foreign := []uint32{7, 8, 9}
 	otherRoot := common.Hash{0xee}
 
 	for _, tc := range []struct {
 		name  string
-		setup func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) (foreignList []uint64)
+		setup func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) (foreignList []uint32)
 	}{
-		{"different_state_root", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint64 {
+		{"different_state_root", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint32 {
 			caches.LookaheadActiveValidatorsCacheGlobal.Put(h.epoch, h.stateRoot, foreign)
 			require.NoError(t, head.SetStateRootAt(h.refIndex, otherRoot))
 			return foreign
 		}},
-		{"zero_state_root", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint64 {
+		{"zero_state_root", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint32 {
 			caches.LookaheadActiveValidatorsCacheGlobal.Put(h.epoch, common.Hash{}, foreign)
 			require.NoError(t, head.SetStateRootAt(h.refIndex, common.Hash{}))
 			return foreign
 		}},
-		{"absent_lookahead", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint64 {
+		{"absent_lookahead", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint32 {
 			caches.LookaheadActiveValidatorsCacheGlobal = caches.NewActiveValidatorsCache("lookahead_active_validators", caches.MaxLookaheadActiveValidatorsCacheSize)
 			return nil
 		}},
-		{"evicted_lookahead", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint64 {
+		{"evicted_lookahead", func(t *testing.T, h *boundaryHead, head *state.CachingBeaconState) []uint32 {
 			evicted, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(h.epoch, h.stateRoot)
 			require.True(t, ok)
 			for i := range caches.MaxLookaheadActiveValidatorsCacheSize + 1 {
@@ -215,7 +215,7 @@ func TestPrecachePromotesEachBranchItsOwnLookaheadActiveValidators(t *testing.T)
 	rootA, rootB := h.stateRoot, common.Hash{0xbb}
 	listA, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(h.epoch, rootA)
 	require.True(t, ok)
-	listB := []uint64{1, 2, 3}
+	listB := []uint32{1, 2, 3}
 	caches.LookaheadActiveValidatorsCacheGlobal.Put(h.epoch, rootB, listB)
 	headA := h.freshHead(t)
 	headB := h.freshHead(t)

@@ -89,7 +89,7 @@ func TestPreCacheNextShuffledValidatorSetReadsTheStateBeforeReturning(t *testing
 	require.NoError(t, err)
 	mix := ref.GetRandaoMix(int((epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector))
 	indicies := ref.GetActiveValidatorsIndices(epoch)
-	want := shuffling.ComputeShuffledIndicies(cfg, mix, make([]uint64, len(indicies)), indicies, epoch*cfg.SlotsPerEpoch)
+	want := shuffling.ComputeShuffledIndicies(cfg, mix, make([]uint32, len(indicies)), indicies, epoch*cfg.SlotsPerEpoch)
 
 	require.Eventually(t, func() bool { return !workingPreCacheNextShuffledValidatorSet.Load() }, 10*time.Second, time.Millisecond)
 	preCacheNextShuffledValidatorSet(log.Root(), &Cfg{beaconCfg: cfg}, head)

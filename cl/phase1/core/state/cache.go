@@ -45,8 +45,8 @@ type CachingBeaconState struct {
 	// Internals
 	publicKeyIndices pubkeyIndex
 	// Caches
-	activeValidatorsCache *lru.Cache[uint64, []uint64]
-	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
+	activeValidatorsCache *lru.Cache[uint64, []uint32]
+	shuffledSetsCache     *lru.Cache[common.Hash, []uint32]
 
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
@@ -257,10 +257,10 @@ func (b *CachingBeaconState) setTotalActiveBalance(total uint64) {
 
 func (b *CachingBeaconState) initCaches() error {
 	var err error
-	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", activeValidatorsCacheSize); err != nil {
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint32]("beacon_active_validators_cache", activeValidatorsCacheSize); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint32]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
 		return err
 	}
 

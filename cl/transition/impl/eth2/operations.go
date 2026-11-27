@@ -1170,7 +1170,7 @@ func (imp *impl) processAttestationPostAltair(
 			if err != nil {
 				return nil, err
 			}
-			attesters := []uint64{}
+			attesters := []uint32{}
 			for i, attester := range committee {
 				if attestation.AggregationBits.GetBitAt(committeeOffset + i) {
 					attesters = append(attesters, attester)

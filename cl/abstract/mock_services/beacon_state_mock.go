@@ -821,10 +821,10 @@ func (c *MockBeaconStateCommitteeCountCall) DoAndReturn(f func(uint64) uint64) *
 }
 
 // ComputeCommittee mocks base method.
-func (m *MockBeaconState) ComputeCommittee(indicies []uint64, slot, index, count uint64) ([]uint64, error) {
+func (m *MockBeaconState) ComputeCommittee(indicies []uint32, slot, index, count uint64) ([]uint32, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ComputeCommittee", indicies, slot, index, count)
-	ret0, _ := ret[0].([]uint64)
+	ret0, _ := ret[0].([]uint32)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -842,19 +842,19 @@ type MockBeaconStateComputeCommitteeCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateComputeCommitteeCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateComputeCommitteeCall {
+func (c *MockBeaconStateComputeCommitteeCall) Return(arg0 []uint32, arg1 error) *MockBeaconStateComputeCommitteeCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateComputeCommitteeCall) Do(f func([]uint64, uint64, uint64, uint64) ([]uint64, error)) *MockBeaconStateComputeCommitteeCall {
+func (c *MockBeaconStateComputeCommitteeCall) Do(f func([]uint32, uint64, uint64, uint64) ([]uint32, error)) *MockBeaconStateComputeCommitteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateComputeCommitteeCall) DoAndReturn(f func([]uint64, uint64, uint64, uint64) ([]uint64, error)) *MockBeaconStateComputeCommitteeCall {
+func (c *MockBeaconStateComputeCommitteeCall) DoAndReturn(f func([]uint32, uint64, uint64, uint64) ([]uint32, error)) *MockBeaconStateComputeCommitteeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1729,10 +1729,10 @@ func (c *MockBeaconStateGenesisValidatorsRootCall) DoAndReturn(f func() common.H
 }
 
 // GetActiveValidatorsIndices mocks base method.
-func (m *MockBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
+func (m *MockBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint32 {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetActiveValidatorsIndices", epoch)
-	ret0, _ := ret[0].([]uint64)
+	ret0, _ := ret[0].([]uint32)
 	return ret0
 }
 
@@ -1749,19 +1749,19 @@ type MockBeaconStateGetActiveValidatorsIndicesCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateGetActiveValidatorsIndicesCall) Return(indicies []uint64) *MockBeaconStateGetActiveValidatorsIndicesCall {
+func (c *MockBeaconStateGetActiveValidatorsIndicesCall) Return(indicies []uint32) *MockBeaconStateGetActiveValidatorsIndicesCall {
 	c.Call = c.Call.Return(indicies)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateGetActiveValidatorsIndicesCall) Do(f func(uint64) []uint64) *MockBeaconStateGetActiveValidatorsIndicesCall {
+func (c *MockBeaconStateGetActiveValidatorsIndicesCall) Do(f func(uint64) []uint32) *MockBeaconStateGetActiveValidatorsIndicesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateGetActiveValidatorsIndicesCall) DoAndReturn(f func(uint64) []uint64) *MockBeaconStateGetActiveValidatorsIndicesCall {
+func (c *MockBeaconStateGetActiveValidatorsIndicesCall) DoAndReturn(f func(uint64) []uint32) *MockBeaconStateGetActiveValidatorsIndicesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1845,10 +1845,10 @@ func (c *MockBeaconStateGetAttestingIndiciesCall) DoAndReturn(f func(*solid.Atte
 }
 
 // GetBeaconCommitee mocks base method.
-func (m *MockBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+func (m *MockBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint32, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetBeaconCommitee", slot, committeeIndex)
-	ret0, _ := ret[0].([]uint64)
+	ret0, _ := ret[0].([]uint32)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -1866,19 +1866,19 @@ type MockBeaconStateGetBeaconCommiteeCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateGetBeaconCommiteeCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateGetBeaconCommiteeCall {
+func (c *MockBeaconStateGetBeaconCommiteeCall) Return(arg0 []uint32, arg1 error) *MockBeaconStateGetBeaconCommiteeCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateGetBeaconCommiteeCall) Do(f func(uint64, uint64) ([]uint64, error)) *MockBeaconStateGetBeaconCommiteeCall {
+func (c *MockBeaconStateGetBeaconCommiteeCall) Do(f func(uint64, uint64) ([]uint32, error)) *MockBeaconStateGetBeaconCommiteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateGetBeaconCommiteeCall) DoAndReturn(f func(uint64, uint64) ([]uint64, error)) *MockBeaconStateGetBeaconCommiteeCall {
+func (c *MockBeaconStateGetBeaconCommiteeCall) DoAndReturn(f func(uint64, uint64) ([]uint32, error)) *MockBeaconStateGetBeaconCommiteeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
