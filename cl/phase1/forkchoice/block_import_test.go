@@ -221,11 +221,8 @@ func TestBlockOvertakenByPendingPromotedFinalityIsNotImported(t *testing.T) {
 
 	require.Zero(t, f.headHash, "the promotion must drop the cached head")
 
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
 	require.Equal(t, epoch, f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
-	_, imported := f.forkGraph.GetHeader(root)
-	require.False(t, imported)
+	requireBlockNotAdded(t, f, block)
 }
 
 // A block that does not descend from the finalized checkpoint a pending epoch-start promotion
@@ -266,10 +263,7 @@ func TestBlockConflictingWithPendingPromotedFinalityIsRejected(t *testing.T) {
 			}
 
 			require.ErrorIs(t, err, ErrNotFinalizedDescendant)
-			root, hashErr := block.Block.HashSSZ()
-			require.NoError(t, hashErr)
-			_, imported := f.forkGraph.GetHeader(root)
-			require.False(t, imported)
+			requireBlockNotAdded(t, f, block)
 		})
 	}
 }
