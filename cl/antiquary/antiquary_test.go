@@ -1018,3 +1018,37 @@ func TestBlobRetirementGapIsReported(t *testing.T) {
 	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0).Add(blobRetirementGapLogInterval))
 	require.Equal(t, 2, strings.Count(buf.String(), "gapSlot="))
 }
+
+func TestStateHistoryWorkerEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		states, blocks bool
+		custom         bool
+		want           bool
+	}{
+		{"supported archive", true, true, false, true},
+		{"state archive disabled", false, true, false, false},
+		{"block archive disabled", true, false, false, false},
+		{"custom network", true, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			if tc.custom {
+				cfg.DepositNetworkID = ^uint64(0)
+			}
+			if tc.custom {
+				require.False(t, clparams.SupportBackfilling(cfg.DepositNetworkID))
+			}
+			a := NewAntiquary(t.Context(), nil, nil, nil, &cfg, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), tc.states, tc.blocks, false, false, nil)
+			require.Equal(t, tc.want, a.states)
+			if !tc.blocks || tc.custom {
+				require.NoError(t, a.Loop())
+			}
+		})
+	}
+	t.Run("inactive without chain config", func(t *testing.T) {
+		a := NewAntiquary(t.Context(), nil, nil, nil, nil, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), false, false, false, false, nil)
+		require.False(t, a.states)
+		require.NoError(t, a.Loop())
+	})
+}

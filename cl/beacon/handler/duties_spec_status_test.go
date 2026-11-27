@@ -961,3 +961,33 @@ func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) 
 	require.Equal(t, http.StatusInternalServerError, status, body)
 	require.Contains(t, body, "dependent root not found")
 }
+
+func TestHistoricalAttesterStateHistoryEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		blocks, custom bool
+		want           int
+	}{
+		{"supported archive", true, false, http.StatusServiceUnavailable},
+		{"block archive disabled", false, false, http.StatusBadRequest},
+		{"custom network", true, true, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := clparams.CaplinConfig{ArchiveStates: true, ArchiveBlocks: tc.blocks}
+			if tc.custom {
+				h.beaconChainCfg.DepositNetworkID = ^uint64(0)
+			}
+			table := state_accessors.NewStaticValidatorTable()
+			table.SetReplayEnabled(antiquary.StateHistoryEnabled(cfg.ArchiveStates, cfg.ArchiveBlocks, h.beaconChainCfg))
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			lowest := uint64(97)
+			fcu.LowestAvailableSlotVal = &lowest
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+			}))
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`)
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}

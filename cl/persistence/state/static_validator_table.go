@@ -400,21 +400,16 @@ var (
 func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit int) (*solid.ValidatorSet, error) {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
-	if slot > s.slot {
-		if !s.replayDisabled {
+	if !s.replayDisabled {
+		if slot > s.slot {
 			return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
 		}
-		out := solid.NewValidatorSetWithLength(limit, int(length))
-		for i, validator := range s.validatorTable[:min(uint64(len(s.validatorTable)), length)] {
-			validator.ToValidator(out.Get(i), slot)
+		if uint64(len(s.validatorTable)) < length {
+			return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
 		}
-		return out, nil
-	}
-	if uint64(len(s.validatorTable)) < length {
-		return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
 	}
 	out := solid.NewValidatorSetWithLength(limit, int(length))
-	for i, validator := range s.validatorTable[:length] {
+	for i, validator := range s.validatorTable[:min(uint64(len(s.validatorTable)), length)] {
 		validator.ToValidator(out.Get(i), slot)
 	}
 	return out, nil

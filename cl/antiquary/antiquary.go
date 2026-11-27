@@ -96,6 +96,14 @@ type Antiquary struct {
 	statePruneBoundaryFn func(table string) uint64
 }
 
+func blockHistoryEnabled(blocks bool, cfg *clparams.BeaconChainConfig) bool {
+	return blocks && clparams.SupportBackfilling(cfg.DepositNetworkID)
+}
+
+func StateHistoryEnabled(states, blocks bool, cfg *clparams.BeaconChainConfig) bool {
+	return states && blockHistoryEnabled(blocks, cfg)
+}
+
 func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloaderClient dbservices.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
@@ -112,7 +120,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		backfilled:      backfilled,
 		blobBackfilled:  blobBackfilled,
 		cfg:             cfg,
-		states:          states,
+		states:          StateHistoryEnabled(states, blocks, cfg),
 		snReader:        reader,
 		snBuildSema:     snBuildSema,
 		validatorsTable: validatorsTable,
@@ -131,11 +139,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (s *Antiquary) Loop() error {
-	if !s.blocks {
-		return nil // Just skip if we don't have a downloader
-	}
-	// Skip if we don't support backfilling for the current network
-	if !clparams.SupportBackfilling(s.cfg.DepositNetworkID) {
+	if !blockHistoryEnabled(s.blocks, s.cfg) {
 		return nil
 	}
 	if s.downloader != nil {

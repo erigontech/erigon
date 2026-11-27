@@ -595,10 +595,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
+	stateHistoryEnabled := antiquary.StateHistoryEnabled(config.ArchiveStates, config.ArchiveBlocks, beaconConfig)
 	vTables := state_accessors.NewStaticValidatorTable()
-	vTables.SetReplayEnabled(config.ArchiveStates)
+	vTables.SetReplayEnabled(stateHistoryEnabled)
 	// Read the current table
-	if config.ArchiveStates {
+	if stateHistoryEnabled {
 		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
 			return err
 		}

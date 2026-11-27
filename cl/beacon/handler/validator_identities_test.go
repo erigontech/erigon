@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,12 +25,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -202,12 +206,47 @@ func TestHistoricalValidatorEndpointsReplayPending(t *testing.T) {
 }
 
 func TestHistoricalValidatorEndpointsWithoutArchiveRetainedProgress(t *testing.T) {
-	_, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	db, blocks, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	slot := blocks[len(blocks)-1].Block.Slot
 	fcu.FinalizedSlotVal = slot + 1
-	table := state_accessors.NewStaticValidatorTable()
-	table.SetReplayEnabled(false)
-	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
-	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/validator_identities", "")
-	require.Equal(t, http.StatusOK, status, body)
+	lowest := slot + 1
+	fcu.LowestAvailableSlotVal = &lowest
+	genesisRoot := common.Hash{1}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		slotData := state_accessors.SlotDataFromBeaconState(preState)
+		var data bytes.Buffer
+		if err := slotData.Serialize(&data); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.SlotData, base_encoding.Encode64ToBytes4(0), data.Bytes()); err != nil {
+			return err
+		}
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			return err
+		}
+		dump := encoder.EncodeAll(make([]byte, slotData.ValidatorLength*8), nil)
+		encoder.Close()
+		if err := tx.Put(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(0), dump); err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteHeaderSlot(tx, genesisRoot, 0)
+	}))
+	for _, tableSlot := range []uint64{0, slot + 1} {
+		t.Run("table at "+strconv.FormatUint(tableSlot, 10), func(t *testing.T) {
+			table := state_accessors.NewStaticValidatorTable()
+			table.SetReplayEnabled(false)
+			table.SetSlot(tableSlot)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			for _, stateSlot := range []uint64{slot, 0} {
+				t.Run("state at "+strconv.FormatUint(stateSlot, 10), func(t *testing.T) {
+					status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/beacon/states/"+strconv.FormatUint(stateSlot, 10)+"/validator_identities", "")
+					require.Equal(t, http.StatusOK, status, body)
+				})
+			}
+		})
+	}
 }
