@@ -24,6 +24,7 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
 )
@@ -147,7 +148,9 @@ type Writer struct {
 // always start at a key; readers of other files Reset to any word, which then reads
 // with the key flag, so those files get both flags or none.
 func CompressionForFile(path string, fc FileCompression) FileCompression {
-	if !fc.Has(CompressKeys) && !fc.Has(CompressVals) || filepath.Ext(path) == ".kv" {
+	name := filepath.Base(path)
+	isKV := strings.HasSuffix(name, ".kv") || strings.Contains(name, ".kv.") // .kv.<staging suffix>, as squeeze writes
+	if !fc.Has(CompressKeys) && !fc.Has(CompressVals) || isKV {
 		return fc
 	}
 	return CompressKeys | CompressVals

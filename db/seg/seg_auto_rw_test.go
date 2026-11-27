@@ -359,9 +359,10 @@ func TestPagedReaderNext2KeepsHeapBuffer(t *testing.T) {
 
 func TestNewWriterOneSidedOnlyForKV(t *testing.T) {
 	for name, want := range map[string]FileCompression{
-		"v1.0-code.0-1024.kv": CompressVals,
-		"v1.0-code.0-1024.v":  CompressKeys | CompressVals, // history reads a value as the first word after Reset
-		"v1.0-code.0-1024.ef": CompressKeys | CompressVals,
+		"v1.0-code.0-1024.kv":              CompressVals,
+		"v1.0-code.0-1024.kv.squeezed.tmp": CompressVals,                // a staging name of a .kv file
+		"v1.0-code.0-1024.v":               CompressKeys | CompressVals, // history reads a value as the first word after Reset
+		"v1.0-code.0-1024.ef":              CompressKeys | CompressVals,
 	} {
 		t.Run(name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), name)

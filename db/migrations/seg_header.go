@@ -209,6 +209,12 @@ func patchCopy(path string, mode os.FileMode, fc seg.FileCompression) (err error
 	if err = tmp.Chmod(mode); err != nil {
 		return err
 	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Chmod(path, mode|0o200); err != nil { // Windows does not replace a read-only file
+		return err
+	}
 	if err = os.Rename(tmp.Name(), path); err != nil {
 		return err
 	}

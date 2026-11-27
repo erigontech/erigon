@@ -20,5 +20,5 @@ package migrations
 
 import "os"
 
-// shortcut: hardlinks are not detected here, add a link-count check if mirrors use them on this OS.
-func sharesInode(os.FileInfo) bool { return false }
+// No link count here, so every file is patched as a private copy.
+func sharesInode(os.FileInfo) bool { return true }
