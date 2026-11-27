@@ -272,9 +272,10 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns []txnAdmission, 
 				result.reason = txpoolcfg.FrameValidationUnavailable
 			}
 		}
-		if result.senderConflict && !txn.hasKeyedNonce() {
-			// A consumed account nonce takes precedence over sender policy, including
-			// cached conflicts. Use the same state view as the rest of admission.
+		if (result.senderConflict || result.reason == txpoolcfg.FrameValidationUnavailable) && !txn.hasKeyedNonce() {
+			// A consumed account nonce takes precedence over an unavailable simulation
+			// and any sender conflict, whether cached or first seen at insertion.
+			// Check it against the same state view as the rest of admission.
 			senderNonce, _, _, err := p.senders.info(stateCache, txn.SenderID)
 			if err != nil {
 				return err
