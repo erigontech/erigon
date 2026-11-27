@@ -54,7 +54,7 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 	return state.NewTest(dirs)
@@ -1472,7 +1472,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, allIrreversible)
+	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, collateAll)
 	require.NoError(t, err)
 
 	{ // prune
@@ -1648,7 +1648,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
-		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize*2, allIrreversible))
+		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize*2, collateAll))
 
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(err)
