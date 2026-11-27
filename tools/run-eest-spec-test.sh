@@ -49,8 +49,8 @@
 #                                              Amsterdam and its transition to Bogota.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
-#                                              runner; compares debug_executionWitness
-#                                              (canonical) per block.
+#                                              runner. Replays each canonical witness
+#                                              and compares it with the fixture.
 #   zkevm-witness-race                         full witness corpus via evm.race.
 #   zkevm-witness-race-{a-h,rest}              CI partitions of the witness race corpus.
 #   zkevm-witness-v3                           zkevm-witness on serial commitment v3.
@@ -180,6 +180,7 @@ case "$shard_route" in
 		paths=("$base/blockchain_tests_engine_x/$gas_dir")
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
 	zkevm-witness*)
+		export ERIGON_ASSERT=true
 		# Witness references can come from cases outside a shard's --run filter.
 		cmd=zkevmtest;   paths=("$base/blockchain_tests") ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
