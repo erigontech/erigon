@@ -19,10 +19,8 @@ package stagedsync
 import (
 	"slices"
 
-	keccak "github.com/erigontech/fastkeccak"
-
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -102,10 +100,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 
 func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
 	if cc.branchPrefetch != nil {
-		if len(plainKey) > length.Addr {
-			plainKey = plainKey[length.Addr:]
-		}
-		hash := keccak.Sum256(plainKey)
+		hash := v3.HashPrefetchKey(plainKey)
 		return hash[:]
 	}
 	if cc.hashAtFold {

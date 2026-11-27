@@ -65,6 +65,10 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
+	if end := cc.chainRW.BeginPayload(); end != nil {
+		defer end()
+	}
+
 	var requestsHash common.Hash
 	if payload.Version() >= clparams.ElectraVersion {
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)

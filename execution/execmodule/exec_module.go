@@ -252,8 +252,9 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache  *cache.StateCache
-	readAheader *exec.BlockReadAheader
+	stateCache     *cache.StateCache
+	readAheader    *exec.BlockReadAheader
+	mempoolPrewarm *mempoolPrewarm
 
 	stateTransitionObserver StateTransitionObserver
 
@@ -354,6 +355,7 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 // close while execution still holds a transaction.
 func (e *ExecModule) Drain() {
 	e.WaitIdle(context.Background())
+	e.stopMempoolPrewarm()
 }
 
 // newDomainStateCache is the module's one construction site of the domain
@@ -512,6 +514,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	e.stopMempoolPrewarm()
 	return e.validateChain(ctx, block, false)
 }
 
@@ -539,6 +542,7 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
 	}
+	e.stopMempoolPrewarm()
 	start := time.Now()
 	result, err := e.validateChain(ctx, block, true)
 	validateChainDuration.ObserveDuration(start)

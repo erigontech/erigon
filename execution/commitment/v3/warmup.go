@@ -16,7 +16,12 @@
 
 package v3
 
-import "github.com/erigontech/erigon/execution/commitment/nibbles"
+import (
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+)
 
 func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) {
 	if depth < 0 || depth >= len(hashedKey) {
@@ -55,6 +60,13 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 		return 0, true
 	}
 	return nextDepth, false
+}
+
+func HashPrefetchKey(plainKey []byte) [32]byte {
+	if len(plainKey) > length.Addr {
+		plainKey = plainKey[length.Addr:]
+	}
+	return keccak.Sum256(plainKey)
 }
 
 func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte) {

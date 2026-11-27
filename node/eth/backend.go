@@ -887,6 +887,9 @@ func New(
 		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
+	if backend.txPool != nil {
+		backend.execModule.SetMempoolPrewarm(backend.txPool.PrewarmTxns)
+	}
 
 	var executionEngine executionclient.ExecutionEngine
 

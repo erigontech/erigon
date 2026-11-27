@@ -998,14 +998,14 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	if p.stateViewStale {
 		return false, 0, nil
 	}
-	return true, p.selectBestLocked(n, txns, onTopOf, availableGas, yielded, availableRlpSpace), nil
+	return true, p.selectBestLocked(n, txns, onTopOf, availableGas, yielded, availableRlpSpace, nil), nil
 }
 
 // selectBestLocked selects from memory while the caller holds the pool lock.
 // A snapshot opened before locking can miss rows written by a concurrent flush.
 // Waiting for a reader slot under the lock can deadlock with readers waiting for that same lock.
 func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
-	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int,
+	availableGas mdgas.FullMdGas, yielded mapset.Set[[32]byte], availableRlpSpace int, prewarmCtx context.Context,
 ) int {
 	best := p.pending.best
 
@@ -1021,6 +1021,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 	i := 0
 
 	for ; count < n && i < len(best.ms); i++ {
+		if prewarmCtx != nil && prewarmCtx.Err() != nil {
+			break
+		}
 		// if we wouldn't have enough gas for a standard transaction then quit out early
 		if availableGas.Execution < minTxGas {
 			break
@@ -1050,7 +1053,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		// A pending blob transaction can become underpriced before it reaches the
 		// bottom of the pool, where promotion would normally demote it.
 		if !coversPendingFees(mt, limits.Total(), pendingBaseFee, pendingBlobFee) {
-			toDemote = append(toDemote, mt)
+			if prewarmCtx == nil {
+				toDemote = append(toDemote, mt)
+			}
 			continue
 		}
 		if !isFrame && slot.GetGas() > p.blockGasLimit.Load() {
@@ -1081,7 +1086,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			if len(slot.Rlp) == 0 {
 				continue
 			}
-			parsed = nil
+			if prewarmCtx == nil {
+				parsed = nil
+			}
 		}
 
 		// Skip transactions that require more blob gas than is available
@@ -1090,7 +1097,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 			if p.isOsaka() {
 				proofs := slot.Proofs()
 				if len(proofs) != int(blobCount)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
-					toDiscard = append(toDiscard, mt)
+					if prewarmCtx == nil {
+						toDiscard = append(toDiscard, mt)
+					}
 					continue
 				}
 			}
@@ -1112,18 +1121,22 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		if isEIP7623 {
 			intrinsicGas = intrinsicGasResult.RequiredGas()
 		}
-		if intrinsicGas > availableGas.Execution {
+		chargedGas := intrinsicGas
+		if prewarmCtx != nil {
+			chargedGas = max(chargedGas, slot.GetGas())
+		}
+		if chargedGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
-		availableGas.Execution -= intrinsicGas
+		availableGas.Execution -= chargedGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= wireSize
 		txns.Txns[count] = slot.Rlp
 		txns.ParsedTxn[count] = parsed
 		copy(txns.Senders.At(count), sender[:])
 		txns.IsLocal[count] = mt.subPool&IsLocal != 0
-		if yielded != nil {
+		if yielded != nil && prewarmCtx == nil {
 			yielded.Add(slot.IDHash)
 		}
 		count++
@@ -1142,7 +1155,9 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 		p.pending.EnforceBestInvariants() // Remove swaps the last txn into the removed one's place
 	}
 
-	p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+	if prewarmCtx == nil {
+		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+	}
 	return count
 }
 
@@ -1206,6 +1221,46 @@ func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uin
 		}
 	}
 	return true, nil
+}
+
+func (p *TxPool) PrewarmTxns(ctx context.Context, head common.Hash, height, gasBudget uint64, limit int, seen mapset.Set[[32]byte]) (types.Transactions, error) {
+	n := min(limit, int(min(gasBudget/mdgas.MinTxGas(true), math.MaxInt)))
+	if n <= 0 || !p.Started() {
+		return nil, ctx.Err()
+	}
+	if ctx.Err() != nil || !p.lock.TryLock() {
+		return nil, ctx.Err()
+	}
+	if p.stateViewStale || p.lastSeenBlock.Load() != height || p.stateBlockHash != head {
+		p.lock.Unlock()
+		return nil, nil
+	}
+	var selected TxnsRlp
+	p.selectBestLocked(n, &selected, height, mdgas.NewFullMdGas(gasBudget, gasBudget, math.MaxUint64), seen, math.MaxInt, ctx)
+	p.lock.Unlock()
+
+	txns := make(types.Transactions, 0, len(selected.ParsedTxn))
+	var buf bytes.Buffer
+	for i, txn := range selected.ParsedTxn {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		raw := selected.Txns[i]
+		if len(raw) == 0 || len(txn.GetBlobHashes()) != 0 {
+			buf.Reset()
+			if err := txn.MarshalBinary(&buf); err != nil {
+				return nil, err
+			}
+			raw = buf.Bytes()
+		}
+		privateTxn, err := types.DecodeTransaction(raw)
+		if err != nil {
+			return nil, err
+		}
+		privateTxn.SetSender(accounts.InternAddress(selected.Senders.AddressAt(i)))
+		txns = append(txns, privateTxn)
+	}
+	return txns, nil
 }
 
 func (p *TxPool) CountContent() (int, int, int) {

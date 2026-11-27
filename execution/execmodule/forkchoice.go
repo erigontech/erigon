@@ -459,6 +459,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
+	prewarm := e.prepareMempoolPrewarm()
 	var restoreStateChanges func()
 	// Roll back only uncommitted changes; earlier catch-up commits still need delivery.
 	checkpointStateChanges := func() {
@@ -649,6 +650,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return nil
 	}
 
+	e.stopMempoolPrewarm()
 	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
@@ -944,7 +946,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// the RAM now and keep the outer defer out of the next FCU's way.
 			teardownOverlay()
 			handOffSemaphore(func() error {
-				return e.runPostForkchoice(initialCycle)
+				if err := e.runPostForkchoice(initialCycle); err != nil {
+					return err
+				}
+				if prewarm != nil && !initialCycle {
+					prewarm(fcuHeader)
+				}
+				return nil
 			})
 		} else {
 			pruneTimings, _, err := e.runForkchoicePrune(initialCycle)
@@ -952,6 +960,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = append(commitTimings, pruneTimings...)
+			if prewarm != nil && !initialCycle {
+				prewarm(fcuHeader)
+			}
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
