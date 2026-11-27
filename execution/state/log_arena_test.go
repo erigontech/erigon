@@ -712,14 +712,39 @@ func TestLogParkingStaysBounded(t *testing.T) {
 	t.Parallel()
 
 	var park logParking
-	park.put(make(types.Logs, 0, maxLogChunkLen-1), 0)
+	park.put(&logArena{entries: make(types.Logs, 0, maxLogChunkLen-1)})
 	require.Empty(t, park.arenas, "a small arena is not parked")
 	for range maxParkedLogArenas + 4 {
-		park.put(make(types.Logs, 0, maxRetainedLogSlots), 0)
+		park.put(&logArena{entries: make(types.Logs, 0, maxRetainedLogSlots)})
 	}
 	require.Len(t, park.arenas, maxParkedLogArenas)
 
-	entries, _ := park.take()
-	require.Equal(t, maxRetainedLogSlots, cap(entries))
+	taken := park.take()
+	require.Equal(t, maxRetainedLogSlots, cap(taken.entries))
 	require.Len(t, park.arenas, maxParkedLogArenas-1)
+}
+
+// The parked total is counted from what the arenas hold, so LOG4 entries with
+// their topics park fewer arenas than bare ones.
+func TestLogParkingCapsHeldBytes(t *testing.T) {
+	t.Parallel()
+
+	const minLog4ArenaBytes = maxLogsPerTxn * (int(unsafe.Sizeof(types.Log{})) + 4*32)
+	var park logParking
+	for range maxParkedLogArenas {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range maxLogsPerTxn {
+			ibs.AllocLog(common.Address{0x01}, 4, 0)
+		}
+		ibs.logs.reset()
+		park.put(&ibs.logs)
+	}
+	require.LessOrEqual(t, park.bytes, maxParkedLogBytes)
+	require.LessOrEqual(t, len(park.arenas), maxParkedLogBytes/minLog4ArenaBytes)
+	require.NotEmpty(t, park.arenas)
+
+	taken := park.take()
+	require.Equal(t, maxRetainedLogSlots, cap(taken.entries))
+	require.LessOrEqual(t, park.bytes, maxParkedLogBytes-minLog4ArenaBytes, "take gives the bytes back")
 }
