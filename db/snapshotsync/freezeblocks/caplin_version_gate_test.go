@@ -311,3 +311,25 @@ func TestOpenListIgnoresTorrentOfMissingUnsupportedSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenListStopsAtMissingSegmentBeforeReversedRangeName(t *testing.T) {
+	for _, reversed := range []string{
+		"v2.0-000000004-000000002-beaconblocks.idx",
+		"v2.0-000000004-000000002-beaconblocks.seg.torrent",
+	} {
+		t.Run(filepath.Ext(reversed), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			typ := snaptype.BeaconBlocks
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
+
+			var err error
+			panicValue := recoverPanic(func() {
+				err = s.OpenList([]string{typ.FileName(typ.Versions().Current, 0, 2), reversed}, false)
+			})
+			require.Nil(t, panicValue)
+			require.NoError(t, err)
+			require.Empty(t, s.Files())
+		})
+	}
+}

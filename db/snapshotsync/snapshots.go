@@ -1102,7 +1102,10 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			continue
 		}
 		listedSegment := f.Ext == ".seg"
-		if snaptype.IsCaplinType(f.Type.Enum()) && (listedSegment || !f.Version.IsZero()) && !f.Type.Versions().Supports(f.Version) {
+		if !listedSegment && (f.Version.IsZero() || f.To < f.From) {
+			continue
+		}
+		if snaptype.IsCaplinType(f.Type.Enum()) && !f.Type.Versions().Supports(f.Version) {
 			segmentName := filepath.Base(fName)
 			if !listedSegment {
 				segmentName = f.Type.FileName(f.Version, f.From, f.To)
