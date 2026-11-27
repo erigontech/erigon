@@ -654,12 +654,7 @@ func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
 	require.Contains(t, logs, "--"+ExperimentalCommitmentV3Flag.Name+"=false")
 	require.NotContains(t, logs, "seg reset", "a chain without published snapshots has no seg reset path")
 
-	chaindataOnly := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(chaindataOnly.Chaindata).MustOpen()
-	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.TblCommitmentVals, commitment.KeyCommitmentState, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
-	}))
-	db.Close()
+	chaindataOnly := datadirWithState(t, commitment.KeyCommitmentState)
 	v3, logs = run(chaindataOnly, "dev")
 	require.False(t, v3, "a datadir with legacy commitment in chaindata only is not fresh")
 	require.Contains(t, logs, warning)

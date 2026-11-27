@@ -37,10 +37,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -63,12 +61,12 @@ func TestRpcdaemonCommitmentV3DatadirSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
 			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, tc.file), nil, 0o644))
+			for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
+			}
 			statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
-			got, found, err := utils.SetCommitmentV3FromDatadir(t.Context(), dirs, log.New())
-			require.NoError(t, err)
-			require.True(t, found)
-			require.Equal(t, tc.v3, got)
-			require.NoError(t, dbstate.CheckSnapshotsCompatibility(dirs))
+			require.NoError(t, checkDatadirCompatibility(t.Context(), dirs, log.New()))
+			require.Equal(t, tc.v3, statecfg.ExperimentalCommitmentV3)
 		})
 	}
 }

@@ -157,6 +157,14 @@ func TestTryOpenAggSelectsLegacyCommitmentFromDatadir(t *testing.T) {
 	require.NoError(t, cmd.Run(t.Context(), []string{"accessor", "--datadir", dirs.DataDir}))
 }
 
+func TestSegDUMissingDatadirDoesNotCreate(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "missing")
+	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
+	err := app.Run(t.Context(), []string{"erigon", "seg", "du", "--log.dir.disable", "--datadir", dataDir})
+	require.ErrorContains(t, err, "datadir does not exist")
+	require.NoDirExists(t, dataDir)
+}
+
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))

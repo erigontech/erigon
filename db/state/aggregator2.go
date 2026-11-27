@@ -255,9 +255,12 @@ func CheckMixedCommitmentFiles(d datadir.Dirs) error {
 	return nil
 }
 
-func CommitmentV3OfDatadir(ctx context.Context, d datadir.Dirs, logger log.Logger) (v3, found bool, err error) {
+func CommitmentV3OfDatadir(ctx context.Context, d datadir.Dirs, logger log.Logger, openedDB ...kv.RoDB) (v3, found bool, err error) {
 	if v3, found, err = commitmentV3OfFiles(d); err != nil || found {
 		return v3, found, err
+	}
+	if len(openedDB) > 0 && openedDB[0] != nil {
+		return commitmentV3OfDB(ctx, openedDB[0])
 	}
 	return commitmentV3OfChaindata(ctx, d.Chaindata, logger)
 }
@@ -275,6 +278,11 @@ func commitmentV3OfChaindata(ctx context.Context, path string, logger log.Logger
 		return false, false, fmt.Errorf("opening chaindata to read its commitment state: %w", err)
 	}
 	defer db.Close()
+	v3, found, err = commitmentV3OfDB(ctx, db)
+	return v3, found, err
+}
+
+func commitmentV3OfDB(ctx context.Context, db kv.RoDB) (v3, found bool, err error) {
 	err = db.View(ctx, func(tx kv.Tx) (err error) {
 		if v3, err = tx.Has(kv.TblCommitmentVals, commitment.KeyCommitmentV3State); err != nil || v3 {
 			found = v3

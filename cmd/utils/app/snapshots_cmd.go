@@ -120,12 +120,6 @@ func commonBeforeSnapshotCommand(ctx context.Context, cliCtx *cli.Command) (cont
 	if err != nil {
 		return ctx, err
 	}
-	if cliCtx.Name != "reset" {
-		dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-		if _, _, err := utils.SetCommitmentV3FromDatadir(ctx, dirs, log.Root()); err != nil {
-			return ctx, err
-		}
-	}
 	return ctx, nil
 }
 
@@ -3706,6 +3700,9 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 }
 
 func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
+	if _, _, err := utils.SetCommitmentV3FromDatadir(ctx, dirs, logger, chainDB); err != nil {
+		return nil, err
+	}
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err

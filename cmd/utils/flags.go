@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -2047,7 +2048,7 @@ func commitmentV3Env() (v3, set bool, err error) {
 	}
 }
 
-func SetCommitmentV3FromDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (v3, found bool, err error) {
+func SetCommitmentV3FromDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger, openedDB ...kv.RoDB) (v3, found bool, err error) {
 	if v3, set, err := commitmentV3Env(); err != nil || set {
 		if err != nil {
 			return false, false, err
@@ -2055,7 +2056,7 @@ func SetCommitmentV3FromDatadir(ctx context.Context, dirs datadir.Dirs, logger l
 		statecfg.SetCommitmentV3(v3)
 		return v3, false, nil
 	}
-	v3, found, err = dbstate.CommitmentV3OfDatadir(ctx, dirs, logger)
+	v3, found, err = dbstate.CommitmentV3OfDatadir(ctx, dirs, logger, openedDB...)
 	if err != nil {
 		return false, false, err
 	}
