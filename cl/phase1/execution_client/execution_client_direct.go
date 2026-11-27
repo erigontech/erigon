@@ -132,22 +132,13 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
-	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
-	if err != nil {
-		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
-	}
-	if result.Status == execmodule.ExecutionStatusInvalidForkchoice {
-		return nil, errors.New("forkchoice was invalid")
-	}
-	if result.Status == execmodule.ExecutionStatusBadBlock {
-		return nil, errors.New("bad block as forkchoice")
-	}
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
 	if attr == nil {
-		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
-			return nil, ErrForkChoiceUpdateBusy
-		}
-		return nil, nil
+		_, err := cc.ForkChoiceUpdateHead(ctx, finalized, safe, head, version)
+		return nil, err
+	}
+	if _, err := cc.updateForkChoice(ctx, finalized, safe, head); err != nil {
+		return nil, err
 	}
 	// The forkchoice update answers before its commit releases the execution semaphore, so the
 	// build that follows it is usually busy for tens of milliseconds.
@@ -158,6 +149,33 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, err
 	}
 	return encodeDirectPayloadID(id), nil
+}
+
+// ForkChoiceUpdateHead reports the head valid when the EL made it its head, which it does only after executing
+// the chain up to it.
+func (cc *ExecutionClientDirect) ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, _ clparams.StateVersion) (bool, error) {
+	result, err := cc.updateForkChoice(ctx, finalized, safe, head)
+	if err != nil {
+		return false, err
+	}
+	if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+		return false, ErrForkChoiceUpdateBusy
+	}
+	return result.Status == execmodule.ExecutionStatusSuccess, nil
+}
+
+func (cc *ExecutionClientDirect) updateForkChoice(ctx context.Context, finalized, safe, head common.Hash) (execmodule.ForkChoiceResult, error) {
+	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
+	if err != nil {
+		return result, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+	}
+	switch result.Status {
+	case execmodule.ExecutionStatusInvalidForkchoice:
+		return result, errors.New("forkchoice was invalid")
+	case execmodule.ExecutionStatusBadBlock:
+		return result, errors.New("bad block as forkchoice")
+	}
+	return result, nil
 }
 
 func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {

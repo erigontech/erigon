@@ -72,12 +72,17 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
 		logger.Debug("Caplin is sending forkchoice")
 
-		if _, err = engine.ForkChoiceUpdate(
+		var headValid bool
+		headValid, err = engine.ForkChoiceUpdateHead(
 			ctx,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			executionHead, nil, headVersion,
-		); err != nil {
+			executionHead, headVersion,
+		)
+		if headValid {
+			cfg.forkChoice.OnHeadPayloadValidated(headRoot, executionHead)
+		}
+		if err != nil {
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
 				// A forkchoice update that ran out of time is not a rejection, and sync has no payload

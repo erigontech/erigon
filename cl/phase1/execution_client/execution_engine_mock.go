@@ -126,6 +126,45 @@ func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// ForkChoiceUpdateHead mocks base method.
+func (m *MockExecutionEngine) ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForkChoiceUpdateHead", ctx, finalized, safe, head, version)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ForkChoiceUpdateHead indicates an expected call of ForkChoiceUpdateHead.
+func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdateHead(ctx, finalized, safe, head, version any) *MockExecutionEngineForkChoiceUpdateHeadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdateHead", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdateHead), ctx, finalized, safe, head, version)
+	return &MockExecutionEngineForkChoiceUpdateHeadCall{Call: call}
+}
+
+// MockExecutionEngineForkChoiceUpdateHeadCall wrap *gomock.Call
+type MockExecutionEngineForkChoiceUpdateHeadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineForkChoiceUpdateHeadCall) Return(headValid bool, err error) *MockExecutionEngineForkChoiceUpdateHeadCall {
+	c.Call = c.Call.Return(headValid, err)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineForkChoiceUpdateHeadCall) Do(f func(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) (bool, error)) *MockExecutionEngineForkChoiceUpdateHeadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineForkChoiceUpdateHeadCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) (bool, error)) *MockExecutionEngineForkChoiceUpdateHeadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // FrozenBlocks mocks base method.
 func (m *MockExecutionEngine) FrozenBlocks(ctx context.Context) uint64 {
 	m.ctrl.T.Helper()

@@ -581,8 +581,8 @@ func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
-		Return(nil, nil).Times(2)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.Phase0Version).
+		Return(false, nil).Times(2)
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 	require.NoError(t, err)
@@ -659,8 +659,8 @@ func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.GloasVersion).
-		Return(nil, nil)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.GloasVersion).
+		Return(false, nil)
 
 	_, computedRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 

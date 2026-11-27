@@ -171,6 +171,39 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	attributes *engine_types.PayloadAttributes,
 	version clparams.StateVersion,
 ) ([]byte, error) {
+	resp, err := cc.forkChoiceUpdated(ctx, finalized, safe, head, attributes, version)
+	if err != nil {
+		return nil, err
+	}
+	if resp.PayloadId == nil {
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
+	}
+	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
+}
+
+func (cc *ExecutionClientEngine) ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) (bool, error) {
+	resp, err := cc.forkChoiceUpdated(ctx, finalized, safe, head, nil, version)
+	if err != nil {
+		return false, err
+	}
+	if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+		return false, err
+	}
+	return resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.ValidStatus, nil
+}
+
+func (cc *ExecutionClientEngine) forkChoiceUpdated(
+	ctx context.Context,
+	finalized, safe, head common.Hash,
+	attributes *engine_types.PayloadAttributes,
+	version clparams.StateVersion,
+) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	forkChoiceState := &engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      safe,
@@ -199,17 +232,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
-
-	if resp.PayloadId == nil {
-		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
-			return nil, err
-		}
-		if attributes != nil {
-			return nil, ErrForkChoiceUpdateNoPayloadID
-		}
-		return []byte{}, nil
-	}
-	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
+	return resp, nil
 }
 
 func (cc *ExecutionClientEngine) SupportInsertion() bool {

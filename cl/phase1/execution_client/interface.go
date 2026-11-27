@@ -68,6 +68,9 @@ func isDeadlineExceeded(err error) bool {
 type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error)
+	// ForkChoiceUpdateHead sends a forkchoice update without payload attributes and reports whether the EL
+	// answered VALID for the head, that is, it has validated the chain up to the head.
+	ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) (headValid bool, err error)
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	InsertBlock(ctx context.Context, block *types.Block) error
