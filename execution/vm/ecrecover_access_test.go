@@ -145,6 +145,10 @@ func TestEcrecoverAccountAccess(t *testing.T) {
 		{name: "reverted cold read", input: input, code: contractCode, gas: 6100, wantRead: true, revert: true},
 		{name: "reverted warm read", input: input, code: contractCode, gas: 3200, warm: true, wantRead: true, revert: true},
 		{name: "delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected},
+		{name: "wrong delegation prefix", input: input, code: append([]byte{0xef, 0x01, 0x01}, delegationCode[3:]...), gas: 6100, wantRead: true},
+		{name: "delegation prefix only", input: input, code: delegationCode[:3], gas: 6100, wantRead: true},
+		{name: "short delegation", input: input, code: delegationCode[:22], gas: 6100, wantRead: true},
+		{name: "long delegation", input: input, code: append(slices.Clone(delegationCode), 0), gas: 6100, wantRead: true},
 		{name: "reverted delegation", input: input, code: delegationCode, gas: 6100, wantRead: true, output: expected, revert: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

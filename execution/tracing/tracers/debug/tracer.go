@@ -382,6 +382,10 @@ func (t *Tracer) OnSystemCallEnd() {
 }
 
 func (t *Tracer) OnAccountAccess(address accounts.Address) {
+	if t.recordOptions.DisableOnAccountAccessRecording {
+		return
+	}
+
 	if t.wrapped != nil && t.wrapped.Hooks != nil && t.wrapped.OnAccountAccess != nil {
 		t.wrapped.OnAccountAccess(address)
 	}
@@ -389,6 +393,10 @@ func (t *Tracer) OnAccountAccess(address accounts.Address) {
 }
 
 func (t *Tracer) OnAccountRead(address accounts.Address) {
+	if t.recordOptions.DisableOnAccountReadRecording {
+		return
+	}
+
 	if t.wrapped != nil && t.wrapped.Hooks != nil && t.wrapped.OnAccountRead != nil {
 		t.wrapped.OnAccountRead(address)
 	}
@@ -587,6 +595,8 @@ type RecordOptions struct {
 	DisableOnGenesisBlockRecording    bool
 	DisableOnSystemCallStartRecording bool
 	DisableOnSystemCallEndRecording   bool
+	DisableOnAccountAccessRecording   bool
+	DisableOnAccountReadRecording     bool
 	DisableOnBalanceChangeRecording   bool
 	DisableOnNonceChangeRecording     bool
 	DisableOnCodeChangeRecording      bool

@@ -486,7 +486,6 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
 		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
 		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
-		"bogota":    {PrecompiledAddressesBogota, PrecompiledContractsBogota},
 	} {
 		require.NotEmpty(t, tc.addrs, name)
 		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)

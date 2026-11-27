@@ -18,13 +18,13 @@ package tracetest
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -42,17 +42,16 @@ import (
 
 func ecrecoverInput(t *testing.T) ([]byte, accounts.Address) {
 	t.Helper()
-	data, err := os.ReadFile("../../../../vm/testdata/precompiles/ecRecover.json")
+	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	var fixtures []struct{ Input, Expected, Name string }
-	require.NoError(t, json.Unmarshal(data, &fixtures))
-	for _, fixture := range fixtures {
-		if fixture.Name == "ValidKey" {
-			return common.FromHex(fixture.Input), accounts.InternAddress(common.BytesToAddress(common.FromHex(fixture.Expected)))
-		}
-	}
-	t.Fatal("missing ecRecover fixture")
-	return nil, accounts.NilAddress
+	hash := crypto.Keccak256Hash([]byte("ecrecover tracing"))
+	signature, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+	input := make([]byte, 128)
+	copy(input, hash[:])
+	input[63] = signature[64] + 27
+	copy(input[64:], signature[:64])
+	return input, accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 }
 
 func callEcrecover(ibs *state.IntraBlockState, hooks *tracing.Hooks, input []byte, gas uint64) ([]byte, error) {

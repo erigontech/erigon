@@ -249,7 +249,6 @@ var (
 	PrecompiledAddressesCancun    []accounts.Address
 	PrecompiledAddressesPrague    []accounts.Address
 	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesBogota    []accounts.Address
 )
 
 func init() {
@@ -264,13 +263,15 @@ func init() {
 		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
 		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
 		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
-		forkBogota:    {PrecompiledContractsBogota, &PrecompiledAddressesBogota},
+		forkBogota:    {PrecompiledContractsBogota, nil},
 	} {
 		for address, p := range tierSet.contracts {
 			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
 		}
 		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
-		*tierSet.addresses = forkSets[tier].addresses
+		if tierSet.addresses != nil {
+			*tierSet.addresses = forkSets[tier].addresses
+		}
 	}
 }
 
@@ -350,7 +351,7 @@ type ecrecoverAccountCode struct {
 	ecrecover
 }
 
-func (c *ecrecoverAccountCode) RunState(ibs *state.IntraBlockState, output []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+func (*ecrecoverAccountCode) RunState(ibs *state.IntraBlockState, output []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	if len(output) == 0 {
 		return nil, gas, nil
 	}
