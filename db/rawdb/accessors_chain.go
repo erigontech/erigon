@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1362,30 +1363,28 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query, txIndex int) (*ty
 	if int(res.TransactionIndex) != txIndex {
 		// Some receipt cache files store the txNum instead of the position as the index of a step's first receipt,
 		// and the other fields of such an entry are right. Any other index is not this transaction's receipt.
-		repaired := uint64(res.TransactionIndex) == query.TxNum
-		warnBadReceiptCacheIndex(tx, query, res.TransactionIndex, repaired)
-		if !repaired {
+		if uint64(res.TransactionIndex) != query.TxNum {
 			return nil, false, nil
 		}
+		warnTxNumAsReceiptIndex(query)
 		res.TransactionIndex = uint(txIndex)
 	}
 	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
 	return res, true, nil
 }
 
-// badReceiptCacheSteps holds the steps already reported by warnBadReceiptCacheIndex, so a range scan warns once
+// txNumAsReceiptIndexSteps holds the steps already reported by warnTxNumAsReceiptIndex, so a range scan warns once
 // per step.
-var badReceiptCacheSteps sync.Map
+var txNumAsReceiptIndexSteps sync.Map
 
-// warnBadReceiptCacheIndex reports a cached receipt with a wrong index once per step, so that the operator can
-// regenerate the receipt cache files that cover it.
-func warnBadReceiptCacheIndex(tx kv.TemporalTx, query RCacheV2Query, index uint, repaired bool) {
-	step := query.TxNum / tx.Debug().StepSize()
-	if _, reported := badReceiptCacheSteps.LoadOrStore(step, struct{}{}); reported {
+// warnTxNumAsReceiptIndex reports, once per step, a cached receipt that stores its txNum as its index, so that the
+// operator can regenerate the receipt cache files that cover it.
+func warnTxNumAsReceiptIndex(query RCacheV2Query) {
+	if _, reported := txNumAsReceiptIndexSteps.LoadOrStore(query.TxNum/config3.DefaultStepSize, struct{}{}); reported {
 		return
 	}
-	log.Warn("[rcache] cached receipt has a wrong transaction index, regenerate the rcache files of this step",
-		"block", query.BlockNum, "txNum", query.TxNum, "step", step, "index", index, "repaired", repaired)
+	log.Warn("[rcache] cached receipt stores its txNum as its index, regenerate the rcache files that cover it",
+		"block", query.BlockNum, "txNum", query.TxNum)
 }
 
 func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (types.Receipts, error) {

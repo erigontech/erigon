@@ -944,7 +944,7 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		index  func(txNum uint64) uint
-		served bool // by the single-receipt reader, with the position as its index
+		served bool // by the single-receipt reader, with the position as its index.
 	}{
 		{"txNum as index", func(txNum uint64) uint { return uint(txNum) }, true},
 		{"another index", func(uint64) uint { return 3_468_750_000 }, false},

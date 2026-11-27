@@ -102,7 +102,7 @@ func TestPersistedReceiptWithTxNumAsIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		index  func(txNum uint64) uint
-		served bool // from the persistent cache
+		served bool // from the persistent cache.
 	}{
 		{"txNum as index", func(txNum uint64) uint { return uint(txNum) }, true},
 		{"another index", func(uint64) uint { return 3_246_875_000 }, false},

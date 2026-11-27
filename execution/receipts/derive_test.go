@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -224,5 +225,5 @@ func TestDerivePriorReceiptsReturnsCacheReadError(t *testing.T) {
 	defer ibs.Close()
 	gp := new(protocol.GasPool).AddGas(header.GasLimit)
 	_, err := DerivePriorReceipts(t.Context(), cfg, ethash.NewFaker(), header, txns, 1, blockStartTxNum, tx, ibs, gp, nil)
-	require.Error(t, err)
+	require.ErrorIs(t, err, rlp.ErrValueTooLarge)
 }
