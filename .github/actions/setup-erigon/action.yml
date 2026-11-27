@@ -158,6 +158,7 @@ runs:
         #   execution/state/genesiswrite/*.json - genesis JSON (read at runtime)
         #   execution/vm/vmgen/*.go - generator sources TestRunIsGenerated reads
         #   witness serving sources TestWitnessTrieCallsites parses
+        #   cmd/tools/jsongen/internal/shared/*.go - fixture and golden TestGenerateShared reads
         #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml .csv
         time git restore-mtime --no-directories -- \
           '**/testdata/**' \
@@ -170,7 +171,8 @@ runs:
           'rpc/jsonrpc/eth_call.go' \
           'rpc/jsonrpc/debug_execution_witness.go' \
           'rpc/jsonrpc/witness_cache_builder.go' \
-          'execution/commitment/commitmentdb/commitment_context.go'
+          'execution/commitment/commitmentdb/commitment_context.go' \
+          'cmd/tools/jsongen/internal/shared/*.go'
 
         # Normalize directory mtimes to a fixed epoch.
         find . -type d -not -path '*/.git/*' -print0 | TZ=UTC xargs -0 touch -t 200902132331.30

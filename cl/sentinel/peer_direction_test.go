@@ -111,14 +111,23 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	for range 8 {
 		connectInbound(t, local)
 	}
+	pid := connectBothWays(t, local)
+	require.True(t, s.handleNewConnection(pid, network.DirOutbound, nil, validate))
+
+	require.True(t, s.handleNewConnection(pid, network.DirInbound, nil, validate))
+	require.Equal(t, network.Connected, local.Network().Connectedness(pid))
+}
+
+// connectBothWays connects local to a new peer, which then dials local back, so local holds an outbound and an
+// inbound connection to it.
+func connectBothWays(t *testing.T, local host.Host) peer.ID {
+	t.Helper()
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	require.NoError(t, err)
 	listening, err := libp2p.New(libp2p.Identity(priv), libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, listening.Close()) })
 	require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: listening.ID(), Addrs: listening.Addrs()}))
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirOutbound, nil, validate))
-
 	dialing, err := libp2p.New(libp2p.Identity(priv), libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, dialing.Close()) })
@@ -126,9 +135,25 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(local.Network().ConnsToPeer(listening.ID())) == 2
 	}, 5*time.Second, 5*time.Millisecond)
+	return listening.ID()
+}
 
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirInbound, nil, validate))
-	require.Equal(t, network.Connected, local.Network().Connectedness(listening.ID()))
+func TestInboundRedialAfterAClosedOutboundConnectionRejectedAtInboundCap(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	s.cfg.MaxPeerCount = 10
+
+	for range 8 {
+		connectInbound(t, local)
+	}
+	pid := connectBothWays(t, local)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid, outboundOnly: true}}}
+
+	require.False(t, s.handleNewConnection(pid, network.DirInbound, nil, func() (bool, error) {
+		t.Error("a peer rejected at the inbound cap must not be handshaked")
+		return false, nil
+	}))
+	waitDisconnected(t, local, pid)
 }
 
 func TestInboundPeerGoneBeforeAdmissionRejectedAtInboundCap(t *testing.T) {
