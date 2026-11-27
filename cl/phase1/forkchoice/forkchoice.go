@@ -116,7 +116,7 @@ type ForkChoiceStore struct {
 	unrealizedFinalizedCheckpoint atomic.Value
 
 	proposerBoostRoot              atomic.Value
-	proposerBoostResetSlot         uint64 // slot whose start last reset proposerBoostRoot, guarded by mu
+	proposerBoostResetSlot         uint64 // latest slot whose start reset proposerBoostRoot, guarded by mu
 	headHash                       common.Hash
 	headSlot                       uint64
 	headPayloadStatus              cltypes.PayloadStatus

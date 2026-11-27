@@ -63,9 +63,7 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	defer f.mu.Unlock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.proposerBoostRoot.Store(common.Hash{})
-	// Ticks advance the time before taking f.mu, so their slot-start work can run in reverse order.
-	f.proposerBoostResetSlot = max(f.proposerBoostResetSlot, currentSlot)
+	f.resetProposerBoost(currentSlot)
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		// Only promote unrealized checkpoints when the node is synced (processing
 		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
@@ -77,6 +75,17 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 		}
 	}
+}
+
+// resetProposerBoost runs the proposer boost reset of a slot start once. A tick advances the time
+// before it takes f.mu, so its reset can come after the reset of a later slot, or after a block
+// of its slot was applied, which runs the reset first.
+func (f *ForkChoiceStore) resetProposerBoost(slot uint64) {
+	if slot <= f.proposerBoostResetSlot {
+		return
+	}
+	f.proposerBoostRoot.Store(common.Hash{})
+	f.proposerBoostResetSlot = slot
 }
 
 func (f *ForkChoiceStore) nearChainTip(slot uint64) bool {

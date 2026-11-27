@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -30,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
@@ -74,9 +72,6 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 // checkpoints, so the block's own advance has to be pulled up when it is applied.
 func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	const targetIndex = 84 // advances unrealized justification in the fixture
-	slotTimeMs := func(f *ForkChoiceStore, slot uint64) uint64 {
-		return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
-	}
 	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
 		blocks, anchor, _ := tests.GetBellatrixRandom()
 		f := newBlockTestStore(t, anchor)
@@ -96,15 +91,14 @@ func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	serial.OnTick(nextEpochMs)
 
 	f, block, _ := importUpTo(t)
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	engine.EXPECT().
-		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-			f.OnTick(nextEpochMs)
-			return execution_client.PayloadStatusValidated, nil
-		})
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	f.engine = engine
-	require.NoError(t, f.OnBlock(t.Context(), block, true, true, false))
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	f.OnTick(nextEpochMs)
+	close(releaseEL)
+	require.NoError(t, <-onBlockDone)
 
 	want := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
 	require.Greater(t, want.Epoch, justifiedBefore.Epoch, "the fixture block must advance justification")

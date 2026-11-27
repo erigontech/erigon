@@ -214,7 +214,7 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
 	// on_block runs atomically at the store time it is called with, so the time spent importing
 	// the block must not make it late.
-	calledAtMs := f.timeMs.Load()
+	storeTimeMs := f.timeMs.Load()
 	if block != nil && block.Block != nil {
 		finishImport := f.BeginPayloadImport(block.Block.Slot)
 		defer finishImport()
@@ -264,6 +264,10 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	if err != nil {
 		return err
+	}
+	// A block called before its slot is admitted only once the store reaches the slot.
+	if f.slotAtTimeMs(storeTimeMs) < block.Block.Slot {
+		storeTimeMs = f.timeMs.Load()
 	}
 	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
@@ -549,7 +553,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		importedBlock,
 		blockRoot,
 		headBeforeBlock,
-		calledAtMs,
+		storeTimeMs,
 		lastProcessedState,
 		prepared,
 	)
