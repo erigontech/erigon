@@ -2194,6 +2194,52 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
 }
 
+func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	var small []Range
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		small = append(small, NewRange(from, from+10_000))
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, snaptype2.Headers.Versions().Current, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	merged := snaptype2.Headers.FileInfo(dir, 0, 100_000)
+	require.NoError(t, os.Remove(merged.Path))
+	require.NoError(t, os.Remove(filepath.Join(dir, snaptype.IdxFileName(snaptype2.Headers.Versions().Current, 0, 100_000, snaptype2.Headers.Name()))))
+	before := fileNames(t, dir)
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
+	var deleted []string
+	onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
+	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
+	require.ErrorContains(t, err, merged.Name())
+	require.Empty(t, deleted)
+
+	require.Equal(t, before, fileNames(t, dir), "every input file stays on disk")
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, small)
+}
+
+func fileNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
 func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
 	small := []Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000), NewRange(30_000, 40_000)}
 	for _, position := range []struct {

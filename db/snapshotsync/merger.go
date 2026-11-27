@@ -261,8 +261,19 @@ func (m *Merger) Merge(
 				mergedFileNames = append(mergedFileNames, toMerge[t.Enum()][0].FilePath())
 				continue
 			}
-			if snapshots.hasIndexedDirtyFile(t.Enum(), output.Path) {
+			if reused := snapshots.indexedDirtyFilePaths(t.Enum(), output.Path, snapDir); reused != nil {
 				// A stopped merge already wrote this output; writing over the open file would fail on Windows.
+				// The inputs are deleted next, so the output must still be on disk.
+				for _, f := range reused {
+					exists, err := dir.FileExist(filepath.Join(snapDir, f))
+					if err == nil && !exists {
+						err = fmt.Errorf("reused output %s is missing from disk", f)
+					}
+					if err != nil {
+						abort()
+						return fmt.Errorf("merger.Merge: %w", err)
+					}
+				}
 				mergedFileNames = append(mergedFileNames, output.Path)
 				continue
 			}
