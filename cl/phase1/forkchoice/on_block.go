@@ -269,6 +269,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if f.slotAtTimeMs(storeTimeMs) < block.Block.Slot {
 		storeTimeMs = f.timeMs.Load()
 	}
+	f.resetProposerBoost(f.Slot())
 	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 

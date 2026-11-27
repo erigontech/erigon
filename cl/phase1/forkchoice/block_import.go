@@ -131,8 +131,8 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
 	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
 	// update_proposer_boost_root: conditionally set proposer boost root, after the reset of its slot
-	// start and not when a later slot start has already reset it.
-	f.resetProposerBoost(currentSlot)
+	// start and not when the store time has already reached a later slot.
+	f.resetProposerBoost(f.Slot())
 	if f.proposerBoostResetSlot == currentSlot {
 		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
 	}

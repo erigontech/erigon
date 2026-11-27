@@ -64,7 +64,7 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	timeliness, ok := store.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
-	require.Equal(t, common.Hash(blockRoot), store.ProposerBoostRoot())
+	require.Zero(t, store.ProposerBoostRoot(), "the store time has reached the next slot")
 }
 
 // A block called in one epoch and committed after the next epoch's tick must leave the store
@@ -98,7 +98,7 @@ func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	awaitSignal(t, elEntered, "NewPayload to start")
 	f.OnTick(nextEpochMs)
 	close(releaseEL)
-	require.NoError(t, <-onBlockDone)
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
 
 	want := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
 	require.Greater(t, want.Epoch, justifiedBefore.Epoch, "the fixture block must advance justification")
