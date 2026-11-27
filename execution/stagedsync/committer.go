@@ -546,6 +546,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.maybeComputeAhead(ctx, r.BlockNum+1)
 
 	case *commitComputeRequest:
+		if logNpPhases {
+			cc.logger.Info("[np-split] ccreq", "atUs", time.Now().UnixMicro())
+		}
 		if cc.shouldComputeOnRequest() {
 			cc.compute(ctx, targetOf(cc.lastBlockResult), computeMode{checkRoot: true, publishRoot: true})
 		} else {
@@ -924,7 +927,15 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	npT0 := time.Now()
+	var npPf, npEmit, npRoot, npFlush time.Time
+	defer func() {
+		if logNpPhases {
+			cc.logger.Info("[np-split] cc", "blk", t.blockNum, "startUs", npT0.UnixMicro(), "prefetchWait", vcSince(npT0, npPf), "emit", vcSince(npPf, npEmit), "root", vcSince(npEmit, npRoot), "flushOwn", vcSince(npRoot, npFlush), "total", time.Since(npT0), "midBlock", m.midBlock, "publishRoot", m.publishRoot)
+		}
+	}()
 	cc.finishPrefetch()
+	npPf = time.Now()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
@@ -934,6 +945,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.asOfReader.cur, cc.asOfReader.curTxNum = cc.curVersionMap, t.lastTxNum
 	defer func() { cc.asOfReader.cur = nil }()
 	emitErr := cc.emit(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	npEmit = time.Now()
 	if m.midBlock {
 		cc.clearFoldedKeys()
 	} else {
@@ -948,6 +960,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, t, cc.handOffUpdates(), cc.asOfReader)
+	npRoot = time.Now()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: t.blockNum, txNum: t.lastTxNum,
@@ -968,6 +981,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			return
 		}
 	}
+	npFlush = time.Now()
 
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
@@ -1045,6 +1059,14 @@ func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.
 	}
 }
 
+// vcSince is b-a, or -1 when a border was not reached.
+func vcSince(a, b time.Time) time.Duration {
+	if a.IsZero() || b.IsZero() {
+		return -1
+	}
+	return b.Sub(a)
+}
+
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
 	// Best-effort send; log only genuine errors (wrong-root and shutdown cancels
 	// are expected). The apply loop surfaces the authoritative error.
@@ -1082,9 +1104,16 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below).
+	npT0 := time.Now()
 	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
+	npFl := time.Now()
+	defer func() {
+		if logNpPhases {
+			cc.logger.Info("[np-split] cwba", "blk", t.blockNum, "flushPrev", npFl.Sub(npT0), "computeWithDiff", time.Since(npFl))
+		}
+	}()
 
 	// The exec loop saves the accumulator by hash before dispatching the block, so
 	// this identifies the block's changeset whatever the loop rotated to since. A
