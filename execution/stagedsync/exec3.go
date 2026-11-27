@@ -405,7 +405,7 @@ func (te *txExecutor) domainsRead() execctx.DomainReader {
 // value, not the block-start pre-state, so the prefix cannot always be
 // reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
-	priorIbs := state.NewWithVersionMap(state.NewHistoryReaderV3(applyTx, blockStartTxNum), state.NewVersionMap(nil))
+	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

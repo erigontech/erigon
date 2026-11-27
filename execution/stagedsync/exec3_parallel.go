@@ -1761,7 +1761,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
-	be.versionMap.FlushVersionedWrites(result.TxOut, false)
+	be.versionMap.FlushWrites(result.TxOut, false)
 }
 
 // dropUnwritten drops the writes that an earlier run made and the run at version does not (see
@@ -1912,7 +1912,7 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	txIncarnation := task.Version().Incarnation
 
 	txTrace := dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Handle()) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Handle()))
+		(dbg.TraceTx(blockNum, txIndex) || traceAddr(result.Coinbase) || traceAddr(result.ExecutionResult.BurntContractAddress))
 
 	if txTrace {
 		tracePrefix := fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
@@ -2156,7 +2156,7 @@ func (result *execResult) calcFees(
 			})
 			// Emit an AddressPath sibling so downstream txs reading this address see
 			// an account record. Serial's AddBalance implicitly creates the account on
-			// first credit; without mirroring that, getVersionedAccount returns nil for
+			// first credit; without mirroring that, getAccount returns nil for
 			// a freshly-credited coinbase and Empty() returns true — charging a stale
 			// CallNewAccountGas for a mid-tx CALL-with-value to the coinbase.
 			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
@@ -2890,7 +2890,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
-		be.versionMap.FlushVersionedWrites(merged, true)
+		be.versionMap.FlushWrites(merged, true)
 		be.markReadersDirty(tx, merged)
 	}
 
@@ -2976,7 +2976,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
 				be.blockIO.RecordReads(txVersion, reads)
-				be.versionMap.FlushVersionedWrites(senderWrites, false)
+				be.versionMap.FlushWrites(senderWrites, false)
 				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
 				be.blockIO.RecordWrites(txVersion, ownedWrites)
 				be.markReadersDirty(tx, senderWrites)
@@ -2992,7 +2992,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			if !tipWrites.IsEmpty() {
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
-				be.versionMap.FlushVersionedWrites(tipWrites, false)
+				be.versionMap.FlushWrites(tipWrites, false)
 				if ownedWrites != nil {
 					ownedWrites.MergeFrom(tipWrites)
 				} else {
@@ -3599,7 +3599,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// loop on the NotThreadSafe inverted-index writer.
 				blockEndLogs = syscallIBS.GetRawLogs(tt.TxIndex)
 
-				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+				be.blockIO.RecordReads(finalVersion, ibs.Reads())
 
 				ivw, err := finalizedBlockWrites(ibs, tt.Rules(), be.blockNum)
 				if err != nil {
@@ -3607,7 +3607,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
-					be.versionMap.FlushVersionedWrites(ivw, true)
+					be.versionMap.FlushWrites(ivw, true)
 				}
 
 				// A read-only versionMap-slice view over the finalize write-set.
@@ -3741,3 +3741,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 	dispatch()
 }
+
+// traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
+func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }

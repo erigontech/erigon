@@ -206,7 +206,7 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 	vw.valStatus = ValueDeleted
 	flushed.SetBalance(burned, vw)
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(flushed, true)
+	vm.FlushWrites(flushed, true)
 
 	seen := 0
 	for addr, vw := range NewVersionMapWriteView(keys, vm, txIdx).Balances() {
@@ -234,7 +234,7 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 		_, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 		out, err := WithoutVanished(ws, vm, 1, false, reader)
 		require.NoError(t, err)
 		return out
@@ -254,14 +254,14 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	funded := NewVersionMap(nil)
 	w := &WriteSet{}
 	w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
-	funded.FlushVersionedWrites(w, true)
+	funded.FlushWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, funded)), "an earlier tx of the block funded the address")
 
 	// Before EIP-161 an earlier tx can leave an empty account that only its AddressPath cell records.
 	empty := NewVersionMap(nil)
 	w = &WriteSet{}
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
-	empty.FlushVersionedWrites(w, true)
+	empty.FlushWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
 }
 
@@ -276,7 +276,7 @@ func TestWithoutVanished_CreatedEmptyTouch(t *testing.T) {
 		ibs.SetTxContext(1, 1)
 		require.NoError(t, ibs.TouchAccount(addr))
 		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
-		vm.FlushVersionedWrites(ws, true)
+		vm.FlushWrites(ws, true)
 		out, err := WithoutVanished(ws, vm, 1, false, reader)
 		require.NoError(t, err)
 		return out
@@ -356,7 +356,7 @@ func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) 
 		Val:         *uint256.NewInt(5),
 	})
 
-	vm.FlushVersionedWrites(keys, false)
+	vm.FlushWrites(keys, false)
 
 	view := NewVersionMapWriteView(keys, vm, txIdx)
 
