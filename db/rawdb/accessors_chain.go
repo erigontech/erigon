@@ -1313,6 +1313,7 @@ type RCacheV2Query struct {
 	BlockHash common.Hash
 	TxnHash   common.Hash
 	TxNum     uint64
+	TxIndex   int
 
 	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
 }
@@ -1357,6 +1358,10 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	receipt := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
 		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, query.BlockNum, len(v))
+	}
+	// Old receipt-cache files hold some receipts whose index field is their txNum; they are not served.
+	if int(receipt.TransactionIndex) != query.TxIndex {
+		return nil, false, nil
 	}
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
