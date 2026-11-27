@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
@@ -67,9 +66,6 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	require.Zero(t, store.ProposerBoostRoot(), "the store time has reached the next slot")
 }
 
-// A block called in one epoch and committed after the next epoch's tick must leave the store
-// checkpoints as on_block followed by that tick does: the tick has already promoted the unrealized
-// checkpoints, so the block's own advance has to be pulled up when it is applied.
 func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	const targetIndex = 84 // advances unrealized justification in the fixture
 	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
@@ -86,7 +82,7 @@ func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	}
 
 	serial, serialBlock, nextEpochMs := importUpTo(t)
-	justifiedBefore := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
+	justifiedBefore := serial.JustifiedCheckpoint()
 	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
 	serial.OnTick(nextEpochMs)
 
@@ -100,8 +96,8 @@ func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 	close(releaseEL)
 	require.NoError(t, awaitOnBlock(t, onBlockDone))
 
-	want := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
+	want := serial.JustifiedCheckpoint()
 	require.Greater(t, want.Epoch, justifiedBefore.Epoch, "the fixture block must advance justification")
-	require.Equal(t, want, f.justifiedCheckpoint.Load().(solid.Checkpoint))
-	require.Equal(t, serial.finalizedCheckpoint.Load().(solid.Checkpoint), f.finalizedCheckpoint.Load().(solid.Checkpoint))
+	require.Equal(t, want, f.JustifiedCheckpoint())
+	require.Equal(t, serial.FinalizedCheckpoint(), f.FinalizedCheckpoint())
 }

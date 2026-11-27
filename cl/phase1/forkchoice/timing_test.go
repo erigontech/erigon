@@ -215,15 +215,6 @@ func slotTimeMs(f *ForkChoiceStore, slot uint64) uint64 {
 	return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
 }
 
-// replaySlotStartWork runs the slot-start work of a tick into the slot of timeMs that advanced the
-// store time before the latest tick, but takes f.mu only now.
-func replaySlotStartWork(f *ForkChoiceStore, timeMs uint64) {
-	now := f.timeMs.Load()
-	f.timeMs.Store(slotTimeMs(f, f.slotAtTimeMs(timeMs)) - 1)
-	f.onTickPerSlot(timeMs)
-	f.timeMs.Store(now)
-}
-
 // onBlockWaitingForLock calls OnBlock while f.mu is held and runs whileWaiting once OnBlock waits for it.
 func onBlockWaitingForLock(t *testing.T, f *ForkChoiceStore, block *cltypes.SignedBeaconBlock, whileWaiting func()) {
 	t.Helper()
@@ -296,7 +287,7 @@ func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
 func TestReversedSlotStartResetsKeepBoostExpired(t *testing.T) {
 	f, _ := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
 		f.OnTick(slotStartMs + 12000 + 100)
-		replaySlotStartWork(f, slotStartMs+100)
+		f.runSlotStart(f.slotAtTimeMs(slotStartMs + 100))
 	})
 
 	assert.Zero(t, f.ProposerBoostRoot())
@@ -311,7 +302,7 @@ func TestStaleSlotStartKeepsBoostOfNewerSlot(t *testing.T) {
 	root := mustRoot(t, block)
 	require.Equal(t, root, f.ProposerBoostRoot())
 
-	replaySlotStartWork(f, slotTimeMs(f, block.Block.Slot-1)+100)
+	f.runSlotStart(f.slotAtTimeMs(slotTimeMs(f, block.Block.Slot-1) + 100))
 
 	assert.Equal(t, root, f.ProposerBoostRoot())
 }
@@ -327,7 +318,7 @@ func TestBlockAppliedBeforePendingSlotStartGetsBoost(t *testing.T) {
 	root := mustRoot(t, block)
 	assert.Equal(t, root, f.ProposerBoostRoot())
 
-	replaySlotStartWork(f, slotStartMs+100)
+	f.runSlotStart(f.slotAtTimeMs(slotStartMs + 100))
 
 	assert.Equal(t, root, f.ProposerBoostRoot())
 }
@@ -418,7 +409,8 @@ func TestGloasBlockLockedAfterNextSlotTickEndsWithoutBoost(t *testing.T) {
 	timeliness, ok := f.getBlockTimeliness(root)
 	require.True(t, ok)
 	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
-	replaySlotStartWork(f, nextSlotMs)
+	assert.True(t, timeliness[clparams.PtcTimelinessIndex])
+	f.runSlotStart(f.slotAtTimeMs(nextSlotMs))
 
 	assert.Zero(t, f.ProposerBoostRoot())
 }

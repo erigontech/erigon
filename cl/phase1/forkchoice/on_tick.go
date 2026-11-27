@@ -58,6 +58,12 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	if currentSlot <= f.slotAtTimeMs(previousTimeMs) {
 		return
 	}
+	f.runSlotStart(currentSlot)
+}
+
+// runSlotStart runs the work of on_tick_per_slot for the start of currentSlot. The tick advances the
+// time before it takes f.mu for this work.
+func (f *ForkChoiceStore) runSlotStart(currentSlot uint64) {
 	f.mu.Lock()
 	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
