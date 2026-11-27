@@ -32,7 +32,7 @@ import (
 func TestDumpCaplinStateUsesRegisteredTypeFilename(t *testing.T) {
 	name, err := caplinStateFileName(kv.PendingDepositsDump, 0, 50_000)
 	require.NoError(t, err)
-	require.Equal(t, "v1.2-000000-000050-PendingDepositsDump.seg", name)
+	require.Equal(t, "v1.1-000000-000050-PendingDepositsDump.seg", name)
 
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))

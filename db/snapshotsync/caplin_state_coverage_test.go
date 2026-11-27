@@ -82,8 +82,8 @@ func TestCaplinStateEqualRangePrefersNewestVersion(t *testing.T) {
 	table := kv.BlockRoot
 
 	olderSeg, olderIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
-	olderV1Seg := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderSeg), "v1.2-", "v1.0-", 1))
-	olderV1Idx := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderIdx), "v1.2-", "v1.0-", 1))
+	olderV1Seg := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderSeg), "v1.1-", "v1.0-", 1))
+	olderV1Idx := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderIdx), "v1.1-", "v1.0-", 1))
 	require.NoError(t, os.Rename(olderSeg, olderV1Seg))
 	require.NoError(t, os.Rename(olderIdx, olderV1Idx))
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
@@ -94,7 +94,7 @@ func TestCaplinStateEqualRangePrefersNewestVersion(t *testing.T) {
 
 	visible := view.VisibleSegments(table)
 	require.Len(t, visible, 1)
-	require.Equal(t, version.V1_2, visible[0].Src().Version())
+	require.Equal(t, version.V1_1, visible[0].Src().Version())
 }
 
 func TestCaplinStateDumpPlanUsesDirtyCoverageAcrossGap(t *testing.T) {

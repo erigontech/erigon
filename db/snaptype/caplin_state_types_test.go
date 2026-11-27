@@ -83,12 +83,12 @@ func TestCaplinStateSnapshotTypes(t *testing.T) {
 		require.Equal(t, expected.typ, typ)
 		require.Equal(t, snaptype.MinCaplinEnum+2+snaptype.Enum(i), typ.Enum())
 		require.Equal(t, expected.name, typ.Name())
-		require.Equal(t, version.V1_2_standart, typ.Versions())
+		require.Equal(t, version.V1_1_standart, typ.Versions())
 
 		indexes := typ.Indexes()
 		require.Len(t, indexes, 1)
 		require.Equal(t, expected.name, indexes[0].Name)
-		require.Equal(t, version.V1_2_standart, indexes[0].Version)
+		require.Equal(t, version.V1_1_standart, indexes[0].Version)
 
 		if previous, ok := seenEnums[typ.Enum()]; ok {
 			t.Fatalf("enum %d is used by %q and %q", typ.Enum(), previous, typ.Name())

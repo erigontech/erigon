@@ -25,8 +25,8 @@ func newCaplinStateType(enum Enum, name string) SnapType {
 	return SnapType{
 		enum:     enum,
 		name:     name,
-		versions: version.V1_2_standart,
-		indexes:  []Index{{Name: name, Version: version.V1_2_standart}},
+		versions: version.V1_1_standart,
+		indexes:  []Index{{Name: name, Version: version.V1_1_standart}},
 	}
 }
 
