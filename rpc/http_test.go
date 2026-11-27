@@ -160,7 +160,7 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 
 	logger := log.New()
-	const respLength = MaxRequestContentLength * 3
+	const respLength = MaxRequestContentLength + 1
 
 	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	defer s.Stop()
