@@ -2715,9 +2715,6 @@ type addrReader struct {
 	paths uint16
 }
 
-// A path of 16 or more would make its path bit 0 and hide its readers from every writer.
-const _ uint16 = 1 << state.CreateContractPath
-
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
@@ -3014,17 +3011,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 	return nil, nil
 }
 
-func (be *blockExecutor) extendWrites(v state.Version, add *state.WriteSet) *state.WriteSet {
-	ws := be.blockIO.WriteSet(v.TxIndex)
-	if !ws.IsEmpty() {
-		ws.MergeFrom(add)
-		return ws
-	}
-	ws = ws.Merge(add)
-	be.blockIO.RecordWrites(v, ws)
-	return ws
-}
-
 // signalCommitted advances the commit frontier to tx and wakes exactly the tasks
 // waiting for that frontier value — directed, no broadcast.
 func (be *blockExecutor) signalCommitted(tx int) {
@@ -3133,12 +3119,12 @@ func (be *blockExecutor) checkWaitTarget(tx, target int) {
 // commitment). A dependent is any committed tx reading a key in changedTx's OLD ∪
 // NEW write-set — NEW for added/revalued keys, OLD for dropped ones. oldWrites is
 // nil for a validation failure (no prior incarnation).
-func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) {
+func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet, writeAddrs []state.AddrPaths) {
 	// be.tasks / status lists are keyed by task index; be.blockIO by block-level
 	// TxIndex. They differ by the block's leading system tx, so blockIO reads map
 	// through be.tasks[i].Task.Version().TxIndex.
 	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
-	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites) {
+	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites, writeAddrs) {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
 		}
@@ -3174,7 +3160,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // revalCandidates returns the task indices > changedTx to re-check: the readers the
 // reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
 // ascending so the cascade order matches the scan.
-func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
+func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet, writeAddrs []state.AddrPaths) []int {
 	set := map[int]struct{}{}
 	seen := map[accounts.Address]struct{}{}
 	addAddr := func(a accounts.Address) {
@@ -3200,11 +3186,7 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
 	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
 	// so its readers are always re-checked.
-	var writeAddrs []state.AddrPaths
-	if !be.versionMap.HasBAL && changedTx < len(be.results) && be.results[changedTx] != nil {
-		writeAddrs = be.results[changedTx].WriteAddrs
-	}
-	if writeAddrs != nil {
+	if !be.versionMap.HasBAL && writeAddrs != nil {
 		for _, e := range writeAddrs {
 			addAddr(e.Addr)
 		}
@@ -3278,14 +3260,14 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				if ok {
 					delete(be.writeChangedPrev, tx)
 				}
-				be.revalidateCommittedDependents(tx, prev)
+				be.revalidateCommittedDependents(tx, prev, txResult.WriteAddrs)
 				continue
 			}
 
 			be.cntValidationFail++
 			be.execFailed[tx]++
 			be.validateTasks.clearInProgress(tx)
-			be.revalidateCommittedDependents(tx, nil)
+			be.revalidateCommittedDependents(tx, nil, txResult.WriteAddrs)
 			// Signal the parked worker whose stale verdict we rejected to re-exec in
 			// place; leave execTasks complete so the re-sent result re-validates
 			// without going through the dispatch path.

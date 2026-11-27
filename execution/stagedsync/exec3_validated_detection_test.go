@@ -84,7 +84,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 1}, newW)
 	be.versionMap.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
 
-	be.revalidateCommittedDependents(0, wWrites)
+	be.revalidateCommittedDependents(0, wWrites, nil)
 
 	require.False(t, be.validateTasks.checkComplete(1),
 		"R was committed against W's in-flight value; W changed -> R must be un-committed")
@@ -123,7 +123,7 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	be.versionMap.FlushWrites(sdW, false)
 	be.versionMap.MarkWritesValidated(sdW, nil)
 
-	be.revalidateCommittedDependents(1, nil)
+	be.revalidateCommittedDependents(1, nil, nil)
 
 	require.False(t, be.validateTasks.checkComplete(2),
 		"R read a live balance; a later self-destruct of that account must un-commit R (cross-path lifecycle dep)")
@@ -159,7 +159,7 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	newW := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 1}, newW)
 	be.versionMap.WriteStorage(addr, key, state.Version{TxIndex: 0, Incarnation: 1}, v2, false)
-	be.revalidateCommittedDependents(0, wWrites) // R is not complete yet -> not re-checked
+	be.revalidateCommittedDependents(0, wWrites, nil) // R is not complete yet -> not re-checked
 
 	// R now commits early, trusting a worker verdict computed against the stale v1.
 	markValidated(be, 1)
@@ -191,7 +191,7 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	rReads.SetHeader(addr, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0, Incarnation: 0}})
 	be.indexReads(1, rReads)
 
-	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
+	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW, nil))
 }
 
 func TestRevalCandidatesFromWriteAddrsMatchesTheWriteSet(t *testing.T) {
@@ -209,14 +209,14 @@ func TestRevalCandidatesFromWriteAddrsMatchesTheWriteSet(t *testing.T) {
 	}
 	candidates := func(withSummary bool) []int {
 		be := newDetExecutor(t, 4)
-		be.results = make([]*execResult, 4)
+		var writeAddrs []state.AddrPaths
 		if withSummary {
-			be.results[0] = &execResult{TxResult: &exec.TxResult{TxOut: ws, WriteAddrs: ws.AddrPaths()}}
+			writeAddrs = ws.AddrPaths()
 		}
 		for tx, rs := range reads {
 			be.indexReads(tx, rs)
 		}
-		return be.revalCandidates(0, ws, nil)
+		return be.revalCandidates(0, ws, nil, writeAddrs)
 	}
 	require.Equal(t, []int{1, 2}, candidates(false))
 	require.Equal(t, []int{1, 2}, candidates(true))

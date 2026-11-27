@@ -231,9 +231,7 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
 
-// A tx charged at validation records its writes, the sender charge and the tip in the
-// worker's own write-set, kept by TxOut as well.
-func TestChargedTxExtendsTheWorkersWritesInPlace(t *testing.T) {
+func TestChargedTxKeepsRetainedTaskWritesUnchanged(t *testing.T) {
 	db := newResumeTestDB(t)
 	sender := senderIsCoinbaseKey.rawAddress
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
@@ -268,6 +266,7 @@ func TestChargedTxExtendsTheWorkersWritesInPlace(t *testing.T) {
 		Val:         1,
 	})
 	be.versionMap.FlushWrites(workerWrites, false)
+	retained := &poolTask{prevWrites: workerWrites}
 
 	be.execTasks.setInProgress(0)
 	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
@@ -294,5 +293,9 @@ func TestChargedTxExtendsTheWorkersWritesInPlace(t *testing.T) {
 	require.True(t, tipped, "the tip must be recorded")
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
-	require.Same(t, workerWrites, recorded, "the loop extends the worker's write set in place")
+	require.NotSame(t, retained.prevWrites, recorded, "finalization must not extend a retained task's write set")
+	_, charged = retained.prevWrites.GetBalance(accounts.InternAddress(sender))
+	require.False(t, charged, "the retained task saw the sender charge")
+	_, tipped = retained.prevWrites.GetBalance(accounts.InternAddress(coinbase))
+	require.False(t, tipped, "the retained task saw the tip")
 }

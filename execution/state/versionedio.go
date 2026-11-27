@@ -3466,6 +3466,9 @@ func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
 }
 
+// A path of 16 or more would make its path bit 0 and hide its readers from every writer.
+const _ uint16 = 1 << CreateContractPath
+
 type AddrPaths struct {
 	Addr  accounts.Address
 	Paths uint16
