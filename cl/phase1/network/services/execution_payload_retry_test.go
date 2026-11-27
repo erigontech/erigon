@@ -45,7 +45,7 @@ func newPendingEnvelopeTestService(t *testing.T) (*executionPayloadService, *moc
 	cache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	fcu := mock_services.NewForkChoiceStorageMock(t)
-	service := &executionPayloadService{ctx: t.Context(), forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache, backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes))}
+	service := &executionPayloadService{ctx: t.Context(), forkchoiceStore: fcu, ethClock: newTestEnvelopeClock(1_000_000), beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache, backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes))}
 	service.pending = service.newPendingQueue(t.Context())
 	service.pending.stopAndWait()
 	return service, fcu

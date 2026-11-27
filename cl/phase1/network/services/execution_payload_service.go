@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -82,6 +83,7 @@ var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block u
 type executionPayloadService struct {
 	ctx             context.Context
 	forkchoiceStore forkchoice.ForkChoiceStorage
+	ethClock        eth_clock.EthereumClock
 	beaconCfg       *clparams.BeaconChainConfig
 	emitters        *beaconevents.EventEmitter
 	gossipManager   gossipmgr.Gossip
@@ -102,6 +104,7 @@ type executionPayloadService struct {
 func NewExecutionPayloadService(
 	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitters *beaconevents.EventEmitter,
 	gossipManager gossipmgr.Gossip,
@@ -113,6 +116,7 @@ func NewExecutionPayloadService(
 	s := &executionPayloadService{
 		ctx:                   ctx,
 		forkchoiceStore:       forkchoiceStore,
+		ethClock:              ethClock,
 		beaconCfg:             beaconCfg,
 		emitters:              emitters,
 		gossipManager:         gossipManager,
@@ -258,6 +262,10 @@ func (s *executionPayloadService) processMessage(
 	// [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue payload for processing once the block is retrieved.
 	if !blockKnown || block == nil {
+		if currentSlot := s.ethClock.GetCurrentSlot(); currentSlot < envelope.Payload.SlotNumber &&
+			!s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(envelope.Payload.SlotNumber) {
+			return fmt.Errorf("%w: envelope is from a future slot: %d > %d", ErrIgnore, envelope.Payload.SlotNumber, currentSlot)
+		}
 		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt, true)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errEnvelopeBlockUnavailable, err)
