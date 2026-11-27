@@ -54,6 +54,9 @@ const (
 	maxParkedLogBytes  = 64 << 20
 
 	maxLogChunkLen = 1024
+
+	logSize  = int(unsafe.Sizeof(types.Log{}))
+	hashSize = int(unsafe.Sizeof(common.Hash{}))
 )
 
 // logArena owns a block's log entries and recycles them in place, so what it
@@ -62,6 +65,8 @@ type logArena struct {
 	entries      types.Logs  // the block so far, in order; past len, the released entries alloc reuses
 	free         []types.Log // entries not handed out yet
 	poolBytes    int         // Data the released entries hold
+	chunkBytes   int         // chunks carved so far, unused tails included
+	topicBytes   int         // Topics the entries hold
 	indexInBlock uint
 }
 
@@ -83,9 +88,11 @@ func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) 
 	} else {
 		a.poolBytes -= cap(lp.Data)
 	}
+	topics := slices.Grow(lp.Topics[:0], numTopics)
+	a.topicBytes += (cap(topics) - cap(lp.Topics)) * hashSize
 	*lp = types.Log{
 		Address: addr,
-		Topics:  slices.Grow(lp.Topics[:0], numTopics)[:numTopics],
+		Topics:  topics[:numTopics],
 		Data:    slices.Grow(lp.Data[:0], dataSize)[:dataSize],
 		TxIndex: hexutil.Uint(txIndex),
 		// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
@@ -101,6 +108,7 @@ func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) 
 func (a *logArena) fresh(logIdx int) *types.Log {
 	if len(a.free) == 0 {
 		a.free = make([]types.Log, min(max(logIdx, 1), maxLogChunkLen))
+		a.chunkBytes += len(a.free) * logSize
 	}
 	lp := &a.free[0]
 	a.free = a.free[1:]
@@ -136,6 +144,8 @@ func (a *logArena) trim() {
 			break
 		}
 		a.poolBytes -= cap(lp.Data)
+		a.topicBytes -= cap(lp.Topics) * hashSize
+		a.chunkBytes -= logSize
 		// The chunk may stay alive through a kept neighbour.
 		lp.Topics, lp.Data = nil, nil
 	}
@@ -184,18 +194,9 @@ func (a *logArena) unpark() {
 	*a = logPark.take()
 }
 
-// heldBytes counts what a reset arena keeps alive: its run, the entries, their
-// Topics and Data, and the unused tail of the last chunk.
+// heldBytes counts what a reset arena keeps alive: its run, chunks, Topics and Data.
 func (a *logArena) heldBytes() int {
-	const logSize = int(unsafe.Sizeof(types.Log{}))
-	n := cap(a.entries)*int(unsafe.Sizeof(&types.Log{})) + len(a.free)*logSize + a.poolBytes
-	for _, lp := range a.entries[:cap(a.entries)] {
-		if lp == nil {
-			break
-		}
-		n += logSize + cap(lp.Topics)*int(unsafe.Sizeof(common.Hash{}))
-	}
-	return n
+	return cap(a.entries)*int(unsafe.Sizeof(&types.Log{})) + a.chunkBytes + a.topicBytes + a.poolBytes
 }
 
 type parkedLogs struct {
