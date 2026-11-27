@@ -201,7 +201,7 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 
 func LoadStaticValidatorTable(tx kv.Tx, archiveStates, replayEnabled bool) (*StaticValidatorTable, error) {
 	table := NewStaticValidatorTable()
-	table.archiveStates = archiveStates
+	table.stateHistoryDisabled = !archiveStates
 	table.SetReplayEnabled(replayEnabled)
 	if archiveStates {
 		if err := ReadValidatorsTable(tx, table); err != nil {

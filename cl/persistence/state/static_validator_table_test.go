@@ -148,3 +148,25 @@ func TestLoadedValidatorTableChecks(t *testing.T) {
 		})
 	}
 }
+
+func TestZeroValueValidatorTableRejectsGap(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	var data bytes.Buffer
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&data))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, index := range []uint64{0, 2} {
+			if err := tx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(index), data.Bytes()); err != nil {
+				return err
+			}
+		}
+		return SetStateProcessingProgress(tx, 96)
+	}))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var table StaticValidatorTable
+		require.NoError(t, ReadValidatorsTable(tx, &table))
+		require.Equal(t, uint64(96), table.Slot())
+		_, err := table.CopyValidatorsAtSlot(96, 3, 10)
+		require.ErrorIs(t, err, ErrValidatorTableTruncated)
+		return nil
+	}))
+}

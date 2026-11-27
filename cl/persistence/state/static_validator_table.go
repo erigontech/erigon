@@ -273,18 +273,17 @@ type staticValidatorField[V any] struct {
 // StaticValidatorTable is a structure to manage a collection of StaticValidators.
 // It is used for tracking multiple validators and their state changes.
 type StaticValidatorTable struct {
-	validatorTable []*StaticValidator
-	slot           uint64
-	replayDisabled bool
-	archiveStates  bool
-	sync           sync.RWMutex // Mutex for safe concurrent access.
+	validatorTable       []*StaticValidator
+	slot                 uint64
+	replayDisabled       bool
+	stateHistoryDisabled bool
+	sync                 sync.RWMutex // Mutex for safe concurrent access.
 }
 
 // NewStaticValidatorTable creates a new instance of StaticValidatorTable.
 func NewStaticValidatorTable() *StaticValidatorTable {
 	return &StaticValidatorTable{
 		validatorTable: make([]*StaticValidator, 0, 2400), // Preallocating memory for efficiency.
-		archiveStates:  true,
 	}
 }
 
@@ -405,7 +404,7 @@ func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit i
 	if !s.replayDisabled && slot > s.slot {
 		return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
 	}
-	if s.archiveStates && uint64(len(s.validatorTable)) < length {
+	if !s.stateHistoryDisabled && uint64(len(s.validatorTable)) < length {
 		return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
 	}
 	out := solid.NewValidatorSetWithLength(limit, int(length))
