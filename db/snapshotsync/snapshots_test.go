@@ -1959,6 +1959,40 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
 }
 
+// A merged file that is already the merge's output for its type stays on disk and visible.
+func TestMergeKeepsAnInputThatIsItsOwnOutput(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Bodies.Enum(), dir, snaptype2.Bodies.Versions().Current, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	bodies := snaptype2.Bodies.FileInfo(dir, 0, 100_000).Path
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true))
+	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
+	var deleted []string
+	onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete))
+	require.NotContains(t, deleted, bodies)
+	_, err := os.Stat(bodies)
+	require.NoError(t, err, "the bodies file that is its own merge output must stay on disk")
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Transactions} {
+		for _, idx := range typ.Indexes() {
+			createTestIdxFile(t, 0, 100_000, typ.Enum(), dir, idx.Version.Current, logger)
+		}
+	}
+	require.NoError(t, s.OpenFolder())
+	requireOneVisibleLayout(t, s, []Range{NewRange(0, 100_000)})
+}
+
 func TestVisibleBlockFilesShowAMergedFileOnlyWhenEveryTypeHasIt(t *testing.T) {
 	small := []Range{NewRange(0, 10_000), NewRange(10_000, 20_000), NewRange(20_000, 30_000), NewRange(30_000, 40_000)}
 	for _, position := range []struct {

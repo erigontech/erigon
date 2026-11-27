@@ -233,7 +233,11 @@ func (m *Merger) Merge(
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
 			if snapshots.hasIndexedDirtyFile(t.Enum(), output.Path) {
-				// A stopped merge already wrote this output; writing over the open file would fail on Windows.
+				// A stopped merge already wrote this output, or an input already is it; writing over the open
+				// file would fail on Windows, and an input with the output's path must be neither deleted nor retired.
+				isOutput := func(s *DirtySegment) bool { return s.FilePath() == output.Path }
+				toMerge[t.Enum()] = slices.DeleteFunc(toMerge[t.Enum()], isOutput)
+				out[t.Enum()] = slices.DeleteFunc(out[t.Enum()], isOutput)
 				mergedFileNames = append(mergedFileNames, output.Path)
 				continue
 			}
