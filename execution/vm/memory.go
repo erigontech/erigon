@@ -54,7 +54,11 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
-		copyChunked(m.store[offset:offset+size], value)
+		if size > memmoveChunk {
+			copyChunked(m.store[offset:offset+size], value)
+			return
+		}
+		copy(m.store[offset:offset+size], value)
 	}
 }
 
@@ -69,8 +73,19 @@ func (m *Memory) SetFromData(memOffset, size, dataOffset uint64, data []byte) {
 		panic("invalid memory: store empty")
 	}
 	dst := m.store[memOffset : memOffset+size]
-	n := copyChunked(dst, data[min(dataOffset, uint64(len(data))):])
-	clear(dst[n:])
+	dataLen := uint64(len(data))
+	if dataOffset >= dataLen {
+		// All zeros.
+		clear(dst)
+		return
+	}
+	avail := dataLen - dataOffset
+	if avail >= size {
+		copy(dst, data[dataOffset:dataOffset+size])
+	} else {
+		copy(dst[:avail], data[dataOffset:dataOffset+avail])
+		clear(dst[avail:])
+	}
 }
 
 // Set32 sets the 32 bytes starting at offset to the value of val, left-padded with zeroes to
@@ -174,11 +189,11 @@ func (m *Memory) Copy(dst, src, len uint64) {
 		return
 	}
 	// Forward chunks would overwrite the source of an overlapping copy to a higher address.
-	if dst > src && dst-src < len {
-		copy(m.store[dst:], m.store[src:src+len])
+	if len > memmoveChunk && (dst <= src || dst-src >= len) {
+		copyChunked(m.store[dst:dst+len], m.store[src:src+len])
 		return
 	}
-	copyChunked(m.store[dst:dst+len], m.store[src:src+len])
+	copy(m.store[dst:], m.store[src:src+len])
 }
 
 // memmoveChunk keeps each copy below 1 MiB: from there Go's amd64 memmove uses
@@ -186,10 +201,10 @@ func (m *Memory) Copy(dst, src, len uint64) {
 const memmoveChunk = 512 * 1024
 
 // copyChunked is copy for non-overlapping or downward-overlapping slices.
-func copyChunked(dst, src []byte) (n int) {
+func copyChunked(dst, src []byte) {
 	for min(len(dst), len(src)) > memmoveChunk {
-		n += copy(dst, src[:memmoveChunk])
+		copy(dst, src[:memmoveChunk])
 		dst, src = dst[memmoveChunk:], src[memmoveChunk:]
 	}
-	return n + copy(dst, src)
+	copy(dst, src)
 }
