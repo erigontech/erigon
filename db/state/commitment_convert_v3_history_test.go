@@ -510,7 +510,11 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	require.NotEmpty(t, historyPaths)
 	historyPath := historyPaths[len(historyPaths)-1]
 	base := strings.TrimSuffix(filepath.Base(historyPath), ".v")
-	idxPath := filepath.Join(dirs.SnapIdx, base+".ef")
+	rangeBase := strings.TrimPrefix(base, "v3.0")
+	idxPaths, err := filepath.Glob(filepath.Join(dirs.SnapIdx, "*"+rangeBase+".ef"))
+	require.NoError(t, err)
+	require.Len(t, idxPaths, 1)
+	idxPath := idxPaths[0]
 	cfg := agg.Cfg(kv.CommitmentDomain).Hist
 
 	historyPairs := readCommitmentHistoryValues(t, historyPath, cfg)
@@ -553,7 +557,6 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	slices.SortFunc(historyPairs, func(a, b commitmentHistoryPair) int { return bytes.Compare(a.key, b.key) })
 
 	agg.CloseFilesNoReopen()
-	rangeBase := strings.TrimPrefix(base, "v3.0")
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapAccessors} {
 		for _, ext := range []string{".bt", ".efi", ".kvei", ".kvi", ".vi"} {
 			accessors, err := filepath.Glob(filepath.Join(dirPath, "*"+rangeBase+ext))
