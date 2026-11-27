@@ -18,14 +18,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -83,6 +86,9 @@ func TestCountStorageSlotsCountsSlotsAtTheBaseBlock(t *testing.T) {
 		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
 	}
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
 
 	require.NoError(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, true, 2, 2), "the head has no slots")
 	require.ErrorContains(t, (&simulator{}).countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2), "more than 2 storage slots")
@@ -99,6 +105,10 @@ func TestCountStorageSlotsCountsSimulatedAndBaseSlotsOnce(t *testing.T) {
 	putSlots(t, putDel, addr, 2) // the base block's slots 1 and 2
 	require.NoError(t, putDel.DomainPut(kv.StorageDomain, key(3), []byte{3}, 5, nil))
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	putDel = sd.AsPutDel(rwTx)
 	// The simulation rewrites slot 2 and writes slot 4, which stay in the mem batch, and writes and clears slot 5.
 	for _, slot := range []byte{2, 4, 5} {
 		require.NoError(t, putDel.DomainPut(kv.StorageDomain, key(slot), []byte{9}, 6, nil))
@@ -110,7 +120,7 @@ func TestCountStorageSlotsCountsSimulatedAndBaseSlotsOnce(t *testing.T) {
 	}
 
 	require.NoError(t, newSim().countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 3))
-	err := newSim().countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2)
+	err = newSim().countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2)
 	require.ErrorContains(t, err, "more than 2 storage slots")
 	var rpcErr rpc.Error
 	require.ErrorAs(t, err, &rpcErr)
@@ -132,6 +142,24 @@ func TestCountStorageSlotsSkipsBaseSlotsAlreadySwept(t *testing.T) {
 
 	require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, false, 2, 2))
 	require.Zero(t, sim.removedSlots)
+}
+
+// A base slot that the simulation cleared is not counted, on latest and on a historical base alike.
+func TestCountStorageSlotsSkipsBaseSlotsTheSimulationCleared(t *testing.T) {
+	t.Parallel()
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addr := common.HexToAddress("0xaa")
+	putSlots(t, sd.AsPutDel(rwTx), addr, 3)
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	require.NoError(t, sd.AsPutDel(rwTx).DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: 1}), 6, []byte{1}))
+	for _, latest := range []bool{true, false} {
+		sim := &simulator{touchedKeys: keysByAccount{accounts.InternAddress(addr): storageKeys{accounts.InternKey(common.Hash{31: 1})}}}
+		require.NoError(t, sim.countStorageSlots(t.Context(), addr[:], sd, rwTx, latest, 2, 2), "latest=%t", latest)
+		require.Equal(t, 2, sim.removedSlots, "latest=%t", latest)
+	}
 }
 
 // On a historical base, an account that has no slots at the base block removes none, whatever the head holds.
@@ -169,7 +197,7 @@ func TestHistoricalRemovalSkipsHeadOnlySlots(t *testing.T) {
 			t.Cleanup(sd.Close)
 
 			sim := &simulator{touchedKeys: keysByAccount{}, sweptStorage: map[accounts.Address]struct{}{}}
-			hist := &historicalPutDel{TemporalPutDel: sd.AsPutDel(rwTx), view: newSimulationIntraBlockStateReader(rwTx, sd, 2), touched: sim.touchedKeys, sweptStorage: sim.sweptStorage}
+			hist := &simulationPutDel{TemporalPutDel: sd.AsPutDel(rwTx), view: newSimulationIntraBlockStateReader(rwTx, sd, 2), touched: sim.touchedKeys, sweptStorage: sim.sweptStorage}
 			bound := &storageBoundPutDel{TemporalPutDel: hist, count: func(a []byte) error {
 				return sim.countStorageSlots(t.Context(), a, sd, rwTx, false, 2, 1)
 			}}
@@ -178,6 +206,87 @@ func TestHistoricalRemovalSkipsHeadOnlySlots(t *testing.T) {
 				_, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}))
 				require.False(t, ok, "slot %d exists only at head", slot)
 			}
+		})
+	}
+}
+
+// storageWalkCountingTx counts the walks over an account's stored slots made through it: history walks of the base
+// block, and walks of the head that seek an address prefix in the storage table.
+type storageWalkCountingTx struct {
+	kv.TemporalTx
+	walks *int
+}
+
+func (tx storageWalkCountingTx) AggTx() any { return tx.TemporalTx.(interface{ AggTx() any }).AggTx() }
+
+func (tx storageWalkCountingTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	if name == kv.StorageDomain {
+		*tx.walks++
+	}
+	return tx.TemporalTx.RangeAsOf(name, fromKey, toKey, asOfTs, asc, limit)
+}
+
+func (tx storageWalkCountingTx) CursorDupSort(table string) (kv.CursorDupSort, error) {
+	c, err := tx.TemporalTx.CursorDupSort(table) //nolint:gocritic // The caller owns the returned cursor.
+	if err != nil {
+		return nil, err
+	}
+	if table != kv.TblStorageVals {
+		return c, nil
+	}
+	return storageWalkCountingCursor{CursorDupSort: c, walks: tx.walks}, nil
+}
+
+type storageWalkCountingCursor struct {
+	kv.CursorDupSort
+	walks *int
+}
+
+func (c storageWalkCountingCursor) Seek(seek []byte) ([]byte, []byte, error) {
+	if len(seek) == length.Addr {
+		*c.walks++
+	}
+	return c.CursorDupSort.Seek(seek)
+}
+
+// The stored slots of an account are walked on its first removal only, once to count them and once to remove them,
+// and every removal also removes the slots the simulation wrote since.
+func TestSimulationPutDelWalksStoredSlotsOnce(t *testing.T) {
+	addr := common.HexToAddress("0xaa")
+	interned := accounts.InternAddress(addr)
+	for _, latest := range []bool{true, false} {
+		t.Run(fmt.Sprintf("latest=%t", latest), func(t *testing.T) {
+			rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+			putSlots(t, sd.AsPutDel(rwTx), addr, 3)
+			require.NoError(t, sd.Flush(t.Context(), rwTx))
+			sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd.Close)
+
+			walks := 0
+			tx := storageWalkCountingTx{TemporalTx: rwTx, walks: &walks}
+			sim := &simulator{touchedKeys: keysByAccount{}, sweptStorage: map[accounts.Address]struct{}{}}
+			putDel := &simulationPutDel{
+				TemporalPutDel: sd.AsPutDel(tx),
+				view:           newSimulationIntraBlockStateReader(tx, sd, 2),
+				latest:         latest,
+				touched:        sim.touchedKeys,
+				sweptStorage:   sim.sweptStorage,
+			}
+			bound := &storageBoundPutDel{TemporalPutDel: putDel, count: func(a []byte) error {
+				return sim.countStorageSlots(t.Context(), a, sd, tx, latest, 2, maxSimRemovedSlots)
+			}}
+			w := newDiffTrackingWriter(bound, 10, sim.touchedKeys)
+			for removal := range 3 {
+				require.NoError(t, w.WriteAccountStorage(interned, 1, accounts.InternKey(common.Hash{31: 9}), uint256.Int{}, *uint256.NewInt(9)))
+				require.NoError(t, w.DeleteAccount(interned, nil))
+				for _, slot := range []byte{1, 2, 3, 9} {
+					v, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}))
+					require.True(t, ok && len(v) == 0, "removal %d: slot %d is not removed", removal, slot)
+				}
+			}
+			require.Equal(t, 2, walks)
+			require.Equal(t, 6, sim.removedSlots, "4 slots on the first removal, then the rewritten slot 9 on each later one")
 		})
 	}
 }

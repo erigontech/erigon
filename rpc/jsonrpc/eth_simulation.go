@@ -620,38 +620,34 @@ var _ state.StateReader = (*simOverrideReader)(nil)
 // loads them all into memory.
 const maxSimRemovedSlots = 100_000
 
-// countStorageSlots adds the slots stored for addr, at the head and at the simulation base block, to the slots
-// the request removes, and fails once they exceed limit.
+// countStorageSlots adds the slots that removing all of addr's storage deletes to the slots the request removes,
+// and fails once they exceed limit. On latest these are the head's slots. On a historical base they are the slots
+// the simulation wrote and the base block's slots. Once a removal swept addr, only the slots the simulation wrote.
 func (s *simulator) countStorageSlots(ctx context.Context, addr []byte, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
 	budget := limit - s.removedSlots
 	removed := 0
-	// Only a historical base walks a second view, whose slots may repeat those at the head.
-	var seen map[string]struct{}
-	if !latest {
-		seen = make(map[string]struct{})
-	}
-	add := func(key []byte) bool {
-		if seen != nil {
-			if _, ok := seen[string(key)]; ok {
-				return true
-			}
-			seen[string(key)] = struct{}{}
-		}
+	add := func() bool {
 		removed++
 		return removed <= budget
 	}
-	if latest {
-		if err := sd.IteratePrefix(kv.StorageDomain, addr, tx, func(k, _ []byte) (bool, error) {
-			return add(k), ctx.Err()
+	address := accounts.InternAddress(common.BytesToAddress(addr))
+	_, swept := s.sweptStorage[address]
+	if latest && !swept {
+		if err := sd.IteratePrefix(kv.StorageDomain, addr, tx, func(_, _ []byte) (bool, error) {
+			return add(), ctx.Err()
 		}); err != nil {
 			return err
 		}
 	} else {
-		// A historical base reads the mem batch, then the base block: slots only the head holds are never read.
-		address := accounts.InternAddress(common.BytesToAddress(addr))
-		visitSimulatedSlots(sd, address, s.touchedKeys[address], func(k, _ []byte) bool { return add(k) })
-		if _, swept := s.sweptStorage[address]; !swept && removed <= budget {
-			if err := visitStorageSlotsAsOf(ctx, tx, addr, firstMinTxNum, add); err != nil {
+		visitSimulatedSlots(sd, address, s.touchedKeys[address], func(_, _ []byte) bool { return add() })
+		if !latest && !swept && removed <= budget {
+			// A historical base reads the mem batch, then the base block: slots only the head holds are never read.
+			if err := visitStorageSlotsAsOf(ctx, tx, addr, firstMinTxNum, func(k []byte) bool {
+				if _, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok {
+					return true // the simulation wrote or cleared it: counted above if it holds a value
+				}
+				return add()
+			}); err != nil {
 				return err
 			}
 		}
@@ -665,8 +661,11 @@ func (s *simulator) countStorageSlots(ctx context.Context, addr []byte, sd *exec
 
 // visitSimulatedSlots visits the slots of address that the simulation wrote and still holds in the mem batch.
 // Every storage write of a simulation goes through diffTrackingWriter, which records its key in touched.
+// visit must not keep k: it is reused for the next slot.
 func visitSimulatedSlots(sd *execctx.SharedDomains, address accounts.Address, touched storageKeys, visit func(k, v []byte) bool) {
+	var k [length.Addr + length.Hash]byte
 	addressValue := address.Value()
+	copy(k[:], addressValue[:])
 	seen := make(map[accounts.StorageKey]struct{}, len(touched))
 	for _, loc := range touched {
 		if _, ok := seen[loc]; ok {
@@ -674,8 +673,8 @@ func visitSimulatedSlots(sd *execctx.SharedDomains, address accounts.Address, to
 		}
 		seen[loc] = struct{}{}
 		locValue := loc.Value()
-		k := append(append(make([]byte, 0, length.Addr+length.Hash), addressValue[:]...), locValue[:]...)
-		if v, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok && len(v) > 0 && !visit(k, v) {
+		copy(k[length.Addr:], locValue[:])
+		if v, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, k[:]); ok && len(v) > 0 && !visit(k[:], v) {
 			return
 		}
 	}
@@ -829,9 +828,12 @@ func (s *simulator) simulateBlock(
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
-	putDel := sharedDomains.AsPutDel(tx)
-	if !latest {
-		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys, sweptStorage: s.sweptStorage}
+	var putDel kv.TemporalPutDel = &simulationPutDel{
+		TemporalPutDel: sharedDomains.AsPutDel(tx),
+		view:           newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum),
+		latest:         latest,
+		touched:        s.touchedKeys,
+		sweptStorage:   s.sweptStorage,
 	}
 	putDel = &storageBoundPutDel{TemporalPutDel: putDel, count: func(addr []byte) error {
 		return s.countStorageSlots(ctx, addr, sharedDomains, tx, latest, firstMinTxNum, maxSimRemovedSlots)
@@ -1423,19 +1425,21 @@ func (p *storageBoundPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, tx
 	return p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
 
-// historicalPutDel writes a simulation on a historical block. SharedDomains resolves the previous
-// value of a write from the head state, so a write equal to head is dropped and a delete of a key
-// gone at head writes no tombstone: in both cases the next simulated block reads the base value.
-// It resolves the previous value from the simulation's own view instead.
-type historicalPutDel struct {
+// simulationPutDel writes a simulation. Once a removal swept an account's storage, every other slot reads as
+// removed, so a later removal deletes only the slots the simulation wrote since.
+// On a historical base, SharedDomains resolves the previous value of a write from the head state, so a write equal
+// to head is dropped and a delete of a key gone at head writes no tombstone: in both cases the next simulated block
+// reads the base value. It resolves the previous value from the simulation's own view instead.
+type simulationPutDel struct {
 	kv.TemporalPutDel
 	view         *simulationIntraBlockStateReader
+	latest       bool
 	touched      keysByAccount
 	sweptStorage map[accounts.Address]struct{}
 }
 
-func (p *historicalPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, error) {
-	if prevVal != nil {
+func (p *simulationPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, error) {
+	if prevVal != nil || p.latest {
 		return prevVal, nil
 	}
 	enc, err := p.view.getEncoded(domain, k)
@@ -1445,7 +1449,7 @@ func (p *historicalPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, er
 	return enc, err
 }
 
-func (p *historicalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+func (p *simulationPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	prevVal, err := p.prev(domain, k, prevVal)
 	if err != nil {
 		return err
@@ -1453,7 +1457,7 @@ func (p *historicalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64
 	return p.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
-func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+func (p *simulationPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	if domain == kv.AccountsDomain {
 		if err := p.DomainDel(kv.CodeDomain, k, txNum, nil); err != nil {
 			return err
@@ -1467,32 +1471,35 @@ func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, p
 		return err
 	}
 	if domain == kv.AccountsDomain {
-		// The code and storage are removed above. SharedDomains would remove the storage again from the head state.
+		// The code and storage are removed above. SharedDomains would walk the stored slots again.
 		return p.view.sd.DomainDelNoCascade(domain, p.view.roTx, k, txNum, prevVal)
 	}
 	return p.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 
-// DomainDelPrefix deletes the slots the simulation wrote and the base block's slots. Reads go to the mem batch,
-// then the base block, so the slots only the head holds need no tombstone.
-func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+// DomainDelPrefix deletes the slots the simulation wrote, then, on the account's first removal, its stored slots:
+// the head's slots on latest, the base block's slots on a historical base. Reads on a historical base go to the mem
+// batch, then the base block, so the slots only the head holds need no tombstone.
+func (p *simulationPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	if domain != kv.StorageDomain {
 		return p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 	}
 	address := accounts.InternAddress(common.BytesToAddress(prefix))
-	type slot struct{ k, v []byte }
-	var written []slot
+	var err error
 	visitSimulatedSlots(p.view.sd, address, p.touched[address], func(k, v []byte) bool {
-		written = append(written, slot{k, v})
-		return true
+		err = p.TemporalPutDel.DomainDel(kv.StorageDomain, k, txNum, v)
+		return err == nil
 	})
-	for _, w := range written {
-		if err := p.TemporalPutDel.DomainDel(kv.StorageDomain, w.k, txNum, w.v); err != nil {
-			return err
-		}
+	if err != nil {
+		return err
 	}
-	_, swept := p.sweptStorage[address]
+	if _, swept := p.sweptStorage[address]; swept {
+		return nil
+	}
 	p.sweptStorage[address] = struct{}{}
+	if p.latest {
+		return p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
+	}
 	to, _ := kv.NextSubtree(prefix)
 	it, err := p.view.roTx.RangeAsOf(kv.StorageDomain, prefix, to, p.view.firstMinTxNum, order.Asc, kv.Unlim)
 	if err != nil {
@@ -1504,7 +1511,7 @@ func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNu
 		if err != nil {
 			return err
 		}
-		if !swept && len(enc) > 0 { // enc is still the base value: a slot created after the base is absent there
+		if len(enc) > 0 { // enc is still the base value: a slot created after the base is absent there
 			p.touched[address] = append(p.touched[address], accounts.InternKey(common.BytesToHash(k[length.Addr:])))
 		}
 		if memEnc, _, ok := p.view.sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok {
