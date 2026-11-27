@@ -18,7 +18,7 @@ import (
 
 var (
 	npProfMode = dbg.EnvString("NP_PROF", "")
-	npProfHash = dbg.EnvStrings("NP_PROF_HASH", ",", nil)
+	npProfHash = dbg.EnvStrings("NP_PROF_HASH", "+", nil)
 	npProfHz   = dbg.EnvInt("NP_PROF_HZ", 1000)
 )
 
