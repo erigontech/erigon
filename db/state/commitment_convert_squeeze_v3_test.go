@@ -34,7 +34,7 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	legacySchema := statecfg.Schema
 	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 10, 32)
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 31, 32, allIrreversible, false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 31, 32, collateAll, false))
 	agg.WaitForFiles()
 	rootTxNums := slices.Sorted(maps.Keys(roots))
 	legacyFiles, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-commitment.*.kv"))

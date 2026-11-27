@@ -152,7 +152,7 @@ type TxPool struct {
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
-	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
+	deletedTxns             []*metaTxn                       // rows to delete and unused sender IDs to release at the next flush
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -2006,7 +2006,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false)
 			if err != nil {
 				return err
 			}
@@ -2035,8 +2035,10 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
+// addTxns returns results in input order. On reload, it queues rows rejected at
+// insertion. discardLocked queues rows for transactions evicted later.
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, fromDB bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -2056,7 +2058,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
-			if collect && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
+			if !fromDB && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
@@ -2064,6 +2066,10 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
 		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+			if fromDB {
+				mt.TxnSlot = &TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}
+				p.deletedTxns = append(p.deletedTxns, mt)
+			}
 			discardReasons[i] = reason
 			continue
 		}
@@ -3416,7 +3422,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
+		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true); err != nil {
 		return err
 	}
 

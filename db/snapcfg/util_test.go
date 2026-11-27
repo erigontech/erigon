@@ -43,14 +43,6 @@ func TestTypedCaplinUsesRegisteredTypes(t *testing.T) {
 	}, typed.Items)
 }
 
-// A registry entry can name an index the type does not have: it is dropped, not a crash.
-func TestTypedDropsAnIndexTheTypeDoesNotHave(t *testing.T) {
-	require.NotPanics(t, func() {
-		names := typedNames(t, PreverifiedItems{{Name: "v1.1-000000-000100-transactions-to-block-blocksidecars.idx", Hash: "h"}})
-		require.Empty(t, names)
-	})
-}
-
 func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
 	names := typedNames(t, PreverifiedItems{
 		{Name: "caplin/v1.0-000000-000100-BlockRoot.seg", Hash: "old"},
@@ -139,6 +131,16 @@ func TestTypedKeepsCaplinTypedEntries(t *testing.T) {
 	}
 	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
 	require.Equal(t, items, typed.Items)
+}
+
+func TestTypedKeepsRegisteredBlobIndexOnly(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-000000-000050-blocksidecars.idx"},
+		{Name: "v1.1-000000-000050-blocksidecars-extra.idx"},
+	}
+
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+	require.Equal(t, PreverifiedItems{{Name: "v1.1-000000-000050-blocksidecars.idx"}}, typed.Items)
 }
 
 func TestNameToParts(t *testing.T) {
@@ -259,6 +261,51 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 	}
 }
 
+func TestMergeLimitSkipsUnregisteredStateType(t *testing.T) {
+	cfg := newCfg("mainnet", Preverified{Items: PreverifiedItems{
+		{Name: "domain/v1.0-caplin.0-32.seg"},
+	}})
+
+	require.NotPanics(t, func() {
+		require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum+1, 0))
+	})
+}
+
 func TestSetTomlRejectsMalformedToml(t *testing.T) {
 	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
+}
+
+func TestTypedReportsUnparsableRegisteredTypeNames(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-bad-000050-blobsidecars.seg", Hash: "bad-from"},
+		{Name: "v1.1-00a000-000100-beaconblocks.seg", Hash: "bad-from-digits"},
+		{Name: "v1.1-000000-000100-BEACONBLOCKS.seg", Hash: "upper-case"},
+		{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "ok"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Equal(t, []PreverifiedItem{{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "ok"}}, kept)
+	require.Equal(t, []string{
+		"v1.1-bad-000050-blobsidecars.seg",
+		"v1.1-00a000-000100-beaconblocks.seg",
+		"v1.1-000000-000100-BEACONBLOCKS.seg",
+	}, drops.unparsableNames)
+}
+
+func TestTypedDropsRootEntryWithInnerExtension(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "v1.1-000000-000100-beaconblocks.seg.torrent", Hash: "torrent"},
+		{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "seg"},
+	})
+	require.Equal(t, []string{"v1.1-000000-000100-beaconblocks.seg"}, names)
+}
+
+func TestTypedCountsUnknownTypeWithRegisteredSuffixAsUnreadable(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-000000-000100-future-beaconblocks.seg", Hash: "unknown"},
+		{Name: "v1.1-000000-000100-BLOCKSIDECARS.idx", Hash: "misspelled"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, 1, drops.unreadable)
+	require.Equal(t, []string{"v1.1-000000-000100-BLOCKSIDECARS.idx"}, drops.unparsableNames)
 }
