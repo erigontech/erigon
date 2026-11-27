@@ -110,6 +110,15 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
+func GetHashFnFromChain(header *types.Header, reader rules.ChainHeaderReader) func(uint64) (common.Hash, error) {
+	if reader == nil {
+		return GetHashFn(header, nil)
+	}
+	return GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		return reader.GetHeader(hash, number), nil
+	})
+}
+
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
 	blockNumber := ref.Number.Uint64()

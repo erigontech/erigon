@@ -65,7 +65,7 @@ func BenchmarkSysCallContract(b *testing.B) {
 		ibs := newIBS(b)
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := SysCallContract(contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}); err != nil {
+			if _, err := SysCallContract(contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}, nil); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -76,7 +76,7 @@ func BenchmarkSysCallContract(b *testing.B) {
 		evm := NewSysCallEVM(chainConfig, vm.Config{})
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := SysCallContractWithEVM(evm, contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}); err != nil {
+			if _, err := SysCallContractWithEVM(evm, contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}, nil); err != nil {
 				b.Fatal(err)
 			}
 		}

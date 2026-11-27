@@ -445,3 +445,17 @@ func TestCreateReceiptBlobGasUsed(t *testing.T) {
 		})
 	}
 }
+
+func TestResetBlockStartHashReader(t *testing.T) {
+	cfg := chain.TestChainBerlinConfig
+	oldHash := common.HexToHash("0x1")
+	want := common.HexToHash("0x2")
+	evm := vm.NewEVM(evmtypes.BlockContext{GetHash: func(uint64) (common.Hash, error) { return oldHash, nil }}, evmtypes.TxContext{}, nil, cfg, vm.Config{})
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	task := &TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(3)}, Config: cfg, EvmBlockContext: evmtypes.BlockContext{GetHash: func(uint64) (common.Hash, error) { return want, nil }}}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	got, err := evm.Context.GetHash(1)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

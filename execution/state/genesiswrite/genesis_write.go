@@ -516,7 +516,7 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		}
 
 		if len(account.Constructor) > 0 {
-			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
+			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head, nil); err != nil {
 				return nil, nil, err
 			}
 			// The constructor reads the alloc storage, but deploys over a fresh account:

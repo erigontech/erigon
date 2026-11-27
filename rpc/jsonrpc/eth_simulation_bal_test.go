@@ -411,8 +411,7 @@ func TestSimulateV1SystemCallBlockHash(t *testing.T) {
 				StateOverrides: &ethapi.StateOverrides{params.BeaconRootsAddress: {Code: &code}},
 				Calls:          []ethapi.CallArgs{readSlot},
 			},
-			{},
-			{Calls: []ethapi.CallArgs{readSlot}},
+			{BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(4))}, Calls: []ethapi.CallArgs{readSlot}},
 		},
 	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 	require.NoError(t, err)
@@ -422,6 +421,66 @@ func TestSimulateV1SystemCallBlockHash(t *testing.T) {
 	require.NotNil(t, result[0].Hash)
 	require.Len(t, result[2].Calls, 1)
 	require.Equal(t, result[0].Hash.Hex(), result[2].Calls[0].ReturnData)
+}
+
+func TestSimulateV1WithdrawalSystemCallBlockHash(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	pack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	code := hexutil.Bytes{byte(vm.CALLER), byte(vm.PUSH20)}
+	systemAddress := params.SystemAddress.Value()
+	code = append(code, systemAddress[:]...)
+	code = append(code, byte(vm.EQ), byte(vm.PUSH1), 0x22, byte(vm.JUMPI),
+		byte(vm.PUSH0), byte(vm.SLOAD), byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN),
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP))
+	address := params.WithdrawalRequestAddress.Value()
+	result, err := api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{StateOverrides: &ethapi.StateOverrides{params.WithdrawalRequestAddress: {Code: &code}}},
+		{Calls: []ethapi.CallArgs{{From: &bankAddr, To: &address}}},
+	}}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	require.Len(t, result[1].Calls, 1)
+	require.Equal(t, m.Genesis.Hash().Hex(), result[1].Calls[0].ReturnData)
+}
+
+func TestSimulateV1SystemCallBlockHashOverrides(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	pack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	for _, tc := range []struct {
+		name   string
+		offset byte
+		block  uint64
+		base   rpc.BlockNumber
+	}{
+		{"older", 2, 0, 1},
+		{"parent", 1, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes{
+				byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0d, byte(vm.JUMPI),
+				byte(vm.PUSH1), tc.offset, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+				byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.SLOAD), byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN),
+			}
+			want := common.HexToHash("0x123456")
+			overrides := map[uint64]common.Hash{tc.block: want}
+			address := params.BeaconRootsAddress.Value()
+			result, err := api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: []SimulatedBlock{{
+				BlockOverrides: &ethapi.BlockOverrides{BlockHash: &overrides},
+				StateOverrides: &ethapi.StateOverrides{params.BeaconRootsAddress: {Code: &code}},
+				Calls:          []ethapi.CallArgs{{From: &bankAddr, To: &address}},
+			}}}, rpc.BlockNumberOrHashWithNumber(tc.base))
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			require.Len(t, result[0].Calls, 1)
+			require.Equal(t, want.Hex(), result[0].Calls[0].ReturnData)
+		})
+	}
 }
 
 func TestSimulateV1SystemCallSelfDestructKeepsBalanceWithoutCalls(t *testing.T) {

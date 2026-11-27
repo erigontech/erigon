@@ -54,7 +54,7 @@ func TestSysCallContractSeesBlockCoinbase(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(contract, false))
 	require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
 
-	_, err := SysCallContract(contract, nil, chainspec.Mainnet.Config, ibs, header, ethash.NewFaker(), false, vm.Config{})
+	_, err := SysCallContract(contract, nil, chainspec.Mainnet.Config, ibs, header, ethash.NewFaker(), false, vm.Config{}, nil)
 	require.NoError(t, err)
 
 	got, err := ibs.GetState(contract, accounts.ZeroKey)
@@ -64,17 +64,38 @@ func TestSysCallContractSeesBlockCoinbase(t *testing.T) {
 	require.Equal(t, want.Hex(), got.Hex())
 }
 
-func TestSysCallContractBlockHashWithoutHeaderReader(t *testing.T) {
-	t.Parallel()
+func TestGetHashFnWithoutHeaderReader(t *testing.T) {
+	parent := common.HexToHash("0x1234")
+	getHash := GetHashFn(&types.Header{Number: *uint256.NewInt(3), ParentHash: parent}, nil)
+	got, err := getHash(2)
+	require.NoError(t, err)
+	require.Equal(t, parent, got)
+	got, err = getHash(3)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, got)
+	_, err = getHash(1)
+	require.ErrorContains(t, err, "header reader unavailable for block 1")
+}
+
+func TestSysCallContractBlockHash(t *testing.T) {
 	contract := params.WithdrawalRequestAddress
-	code := []byte{byte(vm.NUMBER), byte(vm.PUSH1), 2, byte(vm.SWAP1), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.STOP)}
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
 	require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
-	header := &types.Header{Number: *uint256.NewInt(3)}
-
-	_, err := SysCallContract(contract, nil, chain.TestChainBerlinConfig, ibs, header, ethash.NewFaker(), false, vm.Config{})
-	require.ErrorContains(t, err, "header reader unavailable for block 1")
+	want := common.HexToHash("0x1234")
+	parent := &types.Header{Number: *uint256.NewInt(2), ParentHash: want}
+	header := &types.Header{Number: *uint256.NewInt(3), ParentHash: parent.Hash()}
+	getHash := GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		require.Equal(t, parent.Hash(), hash)
+		require.Equal(t, uint64(2), number)
+		return parent, nil
+	})
+	_, err := SysCallContract(contract, nil, chain.TestChainBerlinConfig, ibs, header, ethash.NewFaker(), false, vm.Config{}, getHash)
+	require.NoError(t, err)
+	got, err := ibs.GetState(contract, accounts.ZeroKey)
+	require.NoError(t, err)
+	require.Equal(t, want.U256(), got)
 }
 
 // Stateless execution rejects an invalid tx and goes on, but a panic inside execution is a
