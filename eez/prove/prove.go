@@ -396,6 +396,9 @@ func (c *Client) ProveBy(ctx context.Context, w *Window, start time.Time, per ti
 // status a prover sent, a transient failure outlasting its retries, or a
 // quorum's verdict on its members' failures; not one the node met.
 func Charged(err error) bool {
+	if errors.Is(err, ErrRegistration) {
+		return false
+	}
 	if q, ok := errors.AsType[*QuorumError](err); ok {
 		_, c := q.verdict()
 		return c

@@ -55,6 +55,10 @@ type Attestation struct {
 	Proof       []byte
 }
 
+// ErrRegistration reports a failed read of the manager's registration, the
+// node's failure whatever status the read carries: no member was asked.
+var ErrRegistration = errors.New("manager registration")
+
 // Quorum gathers the attestations a rollup's manager requires of a batch.
 type Quorum struct {
 	Members []*Member
@@ -76,7 +80,7 @@ type Quorum struct {
 func (q *Quorum) ProveBy(ctx context.Context, w *Window, start time.Time, per time.Duration) ([]Attestation, error) {
 	reg, err := q.Register(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("manager registration: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrRegistration, err)
 	}
 	threshold := max(reg.Threshold, 1)
 	var usable []*Member

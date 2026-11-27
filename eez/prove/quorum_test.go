@@ -201,9 +201,9 @@ func TestQuorumStopsWithItsContext(t *testing.T) {
 }
 
 // TestQuorumChargesWhatProversSent: an UNKNOWN a member sent is its
-// refusal, which with another blocks the threshold; the registration, a
-// threshold the members cannot reach and a request too late to start are
-// the node's.
+// refusal, which with another blocks the threshold; the registration, even
+// failing with a gRPC status, a threshold the members cannot reach and a
+// request too late to start are the node's.
 func TestQuorumChargesWhatProversSent(t *testing.T) {
 	unknown := newAttester(t, 0xa, 0, status.Error(codes.Unknown, "prover failed"))
 	invalid := newAttester(t, 0xb, 0, status.Error(codes.InvalidArgument, "window refused"))
@@ -215,9 +215,13 @@ func TestQuorumChargesWhatProversSent(t *testing.T) {
 
 	a := newAttester(t, 0xa, 0, nil)
 	unreadable := func(context.Context) (l1.Registration, error) { return l1.Registration{}, errors.New("L1 down") }
+	unavailable := func(context.Context) (l1.Registration, error) {
+		return l1.Registration{}, status.Error(codes.Unavailable, "L1 KV down")
+	}
 	for name, q := range map[string]*Quorum{
-		"registration": {Members: members(a), Register: unreadable},
-		"unreachable":  {Members: members(a), Register: registered(2, a)},
+		"registration":             {Members: members(a), Register: unreadable},
+		"registration with status": {Members: members(a), Register: unavailable},
+		"unreachable":              {Members: members(a), Register: registered(2, a)},
 	} {
 		_, err := q.ProveBy(t.Context(), quorumWindow(t, a.ps), time.Now().Add(5*time.Second), 0)
 		require.Error(t, err, name)
