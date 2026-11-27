@@ -18,6 +18,7 @@ package stages
 
 import (
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
@@ -34,8 +35,15 @@ import (
 
 const activeListTestValidators = 2_048
 
-// boundaryHead is a Gloas state one slot past an epoch boundary; processing the boundary slot filled the
-// lookahead caches for `epoch` under stateRoot.
+// Validators whose activity flips around the boundary epoch E, so lists for E-1, E and E+1 all differ.
+const (
+	exitsAtBoundaryEpoch        = 3
+	activatesAtBoundaryEpoch    = 5
+	activatesAfterBoundaryEpoch = 7
+)
+
+// boundaryHead is a state one slot past an epoch boundary; processing the boundary slot filled the
+// lookahead caches for `epoch` under stateRoot from Fulu on.
 type boundaryHead struct {
 	cfg         *clparams.BeaconChainConfig
 	preBoundary *state.CachingBeaconState
@@ -48,11 +56,19 @@ type boundaryHead struct {
 
 func newBoundaryHead(t *testing.T) *boundaryHead {
 	t.Helper()
+	return newBoundaryHeadAt(t, &clparams.MainnetBeaconConfig, clparams.GloasVersion)
+}
+
+func newBoundaryHeadAt(t *testing.T, cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *boundaryHead {
+	t.Helper()
 	useFreshPrecacheValidatorCaches(t)
-	cfg := &clparams.MainnetBeaconConfig
 	s := preCacheTestState(t, cfg, activeListTestValidators, 0xd4)
-	s.SetVersion(clparams.GloasVersion)
+	s.SetVersion(version)
 	boundarySlot := 4*cfg.SlotsPerEpoch - 1
+	epoch := boundarySlot/cfg.SlotsPerEpoch + 2
+	require.NoError(t, s.SetExitEpochForValidatorAtIndex(exitsAtBoundaryEpoch, epoch))
+	require.NoError(t, s.SetActivationEpochForValidatorAtIndex(activatesAtBoundaryEpoch, epoch))
+	require.NoError(t, s.SetActivationEpochForValidatorAtIndex(activatesAfterBoundaryEpoch, epoch+1))
 	require.NoError(t, s.SetSlot(boundarySlot-1))
 	s.SetCurrentEpochParticipation(solid.NewParticipationBitList(s.ValidatorLength(), int(cfg.ValidatorRegistryLimit)))
 	s.SetPreviousEpochParticipation(solid.NewParticipationBitList(s.ValidatorLength(), int(cfg.ValidatorRegistryLimit)))
@@ -60,6 +76,7 @@ func newBoundaryHead(t *testing.T) *boundaryHead {
 	pre, err := s.Copy()
 	require.NoError(t, err)
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(s, boundarySlot+1))
+	require.Equal(t, epoch, state.Epoch(s)+1)
 	refIndex := int(boundarySlot % cfg.SlotsPerHistoricalRoot)
 	blockRoot, err := s.GetBlockRootAtSlot(boundarySlot)
 	require.NoError(t, err)
@@ -67,7 +84,7 @@ func newBoundaryHead(t *testing.T) *boundaryHead {
 		cfg:         cfg,
 		preBoundary: pre,
 		head:        s,
-		epoch:       state.Epoch(s) + 1,
+		epoch:       epoch,
 		refIndex:    refIndex,
 		blockRoot:   blockRoot,
 		stateRoot:   s.StateRoots().Get(refIndex),
@@ -81,10 +98,16 @@ func (h *boundaryHead) freshHead(t *testing.T) *state.CachingBeaconState {
 	return c
 }
 
-func (h *boundaryHead) allActive() []uint64 {
-	want := make([]uint64, activeListTestValidators)
-	for i := range want {
-		want[i] = uint64(i)
+func expectedActiveIndices(boundaryEpoch, epoch uint64) []uint64 {
+	want := make([]uint64, 0, activeListTestValidators)
+	for i := range uint64(activeListTestValidators) {
+		switch {
+		case i == exitsAtBoundaryEpoch && epoch >= boundaryEpoch,
+			i == activatesAtBoundaryEpoch && epoch < boundaryEpoch,
+			i == activatesAfterBoundaryEpoch && epoch <= boundaryEpoch:
+			continue
+		}
+		want = append(want, i)
 	}
 	return want
 }
@@ -95,18 +118,42 @@ func scansDuring(f func()) uint64 {
 	return shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64() - before
 }
 
-func TestPrecachePromotesLookaheadActiveValidators(t *testing.T) {
-	h := newBoundaryHead(t)
-	lookahead, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(h.epoch, h.stateRoot)
-	require.True(t, ok)
-	head := h.freshHead(t)
+func TestPrecachePromotionAcrossForkVersions(t *testing.T) {
+	gloasAfterBoundary := clparams.MainnetBeaconConfig
+	gloasAfterBoundary.GloasForkEpoch = 4
 
-	scans := scansDuring(func() { shuffleInputForEpoch(log.Root(), h.cfg, head, h.epoch) })
+	for _, tc := range []struct {
+		name        string
+		cfg         *clparams.BeaconChainConfig
+		version     clparams.StateVersion
+		headVersion clparams.StateVersion
+		promoted    bool
+	}{
+		{"electra", &clparams.MainnetBeaconConfig, clparams.ElectraVersion, clparams.ElectraVersion, false},
+		{"fulu", &clparams.MainnetBeaconConfig, clparams.FuluVersion, clparams.FuluVersion, true},
+		{"gloas", &clparams.MainnetBeaconConfig, clparams.GloasVersion, clparams.GloasVersion, true},
+		{"fulu_to_gloas", &gloasAfterBoundary, clparams.FuluVersion, clparams.GloasVersion, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newBoundaryHeadAt(t, tc.cfg, tc.version)
+			require.Equal(t, tc.headVersion, h.head.Version())
+			lookahead, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(h.epoch, h.stateRoot)
+			require.Equal(t, tc.promoted, ok)
+			head := h.freshHead(t)
 
-	require.Zero(t, scans)
-	main, ok := caches.ActiveValidatorsCacheGlobal.Get(h.epoch, h.blockRoot)
-	require.True(t, ok)
-	require.Same(t, unsafe.SliceData(lookahead), unsafe.SliceData(main))
+			scans := scansDuring(func() { shuffleInputForEpoch(log.Root(), h.cfg, head, h.epoch) })
+
+			main, ok := caches.ActiveValidatorsCacheGlobal.Get(h.epoch, h.blockRoot)
+			require.True(t, ok)
+			require.Equal(t, expectedActiveIndices(h.epoch, h.epoch), main)
+			if !tc.promoted {
+				require.Equal(t, uint64(1), scans)
+				return
+			}
+			require.Zero(t, scans)
+			require.Same(t, unsafe.SliceData(lookahead), unsafe.SliceData(main))
+		})
+	}
 }
 
 func TestPrecacheDoesNotPromoteForeignLookaheadActiveValidators(t *testing.T) {
@@ -152,7 +199,7 @@ func TestPrecacheDoesNotPromoteForeignLookaheadActiveValidators(t *testing.T) {
 			require.Equal(t, uint64(1), scans)
 			main, ok := caches.ActiveValidatorsCacheGlobal.Get(h.epoch, h.blockRoot)
 			require.True(t, ok)
-			require.Equal(t, h.allActive(), main)
+			require.Equal(t, expectedActiveIndices(h.epoch, h.epoch), main)
 			if foreignList != nil {
 				require.NotSame(t, unsafe.SliceData(foreignList), unsafe.SliceData(main))
 			}
@@ -192,15 +239,15 @@ func TestPrecachePromotesEachBranchItsOwnLookaheadActiveValidators(t *testing.T)
 
 func TestPrecacheScansActiveValidatorsOncePerEpochBoundary(t *testing.T) {
 	h := newBoundaryHead(t)
-	caches.ActiveValidatorsCacheGlobal = caches.NewActiveValidatorsCache("active_validators", caches.MaxActiveValidatorsCacheSize)
-	caches.LookaheadActiveValidatorsCacheGlobal = caches.NewActiveValidatorsCache("lookahead_active_validators", caches.MaxLookaheadActiveValidatorsCacheSize)
-	caches.ShuffledIndiciesCacheGlobal = caches.NewShuffledIndiciesCache("shuffled_indicies", caches.MaxShuffledIndiciesCacheSize)
-	caches.LookaheadShuffledIndiciesCacheGlobal = caches.NewShuffledIndiciesCache("lookahead_shuffled_indicies", caches.MaxLookaheadShuffledIndiciesCacheSize)
-
-	preBoundaryEpoch := state.Epoch(h.preBoundary)
-	for epoch := uint64(1); epoch <= preBoundaryEpoch+1; epoch++ {
-		shuffleInputForEpoch(log.Root(), h.cfg, h.preBoundary, epoch)
+	useFreshPrecacheValidatorCaches(t)
+	preCacheCfg := &Cfg{beaconCfg: h.cfg}
+	waitPreCacheIdle := func() {
+		require.Eventually(t, func() bool { return !workingPreCacheNextShuffledValidatorSet.Load() }, 10*time.Second, time.Millisecond)
 	}
+
+	waitPreCacheIdle()
+	preCacheNextShuffledValidatorSet(log.Root(), preCacheCfg, h.preBoundary)
+	waitPreCacheIdle()
 	next, err := h.preBoundary.Copy()
 	require.NoError(t, err)
 	published, err := h.preBoundary.Copy()
@@ -209,11 +256,9 @@ func TestPrecacheScansActiveValidatorsOncePerEpochBoundary(t *testing.T) {
 	scans := scansDuring(func() {
 		require.NoError(t, transition.DefaultMachine.ProcessSlots(next, h.head.Slot()))
 		require.NoError(t, next.CopyInto(published))
-		current := state.Epoch(published)
-		for epoch := current - 2; epoch <= current+1; epoch++ {
-			shuffleInputForEpoch(log.Root(), h.cfg, published, epoch)
-		}
+		preCacheNextShuffledValidatorSet(log.Root(), preCacheCfg, published)
 	})
+	waitPreCacheIdle()
 
 	require.Equal(t, uint64(1), scans)
 }
