@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
@@ -38,6 +39,8 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).DoAndReturn(func(slot uint64, root common.Hash) (bool, error) {
 			return storage.ColumnSidecarExists(t.Context(), slot, root, 0)
 		}).Times(2)
+		logger, records := timelineLogger(log.LvlDebug)
+		service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
 
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
 		job := serviceJob(t, service, root)
@@ -49,6 +52,7 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		start := time.Now()
+		go service.timelines.run(ctx)
 		go service.loop(ctx)
 		synctest.Wait()
 		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
@@ -60,6 +64,13 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 		require.Equal(t, int32(2), processing.calls.Load())
 		_, queued := service.blocksScheduledForLaterExecution.Load(root)
 		require.False(t, queued)
+
+		require.Len(t, records, 1)
+		fields := recordFields(t, <-records)
+		require.Equal(t, common.Hash(root), fields["root"])
+		require.Equal(t, 2, fields["attempts"])
+		require.Equal(t, true, fields["waitedForColumns"])
+		require.IsType(t, int64(0), fields["seenMs"], "a gossip block has an arrival time")
 	})
 }
 

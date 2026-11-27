@@ -18,7 +18,7 @@ package v3
 
 import (
 	"bytes"
-	"fmt"
+	"maps"
 	"math/bits"
 	"slices"
 
@@ -26,71 +26,129 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-type collapseCell struct {
-	hext             []byte
-	hash, acct, stor bool
-	acctKey          []byte
-}
-
-type collapseRow struct {
-	cells [16]collapseCell
-	after uint16
-	lazy  uint16
-	depth int
-	src   *node
-}
-
-type collapseSim struct {
-	ctx    commitment.PatriciaContext
-	tracer commitment.CollapseTracer
-	root   collapseCell
-	rows   []collapseRow
-	key    []byte
-	kbuf   []byte
-	nodes  map[string]*node
-}
-
-func traceCollapses(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
-	s := &collapseSim{ctx: ctx, tracer: tracer, rows: make([]collapseRow, 0, 130), key: make([]byte, 0, 128), nodes: make(map[string]*node)}
-	if err := s.loadRoot(); err != nil {
-		return err
-	}
-	for i := range items {
-		k := items[i].hashedKey
-		for !bytes.HasPrefix(k, s.key) {
-			if err := s.fold(); err != nil {
-				return err
-			}
-		}
-		for {
-			unfolding, err := s.needUnfolding(k)
-			if err != nil {
-				return err
-			}
-			if unfolding <= 0 {
-				break
-			}
-			if err := s.unfold(k, unfolding); err != nil {
-				return err
-			}
-		}
-		if items[i].update != nil && items[i].update.Deleted() {
-			if err := s.deleteCell(k); err != nil {
-				return err
-			}
+func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tracer commitment.CollapseTracer) error {
+	groups := make(map[string][][]byte)
+	for _, item := range items {
+		if item.update == nil || !item.update.Deleted() {
 			continue
 		}
-		s.updateCell(k, len(items[i].plainKey) == length.Addr)
+		owner, path := "", item.hashedKey
+		if len(item.plainKey) != length.Addr {
+			if len(path) < 64 {
+				continue
+			}
+			owner, path = string(path[:64]), path[64:]
+		}
+		groups[owner] = append(groups[owner], slices.Clone(path))
 	}
-	for len(s.rows) > 0 {
-		if err := s.fold(); err != nil {
+	for _, path := range groups[""] {
+		delete(groups, string(path))
+	}
+	for owner, paths := range groups {
+		slices.SortFunc(paths, bytes.Compare)
+		groups[owner] = slices.CompactFunc(paths, bytes.Equal)
+	}
+	for _, groupKey := range slices.Sorted(maps.Keys(groups)) {
+		ownerPath := []byte(groupKey)
+		plane, addrHash, _ := splitPrefix(ownerPath)
+		g := graph{plane: plane, addrHash: addrHash}
+		root, err := g.loadRoot(ctx)
+		if err != nil {
+			return err
+		}
+		deletes := deleteRange(groups[groupKey], root.path)
+		if len(deletes) == 0 {
+			continue
+		}
+		for _, path := range deletes {
+			if err := g.ensurePath(ctx, root, path); err != nil {
+				return err
+			}
+		}
+		if _, err := walkDeletedNode(ctx, g, root, deletes, tracer, ownerPath); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [][]byte, tracer commitment.CollapseTracer, ownerPath []byte) (bool, error) {
+	if n == nil || n.childMask == 0 {
+		return false, nil
+	}
+	if child := rootExtensionChild(n); child != nil {
+		return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
+	}
+	survivorCount, survivor := 0, 15-bits.LeadingZeros16(n.childMask)
+	for mask := n.childMask; mask != 0; mask &= mask - 1 {
+		nib := bits.TrailingZeros16(mask)
+		childDeletes := deleteRange(deletes, deleteChildPath(n, nib))
+		live := true
+		if n.leafMask&(uint16(1)<<nib) != 0 {
+			live = len(childDeletes) == 0
+		} else if child := n.child(nib); child != nil && len(childDeletes) != 0 {
+			var err error
+			live, err = walkDeletedNode(ctx, g, child, childDeletes, tracer, ownerPath)
+			if err != nil {
+				return false, err
+			}
+		}
+		if live {
+			survivorCount++
+			survivor = nib
+		}
+	}
+	if bits.OnesCount16(n.childMask) >= 2 && survivorCount <= 1 {
+		path, err := collapseSurvivorPath(ctx, g, n, survivor, deleteChildPath(n, survivor))
+		if err != nil {
+			return false, err
+		}
+		tracer(slices.Concat(ownerPath, path), slices.Concat(ownerPath, n.path))
+	}
+	return survivorCount != 0, nil
+}
+
+func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib int, path []byte) ([]byte, error) {
+	if g.plane != planeAccount || n.leafMask&(uint16(1)<<nib) == 0 {
+		return path, nil
+	}
+	_, payload := n.leafAt(nib)
+	_, _, _, storageRoot, err := decodeAccountLeaf(payload)
+	if err != nil || bytes.Equal(storageRoot, empty.RootHash[:]) {
+		return path, nil
+	}
+	addrHash := hashAddressPath(path)
+	storage := graph{plane: planeStorage, addrHash: addrHash[:]}
+	root, err := storage.loadRoot(ctx)
+	if err != nil || root.childMask == 0 {
+		return path, err
+	}
+	switch {
+	case root.isLeafRoot():
+		child := bits.TrailingZeros16(root.childMask)
+		return slices.Concat(path, deleteChildPath(root, child)), nil
+	case root.isExtension():
+		return slices.Concat(path, root.path), nil
+	default:
+		return path, nil
+	}
+}
+
+func deleteChildPath(n *node, nib int) []byte {
+	if n.leafMask&(uint16(1)<<nib) == 0 {
+		return n.childPath(nib, nil)
+	}
+	suffix, _ := n.leafAt(nib)
+	path := append(slices.Clone(n.path), byte(nib))
+	return append(path, unpackPath(suffix, 63-len(n.path), nil)...)
+}
+
+func deleteRange(deletes [][]byte, prefix []byte) [][]byte {
+	start, _ := slices.BinarySearchFunc(deletes, prefix, bytes.Compare)
+	end, _ := slices.BinarySearchFunc(deletes, append(slices.Clone(prefix), 0x10), bytes.Compare)
+	return deletes[start:end]
 }
 
 func splitPrefix(prefix []byte) (plane byte, addrHash, path []byte) {
@@ -133,271 +191,6 @@ func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), pre
 		}
 	}
 	return n, nil
-}
-
-func (s *collapseSim) load(plane byte, addrHash, path []byte) (*node, error) {
-	s.kbuf = nodeKey(plane, addrHash, path, s.kbuf[:0])
-	if n, ok := s.nodes[string(s.kbuf)]; ok {
-		return n, nil
-	}
-	n, err := unfold(s.ctx, path, plane, addrHash)
-	if err != nil {
-		return nil, err
-	}
-	s.nodes[string(s.kbuf)] = n
-	return n, nil
-}
-
-func (s *collapseSim) loadRoot() error {
-	root, err := s.load(planeAccount, nil, nil)
-	if err != nil || root == nil || root.childMask == 0 {
-		return err
-	}
-	switch {
-	case root.isLeafRoot():
-		nib := bits.TrailingZeros16(root.childMask)
-		s.root = recordCell(root, nib, nil)
-		s.root.hext = append([]byte{byte(nib)}, s.root.hext...)
-	case len(root.path) != 0:
-		s.root = collapseCell{hash: true, hext: slices.Clone(root.path)}
-	default:
-		s.root = collapseCell{hash: true}
-	}
-	return nil
-}
-
-func recordCell(n *node, nib int, prefix []byte) collapseCell {
-	bit := uint16(1) << nib
-	if n.leafMask&bit == 0 {
-		var extScratch [64]byte
-		return collapseCell{hash: true, hext: slices.Clone(n.childExtAtInto(nib, extScratch[:0]))}
-	}
-	suffix, payload := n.leafAt(nib)
-	rest := unpackPath(suffix, 64-len(n.path)-1, nil)
-	if n.plane != planeAccount {
-		return collapseCell{stor: true, hext: rest}
-	}
-	c := collapseCell{acct: true, hext: rest}
-	if _, _, _, storageRoot, err := decodeAccountLeaf(payload); err != nil || !bytes.Equal(storageRoot, empty.RootHash[:]) {
-		c.acctKey = slices.Concat(prefix, []byte{byte(nib)}, rest)
-	}
-	return c
-}
-
-func (s *collapseSim) resolve(c *collapseCell) error {
-	if c.acctKey == nil {
-		return nil
-	}
-	addrHash := hashAddressPath(c.acctKey)
-	c.acctKey = nil
-	root, err := s.load(planeStorage, addrHash[:], nil)
-	if err != nil || root == nil || root.childMask == 0 {
-		return err
-	}
-	switch {
-	case root.isLeafRoot():
-		nib := bits.TrailingZeros16(root.childMask)
-		suffix, _ := root.leafAt(nib)
-		c.stor = true
-		c.hext = append(append(c.hext, byte(nib)), unpackPath(suffix, 63, nil)...)
-	case len(root.path) != 0:
-		c.hash = true
-		c.hext = append(c.hext, root.path...)
-	default:
-		c.hash = true
-	}
-	return nil
-}
-
-func clampToAccountBoundary(depth, n int) int {
-	if depth < 64 && depth+n > 64 {
-		return 64 - depth
-	}
-	return n
-}
-
-func (s *collapseSim) needUnfolding(k []byte) (int, error) {
-	var c *collapseCell
-	depth := 0
-	if len(s.rows) == 0 {
-		if len(s.root.hext) == 0 && !s.root.hash {
-			return 0, nil
-		}
-		c = &s.root
-	} else {
-		top := &s.rows[len(s.rows)-1]
-		depth = top.depth
-		if len(k) <= depth {
-			return 0, nil
-		}
-		c = s.cell(top, int(k[len(s.key)]))
-	}
-	if err := s.resolve(c); err != nil {
-		return 0, err
-	}
-	if len(c.hext) == 0 {
-		if !c.hash {
-			return 0, nil
-		}
-		return 1, nil
-	}
-	cpl := nibbles.CommonPrefixLen(k[depth:], c.hext[:len(c.hext)-1])
-	return clampToAccountBoundary(depth, cpl+1), nil
-}
-
-func (s *collapseSim) unfold(k []byte, unfolding int) error {
-	up, upDepth := s.root, 0
-	if len(s.rows) != 0 {
-		top := &s.rows[len(s.rows)-1]
-		upDepth = top.depth
-		up = *s.cell(top, int(k[upDepth-1]))
-		s.key = append(s.key, k[upDepth-1])
-	}
-	if len(up.hext) == 0 {
-		return s.unfoldBranch(upDepth + 1)
-	}
-	lowest := min(unfolding, len(up.hext))
-	depth := upDepth + lowest
-	nib := up.hext[lowest-1]
-	row := collapseRow{after: uint16(1) << nib}
-	row.cells[nib] = fillFromUpper(up, lowest)
-	row.depth = depth
-	s.key = append(s.key, up.hext[:lowest-1]...)
-	s.rows = append(s.rows, row)
-	return nil
-}
-
-func (s *collapseSim) unfoldBranch(depth int) error {
-	n, err := liveBranch(s.load, s.key)
-	if err != nil {
-		return err
-	}
-	if n == nil {
-		return fmt.Errorf("commitment v3: collapse trace found no branch at %x", s.key)
-	}
-	s.rows = append(s.rows, collapseRow{depth: depth, after: n.childMask, lazy: n.childMask, src: n})
-	return nil
-}
-
-func (s *collapseSim) cell(r *collapseRow, nib int) *collapseCell {
-	if bit := uint16(1) << nib; r.lazy&bit != 0 {
-		r.lazy &^= bit
-		r.cells[nib] = recordCell(r.src, nib, s.key[:r.depth-1])
-	}
-	return &r.cells[nib]
-}
-
-func fillFromUpper(up collapseCell, inc int) collapseCell {
-	c := collapseCell{acct: up.acct, stor: up.stor, hash: up.hash, acctKey: up.acctKey}
-	if len(up.hext) > inc {
-		c.hext = slices.Clone(up.hext[inc:])
-	}
-	return c
-}
-
-func (s *collapseSim) updateCell(k []byte, account bool) {
-	c, depth := &s.root, 0
-	if len(s.rows) != 0 {
-		top := &s.rows[len(s.rows)-1]
-		depth = top.depth
-		nib := k[len(s.key)]
-		c = s.cell(top, int(nib))
-		top.after |= uint16(1) << nib
-	}
-	if len(c.hext) == 0 {
-		c.hext = slices.Clone(k[depth:])
-	}
-	if account {
-		c.acct = true
-	} else {
-		c.stor = true
-	}
-}
-
-func (s *collapseSim) deleteCell(k []byte) error {
-	if len(s.rows) >= 2 {
-		parent := &s.rows[len(s.rows)-2]
-		if bits.OnesCount16(parent.after) == 2 {
-			depth := parent.depth - 1
-			for bitset := parent.after; bitset != 0; bitset &= bitset - 1 {
-				if sib := bits.TrailingZeros16(bitset); sib != int(k[depth]) {
-					if err := s.report(parent, depth, sib); err != nil {
-						return err
-					}
-					break
-				}
-			}
-		}
-	}
-	if len(s.rows) == 0 {
-		s.root = collapseCell{}
-		return nil
-	}
-	top := &s.rows[len(s.rows)-1]
-	if top.depth < len(k) {
-		return nil
-	}
-	bit := uint16(1) << k[len(s.key)]
-	top.after &^= bit
-	top.lazy &^= bit
-	top.cells[k[len(s.key)]] = collapseCell{}
-	return nil
-}
-
-func (s *collapseSim) report(row *collapseRow, depth, nib int) error {
-	c := s.cell(row, nib)
-	if err := s.resolve(c); err != nil {
-		return err
-	}
-	s.tracer(slices.Concat(s.key[:depth], []byte{byte(nib)}, c.hext), slices.Clone(s.key[:depth]))
-	return nil
-}
-
-func (s *collapseSim) fold() error {
-	top := len(s.rows) - 1
-	r := &s.rows[top]
-	up, upDepth, nib := &s.root, 0, 0
-	if top > 0 {
-		upDepth = s.rows[top-1].depth
-		nib = int(s.key[upDepth-1])
-		up = s.cell(&s.rows[top-1], nib)
-	}
-	switch bits.OnesCount16(r.after) {
-	case 0:
-		if top > 0 && upDepth != 64 {
-			parent := &s.rows[top-1]
-			parent.after &^= uint16(1) << nib
-			if bits.OnesCount16(parent.after) == 1 {
-				if err := s.report(parent, parent.depth-1, bits.TrailingZeros16(parent.after)); err != nil {
-					return err
-				}
-			}
-		}
-		*up = collapseCell{}
-	case 1:
-		child := bits.TrailingZeros16(r.after)
-		fillFromLower(up, s.cell(r, child), r.depth, s.key[upDepth:], child)
-	default:
-		up.hext = slices.Clone(s.key[upDepth:])
-		if r.depth < 64 {
-			up.acct = false
-		}
-		up.stor, up.hash, up.acctKey = false, true, nil
-	}
-	s.rows = s.rows[:top]
-	s.key = s.key[:max(upDepth-1, 0)]
-	return nil
-}
-
-func fillFromLower(up, low *collapseCell, lowDepth int, pre []byte, nib int) {
-	if low.acct || lowDepth < 64 {
-		up.acct = low.acct
-	}
-	up.stor = low.stor
-	if low.hash && ((!low.acct && lowDepth < 64) || (!low.stor && lowDepth > 64)) {
-		up.hext = slices.Concat(pre, []byte{byte(nib)}, low.hext)
-	}
-	up.hash, up.acctKey = low.hash, nil
 }
 
 type recordCache struct {
