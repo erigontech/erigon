@@ -581,7 +581,6 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 		}
 	}
 
-	const logSize = int(unsafe.Sizeof(types.Log{}))
 	slotBytes := cap(ibs.logs.entries) * 8
 	require.LessOrEqual(t, slotBytes, maxRetainedLogSlots*8, "the run's array")
 	released := releasedLogs(ibs)
@@ -594,6 +593,7 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	}
 	require.LessOrEqual(t, held, maxRetainedLogSlots*(8+logSize+2*32)+maxPooledLogBytes,
 		"an arena holds %dKB after mixed traffic", held/1024)
+	require.GreaterOrEqual(t, ibs.logs.heldBytes(), held, "the parking count covers what the arena holds")
 }
 
 func emitMaxLogs(ibs *IntraBlockState, txIndex int) {
