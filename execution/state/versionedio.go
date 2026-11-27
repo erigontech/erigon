@@ -3037,29 +3037,26 @@ func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, init
 // the entry borrows the canonical bytecode owned by cache.StateCache; applyToCode
 // clones it into the BAL CodeChange so the consensus-visible output owns its bytes.
 type changeTracker[T any] struct {
-	entries map[uint32]T
+	entries []indexedChange[T] // sorted by idx
+}
+
+type indexedChange[T any] struct {
+	idx   uint32
+	value T
 }
 
 func (ct *changeTracker[T]) recordWrite(idx uint32, value T) {
-	if ct.entries == nil {
-		ct.entries = make(map[uint32]T)
+	i, found := slices.BinarySearchFunc(ct.entries, idx, func(e indexedChange[T], idx uint32) int { return cmp.Compare(e.idx, idx) })
+	if found {
+		ct.entries[i].value = value
+		return
 	}
-	ct.entries[idx] = value
+	ct.entries = slices.Insert(ct.entries, i, indexedChange[T]{idx, value})
 }
 
 func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
-	if len(ct.entries) == 0 {
-		return
-	}
-
-	indices := make([]uint32, 0, len(ct.entries))
-	for idx := range ct.entries {
-		indices = append(indices, idx)
-	}
-	slices.Sort(indices)
-
-	for _, idx := range indices {
-		applyFn(idx, ct.entries[idx])
+	for _, e := range ct.entries {
+		applyFn(e.idx, e.value)
 	}
 }
 
