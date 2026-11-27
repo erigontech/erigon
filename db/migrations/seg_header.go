@@ -53,6 +53,10 @@ func UpgradeSegHeaders(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 			if e.IsDir() || !segFormatExts[filepath.Ext(e.Name())] {
 				continue
 			}
+			if e.Type()&os.ModeSymlink != 0 { // its .torrent lives next to the target, out of reach
+				logger.Warn("[seg_header] skipping a symlinked file", "file", e.Name())
+				continue
+			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -163,17 +167,8 @@ func setWordLevelFlags(path string, fc seg.FileCompression) error {
 	if err != nil {
 		return err
 	}
-	if sharesInode(info) { // snapshots are hardlinked as immutable files: patch a private copy
-		tmp := path + ".tmp"
-		if err := datadir.CopyFile(path, tmp); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			return err
-		}
-		if err := dir.FsyncDir(filepath.Dir(path)); err != nil {
-			return err
-		}
+	if sharesInode(info) {
+		return patchCopy(path, info.Mode(), fc)
 	}
 	if err := os.Chmod(path, info.Mode()|0o200); err != nil {
 		return err
@@ -184,6 +179,43 @@ func setWordLevelFlags(path string, fc seg.FileCompression) error {
 		return err
 	}
 	defer f.Close()
+	return patchFlags(f, fc)
+}
+
+// patchCopy patches a private copy and renames it over path: snapshots are hardlinked as
+// immutable files, so an in-place patch would change every link.
+func patchCopy(path string, mode os.FileMode, fc seg.FileCompression) (err error) {
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	tmp, err := dir.CreateTemp(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tmp.Close()
+		if err != nil {
+			_ = dir.RemoveFile(tmp.Name())
+		}
+	}()
+	if _, err = tmp.ReadFrom(src); err != nil {
+		return err
+	}
+	if err = patchFlags(tmp, fc); err != nil {
+		return err
+	}
+	if err = tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if err = os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	return dir.FsyncDir(filepath.Dir(path))
+}
+
+func patchFlags(f *os.File, fc seg.FileCompression) error {
 	bitmask := make([]byte, 1)
 	if _, err := f.ReadAt(bitmask, 1); err != nil {
 		return err

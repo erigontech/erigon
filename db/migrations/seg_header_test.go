@@ -318,3 +318,31 @@ func TestUpgradeSegHeaders_CanceledKeepsHeader(t *testing.T) {
 	require.ErrorIs(t, upgradeSegHeader(ctx, path, log.New()), context.Canceled)
 	requireNotPatched(t, path)
 }
+
+func TestUpgradeSegHeaders_HardlinkKeepsExistingTmp(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
+	require.NoError(t, os.Link(path, filepath.Join(root, "mirror.kv")))
+	require.NoError(t, os.WriteFile(path+".tmp", []byte("keep"), 0o644))
+
+	require.NoError(t, upgradeSegHeader(t.Context(), path, log.New()))
+
+	requireHeader(t, path, seg.CompressVals)
+	tmp, err := os.ReadFile(path + ".tmp")
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(tmp))
+}
+
+func TestUpgradeSegHeaders_SkipsFileSymlinks(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	target := filepath.Join(t.TempDir(), "v1.0-code.0-1024.kv")
+	writeV1SegFile(t, target, seg.CompressVals, manyPairs())
+	require.NoError(t, os.WriteFile(target+".torrent", []byte("t"), 0o644))
+	require.NoError(t, os.Symlink(target, filepath.Join(dirs.SnapDomain, filepath.Base(target))))
+
+	require.NoError(t, UpgradeSegHeaders(t.Context(), dirs, log.New()))
+
+	requireNotPatched(t, target)
+	require.FileExists(t, target+".torrent")
+}
