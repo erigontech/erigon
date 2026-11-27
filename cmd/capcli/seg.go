@@ -48,28 +48,7 @@ func segCommand() *cli.Command {
 		Name:        "seg",
 		Usage:       "inspect and manage snapshot segments",
 		Description: "Read and manage Caplin snapshot files and retention metadata. Read-only commands do not take the datadir lock; commands that write segments, the index, or the stored regime take it.",
-		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand(), caplinResetCommand(), caplinRegimeCommand(), caplinCheckManifestCommand()},
-	}
-}
-
-func caplinRegimeCommand() *cli.Command {
-	return &cli.Command{
-		Usage:       "show or set the Caplin retention regime; show reads without a lock, set writes with the datadir lock",
-		Description: "Show reads the stored Caplin regime, oldest stored data, and local sidecar files without writing or taking the datadir lock. Set validates and writes a regime while holding the datadir lock.",
-	}
-}
-
-func caplinResetCommand() *cli.Command {
-	return &cli.Command{
-		Usage:       "reset Caplin snapshot segments; reads and writes files and the index with the datadir lock",
-		Description: "Prints or applies a Caplin reset plan. Both dry runs and writes take the datadir lock; only a write changes files or index rows.",
-	}
-}
-
-func caplinRetireCommand() *cli.Command {
-	return &cli.Command{
-		Usage:       "retire Caplin snapshots; reads and writes files and the index with the datadir lock",
-		Description: "Retires Caplin block, blob, and state data and may compact the Caplin index. It takes the datadir lock for the full operation.",
+		Commands:    []*cli.Command{caplinDuCommand()},
 	}
 }
 
