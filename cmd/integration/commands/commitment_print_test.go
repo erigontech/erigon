@@ -18,15 +18,14 @@ package commands
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/execfinality"
 )
 
 func TestCommitmentPrint(t *testing.T) {
@@ -39,7 +38,7 @@ func TestCommitmentPrint(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
 			db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 			agg, roots := fillAccountState(t, db, 64, 5)
-			require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+			require.NoError(t, agg.BuildFiles(db, 48, math.MaxUint64))
 
 			acRo := agg.BeginFilesRo()
 			defer acRo.Close()
