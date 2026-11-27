@@ -46,6 +46,10 @@ const (
 
 	// Room for maxLogsPerTxn entries: append grows the run to 48128 slots on the way.
 	maxRetainedLogSlots = 64 * 1024
+
+	// A pooled IntraBlockState outlives its call, so it keeps no more than a p99
+	// block's ~1700 logs.
+	maxPooledStateLogs = maxLogsPerTxn / 10
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
