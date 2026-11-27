@@ -1519,7 +1519,7 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 // for the same slot, and a missed read index leaves a superseded read behind.
 func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
-	account := newAccountState(addr)
+	account := NewBlockAccessListBuilder().account(addr)
 	key := func(n int64) accounts.StorageKey {
 		return accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(n)))
 	}
@@ -1557,7 +1557,7 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 // A slot read by many txs must occupy one storageReads entry, otherwise finalize
 // sorts one entry per read instead of one per slot.
 func TestAccountState_RepeatedReadsKeepOneEntry(t *testing.T) {
-	account := newAccountState(accounts.InternAddress(common.HexToAddress("0xbeef")))
+	account := NewBlockAccessListBuilder().account(accounts.InternAddress(common.HexToAddress("0xbeef")))
 	slot := accounts.InternKey(common.HexToHash("0x01"))
 	for range 3 {
 		account.updateReadStorage(slot, *uint256.NewInt(7))
@@ -1579,7 +1579,7 @@ func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
 			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
 		}
 
-		account := newAccountState(addr)
+		account := NewBlockAccessListBuilder().account(addr)
 		ref := newReferenceAccount(addr)
 		for op := range 4 * nSlots {
 			k := keys[r.Intn(nSlots)]
