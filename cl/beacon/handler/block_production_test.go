@@ -6010,7 +6010,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 		clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
 		handler.ethClock = clock
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		produceCalls := 0
 		handler.attestationProducer = cachedAttestationDataProducer{
 			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
@@ -6048,7 +6048,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
 		handler, fcu, slot, produceCalls := setup(t)
-		handler.attestationDataImportWait = defaultAttestationDataImportWait
+		handler.importWait = defaultImportWait
 		var attempts atomic.Int64
 		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
 			return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
@@ -6062,8 +6062,8 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		elapsed := time.Since(start)
 		require.Equal(t, http.StatusOK, status)
 		require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-		require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+		require.GreaterOrEqual(t, elapsed, 2*importPollInterval)
+		require.Less(t, elapsed, defaultImportWait/2)
 		require.Zero(t, *produceCalls)
 	})
 
@@ -6177,7 +6177,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationDataImportWait = 60 * time.Millisecond
+			handler.importWait = 60 * time.Millisecond
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -6269,7 +6269,7 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot + 1).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6307,7 +6307,7 @@ func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) 
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6387,7 +6387,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-			handler.attestationDataImportWait = 20 * time.Millisecond
+			handler.importWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
 			cfg.InitializeForkSchedule()
@@ -6501,7 +6501,7 @@ func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T)
 	setup := func(t *testing.T) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, func(), *atomic.Int32) {
 		t.Helper()
 		_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		handler.aggregatePool = nil
 		cfg := handler.beaconChainCfg
 		cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
