@@ -70,7 +70,7 @@ func TestNewWriterSetsV2Header(t *testing.T) {
 		{"CompressNone", CompressNone, false, false},
 		{"CompressKeys", CompressKeys, true, false},
 		{"CompressVals", CompressVals, false, true},
-		{"CompressKeysVals", CompressKeys | CompressVals, true, true},
+		{"CompressKeysAndVals", CompressKeys | CompressVals, true, true},
 	}
 
 	for _, tc := range cases {

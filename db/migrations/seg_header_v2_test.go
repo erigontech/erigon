@@ -104,7 +104,7 @@ func TestUpgradeSegHeadersV2(t *testing.T) {
 		{"kv_none", "v1.0-accounts.0-1024.kv", seg.CompressNone},
 		{"kv_keys", "v1.0-storage.0-1024.kv", seg.CompressKeys},
 		{"kv_vals", "v1.0-code.0-1024.kv", seg.CompressVals},
-		{"v_keysvals", "v1.0-code.0-1024.v", seg.CompressKeys | seg.CompressVals},
+		{"v_keys_and_vals", "v1.0-code.0-1024.v", seg.CompressKeys | seg.CompressVals},
 		{"ef_none", "v1.0-logaddrs.0-1024.ef", seg.CompressNone},
 	}
 
