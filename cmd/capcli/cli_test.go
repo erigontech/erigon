@@ -758,15 +758,23 @@ func TestBeaconAPIEmptyData(t *testing.T) {
 		body    string
 		request func(string) error
 		want    string
+		rootErr bool
 	}{
-		{"head", `{"data":[]}`, func(base string) error { _, err := getHead(t.Context(), base); return err }, "no head found"},
-		{"missing root", `{"data":{}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err }, "no state root found"},
-		{"empty root", `{"data":{"root":""}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err }, "no state root found"},
+		{"head", `{"data":[]}`, func(base string) error { _, err := getHead(t.Context(), base); return err }, "beacon eth/v2/debug/beacon/heads: no head found", false},
+		{"invalid head slot", `{"data":[{"slot":"query-secret"}]}`, func(base string) error { _, err := getHead(t.Context(), base); return err }, "beacon eth/v2/debug/beacon/heads: invalid beacon head slot", false},
+		{"missing root", `{"data":{}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 42); return err }, "beacon eth/v1/beacon/states/42/root: no state root found", true},
+		{"empty root", `{"data":{"root":""}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 42); return err }, "beacon eth/v1/beacon/states/42/root: no state root found", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
 			t.Cleanup(srv.Close)
-			require.EqualError(t, tc.request(srv.URL), tc.want)
+			err := tc.request(srv.URL + "?apikey=query-secret")
+			if tc.rootErr {
+				require.ErrorIs(t, err, errNoStateRoot)
+			}
+			require.ErrorContains(t, err, tc.want)
+			require.NotContains(t, err.Error(), "query-secret")
+			require.NotContains(t, err.Error(), srv.URL)
 		})
 	}
 }

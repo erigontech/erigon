@@ -797,7 +797,7 @@ func getBeaconJSON(ctx context.Context, beaconApiURL, path string, out any) (int
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, fmt.Errorf("beacon %s: %w", path, fmt.Errorf("bad status code %d", resp.StatusCode))
+		return resp.StatusCode, fmt.Errorf("beacon %s: bad status code %d", path, resp.StatusCode)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return resp.StatusCode, fmt.Errorf("beacon %s: %w", path, err)
@@ -815,11 +815,11 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 		return 0, err
 	}
 	if len(headResponse.Data) == 0 {
-		return 0, errors.New("no head found")
+		return 0, errors.New("beacon eth/v2/debug/beacon/heads: no head found")
 	}
 	slot, err := strconv.ParseUint(headResponse.Data[0].Slot, 10, 64)
 	if err != nil {
-		return 0, errors.New("invalid beacon head slot")
+		return 0, errors.New("beacon eth/v2/debug/beacon/heads: invalid beacon head slot")
 	}
 	return slot, nil
 }
@@ -853,18 +853,16 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 			Root beaconRoot `json:"root"`
 		} `json:"data"`
 	}
-	status, err := getBeaconJSON(ctx, beaconApiURL, fmt.Sprintf("eth/v1/beacon/states/%d/root", slot), &response)
+	path := fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)
+	status, err := getBeaconJSON(ctx, beaconApiURL, path, &response)
 	if status == http.StatusNotFound {
 		return common.Hash{}, nil
-	}
-	if errors.Is(err, errNoStateRoot) {
-		return common.Hash{}, errNoStateRoot
 	}
 	if err != nil {
 		return common.Hash{}, err
 	}
 	if response.Data.Root.hash == (common.Hash{}) {
-		return common.Hash{}, errNoStateRoot
+		return common.Hash{}, fmt.Errorf("beacon %s: %w", path, errNoStateRoot)
 	}
 	return response.Data.Root.hash, nil
 }
