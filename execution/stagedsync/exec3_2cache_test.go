@@ -19,6 +19,7 @@ package stagedsync
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"os"
 	"runtime"
@@ -520,4 +521,41 @@ func TestNotifyAccumulatorChunksStayInsideTheBlock(t *testing.T) {
 	hdr.Number.SetUint64(1)
 	accumulator.StartChange(&hdr, nil, false)
 	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
+}
+
+func BenchmarkNotifyAccumulatorChunks(b *testing.B) {
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc0"))
+	addrOf := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1000))))
+	}
+	defer state.SetBlockEndChunks(512, 1024)
+	for _, txs := range []int{128, 256, 512, 768, 1024, 1536, 2048, 4096, 8192} {
+		tx, domains := setup2CacheTest(b)
+		rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+		writes := make([]state.WriteSetView, txs)
+		for i := range writes {
+			ws := newWS()
+			for _, addr := range []accounts.Address{addrOf(2 * i), addrOf(2*i + 1), coinbase} {
+				val := addr.Value()
+				seed := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100), Incarnation: 1}
+				require.NoError(b, domains.DomainPut(kv.AccountsDomain, tx, val[:], accounts.SerialiseV3(&seed), 0, nil))
+				ws.bal(addr, state.Version{TxIndex: i}, *uint256.NewInt(uint64(i)))
+			}
+			ws.nonce(addrOf(2*i), state.Version{TxIndex: i}, uint64(i))
+			writes[i] = ws.build()
+		}
+		accumulator := shards.NewAccumulator()
+		var hdr types.Header
+		hdr.Number.SetUint64(1)
+		for _, per := range []int{1 << 30, 128, 256, 512, 1024} {
+			b.Run(fmt.Sprintf("writesets=%d/per=%d", txs, per), func(b *testing.B) {
+				state.SetBlockEndChunks(per, 1024)
+				for b.Loop() {
+					accumulator.Reset()
+					accumulator.StartChange(&hdr, nil, false)
+					require.NoError(b, rs.NotifyAccumulator(accumulator, tx, writes))
+				}
+			})
+		}
+	}
 }

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-const notifyWriteSetsPerWorker = 512
+var notifyWriteSetsPerWorker = 512
 
 type notifyOpKind uint8
 
