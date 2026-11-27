@@ -103,11 +103,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	change := msg.SignedBLSToExecutionChange.Message
-	if _, ok := s.seen.Get(change.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
-		return ErrIgnore
+	if !msg.ImmediateVerification {
+		if _, seen := s.seen.Get(change.ValidatorIndex); seen || s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
+			return ErrIgnore
+		}
 	}
 
 	var wc, genesisValidatorRoot common.Hash

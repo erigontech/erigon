@@ -124,11 +124,24 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 		wantInPool    bool
 	}{
 		{
-			name: "signature already exists in pool",
+			name: "gossip signature already exists in pool",
 			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, _ *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				msg.ImmediateVerification = false
 				testCtx.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 			},
 			wantErr:    ErrIgnore,
+			wantInPool: true,
+		},
+		{
+			name: "immediate verification checks a signature already in pool",
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				testCtx.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From))
+				syncHeadState(t, testCtx.syncedData, st)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "ComputeSigningRoot", msg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+			},
+			wantErr:    ErrInvalidBlsSignature,
 			wantInPool: true,
 		},
 		{
@@ -238,7 +251,11 @@ func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
 	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), credentials)
 	syncHeadState(t, testCtx.syncedData, st)
 
-	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	require.ErrorContains(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), "invalid withdrawal credentials prefix")
+
+	gossipMsg := *msg
+	gossipMsg.ImmediateVerification = false
+	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, &gossipMsg), ErrIgnore)
 	require.True(t, testCtx.gomockCtrl.Satisfied())
 }
 
