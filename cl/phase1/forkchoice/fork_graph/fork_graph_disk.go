@@ -398,10 +398,13 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 				if precomputedErr != nil {
 					recordNextEpochStateOutcome("invalid", block.Slot)
 				}
-				// Add block to list of invalid blocks
 				log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 				f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-				f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+				// The block root does not cover the signature: a copy with a bad proposer signature does not
+				// make the block with this root invalid.
+				if !errors.Is(invalidBlockErr, eth2.ErrInvalidBlockSignature) {
+					f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+				}
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
 				return nil, InvalidBlock, invalidBlockErr
