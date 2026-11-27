@@ -669,7 +669,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewSizedBlockAccessListBuilder(applyResult.balAccounts)
+							balBuilder = state.NewBlockAccessListBuilder()
 						}
 						for balBuilder.Next()+1 < applyResult.balSealed {
 							i := balBuilder.Next()
@@ -1735,9 +1735,8 @@ type txResult struct {
 	rules                 *chain.Rules
 	// txIO and balSealed hand over the block's sealed reads and writes, tx indexes
 	// −1..balSealed−2, so the apply loop builds the block access list while the block runs.
-	txIO        *state.VersionedIO
-	balSealed   int
-	balAccounts int // accounts in the block's BAL sidecar, 0 without one
+	txIO      *state.VersionedIO
+	balSealed int
 	// isFinalize marks block-end writes and logs, which have no receipt.
 	// The apply loop indexes these logs without changing the receipt cache.
 	isFinalize bool
@@ -3392,7 +3391,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if (task.Rules().IsAmsterdam || pe.cfg.experimentalBAL) && be.tasks[0].Task.Version().TxIndex == -1 {
 				applyResult.txIO = be.blockIO
 				applyResult.balSealed = min(task.Version().TxIndex+2, finalIndex+1)
-				applyResult.balAccounts = len(be.balSidecar.BlockAccessList())
 			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
