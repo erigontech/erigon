@@ -322,13 +322,6 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
-	historicalState := raw.New(a.beaconChainCfg)
-	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
-	if epoch == a.beaconChainCfg.FuluForkEpoch && historicalState.Version() >= clparams.FuluVersion {
-		historicalState.SetVersion(clparams.FuluVersion)
-	}
-	historicalState.SetValidators(validatorSet)
-
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
 	activeIndices := make([]uint64, 0, validatorSet.Length())
@@ -351,6 +344,13 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	if mix == (common.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
 	}
+
+	historicalState := raw.New(a.beaconChainCfg)
+	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
+	if epoch == a.beaconChainCfg.FuluForkEpoch && historicalState.Version() >= clparams.FuluVersion {
+		historicalState.SetVersion(clparams.FuluVersion)
+	}
+	historicalState.SetValidators(validatorSet)
 
 	epochSeed := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
 	seedArray := [32]byte{}
