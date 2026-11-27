@@ -242,7 +242,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
-	if a.archiveStates {
+	if a.stateReader.ArchiveStates() {
 		stateGetter, err = historicalDutiesStateGetter(tx, readiness, slot, kv.ActiveValidatorIndicies, a.beaconChainCfg)
 		if err != nil {
 			return nil, err

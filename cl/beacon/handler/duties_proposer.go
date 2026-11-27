@@ -93,7 +93,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return nil, err
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
-		if a.archiveStates {
+		if a.stateReader.ArchiveStates() {
 			stateGetter, err = historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg)
 			if err != nil {
 				return nil, err
@@ -107,7 +107,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if err != nil {
 			return nil, err
 		}
-		if !a.archiveStates {
+		if !a.stateReader.ArchiveStates() {
 			progress := readiness.progress
 			if a.caplinStateSnapshots != nil {
 				progress = max(progress, a.caplinStateSnapshots.BlocksAvailable())
@@ -311,7 +311,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 }
 
 func (a *ApiHandler) historicalProposerMissingRootStatus() int {
-	if !a.archiveStates {
+	if !a.stateReader.ArchiveStates() {
 		return http.StatusNotFound
 	}
 	return http.StatusInternalServerError

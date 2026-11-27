@@ -216,7 +216,6 @@ type ApiHandler struct {
 	netConfig            *clparams.NetworkConfig
 	ethClock             eth_clock.EthereumClock
 	beaconChainCfg       *clparams.BeaconChainConfig
-	archiveStates        bool
 	forkchoiceStore      forkchoice.ForkChoiceStorage
 	operationsPool       pool.OperationsPool
 	syncedData           synced_data.SyncedData
@@ -346,7 +345,6 @@ func NewApiHandler(
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
 	rebuilder envelopeRebuilder,
-	archiveStates bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
@@ -386,7 +384,6 @@ func NewApiHandler(
 		netConfig:             netConfig,
 		ethClock:              ethClock,
 		beaconChainCfg:        beaconChainConfig,
-		archiveStates:         archiveStates,
 		indiciesDB:            indiciesDB,
 		forkchoiceStore:       forkchoiceStore,
 		operationsPool:        operationsPool,

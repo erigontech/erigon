@@ -292,6 +292,12 @@ func (s *StaticValidatorTable) SetReplayEnabled(enabled bool) {
 	s.replayDisabled = !enabled
 }
 
+func (s *StaticValidatorTable) ReplayEnabled() bool {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return !s.replayDisabled
+}
+
 func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()

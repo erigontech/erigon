@@ -670,7 +670,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 			envelopeRebuilder,
-			config.ArchiveStates,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
 		apiHandler.StartPayloadAttributes(ctx)

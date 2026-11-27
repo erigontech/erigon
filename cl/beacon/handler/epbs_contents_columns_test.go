@@ -235,7 +235,6 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 		nil,
 		nil,
 		nil,
-		true,
 	)
 	cfg.GloasForkEpoch = 0
 	if slot == 0 {

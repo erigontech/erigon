@@ -71,6 +71,10 @@ func NewHistoricalStatesReader(
 	}
 }
 
+func (r *HistoricalStatesReader) ArchiveStates() bool {
+	return r.validatorTable.ReplayEnabled()
+}
+
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	var snapshotView *snapshotsync.CaplinStateView
 	if r.stateSn != nil {

@@ -525,7 +525,10 @@ func TestHistoricalProposerDutiesValidatorTableRewind(t *testing.T) {
 	duties, err := handler.getHistoricalProposerDuties(t.Context(), tx, getter, 3, 96)
 	require.Equal(t, uint64(95), validatorTable.Slot())
 	require.Error(t, err, "returned %d proposer duties after rewind", len(duties))
-	require.Equal(t, http.StatusServiceUnavailable, beaconhttp.WrapEndpointError(err).Code)
+	require.ErrorIs(t, err, state_accessors.ErrValidatorTableBehind)
+	endpointErr := beaconhttp.WrapEndpointError(err)
+	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
+	require.Contains(t, endpointErr.Message, "slot 96")
 }
 
 func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
@@ -846,8 +849,10 @@ func TestHistoricalDutiesWithoutArchive(t *testing.T) {
 		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-			h.archiveStates = false
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			table := state_accessors.NewStaticValidatorTable()
+			table.SetReplayEnabled(false)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
 			fcu.FinalizedSlotVal = 127
 			lowest := uint64(97)
 			fcu.LowestAvailableSlotVal = &lowest
@@ -876,7 +881,6 @@ func TestHistoricalDutiesWithoutArchive(t *testing.T) {
 
 func TestHistoricalProposerWithoutArchiveRetainedProgress(t *testing.T) {
 	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	h.archiveStates = false
 	fcu.FinalizedSlotVal = 127
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
@@ -884,7 +888,9 @@ func TestHistoricalProposerWithoutArchiveRetainedProgress(t *testing.T) {
 		}
 		return state_accessors.SetStateProcessingProgress(tx, 96)
 	}))
-	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, state_accessors.NewStaticValidatorTable(), preState, nil, h.syncedData)
+	table := state_accessors.NewStaticValidatorTable()
+	table.SetReplayEnabled(false)
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
 	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
 	require.Equal(t, http.StatusBadRequest, status, body)
 }
