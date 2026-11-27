@@ -152,7 +152,7 @@ type TxPool struct {
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
-	deletedTxns             []*metaTxn                       // rows to delete at the next flush: discarded txns and rows rejected on reload
+	deletedTxns             []*metaTxn                       // rows to delete and unused sender IDs to release at the next flush
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config

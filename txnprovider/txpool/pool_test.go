@@ -663,11 +663,11 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 // On reload, addLocked drops blob txns below p.pendingBlobFee, and the next flush deletes their rows.
 func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	const blobFee = 1_000_000
-	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, poolDB, _ := newTestPool(t)
+	pricedSender, underpricedSender := common.Address{1}, common.Address{2}
 
-	blobTxn := func(nonce, blobFeeCap uint64) ([]byte, common.Hash) {
+	blobTxn := func(sender common.Address, blobFeeCap uint64) ([]byte, common.Hash) {
 		wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
-		wrapped.Tx.Nonce = nonce
 		wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(blobFeeCap)
 		wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
 		wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
@@ -675,8 +675,8 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 		require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
 		return append(sender[:], encoded.Bytes()...), wrapped.Tx.Hash()
 	}
-	priced, pricedHash := blobTxn(0, 2*blobFee)
-	underpriced, underpricedHash := blobTxn(1, blobFee/2)
+	priced, pricedHash := blobTxn(pricedSender, 2*blobFee)
+	underpriced, underpricedHash := blobTxn(underpricedSender, blobFee/2)
 
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := tx.Put(kv.PoolTransaction, pricedHash[:], priced); err != nil {
@@ -685,16 +685,22 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
 	}))
 
-	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0, pricedSender, underpricedSender)
 	reset.PendingBlobFeePerGas = blobFee
 	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(pricedHash[:]))
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
+	_, ok := pool.senders.getID(underpricedSender)
+	require.True(t, ok)
 
 	_, err := pool.flush(ctx)
 	require.NoError(t, err)
+	_, ok = pool.senders.getID(underpricedSender)
+	require.False(t, ok, "flush must release the sender ID when its only transaction was rejected")
+	_, ok = pool.senders.getID(pricedSender)
+	require.True(t, ok)
 	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 		has, err := tx.Has(kv.PoolTransaction, underpricedHash[:])
 		require.NoError(t, err)
