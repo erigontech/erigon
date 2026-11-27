@@ -2033,7 +2033,7 @@ func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dir
 func warnLegacyCommitmentDatadir(dirs datadir.Dirs, chain string, logger log.Logger, downloadsEnabled bool) {
 	logger.Warn("[commitment] the datadir holds legacy commitment, so erigon keeps the legacy commitment trie; new datadirs use the v3 trie")
 	if _, known := snapcfg.KnownCfg(chain); known && downloadsEnabled {
-		logger.Warn("[commitment] to move this node to the v3 trie: stop erigon, run the command below, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: erigon seg reset --datadir=\"" + dirs.DataDir + "\" --chain=" + chain)
+		logger.Warn("[commitment] to move this node to the v3 trie: stop erigon, run the command at the end of this line, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: erigon seg reset --datadir=\"" + dirs.DataDir + "\" --chain=" + chain)
 		logger.Warn("[commitment] `erigon seg reset` removes chaindata and the snapshot files that are not in the published snapshot list, which includes the legacy commitment files; add --dry-run to list them first")
 	}
 	logger.Warn(fmt.Sprintf("[commitment] to keep the legacy trie without these warnings, start erigon with --%s=false", ExperimentalCommitmentV3Flag.Name))
