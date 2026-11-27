@@ -3048,7 +3048,7 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	if pt.parked {
 		pt.parked = false
 		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt) {
+		if !be.requeueAt(tx, tx-1, pt, be.wakeAt) {
 			be.pool.push(pt)
 		}
 		return
@@ -3078,19 +3078,6 @@ func (be *blockExecutor) signalValidated(tx int) {
 	}
 }
 
-// requeueAtValidated registers pt to be re-queued when target validates or commits.
-// Returns false when target already committed; the caller then continues in place.
-func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
-	be.checkWaitTarget(tx, target)
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
-	return true
-}
-
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
@@ -3102,16 +3089,16 @@ func (be *blockExecutor) dispatchLimit(workers int) int {
 	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
-// requeueAt registers pt to be re-queued when the frontier reaches target. Returns
+// requeueAt registers pt in queue (wakeAt or wakeValidated) under target. Returns
 // false when the frontier is already there; the caller then continues in place.
-func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
+func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask, queue map[int][]*poolTask) bool {
 	be.checkWaitTarget(tx, target)
 	be.wakeMu.Lock()
 	defer be.wakeMu.Unlock()
 	if int(be.committedFrontier.Load()) >= target {
 		return false
 	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
+	queue[target] = append(queue[target], pt)
 	return true
 }
 

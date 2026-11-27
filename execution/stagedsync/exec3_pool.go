@@ -170,7 +170,7 @@ func (pt *poolTask) bumpInc(p *taskPool) bool {
 
 func (pt *poolTask) waitThen(t, next int) bool {
 	pt.next = next
-	return !pt.be.requeueAt(pt.tv.index, t, pt)
+	return !pt.be.requeueAt(pt.tv.index, t, pt, pt.be.wakeAt)
 }
 
 const poolNamedReruns = 3
@@ -179,7 +179,7 @@ func (pt *poolTask) rerunAfter(named int) bool {
 	pt.reruns++
 	if pt.reruns <= poolNamedReruns {
 		pt.next = psReexec
-		return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
+		return !pt.be.requeueAt(pt.tv.index, named, pt, pt.be.wakeValidated)
 	}
 	return pt.waitThen(pt.tv.index-1, psReexec)
 }
