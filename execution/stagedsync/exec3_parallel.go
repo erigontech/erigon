@@ -3220,7 +3220,7 @@ func (be *blockExecutor) validateNow(txIdx int) (bool, int) {
 			}
 			return state.VersionValid
 		}, false, "")
-	if valid != state.VersionValid || blocker < 0 {
+	if blocker < 0 {
 		blocker = tx - 1
 	}
 	return valid == state.VersionValid && !invalid, blocker
