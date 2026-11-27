@@ -742,7 +742,7 @@ func TestCallBlockRewardSystemCallHashError(t *testing.T) {
 	defer tx.Rollback()
 	api := newTraceApiForTest(m)
 	readErr := errors.New("ancestor lookup failed")
-	api._blockReader = failHeaderReadBlockReader{FullBlockReader: m.BlockReader, blockNumber: 1, err: readErr}
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: m.BlockReader, hash: generated.Blocks[2].ParentHash(), err: readErr}
 	called := false
 	_, _, err = api.callBlock(t.Context(), tx, generated.Blocks[2], nil, m.ChainConfig, nil, func(syscall protocolrules.SystemCall) error {
 		called = true
@@ -776,4 +776,44 @@ func TestCallBlockRewardSystemCallParentHash(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 32)
 	require.Equal(t, block.ParentHash(), common.BytesToHash(result))
+}
+
+type blockHashRewardEngine struct {
+	protocolrules.Engine
+	contract accounts.Address
+	result   []byte
+	called   bool
+}
+
+func (e *blockHashRewardEngine) CalculateRewards(_ *chain.Config, _ *types.Header, _ []*types.Header, syscall protocolrules.SystemCall) ([]protocolrules.Reward, error) {
+	e.called = true
+	e.result, _ = syscall(e.contract, nil)
+	return nil, nil
+}
+
+func TestTraceBlockRewardMissingAncestor(t *testing.T) {
+	for _, offset := range []byte{2, 3} {
+		t.Run(fmt.Sprintf("offset_%d", offset), func(t *testing.T) {
+			contract := common.HexToAddress("0xc0de")
+			code := []byte{byte(vm.PUSH1), offset, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+			genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			generated, err := m.GenerateChain(4, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			api := newTraceApiForTest(m)
+			api._blockReader = hideHeaderBlockReader{FullBlockReader: m.BlockReader, blockNumber: 2}
+			engine := &blockHashRewardEngine{Engine: m.Engine, contract: accounts.InternAddress(contract)}
+			api._engine = engine
+			_, err = api.Block(t.Context(), rpc.BlockNumber(4), nil)
+			require.True(t, engine.called)
+			if offset == 2 {
+				require.NoError(t, err)
+				require.Len(t, engine.result, 32)
+				require.Equal(t, generated.Blocks[1].Hash(), common.BytesToHash(engine.result))
+			} else {
+				require.ErrorContains(t, err, "header 2")
+			}
+		})
+	}
 }
