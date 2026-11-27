@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 
@@ -49,6 +50,16 @@ var (
 		Usage:    "Print files that would be removed, but do not remove them.",
 		Value:    false,
 		Aliases:  []string{"n"},
+		Category: "Reset",
+	}
+	caplinResetFlag = cli.BoolFlag{
+		Name:     "caplin",
+		Usage:    "reset Caplin snapshot files and derived indexes",
+		Category: "Reset",
+	}
+	forceResetFlag = cli.BoolFlag{
+		Name:     "force",
+		Usage:    "delete Caplin files that have no preverified replacement",
 		Category: "Reset",
 	}
 )
@@ -87,6 +98,8 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	allowMixedState := cliCtx.Bool(allowMixedStateFlag.Name)
 	dryRun := cliCtx.Bool(dryRunFlag.Name)
+	caplinEnabled := cliCtx.Bool(caplinResetFlag.Name)
+	caplinForce := cliCtx.Bool(forceResetFlag.Name)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
 
@@ -122,20 +135,14 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	defer unlock()
 
-	err = snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, "")
+	preverifiedSnapshots, err := resetPreverifiedItems(ctx, cliCtx, dirs, chainName, caplinEnabled)
 	if err != nil {
-		return
-	}
-
-	cfg, known := snapcfg.KnownCfg(chainName)
-	if !known {
-		// Wtf does this even imply?
-		return fmt.Errorf("config for chain %v is not known", chainName)
+		return err
 	}
 	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
 	logger.Info(
 		"Loaded preverified snapshots hashes",
-		"len", len(cfg.Preverified.Items),
+		"len", len(preverifiedSnapshots),
 		"chain", chainName,
 	)
 
@@ -150,21 +157,51 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	//	return fmt.Errorf("opening datadir: %w", err)
 	//}
 
+	var caplinDB kv.RwDB
+	var caplinPlan *reset.CaplinResetPlan
+	if caplinEnabled {
+		caplinDB, err = reset.OpenCaplinDB(ctx, dirs.CaplinIndexing, logger, dryRun)
+		if err != nil {
+			return err
+		}
+		if caplinDB != nil {
+			defer caplinDB.Close()
+		}
+		plan, planErr := reset.BuildCaplinResetPlan(ctx, dirs, preverifiedSnapshots, caplinDB, !keepLocal, logger)
+		if planErr != nil {
+			return planErr
+		}
+		caplinPlan = &plan
+		if dryRun {
+			plan.Format(os.Stdout)
+		}
+	}
+	removeFunc := func(osName reset.OsFilePath) error {
+		if dryRun {
+			println(osName)
+			return nil
+		}
+		logger.Debug("Removing datadir file", "name", osName)
+		return dir.RemoveFile(string(osName))
+	}
+	var applyCaplin func() error
+	if caplinEnabled && !dryRun {
+		applyCaplin = func() error {
+			return caplinPlan.Apply(ctx, caplinDB, func(path string) error {
+				return removeFunc(reset.OsFilePath(path))
+			}, caplinForce)
+		}
+	}
+
 	r := reset.Reset{
 		Dirs:                  &dirs,
 		RemoveUnknown:         !keepLocal,
 		AllowMixedStateBuilds: allowMixedState,
 		Logger:                logger,
-		PreverifiedSnapshots:  cfg.Preverified.Items,
-		RemoveFunc: func(osName reset.OsFilePath) error {
-			if dryRun {
-				println(osName)
-				return nil
-			}
-			logger.Debug("Removing datadir file", "name", osName)
-			//return datadirOsRoot.Remove(string(osName))
-			return dir.RemoveFile(string(osName))
-		},
+		PreverifiedSnapshots:  preverifiedSnapshots,
+		CaplinEnabled:         caplinEnabled,
+		ApplyCaplin:           applyCaplin,
+		RemoveFunc:            removeFunc,
 	}
 	err = r.Run()
 	if err != nil {
@@ -174,6 +211,29 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 		logger.Info("Reset complete. Start Erigon as usual, missing files will be downloaded.")
 	}
 	return
+}
+
+func resetPreverifiedItems(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, chainName string, caplinEnabled bool) (preverified.SortedItems, error) {
+	if caplinEnabled {
+		localPath := dirs.PreverifiedPath()
+		if localData, localErr := os.ReadFile(localPath); localErr == nil {
+			override := os.Getenv(snapcfg.RemotePreverifiedEnvKey)
+			if override == "" {
+				return snapcfg.ParseToml(localData)
+			}
+			if _, overrideErr := os.Stat(override); errors.Is(overrideErr, os.ErrNotExist) {
+				return snapcfg.ParseToml(localData)
+			}
+		}
+	}
+	if err := snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, ""); err != nil {
+		return nil, err
+	}
+	cfg, known := snapcfg.KnownCfg(chainName)
+	if !known {
+		return nil, fmt.Errorf("config for chain %v is not known", chainName)
+	}
+	return cfg.Preverified.Items, nil
 }
 
 func getChainNameFromChainData(ctx context.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {

@@ -42,6 +42,8 @@ type Reset struct {
 	// AllowMixedStateBuilds skips the commitment/state build check.
 	AllowMixedStateBuilds bool
 	Dirs                  *datadir.Dirs
+	CaplinEnabled         bool
+	ApplyCaplin           func() error
 
 	stats struct {
 		removed  Stats
@@ -290,6 +292,11 @@ func (reset *Reset) Run() (err error) {
 			return mixed
 		}
 	}
+	if reset.CaplinEnabled && reset.ApplyCaplin != nil {
+		if applyErr := reset.ApplyCaplin(); applyErr != nil {
+			return applyErr
+		}
+	}
 	logger.Info("Resetting snapshots directory", "path", reset.pathForLog(datadir.SnapDir))
 	err = reset.doSnapshots()
 	if err != nil {
@@ -384,7 +391,8 @@ func (reset *Reset) doSnapshots() (err error) {
 		itemName, _ = strings.CutSuffix(itemName, ".part")
 		itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")
 		item, ok := reset.PreverifiedSnapshots.Get(itemName)
-		doRemove := reset.decideRemove(resetItemInfo{
+		keep := reset.CaplinEnabled && (itemName == datadir.PreverifiedFileName || itemName == "caplin" || strings.HasPrefix(itemName, "caplin/") || isCaplinResetName(itemName))
+		doRemove := !keep && reset.decideRemove(resetItemInfo{
 			filePath:      filePath,
 			snapName:      itemName,
 			hash:          func() g.Option[string] { return g.OptionFromTuple(item.Hash, ok) }(),

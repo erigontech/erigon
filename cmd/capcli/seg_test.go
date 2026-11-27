@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/spf13/afero"
@@ -1157,4 +1158,127 @@ func TestRetireReportsBlobPruneError(t *testing.T) {
 	reader := freezeblocks.NewBeaconSnapshotReader(sn, nil, cfg)
 	result, err := antiquary.RetireBlobSidecars(t.Context(), db, failSidecarPrune{store, fault}, sn, reader, cfg, dirs, sn.Salt, log.New(), antiquary.BlobRetireHooks{})
 	require.ErrorIs(t, err, fault, "reported retirement through %d despite the hot prune failure", result.To)
+}
+
+func TestSegResetIndexAccessMode(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteLastBeaconSnapshot(tx, 100)
+	}))
+	db.Close()
+	local := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)
+	replacement := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 200)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, local), []byte(local), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'"+replacement+"' = 'replacement'\n"), 0o600))
+	app := &cli.Command{Name: "capcli", Commands: commands()}
+	args := []string{"capcli", "seg", "reset", "--chain", "mainnet", "--datadir", dirs.DataDir}
+	t.Run("dry run", func(t *testing.T) {
+		path := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+		marker := time.Unix(1500000000, 0)
+		require.NoError(t, os.Chtimes(path, marker, marker))
+		require.NoError(t, app.Run(t.Context(), append(args, "--dry-run")))
+		stat, err := os.Stat(path)
+		require.NoError(t, err)
+		if !stat.ModTime().Equal(marker) {
+			t.Fatal("dry-run changed indexing/mdbx.dat mtime")
+		}
+	})
+	t.Run("execute", func(t *testing.T) {
+		app := &cli.Command{Name: "capcli", Commands: commands()}
+		err := app.Run(t.Context(), args)
+		if err != nil {
+			_, fileErr := os.Stat(filepath.Join(dirs.Snap, local))
+			t.Fatalf("segment still present = %t, reset error = %v", fileErr == nil, err)
+		}
+		db, err = caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+		require.NoError(t, err)
+		defer db.Close()
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+			require.NoError(t, err)
+			require.Zero(t, progress)
+			return nil
+		}))
+	})
+}
+
+func TestSegResetDryRunKeepsDatadir(t *testing.T) {
+	for _, locked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("locked=%t", locked), func(t *testing.T) {
+			dirs := datadir.Open(t.TempDir())
+			unlock, err := dirs.TryFlock()
+			require.NoError(t, err)
+			if locked {
+				defer unlock()
+			} else {
+				unlock()
+			}
+			app := &cli.Command{Name: "capcli", Commands: commands()}
+			err = app.Run(t.Context(), []string{"capcli", "seg", "reset", "--chain", "mainnet", "--datadir", dirs.DataDir, "--dry-run"})
+			if locked {
+				require.ErrorIs(t, err, datadir.ErrDataDirLocked)
+			} else {
+				require.NoError(t, err)
+			}
+			entries, err := os.ReadDir(dirs.DataDir)
+			require.NoError(t, err)
+			if len(entries) != 1 {
+				t.Fatalf("dry-run changed datadir: %d entries, want 1", len(entries))
+			}
+		})
+	}
+}
+
+func TestSegResetUsesSupportedReplacements(t *testing.T) {
+	preserveResetManifest(t)
+	dirs := datadir.New(t.TempDir())
+	local := snaptype.StateEvents.FileName(version.V1_1, 0, 100)
+	future := "caplin/" + snaptype.StateEvents.FileName(version.Version{Major: 9}, 0, 200)
+	data := []byte("'" + future + "' = '0000000000000000000000000000000000000001'\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, local), []byte(local), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), data, 0o600))
+	require.NoError(t, snapcfg.SetToml("mainnet", data, true))
+	cfg, _ := snapcfg.KnownCfg("mainnet")
+	_, available := cfg.Preverified.Items.Get(future)
+	require.False(t, available)
+	app := &cli.Command{Name: "capcli", Commands: commands()}
+	err := app.Run(t.Context(), []string{"capcli", "seg", "reset", "--chain", "mainnet", "--datadir", dirs.DataDir})
+	if err == nil {
+		_, statErr := os.Stat(filepath.Join(dirs.SnapCaplin, local))
+		t.Fatalf("reset accepted unreadable replacement: local StateEvents still present = %t", statErr == nil)
+	}
+	require.ErrorContains(t, err, "only copy")
+}
+
+func TestSegResetLoadsManifestWithoutLock(t *testing.T) {
+	preserveResetManifest(t)
+	dirs := datadir.New(t.TempDir())
+	file := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)
+	source := filepath.Join(t.TempDir(), "mainnet.toml")
+	require.NoError(t, os.WriteFile(source, []byte("'"+file+"' = '0000000000000000000000000000000000000001'\n"), 0o600))
+	t.Setenv(snapcfg.RemotePreverifiedEnvKey, source)
+	require.NoError(t, snapcfg.LoadRemotePreverified(t.Context(), "mainnet", ""))
+	cfg, _ := snapcfg.KnownCfg("mainnet")
+	_, published := cfg.Preverified.Items.Get(file)
+	require.True(t, published)
+	require.NoError(t, snapcfg.SetToml("mainnet", []byte{}, false))
+	path := filepath.Join(dirs.Snap, file)
+	require.NoError(t, os.WriteFile(path, []byte(file), 0o600))
+	app := &cli.Command{Name: "capcli", Commands: commands()}
+	require.NoError(t, app.Run(t.Context(), []string{"capcli", "seg", "reset", "--chain", "mainnet", "--datadir", dirs.DataDir, "--force"}))
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		t.Fatal("published beacon segment was removed with --force")
+	}
+	require.NoError(t, err)
+}
+
+func preserveResetManifest(t *testing.T) {
+	t.Helper()
+	cfg, _ := snapcfg.KnownCfg("mainnet")
+	raw := append([]byte{}, snapcfg.GetToml("mainnet")...)
+	local := cfg.Local
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml("mainnet", raw, local)) })
 }
