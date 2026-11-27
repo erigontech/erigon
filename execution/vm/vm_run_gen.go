@@ -417,31 +417,10 @@ run:
 					pc++
 					continue run
 				}
-			case SWAP1:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+			case SWAP1, SWAP2, SWAP3, SWAP4, SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+				if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					callContext.Stack.swap(1)
-					pc++
-					continue run
-				}
-			case SWAP2:
-				if sLen >= 3 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(2)
-					pc++
-					continue run
-				}
-			case SWAP3:
-				if sLen >= 4 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(3)
-					pc++
-					continue run
-				}
-			case SWAP4:
-				if sLen >= 5 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(4)
+					callContext.Stack.swap(int(op-SWAP1) + 1)
 					pc++
 					continue run
 				}
@@ -901,13 +880,6 @@ run:
 						pc++
 						continue run
 					}
-				case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
-					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
-						gasLeft -= GasFastestStep
-						callContext.Stack.swap(int(op-SWAP1) + 1)
-						pc++
-						continue run
-					}
 				}
 			}
 			callContext.gas = gasLeft
@@ -1036,16 +1008,4 @@ var isColdOp = [256]bool{
 	DUP14:          true,
 	DUP15:          true,
 	DUP16:          true,
-	SWAP5:          true,
-	SWAP6:          true,
-	SWAP7:          true,
-	SWAP8:          true,
-	SWAP9:          true,
-	SWAP10:         true,
-	SWAP11:         true,
-	SWAP12:         true,
-	SWAP13:         true,
-	SWAP14:         true,
-	SWAP15:         true,
-	SWAP16:         true,
 }

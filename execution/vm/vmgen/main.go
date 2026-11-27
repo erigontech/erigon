@@ -93,15 +93,15 @@ func fastOps() []fastOp {
 	for n := 1; n <= 8; n++ {
 		ops = append(ops, op(fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n+1))
 	}
-	for n := 1; n <= 4; n++ {
-		ops = append(ops, op(fmt.Sprintf("SWAP%d", n), fmt.Sprintf("opSwap%d", n), "GasFastestStep", n+1, n+1))
+	for n := 1; n <= 16; n++ {
+		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, index: "int(op-SWAP1)", minStack: "int(op-SWAP1)+2"})
 	}
 	return ops
 }
 
 // coldOps are cheap constant-gas ops that run inline in a second switch after
 // the fastOps one. A separate switch keeps the hot ops' compare tree as shallow
-// as it was; the DUPs and SWAPs share a case each, or Go compiles it to a jump table.
+// as it was; DUP9-16 share one case, or Go compiles it to a jump table.
 func coldOps() []fastOp {
 	op := func(name, execute string) fastOp {
 		return fastOp{name: name, execute: execute, gas: "GasQuickStep", push: 1}
@@ -153,9 +153,6 @@ func coldOps() []fastOp {
 	}
 	for n := 9; n <= 16; n++ {
 		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
-	}
-	for n := 5; n <= 16; n++ {
-		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, index: "int(op-SWAP1)", minStack: "int(op-SWAP1)+2"})
 	}
 	return ops
 }
