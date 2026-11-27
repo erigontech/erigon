@@ -43,14 +43,6 @@ func TestTypedCaplinUsesRegisteredTypes(t *testing.T) {
 	}, typed.Items)
 }
 
-// A registry entry can name an index the type does not have: it is dropped, not a crash.
-func TestTypedDropsAnIndexTheTypeDoesNotHave(t *testing.T) {
-	require.NotPanics(t, func() {
-		names := typedNames(t, PreverifiedItems{{Name: "v1.1-000000-000100-transactions-to-block-blocksidecars.idx", Hash: "h"}})
-		require.Empty(t, names)
-	})
-}
-
 func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
 	names := typedNames(t, PreverifiedItems{
 		{Name: "caplin/v1.0-000000-000100-BlockRoot.seg", Hash: "old"},
@@ -297,4 +289,12 @@ func TestTypedReportsUnparsableRegisteredTypeNames(t *testing.T) {
 		"v1.1-00a000-000100-beaconblocks.seg",
 		"v1.1-000000-000100-BEACONBLOCKS.seg",
 	}, drops.unparsableNames)
+}
+
+func TestTypedDropsRootEntryWithInnerExtension(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "v1.1-000000-000100-beaconblocks.seg.torrent", Hash: "torrent"},
+		{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "seg"},
+	})
+	require.Equal(t, []string{"v1.1-000000-000100-beaconblocks.seg"}, names)
 }

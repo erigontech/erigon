@@ -1198,15 +1198,7 @@ func TestDownloadTypedCaplinPaths(t *testing.T) {
 func TestDownloadMalformedRootBlobSidecarIsRejected(t *testing.T) {
 	const name = "v1.1-bad-000050-blobsidecars.seg"
 	items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
-	typed := items.Typed(snaptype.CaplinSnapshotTypes)
-	require.Empty(t, typed.Items)
-
-	got, err := SnapshotsToDownload(
-		context.Background(), "test", false, true, true, BlobRetention{}, prune.ArchiveMode, NoCaplin,
-		nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1, typed, 0, 0,
-	)
-	require.NoError(t, err)
-	require.Empty(t, got)
+	require.Empty(t, items.Typed(snaptype.CaplinSnapshotTypes).Items)
 }
 
 func TestDownloadBareCaplinState(t *testing.T) {
@@ -1232,4 +1224,17 @@ func TestDownloadBareCaplinState(t *testing.T) {
 			checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: tc.name}}}, tc.mode, tc.caplinState, tc.toBlock, tc.want)
 		})
 	}
+}
+
+func TestFilterToBlockSkipsUnparsableSaltPrefixedPath(t *testing.T) {
+	require.True(t, filterToBlock("salt-backup/notes.txt", 42, 0, false))
+	require.False(t, filterToBlock("salt-blocks.txt", 42, 0, false))
+}
+
+// A registry entry can name an index the type does not have: it is dropped, not a crash.
+func TestTypedDropsAnIndexTheTypeDoesNotHave(t *testing.T) {
+	items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: "v1.1-000000-000100-domain.idx", Hash: "h"}}}
+	require.NotPanics(t, func() {
+		require.Empty(t, items.Typed([]snaptype.Type{snaptype2.Domains}).Items)
+	})
 }

@@ -891,10 +891,10 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
-	if strings.HasPrefix(name, "salt") {
+	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
+	if ok && strings.HasPrefix(name, "salt") {
 		return false // not applicable
 	}
-	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
 	if strings.HasPrefix(name, datadir.SnapCaplinDir+"/") && (ok || fileInfo.TypeString != "") {
 		return false // not applicable, caplin files are slot-based
 	}

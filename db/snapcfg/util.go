@@ -292,7 +292,7 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			typeName = "transactions"
 		}
 		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
-		if parsedOK && parsed.Type != nil && spellsRegisteredName(parsed.Type, parsed.TypeString) {
+		if parsedOK && parsed.Type != nil && strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) && spellsRegisteredName(parsed.Type, parsed.TypeString) {
 			typeName = parsed.Type.Name()
 		} else if _, registered := snaptype.ParseEnum(typeName); registered {
 			drops.unparsableItem(p.Name)
