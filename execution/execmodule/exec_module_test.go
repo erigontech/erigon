@@ -4509,13 +4509,13 @@ func TestCreditAfterFrameFallsBackOnCallCodeWithValue(t *testing.T) {
 }
 
 func TestCreditAfterFrameFallsBackOnCreateWithValue(t *testing.T) {
-	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE),
-		byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+	code := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE), byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}
+	requireTransfersToCodeMatchSerial(t, code, nil)
 }
 
 func TestCreditAfterFrameFallsBackOnCreate2WithValue(t *testing.T) {
-	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.CALLER), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE2),
-		byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+	code := []byte{byte(vm.CALLER), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE2), byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}
+	requireTransfersToCodeMatchSerial(t, code, nil)
 }
 
 func TestCreditAfterFrameFallsBackOnSelfDestruct(t *testing.T) {
@@ -4534,8 +4534,8 @@ func TestCreditOfAbsentRecipientMatchesSerialExecution(t *testing.T) {
 	recreated := types.CreateAddress(crypto.PubkeyToAddress(keys[0].PublicKey), 0)
 	codeLater := types.CreateAddress(crypto.PubkeyToAddress(keys[1].PublicKey), 0)
 	existence := common.Address{0xab}
-	alloc := types.GenesisAlloc{existence: {Code: []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.DUP1), byte(vm.EXTCODEHASH), byte(vm.SWAP1),
-		byte(vm.SSTORE), byte(vm.STOP)}}}
+	storeCodeHash := []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.DUP1), byte(vm.EXTCODEHASH), byte(vm.SWAP1), byte(vm.SSTORE), byte(vm.STOP)}
+	alloc := types.GenesisAlloc{existence: {Code: storeCodeHash}}
 	selfDestructInit := []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)}
 	storeCallValue := []byte{
 		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
