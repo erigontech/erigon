@@ -2660,11 +2660,26 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 // so a block's list can be built while its txs are published.
 type BlockAccessListBuilder struct {
 	ac   map[accounts.Address]*accountState
-	next int
+	slab []accountState
+	// recent holds the last accounts looked up: a tx touches few accounts, each on
+	// several paths, and a probe of ac misses the CPU cache once ac holds a whole block.
+	recent   [4]recentAccount
+	recentAt uint
+	next     int
+}
+
+type recentAccount struct {
+	addr    accounts.Address
+	account *accountState
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
-	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), next: -1}
+	return NewSizedBlockAccessListBuilder(0)
+}
+
+// NewSizedBlockAccessListBuilder reserves room for n accounts.
+func NewSizedBlockAccessListBuilder(n int) *BlockAccessListBuilder {
+	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState, n), next: -1}
 }
 
 // Next is the tx index Add expects; indexes start at -1, the pre-block system calls.
@@ -2683,13 +2698,12 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		panic(fmt.Sprintf("block access list: added tx %d, expected %d", txIndex, b.next))
 	}
 	b.next++
-	ac := b.ac
 	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 	for addr, tr := range rs.balance {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
+		b.account(addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
 		if addr.IsNil() {
@@ -2699,7 +2713,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
+			b.account(addr).updateReadStorage(key, tr.Val)
 		}
 	}
 	for addr, tr := range rs.address {
@@ -2713,43 +2727,43 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if tr.Val == nil || tr.Val.IsNil() {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.nonce {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.incarnation {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.selfDestruct {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.createContract {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.code {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.codeHash {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		account := ensureAccountState(ac, addr)
+		account := b.account(addr)
 		// A pre-block-empty code hash marks the baseline empty so applyToCode
 		// drops a net-zero same-tx set-then-clear. Only an empty read seen
 		// before any code change is the pre-block value.
@@ -2761,35 +2775,27 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 
 	if writes != nil {
-		// Self-destruct is applied before the balance writes so the EIP-7928
-		// burn (zeroing a non-zero balance written by the destroying tx) fires.
-		for addr, w := range writes.SelfDestructs() {
-			if addr.IsNil() || !w.Val {
-				continue
-			}
-			ensureAccountState(ac, addr)
-		}
-		for addr, w := range writes.Balances() {
+		for addr, w := range writes.balance {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Nonces() {
+		for addr, w := range writes.nonce {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Codes() {
+		for addr, w := range writes.code {
 			if addr.IsNil() {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			// An account absent or destroyed at the tx start had no code before the block: an account
 			// that had code before the block is never removed within it (EIP-161, EIP-6780).
 			if tr, ok := rs.address[addr]; ok && (tr.Val == nil || tr.Val.IsNil()) || rs.selfDestruct[addr].Val {
@@ -2797,27 +2803,27 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			}
 			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, byKey := range writes.Storages() {
+		for addr, byKey := range writes.storage {
 			if addr.IsNil() {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			for key, w := range byKey {
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
 		// EIP-7928 requires every touched address to appear; these paths carry
 		// no value the loops above record.
-		registerAddrs(ac, writes.address)
-		registerAddrs(ac, writes.incarnation)
-		registerAddrs(ac, writes.selfDestruct)
-		registerAddrs(ac, writes.codeHash)
-		registerAddrs(ac, writes.codeSize)
+		registerAddrs(b, writes.address)
+		registerAddrs(b, writes.incarnation)
+		registerAddrs(b, writes.selfDestruct)
+		registerAddrs(b, writes.codeHash)
+		registerAddrs(b, writes.codeSize)
 		for addr, w := range writes.createContract {
 			if addr.IsNil() {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
 			if w.Val {
@@ -2830,7 +2836,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if addr.IsNil() {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 }
 
@@ -2912,13 +2918,14 @@ type accountState struct {
 	balance             fieldTracker[uint256.Int]
 	nonce               fieldTracker[uint64]
 	code                fieldTracker[accounts.Code]
-	balanceValue        g.Option[uint256.Int]               // tracks latest seen balance
-	initialBalanceValue g.Option[uint256.Int]               // tracks pre-block balance for net-zero detection
-	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
-	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
-	initialCodeEmpty    bool                                // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
+	balanceValue        g.Option[uint256.Int]       // tracks latest seen balance
+	initialBalanceValue g.Option[uint256.Int]       // tracks pre-block balance for net-zero detection
+	readValues          []slotValue                 // first read value per slot, for net-zero detection
+	readValueAt         map[accounts.StorageKey]int // slot -> index into readValues, built past slotIndexMin
+	slotWrites          map[accounts.StorageKey]int // slot -> index into changes.StorageChanges, built past slotIndexMin
+	storageReads        []accounts.StorageKey       // copied into changes.StorageReads by finalize
+	slotReads           map[accounts.StorageKey]int // slot -> index into storageReads, built with slotWrites
+	initialCodeEmpty    bool                        // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
 }
 
 // matches compares the account with a sidecar entry without building and sorting its lists.
@@ -2945,7 +2952,7 @@ func (account *accountState) matchesStorage(want *types.AccountChanges) bool {
 			return false
 		}
 		key := accounts.InternKey(read)
-		if _, wasRead := account.storageReadValues[key]; !wasRead || account.hasStorageWrite(key) {
+		if _, wasRead := account.readValue(key); !wasRead || account.hasStorageWrite(key) {
 			return false
 		}
 	}
@@ -3037,50 +3044,61 @@ func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, init
 // the entry borrows the canonical bytecode owned by cache.StateCache; applyToCode
 // clones it into the BAL CodeChange so the consensus-visible output owns its bytes.
 type changeTracker[T any] struct {
-	entries map[uint32]T
+	entries []indexedChange[T] // sorted by idx
+}
+
+type indexedChange[T any] struct {
+	idx   uint32
+	value T
 }
 
 func (ct *changeTracker[T]) recordWrite(idx uint32, value T) {
-	if ct.entries == nil {
-		ct.entries = make(map[uint32]T)
+	i, found := slices.BinarySearchFunc(ct.entries, idx, func(e indexedChange[T], idx uint32) int { return cmp.Compare(e.idx, idx) })
+	if found {
+		ct.entries[i].value = value
+		return
 	}
-	ct.entries[idx] = value
+	ct.entries = slices.Insert(ct.entries, i, indexedChange[T]{idx, value})
 }
 
 func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
-	if len(ct.entries) == 0 {
-		return
-	}
-
-	indices := make([]uint32, 0, len(ct.entries))
-	for idx := range ct.entries {
-		indices = append(indices, idx)
-	}
-	slices.Sort(indices)
-
-	for _, idx := range indices {
-		applyFn(idx, ct.entries[idx])
+	for _, e := range ct.entries {
+		applyFn(e.idx, e.value)
 	}
 }
 
-func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+func registerAddrs[V any](b *BlockAccessListBuilder, writes map[accounts.Address]V) {
 	for addr := range writes {
 		if !addr.IsNil() {
-			ensureAccountState(ac, addr)
+			b.account(addr)
 		}
 	}
 }
 
-func newAccountState(addr accounts.Address) *accountState {
-	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
+const accountSlabSize = 128
+
+func (b *BlockAccessListBuilder) account(addr accounts.Address) *accountState {
+	for i := range b.recent {
+		if r := &b.recent[i]; r.addr == addr && r.account != nil {
+			return r.account
+		}
+	}
+	account := b.lookup(addr)
+	b.recentAt = (b.recentAt + 1) % uint(len(b.recent))
+	b.recent[b.recentAt] = recentAccount{addr, account}
+	return account
 }
 
-func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
-	if account, ok := accounts[addr]; ok {
+func (b *BlockAccessListBuilder) lookup(addr accounts.Address) *accountState {
+	if account, ok := b.ac[addr]; ok {
 		return account
 	}
-	account := newAccountState(addr)
-	accounts[addr] = account
+	if len(b.slab) == cap(b.slab) {
+		b.slab = make([]accountState, 0, accountSlabSize)
+	}
+	b.slab = append(b.slab, accountState{changes: types.AccountChanges{Address: addr.Value()}})
+	account := &b.slab[len(b.slab)-1]
+	b.ac[addr] = account
 	return account
 }
 
@@ -3090,7 +3108,7 @@ func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint
 	// the original read value, it's a no-op that should remain as a read.
 	at := account.storageWriteIndex(key)
 	if at < 0 {
-		if origVal, wasRead := account.storageReadValues[key]; wasRead && val.Eq(&origVal) {
+		if origVal, wasRead := account.readValue(key); wasRead && val.Eq(&origVal) {
 			return
 		}
 	}
@@ -3139,13 +3157,18 @@ func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint
 func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint256.Int) {
 	// Record the original read value for net-zero detection.
 	// Only the first read for each slot is recorded (the original value).
-	if account.storageReadValues == nil {
-		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
-	}
-	if _, seen := account.storageReadValues[key]; seen {
+	if _, seen := account.readValue(key); seen {
 		return
 	}
-	account.storageReadValues[key] = val
+	account.readValues = append(account.readValues, slotValue{key, val})
+	if account.readValueAt != nil {
+		account.readValueAt[key] = len(account.readValues) - 1
+	} else if len(account.readValues) >= slotIndexMin {
+		account.readValueAt = make(map[accounts.StorageKey]int, len(account.readValues))
+		for i := range account.readValues {
+			account.readValueAt[account.readValues[i].slot] = i
+		}
+	}
 	if account.hasStorageWrite(key) {
 		return
 	}
@@ -3167,6 +3190,26 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	if len(account.balance.changes.entries) == 0 {
 		account.balanceValue.Set(val)
 	}
+}
+
+type slotValue struct {
+	slot  accounts.StorageKey
+	value uint256.Int
+}
+
+func (account *accountState) readValue(slot accounts.StorageKey) (uint256.Int, bool) {
+	if account.readValueAt != nil {
+		if i, ok := account.readValueAt[slot]; ok {
+			return account.readValues[i].value, true
+		}
+		return uint256.Int{}, false
+	}
+	for i := range account.readValues {
+		if account.readValues[i].slot == slot {
+			return account.readValues[i].value, true
+		}
+	}
+	return uint256.Int{}, false
 }
 
 // slotIndexMin is where scanning the slot lists stops being cheaper than a map
