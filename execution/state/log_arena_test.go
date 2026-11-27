@@ -573,5 +573,32 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
 
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
-	require.Less(t, held, 4<<20, "an arena holds %dKB after mixed traffic", held/1024)
+	require.Less(t, held, 16<<20, "an arena holds %dKB after mixed traffic, more than one max transaction", held/1024)
 }
+
+// A transaction that spends its whole gas on logs reuses the entries and the
+// slots the one before it left.
+func TestLogPoolReusesTxMaxLogsAcrossTxs(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	before := make(map[*types.Log]struct{}, maxLogsPerTxn)
+	for range maxLogsPerTxn {
+		before[ibs.AllocLog(common.HexToAddress("0x1"), 0, 0)] = struct{}{}
+	}
+	ibs.Reset()
+	slots := cap(ibs.logs.entries)
+	require.GreaterOrEqual(t, slots, maxLogsPerTxn)
+
+	ibs.SetTxContext(1, 1)
+	reused := 0
+	for range maxLogsPerTxn {
+		if _, ok := before[ibs.AllocLog(common.HexToAddress("0x2"), 0, 0)]; ok {
+			reused++
+		}
+	}
+	require.Equal(t, maxLogsPerTxn, reused)
+	require.Equal(t, slots, cap(ibs.logs.entries), "slots reallocated")
+}
+
