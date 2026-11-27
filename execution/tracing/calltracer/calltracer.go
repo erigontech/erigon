@@ -19,6 +19,7 @@ package calltracer
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -59,8 +60,19 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 func (ct *CallTracer) Reset() {
 	ct.froms, ct.tos = nil, nil
 }
-func (ct *CallTracer) Froms() map[accounts.Address]struct{} { return ct.froms }
-func (ct *CallTracer) Tos() map[accounts.Address]struct{}   { return ct.tos }
+
+// Addresses returns the distinct call senders and recipients; both share one backing array.
+func (ct *CallTracer) Addresses() (froms, tos []common.Address) {
+	all := make([]common.Address, 0, len(ct.froms)+len(ct.tos))
+	for a := range ct.froms {
+		all = append(all, a.Value())
+	}
+	n := len(all)
+	for a := range ct.tos {
+		all = append(all, a.Value())
+	}
+	return all[:n:n], all[n:]
+}
 
 func (ct *CallTracer) OnEnterV2(from accounts.Address, to accounts.Address) {
 	if ct.froms == nil {

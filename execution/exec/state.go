@@ -418,8 +418,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	if callTracer != nil {
-		result.TraceFroms = callTracer.Froms()
-		result.TraceTos = callTracer.Tos()
+		result.TraceFroms, result.TraceTos = callTracer.Addresses()
 	}
 
 	return result

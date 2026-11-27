@@ -199,11 +199,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		if txTask.BlockNumber() == 0 {
 			break
 		}
-		result.TraceTos = map[accounts.Address]struct{}{}
-		result.TraceTos[accounts.InternAddress(header.Coinbase)] = struct{}{}
-		for _, uncle := range txTask.Uncles {
-			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
-		}
+		result.TraceTos = blockRewardTraceTos(header, txTask.Uncles)
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
@@ -232,8 +228,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				ibs.EndTransaction()
 
 				result.Logs = ibs.GetRawLogs(txTask.TxIndex)
-				result.TraceFroms = tracer.Froms()
-				result.TraceTos = tracer.Tos()
+				result.TraceFroms, result.TraceTos = tracer.Addresses()
 			}
 			return nil
 		}()

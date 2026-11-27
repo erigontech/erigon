@@ -49,9 +49,8 @@ type StateV3 struct {
 	trace                  atomic.Bool
 
 	// Scratch for the per-transaction index writes; the apply goroutine alone
-	// touches them.
+	// touches it.
 	receiptsWriter rawtemporaldb.ReceiptWriter
-	traceAddr      common.Address
 }
 
 func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, logger log.Logger) *StateV3 {
@@ -353,8 +352,7 @@ func (rs *StateV3) ApplyTxIndexes(
 	receipt *types.Receipt,
 	cummulativeBlobGas uint64,
 	logs []*types.Log,
-	traceFroms map[accounts.Address]struct{},
-	traceTos map[accounts.Address]struct{},
+	traceFroms, traceTos []common.Address,
 	skipReceiptCache ...bool,
 ) error {
 	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
@@ -364,18 +362,16 @@ func (rs *StateV3) ApplyTxIndexes(
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms, traceTos []common.Address, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
-	for addr := range traceFroms {
-		rs.traceAddr = addr.Value()
-		if err := domains.IndexAdd(kv.TracesFromIdx, rs.traceAddr[:], txNum); err != nil {
+	for i := range traceFroms {
+		if err := domains.IndexAdd(kv.TracesFromIdx, traceFroms[i][:], txNum); err != nil {
 			return err
 		}
 	}
 
-	for addr := range traceTos {
-		rs.traceAddr = addr.Value()
-		if err := domains.IndexAdd(kv.TracesToIdx, rs.traceAddr[:], txNum); err != nil {
+	for i := range traceTos {
+		if err := domains.IndexAdd(kv.TracesToIdx, traceTos[i][:], txNum); err != nil {
 			return err
 		}
 	}

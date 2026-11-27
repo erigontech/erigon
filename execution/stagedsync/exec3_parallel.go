@@ -1728,8 +1728,8 @@ type txResult struct {
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
 	logs                  []*types.Log
-	traceFroms            map[accounts.Address]struct{}
-	traceTos              map[accounts.Address]struct{}
+	traceFroms            []common.Address
+	traceTos              []common.Address
 	writes                state.WriteSetView
 	versionMap            *state.VersionMap
 	rules                 *chain.Rules

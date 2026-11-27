@@ -41,6 +41,26 @@ func TestEnterV2PreservesCallIndexes(t *testing.T) {
 	}})
 	ct.Tracer().EmitEnter(0, 0xf1, from, to, false, nil, gas, uint256.Int{}, nil)
 	require.Equal(t, 1, calls)
-	require.Contains(t, ct.Froms(), from)
-	require.Contains(t, ct.Tos(), to)
+	froms, tos := ct.Addresses()
+	require.Equal(t, []common.Address{from.Value()}, froms)
+	require.Equal(t, []common.Address{to.Value()}, tos)
+}
+
+func TestAddressesAreDistinct(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0x1000"))
+	b := accounts.InternAddress(common.HexToAddress("0x2000"))
+	ct := NewCallTracer(nil)
+	froms, tos := ct.Addresses()
+	require.Empty(t, froms)
+	require.Empty(t, tos)
+
+	ct.OnEnterV2(a, b)
+	ct.OnEnterV2(b, a)
+	ct.OnEnterV2(a, b)
+	froms, tos = ct.Addresses()
+	require.ElementsMatch(t, []common.Address{a.Value(), b.Value()}, froms)
+	require.ElementsMatch(t, []common.Address{a.Value(), b.Value()}, tos)
+
+	froms = append(froms, common.Address{})
+	require.ElementsMatch(t, []common.Address{a.Value(), b.Value()}, tos)
 }

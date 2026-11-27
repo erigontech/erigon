@@ -404,17 +404,15 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				}
 			}
 			if produce.TraceFrom {
-				for addr := range result.TraceFroms {
-					addrValue := addr.Value()
-					if err := doms.IndexAdd(kv.TracesFromIdx, addrValue[:], txTask.TxNum); err != nil {
+				for i := range result.TraceFroms {
+					if err := doms.IndexAdd(kv.TracesFromIdx, result.TraceFroms[i][:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
 			}
 			if produce.TraceTo {
-				for addr := range result.TraceTos {
-					addrValue := addr.Value()
-					if err := doms.IndexAdd(kv.TracesToIdx, addrValue[:], txTask.TxNum); err != nil {
+				for i := range result.TraceTos {
+					if err := doms.IndexAdd(kv.TracesToIdx, result.TraceTos[i][:], txTask.TxNum); err != nil {
 						return err
 					}
 				}

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -100,8 +101,8 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[accounts.Address]struct{}
-	TraceTos   map[accounts.Address]struct{}
+	TraceFroms []common.Address
+	TraceTos   []common.Address
 
 	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
 	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
@@ -499,11 +500,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
-		result.TraceTos = map[accounts.Address]struct{}{}
-		result.TraceTos[accounts.InternAddress(t.Header.Coinbase)] = struct{}{}
-		for _, uncle := range t.Uncles {
-			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
-		}
+		result.TraceTos = blockRewardTraceTos(t.Header, t.Uncles)
 	default:
 
 		result.Coinbase = evm.Context.Coinbase
@@ -962,4 +959,14 @@ func (q *ResultsQueue) AddWaiter(lock bool) chan any {
 	}
 
 	return q.addWaiters
+}
+
+func blockRewardTraceTos(header *types.Header, uncles []*types.Header) []common.Address {
+	tos := []common.Address{header.Coinbase}
+	for _, uncle := range uncles {
+		if !slices.Contains(tos, uncle.Coinbase) {
+			tos = append(tos, uncle.Coinbase)
+		}
+	}
+	return tos
 }

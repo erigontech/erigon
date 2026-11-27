@@ -445,3 +445,11 @@ func TestCreateReceiptBlobGasUsed(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockRewardTraceTosAreDistinct(t *testing.T) {
+	a, b := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	header := &types.Header{Coinbase: a}
+	uncles := []*types.Header{{Coinbase: b}, {Coinbase: a}, {Coinbase: b}}
+	require.Equal(t, []common.Address{a, b}, blockRewardTraceTos(header, uncles))
+	require.Equal(t, []common.Address{a}, blockRewardTraceTos(header, nil))
+}
