@@ -61,15 +61,15 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 }
 
 func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
-	var finalityCtx kv.FinalityContext
+	var irreversibleTxNum uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, cfg.blockReader.TxnumReader())
+		irreversibleTxNum, err = execfinality.ResolveTxNum(ctx, tx, cfg.maxReorgDepth, false, cfg.blockReader.TxnumReader())
 		return err
 	}); err != nil {
 		return empty.RootHash, err
 	}
-	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, cfg.blockReader, finalityCtx, log.New(), squeeze)
+	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, cfg.blockReader, irreversibleTxNum, log.New(), squeeze)
 	if err != nil {
 		return empty.RootHash, err
 	}

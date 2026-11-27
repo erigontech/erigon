@@ -488,7 +488,7 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx kv.FinalityContext, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, irreversibleTxNum uint64, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
@@ -626,7 +626,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			toStep++
 		}
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, irreversibleTxNum, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -1093,10 +1093,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			domains.Close()
 
-			// make new file visible for all aggregator transactions
-			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(nil)
-			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
 			for {
@@ -1217,10 +1213,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
+	writer := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[kv.CommitmentDomain]
+	files, err := aggTx.d[kv.CommitmentDomain].d.dumpStepRangeToPath(ctx, cfg.StepFrom, cfg.StepTo, writer, "")
 	if err != nil {
 		return nil, err
 	}
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = files
+	aggTx.a.IntegrateDirtyFiles(static, aggTx.a.FirstTxNumOfStep(cfg.StepFrom), aggTx.a.FirstTxNumOfStep(cfg.StepTo))
 
 	logger.Info(cfg.LogPrefix+" finished", "block", cfg.BlockNumber, "txn", cfg.TxnNumber, "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
@@ -1252,7 +1252,7 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	d := a.d[kv.CommitmentDomain]
 	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
 	defer wal.Close()
-	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), "")
 	if err != nil {
 		return err
 	}
@@ -1265,10 +1265,9 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	if err != nil {
 		return err
 	}
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	d.integrateDirtyFiles(sf, uint64(step)*a.StepSize(), uint64(step+1)*a.StepSize())
-	a.recalcVisibleFiles(nil)
+	static := &AggV3StaticFiles{}
+	static.d[kv.CommitmentDomain] = sf
+	a.IntegrateDirtyFiles(static, a.FirstTxNumOfStep(step), a.FirstTxNumOfStep(step+1))
 	return nil
 }
 

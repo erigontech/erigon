@@ -27,6 +27,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -55,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -348,15 +350,11 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	// Insert one chain first, then the other
-	firstChain, err := m.GenerateChainFrom(m.Current(nil), len(first), func(i int, b *blockgen.BlockGen) {
-		b.OffsetTime(first[i])
-	})
+	firstChain, err := m.GenerateChainWithTimeOffsets(m.Current(nil), first, nil)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	secondChain, err := m.GenerateChainFrom(m.Current(nil), len(second), func(i int, b *blockgen.BlockGen) {
-		b.OffsetTime(second[i])
-	})
+	secondChain, err := m.GenerateChainWithTimeOffsets(m.Current(nil), second, nil)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -500,7 +498,8 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd types.Transaction
 
-	chain, err := m.GenerateChain(3, func(i int, gen *blockgen.BlockGen) {
+	// Delay the third block to simulate a weaker chain.
+	chain, err := m.GenerateChainWithTimeOffsets(m.Genesis, []int64{0, 0, 9}, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key2)
@@ -513,8 +512,6 @@ func TestChainTxReorgs(t *testing.T) {
 
 			gen.AddTx(freshDrop) // This transaction will be dropped in the fork from exactly at the split point
 			gen.AddTx(swapped)   // This transaction will be swapped out at the exact height
-
-			gen.OffsetTime(9) // Lower the block difficulty to simulate a weaker chain
 		}
 	})
 	if err != nil {
@@ -1178,10 +1175,11 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
 	for i := range forks {
-		fork, err := m.GenerateChain(i+1, func(j int, b *blockgen.BlockGen) {
+		offsets := make([]int64, i+1)
+		offsets[i] = -2 // Shorten the last interval so the fork has higher difficulty.
+		fork, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})
-				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
 			} else {
 				b.SetCoinbase(common.Address{1})
 			}
@@ -1259,12 +1257,12 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := m.GenerateChain(64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
+	offsets := slices.Concat(make([]int64, 64), slices.Repeat([]int64{-2}, 2*triesInMemory+1))
+	competitor, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
 			b.SetCoinbase(common.Address{3})
-			b.OffsetTime(-2)
 		}
 	})
 	if err != nil {
@@ -1308,18 +1306,19 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := m.GenerateChain(6*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	offsets := slices.Repeat([]int64{-9}, 6*triesInMemory)
+	chain, err := m.GenerateChainWithTimeOffsets(m.Genesis, offsets, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		b.OffsetTime(-9)
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := m.GenerateChain(11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
-		if i < 11 {
+	const sharedBlocks = 11
+	forkOffsets := slices.Concat(offsets[:sharedBlocks], make([]int64, 8*triesInMemory))
+	fork, err := m.GenerateChainWithTimeOffsets(m.Genesis, forkOffsets, func(i int, b *blockgen.BlockGen) {
+		if i < sharedBlocks {
 			b.SetCoinbase(common.Address{1})
-			b.OffsetTime(-9)
 		} else {
 			b.SetCoinbase(common.Address{2})
 		}
@@ -2618,4 +2617,75 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
 	}
 	require.NoError(t, m.InsertChain(chainPack))
+}
+
+// TestParallelSameBlockDeployCallFuzz builds BAL blocks that deploy contracts and call them later in the same
+// block, in random orders; a call to a self-destruct contract sends its balance back to the caller (EIP-6780).
+// The parallel executor must reproduce the roots and receipts the block generator computed.
+func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	destruct := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
+	config := libchain.AllProtocolChanges
+	gasPrice := uint256.NewInt(10_000_000_000)
+	for seed := range 8 {
+		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(uint64(seed), 25694))
+			keys := make([]*ecdsa.PrivateKey, 6)
+			alloc := types.GenesisAlloc{}
+			for i := range keys {
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
+				require.NoError(t, err)
+				keys[i] = key
+				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+			}
+			ethconfig.Defaults.Sync.ExecWorkerCount = 4
+			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]), execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc}), execmoduletester.WithExperimentalBAL())
+			signer := types.LatestSignerForChainID(config.ChainID)
+			nonces := make([]uint64, len(keys))
+			var deployed []common.Address
+			chainPack, err := m.GenerateChain(3, func(_ int, b *blockgen.BlockGen) {
+				for range 16 {
+					s := rng.IntN(len(keys))
+					from := crypto.PubkeyToAddress(keys[s].PublicKey)
+					var txn types.Transaction
+					if len(deployed) == 0 || rng.IntN(3) == 0 {
+						runtime := counter
+						if rng.IntN(3) == 0 {
+							runtime = destruct
+						}
+						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, program.New().ReturnViaCodeCopy(runtime).Bytes())
+					} else {
+						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(uint64(rng.IntN(2))), 300_000, gasPrice, nil)
+					}
+					signed, err := types.SignTx(txn, *signer, keys[s])
+					require.NoError(t, err)
+					b.AddTx(signed)
+					nonces[s]++
+				}
+			})
+			require.NoError(t, err)
+			for i, blk := range chainPack.Blocks {
+				require.Equal(t, 16, blk.Transactions().Len())
+				require.NotNil(t, blk.Header().BlockAccessListHash, "every block carries a BAL")
+				for _, r := range chainPack.Receipts[i] {
+					require.Equal(t, types.ReceiptStatusSuccessful, r.Status, "every deploy and call succeeds")
+				}
+			}
+			require.NoError(t, m.InsertChain(chainPack))
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				head := rawdb.ReadCurrentHeader(tx)
+				require.Equal(t, uint64(3), head.Number.Uint64())
+				return nil
+			}))
+		})
+	}
 }

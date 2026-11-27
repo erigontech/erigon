@@ -225,29 +225,44 @@ func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *h
 
 func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if blockId.Head() {
+		// Validators sign sync committee messages with this root, so it waits for the current slot's block like
+		// attestation data does. The fork choice head computation publishes the selected head read below.
+		if slot := a.ethClock.GetCurrentSlot(); a.importInProgress(slot) {
+			a.waitForImportedHead(ctx, slot, &a.headRootWaitedSlot)
+		} else {
+			a.forkchoiceStore.TryGetHeadNode()
+		}
+	}
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := beaconhttp.BlockIdFromRequest(r)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	}
 	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
-
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
+		// A block that fork choice just imported is above finality and is indexed shortly after. Finalized history
+		// without indices stays not found, since its finalized flag cannot be derived.
+		header, ok := a.forkchoiceStore.GetHeader(root)
+		if !ok || root == a.forkchoiceStore.FinalizedCheckpoint().Root || header.Slot <= a.forkchoiceStore.FinalizedSlot() {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
+		}
+		slot = &header.Slot
 	}
+	// Read after the lookups, so the status belongs to the block found and not to a root fork choice did not know yet.
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	// Check if the block is canonical
 	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)

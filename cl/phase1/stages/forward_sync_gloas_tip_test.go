@@ -472,3 +472,7 @@ func TestStageLoopAfterGloasTipWithEmptyEpochs(t *testing.T) {
 	require.Equal(t, ForkChoice, visited[0])
 	require.Contains(t, visited, CleanupAndPruning)
 }
+
+func (*forwardSyncTipSentinel) RewardPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}

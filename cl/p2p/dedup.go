@@ -15,6 +15,7 @@ const (
 	duplicateConnIdlePoll    = 200 * time.Millisecond
 	duplicateConnMaxIdleWait = 10 * time.Second
 	duplicateLossTolerance   = 10 * time.Second
+	duplicateLossBurst       = time.Second
 )
 
 // connDeduper keeps one connection per peer when two peers dial each other, possibly over different
@@ -31,6 +32,7 @@ type connDeduper struct {
 	idlePoll      time.Duration
 	maxIdleWait   time.Duration
 	lossTolerance time.Duration
+	lossBurst     time.Duration
 
 	mu    sync.Mutex
 	conns map[peer.ID][]*trackedConn
@@ -39,9 +41,9 @@ type connDeduper struct {
 // trackedConn is a connection between its Connected notification and lossTolerance after its
 // Disconnected one.
 type trackedConn struct {
-	conn     network.Conn
-	closedAt time.Time
-	excused  bool
+	conn      network.Conn
+	closedAt  time.Time
+	excusedAt time.Time
 }
 
 func newConnDeduper(local peer.ID, n network.Network) *connDeduper {
@@ -52,6 +54,7 @@ func newConnDeduper(local peer.ID, n network.Network) *connDeduper {
 		idlePoll:      duplicateConnIdlePoll,
 		maxIdleWait:   duplicateConnMaxIdleWait,
 		lossTolerance: duplicateLossTolerance,
+		lossBurst:     duplicateLossBurst,
 		conns:         make(map[peer.ID][]*trackedConn),
 	}
 }
@@ -122,22 +125,28 @@ func hasRequestStreams(c network.Conn) bool {
 }
 
 // ConsumeDuplicateLoss reports whether a failure with pid may come from closing one of its duplicate
-// connections, and uses that up: each duplicate pair excuses one failure. A request or handshake cut
-// by that close is not the peer's fault. The pair counts from when both connections registered, not
-// from the close, because a stream on a connection the remote closes can fail before this side sees
-// the close.
+// connections, and uses that up. A request or handshake cut by that close is not the peer's fault.
+// Each duplicate pair excuses the failures within lossBurst of its first excused one, because the
+// close cuts all streams of the connection at once. The pair counts from when both connections
+// registered, not from the close, because a stream on a connection the remote closes can fail before
+// this side sees the close.
 func (d *connDeduper) ConsumeDuplicateLoss(pid peer.ID) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := time.Now()
 	conns := d.conns[pid]
 	for _, dup := range conns {
-		if dup.excused || d.expired(dup, now) {
+		if !dup.excusedAt.IsZero() && now.Sub(dup.excusedAt) <= d.lossBurst {
+			return true
+		}
+	}
+	for _, dup := range conns {
+		if !dup.excusedAt.IsZero() || d.expired(dup, now) {
 			continue
 		}
 		for _, keep := range conns {
 			if !d.expired(keep, now) && d.duplicateOf(dup.conn, keep.conn) {
-				dup.excused = true
+				dup.excusedAt = now
 				return true
 			}
 		}

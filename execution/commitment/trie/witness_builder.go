@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 )
 
 type HashNodeFunc func(Node, bool, []byte) (int, error)
@@ -17,20 +18,20 @@ type MerklePathLimiter struct {
 type WitnessBuilder struct {
 	root     Node
 	trace    bool
-	operands []WitnessOperator
+	operands []opstream.WitnessOperator
 }
 
 func NewWitnessBuilder(root Node, trace bool) *WitnessBuilder {
 	return &WitnessBuilder{
 		root:     root,
 		trace:    trace,
-		operands: make([]WitnessOperator, 0),
+		operands: make([]opstream.WitnessOperator, 0),
 	}
 }
 
-func (b *WitnessBuilder) Build(limiter *MerklePathLimiter) (*Witness, error) {
+func (b *WitnessBuilder) Build(limiter *MerklePathLimiter) (*opstream.Witness, error) {
 	err := b.makeBlockWitness(b.root, []byte{}, limiter, true)
-	witness := NewWitness(b.operands)
+	witness := opstream.NewWitness(b.operands)
 	b.operands = nil
 	return witness, err
 }
@@ -40,7 +41,7 @@ func (b *WitnessBuilder) addLeafOp(key []byte, value []byte) error {
 		fmt.Printf("LEAF_VALUE: k %x v:%x\n", key, value)
 	}
 
-	var op OperatorLeafValue
+	var op opstream.OperatorLeafValue
 
 	op.Key = make([]byte, len(key))
 	copy(op.Key, key)
@@ -58,7 +59,7 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *AccountNode, 
 		fmt.Printf("LEAF_ACCOUNT: k %x acc:%v\n", key, accountNode)
 	}
 
-	var op OperatorLeafAccount
+	var op opstream.OperatorLeafAccount
 	op.Key = make([]byte, len(key))
 	copy(op.Key, key)
 
@@ -83,7 +84,7 @@ func (b *WitnessBuilder) addExtensionOp(key []byte) error {
 		fmt.Printf("EXTENSION: k %x\n", key)
 	}
 
-	var op OperatorExtension
+	var op opstream.OperatorExtension
 	op.Key = make([]byte, len(key))
 	copy(op.Key, key)
 
@@ -109,7 +110,7 @@ func (b *WitnessBuilder) addHashOp(n *HashNode) error {
 		fmt.Printf("HASH: type: %T v %s\n", n, n)
 	}
 
-	var op OperatorHash
+	var op opstream.OperatorHash
 	op.Hash = common.BytesToHash(n.hash)
 
 	b.operands = append(b.operands, &op)
@@ -121,7 +122,7 @@ func (b *WitnessBuilder) addBranchOp(mask uint32) error {
 		fmt.Printf("BRANCH: mask=%b\n", mask)
 	}
 
-	var op OperatorBranch
+	var op opstream.OperatorBranch
 	op.Mask = mask
 
 	b.operands = append(b.operands, &op)
@@ -133,7 +134,7 @@ func (b *WitnessBuilder) addCodeOp(code []byte) error {
 		fmt.Printf("CODE: len=%d\n", len(code))
 	}
 
-	var op OperatorCode
+	var op opstream.OperatorCode
 	op.Code = make([]byte, len(code))
 	copy(op.Code, code)
 
@@ -146,7 +147,7 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 		fmt.Printf("EMPTY ROOT\n")
 	}
 
-	b.operands = append(b.operands, &OperatorEmptyRoot{})
+	b.operands = append(b.operands, &opstream.OperatorEmptyRoot{})
 	return nil
 }
 

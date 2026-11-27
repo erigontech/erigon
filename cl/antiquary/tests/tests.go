@@ -151,6 +151,14 @@ func (m *MockBlockReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.T
 	return m.U[slot], nil
 }
 
+func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+	block := m.U[slot]
+	if block == nil {
+		return nil, nil
+	}
+	return block.Blinded()
+}
+
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	// do a linear search
 	for _, v := range m.U {

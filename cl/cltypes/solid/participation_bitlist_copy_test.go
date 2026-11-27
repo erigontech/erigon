@@ -23,7 +23,7 @@ import (
 )
 
 func TestParticipationBitListCopyToCopiesOnlyLogicalLength(t *testing.T) {
-	source := NewParticipationBitList(3, 16)
+	source := NewParticipationBitList(3, 8)
 	source.Set(0, 1)
 	source.u[3] = 0xff
 	target := NewParticipationBitList(8, 16)

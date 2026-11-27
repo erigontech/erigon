@@ -46,11 +46,11 @@ var engineXTestCommand = cli.Command{
 	Name:      "enginextest",
 	Usage:     "Executes engine-x test fixtures using the existing EngineXTestRunner",
 	ArgsUsage: "<path>",
-	Description: "Tests with the same fork and pre-alloc hash share a short-lived Erigon\n" +
-		"node whose datadir lives under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
-		"per-tester create/unlink work serialises through the journal and\n" +
-		"dominates wall time. Pointing $TMPDIR at a RAM-backed filesystem cuts\n" +
-		"wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
+	Description: "Tests share a short-lived Erigon node when the fork, pre-alloc hash, and\n" +
+		"EIP-8253 account list match. Its datadir lives under $TMPDIR (default /tmp).\n" +
+		"On a journaled filesystem like ext4, the per-tester create/unlink work\n" +
+		"serialises through the journal and dominates wall time. Pointing $TMPDIR\n" +
+		"at a RAM-backed filesystem cuts wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
 		"\n" +
 		"    RAMDISK=$(./tools/create-ramdisk)\n" +
 		"    TMPDIR=$RAMDISK evm enginextest ...\n" +
@@ -270,10 +270,9 @@ func printTimings(results []testResult) {
 }
 
 // loadEngineXGroups walks path for JSON files, parses each, filters tests by
-// the regex, and groups them by (fork, preAllocHash). Each group is the unit
-// of execution given to a worker — a worker creates one EngineApiTester for
-// the group's (fork, preAllocHash), runs all tests in the group sequentially
-// on that tester, then evicts it.
+// the regex, and groups them by (fork, preAllocHash). A worker runs each group's
+// tests sequentially. The runner keeps separate testers for different account
+// lists within the group, then evicts all of them when the group finishes.
 //
 // Files under any pre_alloc/ directory are skipped: those are pre-allocation
 // inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
@@ -335,12 +334,9 @@ func isUnderPreAlloc(p string) bool {
 	return false
 }
 
-// runEngineXGroup executes every test in the group sequentially on a single
-// tester (created lazily by the runner) then evicts the tester to free its
-// node and temp directory before returning. Results are streamed to resultCh
-// so the parent goroutine can collect across all workers. When timeIt is
-// true, each test's single Run is wrapped in timedExec so wall-time and
-// memstats land on the JSON output.
+// runEngineXGroup executes the group's tests sequentially and then evicts its
+// cached testers. Results are streamed to resultCh. When timeIt is true, each
+// Run is wrapped in timedExec to include wall-time and memstats in the JSON output.
 func runEngineXGroup(
 	ctx context.Context,
 	runner *engineapitester.EngineXTestRunner,

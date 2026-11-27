@@ -239,13 +239,7 @@ func trackedDeduper(after time.Duration) (*connDeduper, *fakeConn, *fakeConn) {
 	return d, preferred, other
 }
 
-// The excuse counts from when the pair registered: a stream on a duplicate the remote closes fails
-// before this side is notified.
-func TestDedupExcusesOneFailurePerDuplicatePair(t *testing.T) {
-	d, _, _ := trackedDeduper(time.Second)
-	require.True(t, d.ConsumeDuplicateLoss(highID))
-	require.False(t, d.ConsumeDuplicateLoss(highID), "one pair excuses one failure")
-
+func TestDedupExcusesAClosedDuplicateUntilItExpires(t *testing.T) {
 	d, preferred, other := trackedDeduper(time.Second)
 	n := d.net.(*fakeNetwork)
 	n.conns = []network.Conn{preferred}
@@ -259,6 +253,31 @@ func TestDedupExcusesOneFailurePerDuplicatePair(t *testing.T) {
 	d.Disconnected(n, other)
 	time.Sleep(time.Millisecond)
 	require.False(t, d.ConsumeDuplicateLoss(highID), "the excuse expires after the close")
+}
+
+func TestDedupDoesNotExcuseADuplicateLongAfterThePreferredConnectionClosed(t *testing.T) {
+	d, preferred, _ := trackedDeduper(time.Second)
+	n := d.net.(*fakeNetwork)
+	n.conns = []network.Conn{d.conns[highID][1].conn}
+	d.lossTolerance = 0
+	d.Disconnected(n, preferred)
+	time.Sleep(time.Millisecond)
+	require.False(t, d.ConsumeDuplicateLoss(highID))
+}
+
+// Closing a duplicate cuts all of its streams at once, so the failures that follow the first
+// excused one closely are excused too.
+func TestDedupExcusesTheFailuresOfOneClose(t *testing.T) {
+	d, _, _ := trackedDeduper(time.Second)
+	d.lossBurst = time.Hour
+	require.True(t, d.ConsumeDuplicateLoss(highID))
+	excused := d.conns[highID][1]
+	excused.excusedAt = excused.excusedAt.Add(-time.Minute)
+	first := excused.excusedAt
+	require.True(t, d.ConsumeDuplicateLoss(highID), "a second stream cut by the same close")
+	require.Equal(t, first, excused.excusedAt, "the burst counts from the first excused failure")
+	excused.excusedAt = excused.excusedAt.Add(-2 * d.lossBurst)
+	require.False(t, d.ConsumeDuplicateLoss(highID), "a failure after the burst is the peer's")
 }
 
 // The preferred connection replaces an older non-preferred one of any age, so that close is excused.
