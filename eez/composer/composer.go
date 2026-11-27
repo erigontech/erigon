@@ -947,6 +947,15 @@ func bundled(txs []*Held) []*Held {
 	return out
 }
 
+// settledBy returns derivation's settlement record covering block n, if it
+// holds one.
+func (c *Composer) settledBy(n uint64) (deriver.Record, bool) {
+	if c.settlement == nil {
+		return deriver.Record{}, false
+	}
+	return c.settlement(n)
+}
+
 // partialCulprit returns the transaction where L1 stopped a partial batch of
 // txs, given those spent: its first unspent outbound transaction, else its
 // first inbound one when unspent, as one behind a spent trigger may only be
@@ -977,8 +986,10 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // the provers refused was never posted: its culprit, unless it ran, is
 // ejected instead, and no other is charged. A batch its own posting settled
 // whole, derivation passing it before its verdict, is only released. False
-// leaves p for the next call, a read having failed.
+// leaves p for the next call, a read having failed or derivation having
+// replaced or rolled out the settlement during the reads.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
+	settler, derived := c.settledBy(p.Height)
 	spent, reverted, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		return false
@@ -1006,10 +1017,8 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 			rest = append(rest, tx)
 		}
 	}
-	var settler deriver.Record
-	derived := false
-	if c.settlement != nil {
-		settler, derived = c.settlement(p.Height)
+	if now, ok := c.settledBy(p.Height); c.cursor() < p.Height || ok != derived || now != settler {
+		return false
 	}
 	own := derived && settler.TxHash == p.Post
 	// A reorg during the reads may have taken the batch and requeued it.

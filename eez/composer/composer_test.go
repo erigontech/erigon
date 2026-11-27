@@ -1095,6 +1095,50 @@ func TestComposerDisposesOfPartialTransactions(t *testing.T) {
 	}
 }
 
+// TestComposerRestartsADisposalDerivationMoved: a settlement derivation
+// replaces, or rolls out, while disposal reads what ran leaves the batch for
+// the next call, the pool untouched.
+func TestComposerRestartsADisposalDerivationMoved(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		move func(h *harness, settler *atomic.Pointer[deriver.Record])
+	}{
+		{name: "the settlement replaced", move: func(_ *harness, settler *atomic.Pointer[deriver.Record]) {
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xe}, LastL2Block: 8})
+		}},
+		{name: "the settlement rolled out", move: func(h *harness, _ *atomic.Pointer[deriver.Record]) { h.cursor.Store(7) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			node := &triggers{landed: map[common.Hash]bool{}}
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			var settler atomic.Pointer[deriver.Record]
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xf}, LastL2Block: 8})
+			h.c.Settlements(func(n uint64) (deriver.Record, bool) {
+				r := settler.Load()
+				return *r, n <= r.LastL2Block
+			})
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			ran, cut := held(addr(0xa), 0, Inbound, 1), held(addr(0xb), 0, Inbound, 2)
+			node.landed[ran.Hash] = true
+			require.NoError(t, pool.Push(ran, 0))
+			require.NoError(t, pool.Push(cut, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+			h.c.ledger.MarkSettledPartial(8, common.Hash{0xf})
+			h.cursor.Store(8)
+			var once sync.Once
+			node.read = func() { once.Do(func() { c.move(h, &settler) }) }
+
+			h.c.RecoverFailed(t.Context())
+			r, ok := h.resolution(8)
+			require.True(t, ok)
+			require.Equal(t, SettledPartial, r)
+			require.Zero(t, pool.Len())
+			require.Zero(t, cut.Attempts)
+		})
+	}
+}
+
 // TestComposerDisposesOfAPartialBatchLedByOutbound: the outbound
 // transaction leading a partial batch, in the block derivation rebuilt, ran;
 // L1 stopped at the first unspent trigger.
@@ -1396,6 +1440,8 @@ func TestComposerForgetsAFinalizedBatchThatNeverLanded(t *testing.T) {
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
+	// read, when set, runs on each receipt read.
+	read func()
 	// mu guards asked: recovery reads receipts concurrently.
 	mu    sync.Mutex
 	asked []common.Hash
@@ -1411,6 +1457,9 @@ func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error
 	l.mu.Lock()
 	l.asked = append(l.asked, h)
 	l.mu.Unlock()
+	if l.read != nil {
+		l.read()
+	}
 	if l.failed != nil {
 		return nil, l.failed
 	}
