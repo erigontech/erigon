@@ -316,18 +316,15 @@ type historicalReadiness struct {
 }
 
 func newHistoricalReadiness(tx kv.Tx, view *snapshotsync.CaplinStateView) (historicalReadiness, error) {
-	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	progressBytes, err := tx.GetOne(kv.StatesProcessingProgress, kv.StatesProcessingKey)
 	if err != nil {
 		return historicalReadiness{}, err
 	}
-	reconstructed := progress != 0
-	if !reconstructed {
-		reconstructed, err = tx.Has(kv.StatesProcessingProgress, kv.StatesProcessingKey)
-		if err != nil {
-			return historicalReadiness{}, err
-		}
+	r := historicalReadiness{reconstructed: len(progressBytes) != 0, view: view}
+	if r.reconstructed {
+		r.progress = base_encoding.Decode64FromBytes4(progressBytes)
 	}
-	return historicalReadiness{progress: progress, reconstructed: reconstructed, view: view}, nil
+	return r, nil
 }
 
 func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) error {
