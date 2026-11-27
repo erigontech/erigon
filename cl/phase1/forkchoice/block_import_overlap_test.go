@@ -1454,3 +1454,41 @@ func TestBlockImportOverlapParentNotSyncedHeadUsesSerialPath(t *testing.T) {
 	require.NoError(t, test.store.OnBlock(t.Context(), blocks[1], true, true, false))
 	require.Zero(t, hooks.Load())
 }
+
+// A same-root waiter checks admission again after the other import settles. An epoch tick that
+// advanced the time meanwhile and still waits for f.mu promotes first, and a block that this
+// promotion puts at the finalized horizon must not be imported.
+func TestBlockImportOverlapWaiterRunsPendingPromotionBeforeRecheck(t *testing.T) {
+	blocks, anchor, _ := tests.GetCapellaRandom()
+	block := cloneOverlapFixture(t, blocks[0])
+	block.Block.Body.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](int(anchor.BeaconConfig().MaxAttestations))
+	test := newOverlapTestStore(t, anchor, newReturningEngine(t, execution_client.PayloadStatusValidated, nil), false)
+	tickOverlapStore(test, block)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	root := common.Hash(blockRoot)
+	overlap := &blockImportOverlap{settled: make(chan struct{})}
+	test.store.mu.Lock()
+	test.store.blockImportsInFlight = map[common.Hash]chan struct{}{root: overlap.settled}
+	test.store.mu.Unlock()
+
+	checks := signalAdmissionChecks(test)
+	waiterDone := make(chan error, 1)
+	go func() { waiterDone <- test.store.OnBlock(t.Context(), block, false, false, false) }()
+	awaitSignal(t, checks, "waiter admission")
+	assertOnBlockWaiting(t, test.store, waiterDone)
+
+	slotsPerEpoch := test.store.beaconCfg.SlotsPerEpoch
+	nextEpoch := block.Block.Slot/slotsPerEpoch + 1
+	test.store.mu.Lock()
+	test.store.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{Epoch: nextEpoch, Root: block.Block.ParentRoot})
+	// The epoch tick advances the time; its slot-start work waits for f.mu.
+	test.store.timeMs.Store((test.store.genesisTime+nextEpoch*slotsPerEpoch*test.store.beaconCfg.SecondsPerSlot)*1000 + 100)
+	test.store.settleBlockImportOverlapLocked(root, overlap)
+	test.store.mu.Unlock()
+	require.NoError(t, awaitOnBlock(t, waiterDone))
+
+	require.Equal(t, nextEpoch, test.store.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
+	_, imported := test.graph.GetHeader(root)
+	require.False(t, imported)
+}

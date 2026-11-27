@@ -1789,6 +1789,9 @@ func (a *ApiHandler) getBuilderPayload(
 			return nil, nil, err
 		}
 	}
+	if err := header.VerifySignature(a.beaconChainCfg, baseState.Version()); err != nil {
+		return nil, nil, err
+	}
 
 	return header, blockValue, nil
 }
