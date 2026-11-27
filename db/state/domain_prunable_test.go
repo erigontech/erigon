@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -71,7 +70,7 @@ func requirePrunableGauge(t *testing.T, cfg statecfg.DomainCfg, gauge metrics.Ga
 	logEvery := time.NewTicker(time.Hour)
 	defer logEvery.Stop()
 
-	db, d := testDbAndDomainOfStep(t, cfg, aggStep, log.New())
+	db, d := testDbAndDomainOfStep(t, cfg, aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -124,7 +123,7 @@ func TestDomain_PrunableGaugeInterruptedRotation(t *testing.T) {
 	logEvery := time.NewTicker(time.Hour)
 	defer logEvery.Stop()
 
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, aggStep, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

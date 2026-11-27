@@ -666,6 +666,10 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
 // module and asserts the cached witness bytes are identical to the on-demand build.
 func TestWitnessCacheBuilderParity(t *testing.T) {
+	runCommitmentV3Tests(t, testWitnessCacheBuilderParity)
+}
+
+func testWitnessCacheBuilderParity(t *testing.T, v3 bool) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
@@ -679,6 +683,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	})
 	require.NoError(t, err)
+	requireCommitmentVariant(t, m, v3)
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 
@@ -1041,6 +1046,16 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
 	m, testChain := newV3HistoryTestExecModule(t)
+	runHeadCaptureOverParentRecords(t, m, testChain)
+
+	t.Run("collapse chain", func(t *testing.T) {
+		golden := newWitnessGoldenRun(t)
+		runHeadCaptureOverParentRecords(t, golden.m, golden.chain)
+	})
+}
+
+func runHeadCaptureOverParentRecords(t *testing.T, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) {
+	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 

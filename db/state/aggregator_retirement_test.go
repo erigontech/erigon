@@ -75,7 +75,7 @@ func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
 			require.NotNil(t, file.original.decompressor, file.kind)
 		}
 	})
-	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
+	require.NoError(t, agg.buildFiles(ctx, db, 0, collateAll, nil))
 	require.NotNil(t, reader)
 	for _, file := range files {
 		old := file.original

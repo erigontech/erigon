@@ -105,13 +105,13 @@ func Capture(
 	return fx, nil
 }
 
-// captureAncestors records the last 256 ancestor hashes so replay can answer
+// captureAncestors records the last 257 ancestor hashes so replay can answer
 // the BLOCKHASH opcode without a DB.
 func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) error {
 	n := header.Number.Uint64()
 	lo := uint64(0)
-	if n > 256 {
-		lo = n - 256
+	if n > 257 {
+		lo = n - 257
 	}
 	for a := lo; a < n; a++ {
 		h, ok, err := blockReader.CanonicalHash(ctx, tx, a)
@@ -155,7 +155,7 @@ func Replay(
 		if h, ok := fx.Ancestors[n]; ok {
 			return common.Hash(h), nil
 		}
-		return common.Hash{}, nil
+		return common.Hash{}, fmt.Errorf("ancestor %d missing from fixture", n)
 	}
 
 	cr, err := newFixtureChainReader(chainConfig, fx)

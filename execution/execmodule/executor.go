@@ -118,14 +118,20 @@ func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv
 	return pe.validationSync.RunUnwind(sd, tx)
 }
 
-// RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+// RunPrune executes pruning on the main pipeline and returns the last txnum state files may now hold.
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (uint64, error) {
+	retireToBlock, err := pe.pruneStages(ctx, tx, initialCycle, timeout)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	err = pe.sync.RunPrune(ctx, tx, initialCycle, finalityCtx, timeout)
-	return finalityCtx, err
+	return execfinality.CollateToTxNum(ctx, tx, pe.blockReader.TxnumReader(), retireToBlock)
+}
+
+func (pe *PipelineExecutor) pruneStages(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (retireToBlock uint64, err error) {
+	if retireToBlock, err = execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle); err != nil {
+		return 0, err
+	}
+	return retireToBlock, pe.sync.RunPrune(ctx, tx, initialCycle, retireToBlock, timeout)
 }
 
 // Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
@@ -279,23 +285,28 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		hook.NotifySyncState(tx)
 	}
 
-	var finalityCtx kv.FinalityContext
+	const initialCycle = true
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			var err error
-			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			_, err := pe.pruneStages(ctx, rwtx, initialCycle, 0)
 			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
+			// The boundary is read after the flush: the batch's own changesets keep their blocks out of the files.
+			var collateToTxNum uint64
+			resolve := func(tx kv.RwTx) (err error) {
+				collateToTxNum, err = execfinality.ResolveTxNum(ctx, tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+				return err
+			}
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
-			if err := sd.Commit(ctx, tx); err != nil {
+			if err := sd.Commit(ctx, tx, resolve); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			restoreStateChanges = hook.CheckpointStateChanges()
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
-			pe.db.BuildFilesInBackground(finalityCtx)
+			pe.db.BuildFilesInBackground(collateToTxNum)
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
 				return nil, nil, nil

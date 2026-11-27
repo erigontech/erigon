@@ -424,6 +424,9 @@ func (t *TxTask) IsHistoric() bool {
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
+	if t.TxIndex == -1 {
+		evm.Context.GetHash = t.EvmBlockContext.GetHash
+	}
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
 		var vmCfg vm.Config
@@ -485,12 +488,16 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
+		getHash := evm.Context.GetHash
+		if getHash == nil {
+			getHash = protocol.GetHashFnFromChain(header, chainReader)
+		}
 		// Block initialisation
 		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", t.TxNum, t.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			// Block initialisation runs between transactions, so the worker's EVM is
 			// free: reuse it instead of building one per system call.
-			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
+			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config(), getHash)
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)

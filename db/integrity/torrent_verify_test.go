@@ -19,6 +19,7 @@ package integrity
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,8 +48,18 @@ func writeTorrentFile(t *testing.T, dataPath string) {
 	t.Helper()
 	info := metainfo.Info{PieceLength: 16 * 1024}
 	require.NoError(t, info.BuildFromFilePath(dataPath))
+	writeTorrentInfo(t, dataPath, info)
+}
+
+func writeTorrentInfo(t *testing.T, dataPath string, info metainfo.Info) {
+	t.Helper()
 	infoBytes, err := bencode.Marshal(info)
 	require.NoError(t, err)
+	writeTorrentInfoBytes(t, dataPath, infoBytes)
+}
+
+func writeTorrentInfoBytes(t *testing.T, dataPath string, infoBytes []byte) {
+	t.Helper()
 
 	f, err := os.Create(dataPath + ".torrent")
 	require.NoError(t, err)
@@ -81,6 +92,135 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 
 	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
 	require.NoError(t, err)
+}
+
+func TestVerifyTorrentFilesRejectsV2OnlyTorrent(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	infoBytes := []byte(fmt.Sprintf("d9:file treed8:test.segd0:d6:lengthi1024e11:pieces root32:%seee12:meta versioni2e4:name8:test.seg12:piece lengthi16384ee", make([]byte, 32)))
+	f, err := os.Create(dataPath + ".torrent")
+	require.NoError(t, err)
+	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
+	require.NoError(t, f.Close())
+
+	var verifyErr error
+	require.NotPanics(t, func() {
+		verifyErr = VerifyTorrentFiles(t.Context(), dir, true, log.New())
+	})
+	require.Error(t, verifyErr)
+}
+
+func TestVerifyTorrentFilesRejectsOverflowingPieceCount(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	const totalLength = int64(1 << 20)
+	const pieceLength = int64(1<<63 - 1)
+	require.NoError(t, os.WriteFile(dataPath, nil, 0o644))
+	require.NoError(t, os.Truncate(dataPath, totalLength))
+	writeTorrentInfo(t, dataPath, metainfo.Info{Name: filepath.Base(dataPath), Length: totalLength, PieceLength: pieceLength})
+
+	var verified bool
+	var verifyErr error
+	require.NotPanics(t, func() {
+		verifyErr = verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	})
+	require.Error(t, verifyErr)
+	require.False(t, verified)
+}
+
+func TestVerifyTorrentFilesAcceptsEmptyV1Torrent(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, nil, 0o644))
+	writeTorrentInfo(t, dataPath, metainfo.Info{Name: filepath.Base(dataPath)})
+
+	var verified bool
+	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	require.NoError(t, err)
+	require.True(t, verified)
+}
+
+func TestVerifyTorrentFilesRejectsHybridPieceLayout(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	data := []byte{0xaa, 0xbb}
+	require.NoError(t, os.WriteFile(dataPath, data, 0o644))
+	pieceHash := sha1.Sum(data)
+	infoBytes := []byte(fmt.Sprintf("d9:file treed1:ad0:d6:lengthi1eee1:bd0:d6:lengthi1eeee6:lengthi2e12:meta versioni2e4:name8:test.seg12:piece lengthi16e6:pieces20:%se", pieceHash[:]))
+	writeTorrentInfoBytes(t, dataPath, infoBytes)
+
+	var verified bool
+	var verifyErr error
+	require.NotPanics(t, func() {
+		verifyErr = verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	})
+	require.Error(t, verifyErr)
+	require.False(t, verified)
+}
+
+func TestVerifyTorrentFilesRejectsV2TreeWithZeroPieceLength(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, []byte{0xaa}, 0o644))
+	writeTorrentInfo(t, dataPath, metainfo.Info{
+		Name:        filepath.Base(dataPath),
+		PieceLength: 0,
+		MetaVersion: 2,
+		FileTree: metainfo.FileTree{Dir: map[string]metainfo.FileTree{
+			"test.seg": {File: metainfo.FileTreeFile{Length: 1}},
+		}},
+	})
+
+	var verified bool
+	var verifyErr error
+	require.NotPanics(t, func() {
+		verifyErr = verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	})
+	require.Error(t, verifyErr)
+	require.False(t, verified)
+}
+
+func TestVerifyTorrentFilesRejectsMissingPieceHashes(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "test.seg")
+	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	info := metainfo.Info{Name: filepath.Base(dataPath), Length: 1024, PieceLength: 16 * 1024}
+	infoBytes, err := bencode.Marshal(info)
+	require.NoError(t, err)
+	f, err := os.Create(dataPath + ".torrent")
+	require.NoError(t, err)
+	require.NoError(t, (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(f))
+	require.NoError(t, f.Close())
+
+	var verified bool
+	err = verifyTorrentFiles(t.Context(), dir, true, log.New(), func(string, [20]byte) { verified = true })
+	require.Error(t, err)
+	require.False(t, verified)
+}
+
+func TestVerifyTorrentFilesRecordsResolvedReadPath(t *testing.T) {
+	dir := t.TempDir()
+	targetOne := filepath.Join(dir, "one.data")
+	targetTwo := filepath.Join(dir, "two.data")
+	alias := filepath.Join(dir, "alias.seg")
+	require.NoError(t, os.WriteFile(targetOne, bytes.Repeat([]byte{0xaa}, 1024), 0o644))
+	require.NoError(t, os.WriteFile(targetTwo, bytes.Repeat([]byte{0xbb}, 1024), 0o644))
+	require.NoError(t, os.Symlink(targetOne, alias))
+	writeTorrentFile(t, alias)
+
+	var callbackPath string
+	var callbackErr error
+	err := verifyTorrentFiles(t.Context(), dir, true, log.New(), func(path string, _ [20]byte) {
+		callbackPath = path
+		callbackErr = dir2.RemoveFile(alias)
+		if callbackErr == nil {
+			callbackErr = os.Symlink(targetTwo, alias)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, callbackErr)
+	require.Equal(t, cachePath(targetOne), callbackPath)
 }
 
 func TestVerifyTorrentFilesRejectsTrailingBytes(t *testing.T) {

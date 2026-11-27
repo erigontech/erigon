@@ -184,6 +184,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
+	cancel              func() // cancels the running EVM once a read dependency voids the run
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
@@ -1202,12 +1203,12 @@ func (ibs *IntraBlockState) accountBase(addr accounts.Address, readStorage bool)
 		}
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
 		if destructDep != UnknownDep {
-			ibs.dep = max(ibs.dep, destructDep)
+			ibs.recordDep(destructDep)
 		}
 		// Only the re-creation keeps the account present, so the read must fail validation once it is gone.
 		if recreation != nil {
 			if recreation.Status() == MVReadResultDependency {
-				ibs.dep = max(ibs.dep, recreation.DepIdx())
+				ibs.recordDep(recreation.DepIdx())
 			}
 			if _, ok := ibs.reads.GetAddress(addr); !ok {
 				acc := *readAccount
