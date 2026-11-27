@@ -431,8 +431,9 @@ func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixtu
 		key, err := bls.GenerateKey()
 		require.NoError(t, err)
 		publicKey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
-		validator, err := head.ValidatorForValidatorIndex(index)
+		view, err := head.ValidatorForValidatorIndex(index)
 		require.NoError(t, err)
+		validator := view.Clone()
 		validator.SetPublicKey(publicKey)
 		head.SetValidatorAtIndex(index, validator)
 		for _, position := range memberPositions {

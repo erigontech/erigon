@@ -56,7 +56,7 @@ func (c validatorErrorCursor) Close()                        {}
 
 func TestReadValidatorsTableReturnsCursorError(t *testing.T) {
 	var row bytes.Buffer
-	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&row))
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator().View(), 0).Serialize(&row))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	wantErr := errors.New("cursor failed")
