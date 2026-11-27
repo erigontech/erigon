@@ -580,15 +580,6 @@ func (c *Composer) RecoverFailed(ctx context.Context) {
 		}
 	}
 	for _, p := range c.ledger.TakeFinalized(c.finalized()) {
-		// Derivation passing a posting that never landed confirms the height,
-		// not the posting: what ran of it is final in the block derivation
-		// built.
-		if !p.Landed {
-			if c.pool != nil {
-				c.pool.Forget(p.Txs)
-			}
-			continue
-		}
 		c.wg.Go(func() { c.audit(p) })
 	}
 }
@@ -879,30 +870,82 @@ func (c *Composer) release(txs []*Held) {
 	}
 }
 
-// audit checks that the posting of a finalized settlement is on L1: one
-// missing means a reorg the follower did not see, and its transactions
-// return to the pool for the next drain to revalidate. Otherwise they are
-// final.
+// audit settles the transactions of p, a batch whose height L1 finalized.
+// A posting of the composer's that landed and is no longer on L1, which no
+// other settlement superseded, is a reorg the follower did not see: all of
+// p returns to the pool for the next drain to revalidate, as it does when L1
+// or the chain cannot be read. Otherwise the final chain decides, whichever
+// posting settled the height and whatever a reorg made of the settlement
+// since it was confirmed: what the block at its height holds, and the
+// triggers L1 has, ran and are final; the rest returns to the pool.
 func (c *Composer) audit(p Posted[*Held]) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
 	defer cancel()
-	r, err := c.observer.Node.Receipt(ctx, p.Post)
-	switch {
-	case err != nil:
-		c.logger.Error("[eez] finality audit failed", "event", "eez.composer.finality_audit.check_failed", "to", p.Height, "post", p.Post, "err", err)
-	case r == nil && (p.Superseded || c.superseded(p)):
-		// Another posting settled the height; what ran of p is final in it.
-	case r == nil:
-		c.logger.Error("[eez] finalized settlement's posting is not on L1", "event", "eez.composer.finality_audit.rolled_out", "to", p.Height, "post", p.Post,
-			"held", len(p.Txs))
-		if c.pool != nil && len(p.Txs) > 0 {
+	requeue := func(event, msg string, args ...any) {
+		c.logger.Error(msg, append([]any{"event", event, "to", p.Height, "post", p.Post, "held", len(p.Txs)}, args...)...)
+		if c.pool != nil {
 			c.pool.PushFront(p.Txs)
 		}
+	}
+	if p.Landed {
+		r, err := c.observer.Node.Receipt(ctx, p.Post)
+		switch {
+		case err != nil:
+			requeue("eez.composer.finality_audit.check_failed", "[eez] finality audit failed, its transactions are requeued", "err", err)
+			return
+		case r == nil && !p.Superseded && !c.superseded(p):
+			requeue("eez.composer.finality_audit.rolled_out", "[eez] finalized settlement's posting is not on L1")
+			return
+		}
+	}
+	if c.pool == nil || len(p.Txs) == 0 {
 		return
 	}
-	if c.pool != nil {
-		c.pool.Forget(p.Txs)
+	spent, _, err := c.ranAt(ctx, p.Txs, p.Height)
+	if err != nil {
+		requeue("eez.composer.finality_audit.check_failed", "[eez] finality audit failed, its transactions are requeued", "err", err)
+		return
 	}
+	var ran, rest []*Held
+	for _, tx := range p.Txs {
+		if spent[tx.Hash] {
+			ran = append(ran, tx)
+		} else {
+			rest = append(rest, tx)
+		}
+	}
+	if len(rest) > 0 {
+		c.logger.Warn("[eez] finalized height left transactions out, requeued", "event", "eez.composer.finality_audit.requeued",
+			"to", p.Height, "post", p.Post, "requeued", len(rest))
+		c.pool.PushFront(rest)
+	}
+	c.pool.Forget(ran)
+}
+
+// ranAt reports which of txs ran in the batch settled at height: the
+// outbound ones the block derivation rebuilt there holds, the triggers L1
+// has a receipt of; and whether one of those triggers reverted.
+func (c *Composer) ranAt(ctx context.Context, txs []*Held, height uint64) (map[common.Hash]bool, bool, error) {
+	spent, reverted, err := c.landed(ctx, bundled(txs))
+	if err != nil {
+		return nil, false, err
+	}
+	if slices.ContainsFunc(txs, func(tx *Held) bool { return tx.Direction == Outbound }) {
+		b, err := c.block(ctx, height)
+		if err != nil {
+			return nil, false, err
+		}
+		rebuilt := make(map[common.Hash]bool, len(b.Transactions()))
+		for _, t := range b.Transactions() {
+			rebuilt[t.Hash()] = true
+		}
+		for _, tx := range txs {
+			if tx.Direction == Outbound {
+				spent[tx.Hash] = rebuilt[tx.Hash]
+			}
+		}
+	}
+	return spent, reverted, nil
 }
 
 // receiptReads bounds the receipt reads a recovery runs at once.
@@ -990,24 +1033,9 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // replaced or rolled out the settlement during the reads.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 	settler, derived := c.settledBy(p.Height)
-	spent, reverted, err := c.landed(ctx, bundled(p.Txs))
+	spent, reverted, err := c.ranAt(ctx, p.Txs, p.Height)
 	if err != nil {
 		return false
-	}
-	if slices.ContainsFunc(p.Txs, func(tx *Held) bool { return tx.Direction == Outbound }) {
-		b, err := c.block(ctx, p.Height)
-		if err != nil {
-			return false
-		}
-		rebuilt := make(map[common.Hash]bool, len(b.Transactions()))
-		for _, t := range b.Transactions() {
-			rebuilt[t.Hash()] = true
-		}
-		for _, tx := range p.Txs {
-			if tx.Direction == Outbound {
-				spent[tx.Hash] = rebuilt[tx.Hash]
-			}
-		}
 	}
 	var ran, rest []*Held
 	for _, tx := range p.Txs {

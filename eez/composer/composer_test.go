@@ -1388,12 +1388,13 @@ func TestComposerDisposesOfPartialSettlements(t *testing.T) {
 func TestComposerAuditsFinality(t *testing.T) {
 	for _, gone := range []bool{false, true} {
 		t.Run(fmt.Sprintf("gone=%v", gone), func(t *testing.T) {
-			chain := newTestChain(t, 8)
+			chain := newTestChain(t, 8, 8)
 			node := newLanding(t, chain.blocks[8].Hash())
 			h := newHarness(t, chain, 8, node)
 			pool := NewHeldPool()
 			h.c.Recover(pool, nil)
 			out := held(addr(0xa), 0, Outbound, 1)
+			out.Hash = chain.blocks[8].Transactions()[0].Hash()
 			require.NoError(t, pool.Push(out, 0))
 			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(1)})
 			h.c.ledger.MarkSettled(8, common.Hash{0xf})
@@ -1853,6 +1854,85 @@ func TestComposerAuditsASupersededPosting(t *testing.T) {
 	require.False(t, pool.Holds(out.Hash), "final in the rival's block")
 }
 
+// TestComposerAuditsASettlementReplaced: an L1 reorg that replaces a
+// settlement with a rival's at the same height moves no cursor; at
+// finality, of the composer's transactions those the final block holds are
+// final and the others return to the pool, whether its posting left L1 or
+// landed again without the settlement. A batch disposed of against a first
+// rival, its block holding kept, is decided by a second rival's, which holds
+// none. A block that cannot be read returns them all.
+func TestComposerAuditsASettlementReplaced(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// landed has the composer's posting settle the height first.
+		landed bool
+		// back lands the posting again after the reorg.
+		back bool
+		// unread leaves the final block unreadable.
+		unread bool
+		// requeued lists the transactions back in the pool, kept and
+		// omitted.
+		requeued func(kept, omitted *Held) []*Held
+	}{
+		{name: "the posting left L1", landed: true, requeued: func(_, o *Held) []*Held { return []*Held{o} }},
+		{name: "the posting back without the settlement", landed: true, back: true, requeued: func(_, o *Held) []*Held { return []*Held{o} }},
+		{name: "a second rival", requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
+		{name: "the final block unreadable", landed: true, unread: true, requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8, 8)
+			node := &triggers{landed: map[common.Hash]bool{}}
+			h := newHarness(t, chain, 8, node)
+			var settler atomic.Pointer[deriver.Record]
+			first := common.Hash{0xf}
+			if !c.landed {
+				first = common.Hash{0xe}
+			}
+			settler.Store(&deriver.Record{TxHash: first, LastL2Block: 8})
+			h.c.Settlements(func(n uint64) (deriver.Record, bool) { return settlements(*settler.Load())(n) })
+			pool := NewHeldPool()
+			h.c.Recover(pool, nil)
+			kept := held(addr(0xa), 0, Outbound, 1)
+			kept.Hash = chain.blocks[8].Transactions()[0].Hash()
+			omitted := held(addr(0xb), 0, Outbound, 2)
+			require.NoError(t, pool.Push(kept, 0))
+			require.NoError(t, pool.Push(omitted, 0))
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: chain.header(8), Txs: pool.PopN(2)})
+			if c.landed {
+				h.c.ledger.MarkSettled(8, common.Hash{0xf})
+			}
+			h.cursor.Store(8)
+			h.c.RecoverFailed(t.Context())
+			if c.landed {
+				require.True(t, pool.Holds(omitted.Hash), "settled, held until final")
+			}
+			// The reorg: a rival's block at height 8, holding kept alone, or,
+			// replacing the first rival's, nothing.
+			settler.Store(&deriver.Record{TxHash: common.Hash{0xd}, LastL2Block: 8})
+			if !c.landed {
+				require.True(t, pool.Holds(kept.Hash), "ran in the first rival's block")
+				h.chain.blocks[8] = types.NewBlockWithHeader(chain.header(8), nil)
+			}
+			if c.back {
+				node.mu.Lock()
+				node.landed[common.Hash{0xf}] = true
+				node.mu.Unlock()
+			}
+			if c.unread {
+				h.chain.head = 7
+			}
+			h.final.Store(8)
+			h.c.RecoverFailed(t.Context())
+			h.c.Close()
+			want := c.requeued(kept, omitted)
+			require.ElementsMatch(t, want, pool.PopN(math.MaxInt))
+			if !slices.Contains(want, kept) {
+				require.False(t, pool.Holds(kept.Hash), "final in the rival's block")
+			}
+		})
+	}
+}
+
 // TestComposerAuditsAPostingSupersededAndPruned: a posting another poster
 // superseded is not looked for at finality, when derivation has pruned the
 // settlement that superseded it.
@@ -2132,9 +2212,10 @@ func TestComposerEjectsARefusedCulpritL1Settled(t *testing.T) {
 	}
 }
 
-// TestComposerAuditFailureLetsGo: a finality audit that cannot read L1 lets
-// the settlement's transactions go.
-func TestComposerAuditFailureLetsGo(t *testing.T) {
+// TestComposerAuditFailureRequeues: a finality audit that cannot read L1
+// returns the settlement's transactions to the pool, where the drain drops
+// those whose nonces are spent.
+func TestComposerAuditFailureRequeues(t *testing.T) {
 	h := newHarness(t, newTestChain(t, 8), 8, &triggers{failed: errors.New("node down")})
 	pool := NewHeldPool()
 	h.c.Recover(pool, nil)
@@ -2146,8 +2227,7 @@ func TestComposerAuditFailureLetsGo(t *testing.T) {
 	h.final.Store(8)
 	h.c.RecoverFailed(t.Context())
 	h.c.Close()
-	require.False(t, pool.Holds(out.Hash))
-	require.Zero(t, pool.Len())
+	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
 }
 
 // TestComposerPostsTheQuorum: a batch sized for every configured proof
