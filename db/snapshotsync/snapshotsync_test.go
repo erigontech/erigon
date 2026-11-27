@@ -1177,7 +1177,7 @@ func TestDownloadTypedCaplinPaths(t *testing.T) {
 		{name: header, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
 		{name: "caplin/salt-blocks.txt", mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
 		{name: "caplin/erigondb.toml", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: false},
-		{name: "caplin/v1.0-accounts.0-32.kv", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/v1.0-accounts.0-64.kv", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%s/typed=%t/mode=%d/state=%t/toBlock=%d", tc.name, tc.useTyped, tc.mode, tc.caplinState, tc.toBlock), func(t *testing.T) {
