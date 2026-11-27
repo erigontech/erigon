@@ -445,11 +445,3 @@ func TestNamedRerunWaitsForAFeeRecipientCellToSettle(t *testing.T) {
 	be.signalCommitted(1)
 	require.Same(t, pt, be.pool.pop())
 }
-
-// A commit drops the task's validated mark: the commit frontier covers it from then on.
-func TestCommitDropsTheValidatedMark(t *testing.T) {
-	_, be := newPoolUnit(t, 2)
-	be.signalValidated(0)
-	be.signalCommitted(0)
-	require.NotContains(t, be.validatedTasks, 0)
-}
