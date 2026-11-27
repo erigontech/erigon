@@ -244,6 +244,35 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	}
 }
 
+// After a run without the credit touched its recipient's balance, a later transfer to that recipient
+// credits it in the run once the recipient's previous tx commits. Transfers to other recipients keep
+// the credit at validation.
+func TestFallenBackRecipientIsCreditedInRun(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c, a}, []accounts.Address{d, e, d, e}), d, e)
+	task := func(i int) *exec.TxTask { return s.be.tasks[i].Task.(*exec.TxTask) }
+	var reads state.ReadSet
+	reads.SetBalance(d, state.VersionedRead[uint256.Int]{})
+	run := &exec.TxResult{TxIn: reads, TxOut: &state.WriteSet{}, ExecutionResult: evmtypes.ExecutionResult{RecipientCredit: evmtypes.RecipientCreditAfterFrame}}
+	require.True(t, s.be.recipientFallsBack(task(0), run))
+
+	pts := make([]*poolTask, 4)
+	for i := 1; i < 4; i++ {
+		pts[i] = &poolTask{be: s.be, tv: &taskVersion{execTask: s.be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}}}
+		inRun := i == 2
+		require.Equal(t, inRun, pts[i].waitsForInOrderCredit(task(i)), "tx %d", i)
+		require.Equal(t, inRun, task(i).CreditRecipientInRun, "tx %d", i)
+	}
+	require.Equal(t, []*poolTask{pts[2]}, s.be.wakeAt[0], "tx 2 does not wait for the previous tx to its recipient")
+
+	s.be.committedFrontier.Store(0)
+	require.False(t, pts[2].waitsForInOrderCredit(task(2)), "tx 2 waits although the previous tx to its recipient committed")
+}
+
 func TestChargedValueTransferDispatchReadsNoRecipient(t *testing.T) {
 	a := accounts.InternAddress(common.HexToAddress("0xa0"))
 	b := accounts.InternAddress(common.HexToAddress("0xb1"))

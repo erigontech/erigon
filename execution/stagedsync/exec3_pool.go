@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -226,6 +227,11 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, err))
 		return false
 	}
+	txTask, chargesSender := tv.Task.(*exec.TxTask)
+	chargesSender = chargesSender && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation))
+	if chargesSender && pt.waitsForInOrderCredit(txTask) {
+		return false
+	}
 	for {
 		last := be.runInc[tv.index].Load()
 		if int64(tv.version.Incarnation) <= last {
@@ -240,8 +246,8 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
 	result := wk.w.RunTxTask(tv)
-	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) {
-		touchedRecipient := result.Err == nil && touchedRecipientBalance(txTask, result)
+	if chargesSender {
+		touchedRecipient := result.Err == nil && be.recipientFallsBack(txTask, result)
 		if result.ExecutionResult.RecipientCredit == evmtypes.RecipientCreditAfterFrame {
 			be.afterFrameRuns.Add(1)
 			if touchedRecipient {
@@ -270,6 +276,21 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		return pt.rerunAfter(blocker)
 	}
 	return pt.settle(p, result, target)
+}
+
+// waitsForInOrderCredit makes a transfer to a recipient that fell back in this block credit it in the run,
+// after the recipient's previous tx commits. It reports whether the task parked for that.
+func (pt *poolTask) waitsForInOrderCredit(txTask *exec.TxTask) bool {
+	tx := txTask.Tx()
+	if tx == nil || tx.GetTo() == nil || tx.GetValue().IsZero() {
+		return false
+	}
+	if _, ok := pt.be.inOrderCreditRecipients.Load(accounts.InternAddress(*tx.GetTo())); !ok {
+		return false
+	}
+	txTask.CreditRecipientInRun = true
+	pt.next = psRun
+	return pt.be.requeueAt(pt.tv.index, pt.tv.recipientPrevTx, pt)
 }
 
 func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {

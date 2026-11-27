@@ -219,6 +219,8 @@ type TxTask struct {
 	Engine rules.Engine
 	Logger log.Logger
 	Trace  bool
+	// CreditRecipientInRun keeps the recipient credit in a run that charges the sender at validation.
+	CreditRecipientInRun bool
 
 	message      *types.Message
 	signer       *types.Signer
@@ -521,7 +523,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 			switch {
 			case !calcFees && t.ChargesSenderAtValidation(ibs.Incarnation()):
-				applyRes, applyErr = protocol.ApplyMessageChargeSenderAtValidation(evm, message, t.GasPool(), engine)
+				applyRes, applyErr = protocol.ApplyMessageChargeSenderAtValidation(evm, message, t.GasPool(), engine, t.CreditRecipientInRun)
 			case !calcFees:
 				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, t.GasPool(), true, false, engine)
 			default:

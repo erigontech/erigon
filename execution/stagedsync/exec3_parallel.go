@@ -1258,6 +1258,7 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 			Task:               txTask,
 			index:              i,
 			shouldDelayFeeCalc: true,
+			recipientPrevTx:    -1,
 		}
 
 		blockNum := t.Version().BlockNum
@@ -1323,6 +1324,9 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 				case chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
 					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules()):
 					// Credited at validation: a later user of the recipient still waits for it.
+					if prev, ok := prevAccountTx[to]; ok {
+						t.recipientPrevTx = prev
+					}
 					prevAccountTx[to] = i
 				case ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)):
 					// The failed frame still reads the recipient: wait for its last writer, without becoming one.
@@ -1878,6 +1882,7 @@ type execTask struct {
 	exec.Task
 	index              int
 	shouldDelayFeeCalc bool
+	recipientPrevTx    int // the last lower task that touched this transfer's recipient, -1 for none
 }
 
 type execResult struct {
@@ -2331,14 +2336,18 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
-// touchedRecipientBalance reports whether a run that executed the recipient's code without its credit read or wrote the recipient's balance.
-func touchedRecipientBalance(txTask *exec.TxTask, result *exec.TxResult) bool {
+// recipientFallsBack reports whether a run that executed the recipient's code without its credit read or wrote
+// the recipient's balance. Later transfers to that recipient in the block then credit it in the run.
+func (be *blockExecutor) recipientFallsBack(txTask *exec.TxTask, result *exec.TxResult) bool {
 	if result.ExecutionResult.RecipientCredit != evmtypes.RecipientCreditAfterFrame {
 		return false
 	}
 	to := accounts.InternAddress(*txTask.Tx().GetTo())
 	_, read := result.TxIn.GetBalance(to)
 	_, wrote := result.TxOut.GetBalance(to)
+	if read || wrote {
+		be.inOrderCreditRecipients.Store(to, struct{}{})
+	}
 	return read || wrote
 }
 
@@ -2610,6 +2619,7 @@ type blockExecutor struct {
 	execCpuNanos atomic.Int64
 	// afterFrameRuns and recipientFallbacks count runs without the recipient credit and those of them that reran in order.
 	afterFrameRuns, recipientFallbacks atomic.Int32
+	inOrderCreditRecipients            sync.Map // accounts.Address of recipients that fell back
 
 	// coinbase is the block's fee recipient, cached from the first tx result so
 	// dependency-ordered validation can gate coinbase readers.

@@ -104,6 +104,7 @@ type TxnExecutor struct {
 	noFeeBurnAndTip bool
 
 	chargeSenderAtValidation bool
+	creditRecipientInRun     bool
 }
 
 // Message represents a message sent to a contract.
@@ -161,10 +162,10 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 // Frame transactions ignore gasBailout and require normal payment approval
 // and value transfers.
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, false, engine)
 }
 
-func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, chargeSenderAtValidation bool, engine rules.EngineReader) (
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, chargeSenderAtValidation bool, creditRecipientInRun bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error,
 ) {
 	st := NewTxnExecutor(evm, msg, gp)
@@ -180,16 +181,18 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	}
 	st.noFeeBurnAndTip = noFeeBurnAndTip
 	st.chargeSenderAtValidation = chargeSenderAtValidation
+	st.creditRecipientInRun = creditRecipientInRun
 	return st.Execute(refunds, gasBailout)
 }
 
 func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, true, false, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, true, false, false, engine)
 }
 
 // ApplyMessageChargeSenderAtValidation is ApplyMessageNoFeeBurnOrTip without the sender charge (nonce, gas, value).
-func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, true, false, true, true, engine)
+// creditRecipientInRun keeps the recipient credit in the run.
+func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader, creditRecipientInRun bool) (*evmtypes.ExecutionResult, error) {
+	return applyMessage(evm, msg, gp, true, false, true, true, creditRecipientInRun, engine)
 }
 
 // to returns the recipient of the message.
@@ -713,7 +716,7 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 // recipientCreditAtValidation says how a run that charges its sender at validation leaves the credit of its
 // recipient. A recorded read of the recipient would conflict with each lower credit, so it peeks at block-start state.
 func (st *TxnExecutor) recipientCreditAtValidation(sender, coinbase accounts.Address) evmtypes.RecipientCredit {
-	if !st.chargeSenderAtValidation || !RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, st.evm.Config().Tracer, st.evm.ChainRules()) {
+	if !st.chargeSenderAtValidation || st.creditRecipientInRun || !RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, st.evm.Config().Tracer, st.evm.ChainRules()) {
 		return evmtypes.RecipientCreditedInRun
 	}
 	acc, err := st.state.StateReader().ReadAccountData(st.to())
