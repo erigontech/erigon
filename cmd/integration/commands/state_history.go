@@ -126,14 +126,15 @@ func stepToTxNum(step, stepSize uint64) (uint64, error) {
 }
 
 var printCmd = &cobra.Command{
-	Use: "print",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 
 		dirs, l, err := datadir.New(datadirCli).MustFlock()
 		if err != nil {
-			logger.Error("Opening Datadir", "error", err)
-			return
+			return fmt.Errorf("opening datadir: %w", err)
 		}
 		defer func() {
 			if err := l.Unlock(); err != nil {
@@ -143,13 +144,11 @@ var printCmd = &cobra.Command{
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
-			logger.Error("Failed to open history", "error", err)
-			return
+			return fmt.Errorf("failed to open history: %w", err)
 		}
 		_, _, dumpFrom, dumpTo, err := stepBounds(settings.StepSize)
 		if err != nil {
-			logger.Error("Invalid step range", "error", err)
-			return
+			return fmt.Errorf("invalid step range: %w", err)
 		}
 
 		roTx := history.BeginFilesRoForDebug()
@@ -172,21 +171,22 @@ var printCmd = &cobra.Command{
 			},
 		)
 		if err != nil {
-			logger.Error("Failed to print history", "error", err)
-			return
+			return fmt.Errorf("failed to print history: %w", err)
 		}
+		return nil
 	},
 }
 
 var distributionCmd = &cobra.Command{
-	Use: "distribution",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "distribution",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 
 		dirs, l, err := datadir.New(datadirCli).MustFlock()
 		if err != nil {
-			logger.Error("Opening Datadir", "error", err)
-			return
+			return fmt.Errorf("opening datadir: %w", err)
 		}
 		defer func() {
 			if err := l.Unlock(); err != nil {
@@ -196,13 +196,11 @@ var distributionCmd = &cobra.Command{
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
-			logger.Error("Failed to open history", "error", err)
-			return
+			return fmt.Errorf("failed to open history: %w", err)
 		}
 		_, _, dumpFrom, dumpTo, err := stepBounds(settings.StepSize)
 		if err != nil {
-			logger.Error("Invalid step range", "error", err)
-			return
+			return fmt.Errorf("invalid step range: %w", err)
 		}
 
 		roTx := history.BeginFilesRoForDebug()
@@ -222,8 +220,7 @@ var distributionCmd = &cobra.Command{
 			},
 		)
 		if err != nil {
-			logger.Error("Failed to calculate history distribution", "error", err)
-			return
+			return fmt.Errorf("failed to calculate history distribution: %w", err)
 		}
 
 		var distribution []int
@@ -235,7 +232,7 @@ var distributionCmd = &cobra.Command{
 		sort.Ints(distribution)
 
 		if len(distribution) == 0 {
-			return
+			return nil
 		}
 
 		type DistPecentile struct {
@@ -269,6 +266,7 @@ var distributionCmd = &cobra.Command{
 
 			fmt.Printf("%d percentile distribution: %d (example key: 0x%x)\n", percentiles[i].P, percentiles[i].Value, percentiles[i].ExampleKey)
 		}
+		return nil
 	},
 }
 
@@ -455,6 +453,7 @@ var duplicatesCmd = &cobra.Command{
 	Short: "Report keys whose history has consecutive duplicate (redundant) values, per domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 
 		if dupSamples < 0 {
 			return fmt.Errorf("--samples must be >= 0, got %d", dupSamples)

@@ -46,55 +46,64 @@ var stateBuckets = []string{
 }
 
 var cmdMdbxTopDup = &cobra.Command{
-	Use: "mdbx_top_dup",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "mdbx_top_dup",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		err := mdbxTopDup(ctx, chaindata, bucket, logger)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
 var cmdCompareBucket = &cobra.Command{
-	Use:   "compare_bucket",
-	Short: "compare bucket to the same bucket in '--chaindata.reference'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "compare_bucket",
+	Short:        "compare bucket to the same bucket in '--chaindata.reference'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "integration")
+		_ = debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
 var cmdCompareStates = &cobra.Command{
-	Use:   "compare_states",
-	Short: "compare state buckets to buckets in '--chaindata.reference'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "compare_states",
+	Short:        "compare state buckets to buckets in '--chaindata.reference'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "integration")
+		_ = debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareStates(ctx, chaindata, referenceChaindata)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
@@ -105,6 +114,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 
 		if toChaindata == "" {
 			return errors.New("--chaindata.to is required: it names the db to copy --chaindata into")
@@ -119,18 +129,18 @@ var cmdMdbxToMdbx = &cobra.Command{
 }
 
 var cmdFToMdbx = &cobra.Command{
-	Use:   "f_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "f_to_mdbx",
+	Short:        "copy data from '--chaindata' to '--chaindata.to'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 

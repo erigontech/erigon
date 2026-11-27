@@ -103,6 +103,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+			defer debug.Exit()
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
@@ -139,37 +140,39 @@ var (
 )
 
 var cmdAlloc = &cobra.Command{
-	Use:     "alloc",
-	Example: "integration allocates and holds 1Gb (or given size)",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "alloc",
+	Example:      "integration allocates and holds 1Gb (or given size)",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
 		_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		v, err := datasize.ParseString(args[0])
 		if err != nil {
-			panic(err)
+			return err
 		}
 		n := make([]byte, v.Bytes())
 		_ = common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
+		return nil
 	},
 }
 
 var cmdPrintTableSizes = &cobra.Command{
-	Use:   "print_table_sizes",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print_table_sizes",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
 		tableSizes, err := kv.CollectTableSizes(cmd.Context(), db)
 		if err != nil {
-			logger.Error("error while collecting table sizes", "err", err)
-			return
+			return fmt.Errorf("error while collecting table sizes: %w", err)
 		}
 
 		var sb strings.Builder
@@ -186,92 +189,95 @@ var cmdPrintTableSizes = &cobra.Command{
 
 		if outputCsvFile == "" {
 			logger.Info("table sizes", "csv", sb.String())
-			return
+			return nil
 		}
 
 		f, err := os.Create(outputCsvFile)
 		if err != nil {
-			logger.Error("issue creating file", "file", outputCsvFile, "err", err)
-			return
+			return fmt.Errorf("issue creating file %s: %w", outputCsvFile, err)
 		}
 
 		_, err = f.WriteString(sb.String())
 		if err != nil {
-			logger.Error("issue writing output to file", "file", outputCsvFile, "err", err)
-			return
+			return fmt.Errorf("issue writing output to file %s: %w", outputCsvFile, err)
 		}
 
 		logger.Info("wrote table sizes to csv output file", "file", outputCsvFile)
+		return nil
 	},
 }
 
 var cmdPrintMigrations = &cobra.Command{
-	Use:   "print_migrations",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print_migrations",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
-			return
+			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
 		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
 var cmdRemoveMigration = &cobra.Command{
-	Use:   "remove_migration",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "remove_migration",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
-			return
+			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
 		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
 var cmdRunMigrations = &cobra.Command{
-	Use:   "run_migrations",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "run_migrations",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		if isDefaultChaindata(chaindata, datadirCli) {
 			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
-				logger.Error("Apply migrations", "error", err)
-				return
+				return fmt.Errorf("apply migrations: %w", err)
 			}
 		}
-		migrateDB := func(label kv.Label, path string) {
-			if err := runMigrationsForDB(label, path, logger); err != nil {
-				logger.Error("Opening DB", "error", err)
-			}
+		if err := runMigrationsForDB(dbcfg.ChainDB, chaindata, logger); err != nil {
+			return fmt.Errorf("opening DB: %w", err)
 		}
-
-		migrateDB(dbcfg.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
-			migrateDB(dbcfg.ConsensusDB, consensus)
+			if err := runMigrationsForDB(dbcfg.ConsensusDB, consensus, logger); err != nil {
+				return fmt.Errorf("opening DB: %w", err)
+			}
 		}
+		return nil
 	},
 }
 

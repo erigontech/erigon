@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 const uncleanShutdownPathEnv = "ERIGON_TEST_UNCLEAN_SHUTDOWN_PATH"
@@ -255,4 +258,30 @@ func tableNames(t *testing.T, opts kv2.MdbxOpts) []string {
 	}))
 	slices.Sort(names)
 	return names
+}
+
+func TestCommandsReturnErrors(t *testing.T) {
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		assert.Nil(t, cmd.Run, "%q must use RunE so a failure exits non-zero", cmd.CommandPath())
+		for _, sub := range cmd.Commands() {
+			if sub.Name() != "help" {
+				walk(sub)
+			}
+		}
+	}
+	walk(integrationRoot())
+}
+
+func TestFailedCommandReturnsErrorAndStopsProfiling(t *testing.T) {
+	dataDir := useTestDatadir(t)
+	root := integrationRoot()
+	t.Cleanup(func() {
+		cpu := root.PersistentFlags().Lookup("pprof.cpuprofile")
+		_ = cpu.Value.Set("")
+		cpu.Changed = false
+	})
+	root.SetArgs([]string{"--log.dir.disable", "--pprof.cpuprofile", filepath.Join(t.TempDir(), "cpu.out"), "commitment", "print", "--chain", "mainnet", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
+	require.ErrorIs(t, root.ExecuteContext(t.Context()), kv2.ErrDBDoesNotExists)
+	require.ErrorContains(t, debug.Handler.StopCPUProfile(), "not in progress")
 }

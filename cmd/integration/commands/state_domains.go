@@ -56,13 +56,15 @@ func init() {
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
 var readDomains = &cobra.Command{
-	Use:       "read_domains",
-	Short:     `Run block execution and commitment with Domains.`,
-	Example:   "go run ./cmd/integration read_domains --datadir=... --verbosity=3",
-	ValidArgs: []string{"account", "storage", "code", "commitment"},
-	Args:      cobra.ArbitraryArgs,
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "read_domains",
+	Short:        `Run block execution and commitment with Domains.`,
+	Example:      "go run ./cmd/integration read_domains --datadir=... --verbosity=3",
+	ValidArgs:    []string{"account", "storage", "code", "commitment"},
+	Args:         cobra.ArbitraryArgs,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -70,7 +72,7 @@ var readDomains = &cobra.Command{
 
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
-			utils.Fatalf("unknown chain %s", chain)
+			return fmt.Errorf("unknown chain %s: %w", chain, err)
 		}
 		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
@@ -83,8 +85,7 @@ var readDomains = &cobra.Command{
 				case "account", "storage", "code", "commitment":
 					readFromDomain = s
 				default:
-					logger.Error("invalid domain to read from", "arg", args[i])
-					return
+					return fmt.Errorf("invalid domain to read from: %s", args[i])
 				}
 				continue
 			}
@@ -99,23 +100,23 @@ var readDomains = &cobra.Command{
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer chainDb.Close()
 
 		stateDb, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
-			return
+			return fmt.Errorf("opening state DB: %w", err)
 		}
 		defer stateDb.Close()
 
 		if err := requestDomains(stateDb, ctx, readFromDomain, addrs, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 

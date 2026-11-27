@@ -92,6 +92,7 @@ var dumpState = &cobra.Command{
   integration dump_state --datadir=... --chain=mainnet --latest --dry-run   # just count accounts`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 
 		if !dumpStateDryRun && dumpStateOutput == "" {
 			return errors.New("--output is required unless --dry-run is set")

@@ -58,15 +58,17 @@ Examples:
 --block # Stop at exact blocks
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
-	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
-	Run: func(cmd *cobra.Command, args []string) {
+	Example:      "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
-			utils.Fatalf("unknown chain %s", chain)
+			return fmt.Errorf("unknown chain %s: %w", chain, err)
 		}
 		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
@@ -74,48 +76,50 @@ Examples:
 		utils.SetupMinerCobra(cmd, &builderConfig)
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, builderConfig, ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
+				if errors.Is(err, context.Canceled) {
+					return nil
 				}
-				return
+				return err
 			}
 		}
+		return nil
 	},
 }
 
 var loopExecCmd = &cobra.Command{
-	Use: "loop_exec",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "loop_exec",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 		if unwind == 0 {
 			unwind = 1
 		}
 		if err := loopExec(db, ctx, unwind, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 

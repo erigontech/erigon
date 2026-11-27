@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -36,9 +37,11 @@ var triggerFCU = &cobra.Command{
 
 This is specially useful on devnets where there are network constraints (e.g. few slow peers), so you can test Erigon in isolation without having to rely on an external CL up to a certain known block.
 `,
-	Args: cobra.ArbitraryArgs,
-	Run: func(cmd *cobra.Command, args []string) {
+	Args:         cobra.ArbitraryArgs,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		ctx := cmd.Context()
 		dirs := datadir.New(datadirCli)
 		jwt := filepath.Join(dirs.DataDir, "jwt.hex")
@@ -46,14 +49,12 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 		jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: jwt}
 		jwtSecret, err := cli.ObtainJWTSecret(jwtConfig, logger)
 		if err != nil {
-			logger.Error("failed while reading jwt secret", "err", err)
-			panic(err)
+			return fmt.Errorf("failed while reading jwt secret: %w", err)
 		}
 
 		engineApiClient, err := engineapi.DialJsonRpcClient(engineEndpoint, jwtSecret, logger)
 		if err != nil {
-			logger.Error("failed while connecting to engine API endpoint", "err", err)
-			panic(err)
+			return fmt.Errorf("failed while connecting to engine API endpoint: %w", err)
 		}
 		hash := common.HexToHash(blockHash)
 		fcu := &engine_types.ForkChoiceState{
@@ -63,8 +64,8 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 		}
 		_, err = engineApiClient.ForkchoiceUpdatedV3(ctx, fcu, nil)
 		if err != nil {
-			logger.Error("failed while sending forkChoiceUpdate", "err", err)
-			panic(err)
+			return fmt.Errorf("failed while sending forkChoiceUpdate: %w", err)
 		}
+		return nil
 	},
 }

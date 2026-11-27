@@ -66,27 +66,27 @@ Flags:
 	Example: `go run ./cmd/integration write_amplification --datadir=... --chain=mainnet
 go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainnet --domains=storage,commitment
 go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainnet --domains=accounts`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer chainDb.Close()
 
 		// Parse domains flag
 		domains, err := parseDomainsFlag(writeAmpDomainsToAnalyze)
 		if err != nil {
-			logger.Error("Invalid --domains flag", "error", err)
-			return
+			return fmt.Errorf("invalid --domains flag: %w", err)
 		}
 
 		if err := calculateWriteAmplification(ctx, chainDb, domains, logger); err != nil {
-			logger.Error("Failed to calculate write amplification", "error", err)
-			return
+			return fmt.Errorf("failed to calculate write amplification: %w", err)
 		}
+		return nil
 	},
 }
 

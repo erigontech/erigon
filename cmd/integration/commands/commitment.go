@@ -279,14 +279,13 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 }
 
 var cmdCommitmentVerify = &cobra.Command{
-	Use:   "verify",
-	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "verify",
+	Short:        "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		if err := commitmentVerify(ctx, logger); err != nil {
-			logger.Error("[commitment verify]", "err", err)
-			os.Exit(1)
-		}
+		defer debug.Exit()
+		return commitmentVerify(ctx, logger)
 	},
 }
 
@@ -483,23 +482,25 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 // integration commitment print
 var cmdCommitmentPrint = &cobra.Command{
-	Use:   "print",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
 		if err := printCommitment(db, cmd.Context()); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
@@ -604,6 +605,7 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			return errors.New("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 		}
@@ -756,16 +758,19 @@ Examples:
   integration commitment bench-lookup --chain=mainnet --datadir ~/data/eth-mainnet
   integration commitment bench-lookup --datadir /path/to/datadir --sample-size 100000
   integration commitment bench-lookup --datadir /path/to/datadir --seed 12345`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		ctx := cmd.Context()
 
 		if err := benchLookup(ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
@@ -780,16 +785,19 @@ Examples:
   integration commitment bench-history-lookup --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix 0a1b2c --sample-percentage 5
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+		defer debug.Exit()
 		ctx := cmd.Context()
 
 		if err := benchHistoryLookup(ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+			if errors.Is(err, context.Canceled) {
+				return nil
 			}
-			return
+			return err
 		}
+		return nil
 	},
 }
 
