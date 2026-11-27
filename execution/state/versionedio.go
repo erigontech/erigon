@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -296,7 +295,7 @@ func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (Ve
 }
 
 // getHeader probes the read set for path and returns the type-agnostic
-// header only.  This is the single read-set probe versionedReadCore uses —
+// header only.  This is the single read-set probe readCore uses —
 // uniform return type, so the runtime path switch works without the value
 // type leaking into the probe.
 func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey) (ReadHeader, bool) {
@@ -377,7 +376,7 @@ func (s *ReadSet) hasAnyReadAt(addr accounts.Address) bool {
 }
 
 // setHeader records a header-only read (zero value) at (addr, path, key).
-// Used on the dependency-conflict paths where versionedReadCore records the
+// Used on the dependency-conflict paths where readCore records the
 // read purely for ValidateVersion's version check — the value is never
 // consulted there (it was zero in the legacy VersionedRead path too).
 func (s *ReadSet) SetHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) {
@@ -694,16 +693,14 @@ func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, acco
 }
 
 // WriteHeader is the type-agnostic part of a versioned write: address,
-// path, optional storage key, tx-version and balance-change reason.
+// path, optional storage key and tx-version.
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
-	Address     accounts.Address
-	Key         accounts.StorageKey
-	Version     Version
-	Path        AccountPath
-	Reason      tracing.BalanceChangeReason
-	NonceReason tracing.NonceChangeReason
-	valStatus   valueStatus
+	Address   accounts.Address
+	Key       accounts.StorageKey
+	Version   Version
+	Path      AccountPath
+	valStatus valueStatus
 }
 
 func (h WriteHeader) String() string {
@@ -997,7 +994,7 @@ func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
 	return getVWStorage()
 }
 
-// WriteSet is the cell-pipeline target shape for versionedWrites.
+// WriteSet is the cell-pipeline target shape for writes.
 // Symmetric with ReadSet — see that type for rationale.
 type WriteSet struct {
 	address        map[accounts.Address]*VersionedWrite[*accounts.Account]
@@ -1329,7 +1326,7 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			}
 		}
 		// CreateContract survives self-destruct: fee finalization and the BAL need
-		// the creation marker. ApplyVersionedWrites skips applying it under
+		// the creation marker. ApplyWrites skips applying it under
 		// self-destruct, so keeping it here does not resurrect the account.
 		if vw, ok := ws.createContract[addr]; ok {
 			out.SetCreateContract(addr, cloneVW(vw))
@@ -2344,24 +2341,6 @@ func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}
-}
-
-// sortWriteHeaders sorts headers by (Address, Path, Key) for deterministic
-// processing order; WriteSet map iteration is non-deterministic in Go.
-// The sort relies on the AccountPath enum ordering defined in versionmap.go.
-func sortWriteHeaders(headers []WriteHeader) {
-	slices.SortFunc(headers, func(a, b WriteHeader) int {
-		if c := a.Address.Cmp(b.Address); c != 0 {
-			return c
-		}
-		if a.Path != b.Path {
-			if a.Path < b.Path {
-				return -1
-			}
-			return 1
-		}
-		return a.Key.Cmp(b.Key)
-	})
 }
 
 // hasHeader reports whether a write exists at h's (Address, Path, Key).

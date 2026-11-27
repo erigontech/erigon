@@ -41,25 +41,24 @@ const maxGetStorageSlots = 1024
 // overlay-aware transaction, so the block a request resolves and the state it
 // reads back cannot come from different overlay generations.
 // The caller must defer tx.Rollback() on the returned tx.
-func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+func (api *BaseAPI) stateReaderAt(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, db)
 	if err != nil {
 		return nil, nil, err
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, tx)
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	blockNumber, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err := api.BaseAPI.checkPruneState(ctx, tx, blockNumber); err != nil {
-		return nil, nil, err
-	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
-		return nil, nil, err
+	// The latest executed block is read from the current domains, never from history.
+	if !latest {
+		if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
@@ -73,7 +72,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.U256, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +106,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		}
 		// txpool doesn't know about this address yet: fall through to DB lookup
 	}
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +123,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -158,32 +157,11 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, &rpc.InvalidParamsError{Message: "empty request"}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash.RequireCanonical = true
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 
 	result := make(map[common.Address][]hexutil.Bytes, len(requests))
 	for addr, keys := range requests {
@@ -216,7 +194,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if len(indexBytes) > 32 {
 		return common.Hash{}, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -237,7 +215,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 
 // Exist returns whether an account for a given address exists in the database.
 func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
-	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, blockNrOrHash)
 	if err != nil {
 		return false, err
 	}

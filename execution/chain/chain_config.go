@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -79,6 +80,13 @@ type Config struct {
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
+
+	// ZeroNonceStorageAccounts lists this chain's accounts with zero nonce, empty code
+	// and non-empty storage immediately before the Bogota hardfork (EIP-8253).
+	// The first Bogota block with a pre-Bogota parent sets each listed nonce to one
+	// without rechecking those conditions. If Bogota is active at genesis, the
+	// genesis allocation supplies the nonces.
+	ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -643,17 +651,16 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 	}
 }
 
-// SameTimestampForks reports whether every time-based fork is scheduled identically.
-// When they are, no head time can produce a timestamp conflict, so the caller need not
-// establish one.
-func (c *Config) SameTimestampForks(newcfg *Config) bool {
+// SameTimestampRules reports whether the fork timestamps match and, if Bogota
+// is scheduled, both configs name the same set of EIP-8253 accounts.
+func (c *Config) SameTimestampRules(newcfg *Config) bool {
 	newTimes := newcfg.forkTimestamps()
 	for i, f := range c.forkTimestamps() {
 		if !numEqual(f.timestamp, newTimes[i].timestamp) {
 			return false
 		}
 	}
-	return true
+	return c.BogotaTime == nil || sameAddressSet(c.ZeroNonceStorageAccounts, newcfg.ZeroNonceStorageAccounts)
 }
 
 // CheckConfigForkOrder rejects missing predecessors and reversed activation schedules.
@@ -782,7 +789,24 @@ func (c *Config) checkCompatibleTimestamps(newcfg *Config, headTime uint64) *Con
 			return newTimestampCompatError(f.what, f.timestamp, newTimes[i].timestamp)
 		}
 	}
+	if (c.IsBogota(headTime) || newcfg.IsBogota(headTime)) && !sameAddressSet(c.ZeroNonceStorageAccounts, newcfg.ZeroNonceStorageAccounts) {
+		return newTimestampCompatError("EIP-8253 account list", c.BogotaTime, newcfg.BogotaTime)
+	}
 	return nil
+}
+
+func sameAddressSet(a, b []common.Address) bool {
+	if slices.Equal(a, b) {
+		return true
+	}
+	left, right := make(map[common.Address]struct{}, len(a)), make(map[common.Address]struct{}, len(b))
+	for _, address := range a {
+		left[address] = struct{}{}
+	}
+	for _, address := range b {
+		right[address] = struct{}{}
+	}
+	return maps.Equal(left, right)
 }
 
 func numEqual(x, y *uint64) bool {
@@ -877,18 +901,24 @@ func uint64PtrStr(p *uint64) string {
 }
 
 func (err *ConfigCompatError) Error() string {
-	blocks := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
+	blockMessage := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
 		err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
-	times := fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
-		err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
-	switch {
-	case !err.HasTimestampConflict():
-		return blocks
-	case !err.HasBlockConflict():
-		return times
-	default:
-		return blocks + "; " + times
+	if !err.HasTimestampConflict() {
+		return blockMessage
 	}
+
+	var timeMessage string
+	if numEqual(err.StoredTime, err.NewTime) {
+		timeMessage = fmt.Sprintf("mismatching %s in database (activation timestamp %s, rewindto timestamp %d)",
+			err.WhatTime, uint64PtrStr(err.StoredTime), err.RewindToTime)
+	} else {
+		timeMessage = fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
+			err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
+	}
+	if err.HasBlockConflict() {
+		return blockMessage + "; " + timeMessage
+	}
+	return timeMessage
 }
 
 // HasBlockConflict reports whether a block-based fork conflicts.

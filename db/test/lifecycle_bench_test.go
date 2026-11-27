@@ -232,7 +232,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 		if step > 3 {
 			collateStart := time.Now()
 			buildTo := txNum - 2*stepSize
-			err = agg.BuildFiles(db, buildTo, unboundedFinalityCtx)
+			err = agg.BuildFiles(db, buildTo, collateAll)
 			require.NoError(b, err)
 			timings.collate += time.Since(collateStart)
 		}
@@ -478,7 +478,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for b.Loop() {
-			err := agg.BuildFiles(db, txNum-2*stepSize, unboundedFinalityCtx)
+			err := agg.BuildFiles(db, txNum-2*stepSize, collateAll)
 			require.NoError(b, err)
 		}
 	})

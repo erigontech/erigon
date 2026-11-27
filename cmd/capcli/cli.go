@@ -260,14 +260,15 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 	defer csn.Close()
 
-	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
+	baseUri, err := url.Parse(c.Endpoint)
 	if err != nil {
 		return err
 	}
+	blocksUri := baseUri.JoinPath("eth/v2/beacon/blocks")
 
 	log.Info("Hooked", "endpoint", blobfetch.RedactEndpoint(c.Endpoint))
 	// Let's fetch the head first
-	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
+	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, blocksUri.JoinPath("head").String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve head: %w", err)
 	}
@@ -308,7 +309,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 
 		// Let's fetch the head first
-		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, blocksUri.JoinPath("0x"+stringifiedRoot).String(), (*common.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block 0x%s: %w", stringifiedRoot, err)
 		}
@@ -777,62 +778,93 @@ type ArchiveSanitizer struct {
 	FaultOut     string
 }
 
-func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
-	headResponse := map[string]any{}
-	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
+func getBeaconJSON(ctx context.Context, beaconApiURL, path string, out any) (int, error) {
+	base, err := url.Parse(beaconApiURL)
 	if err != nil {
-		return 0, blobfetch.RedactURLError(err)
+		return 0, fmt.Errorf("beacon %s: %w", path, blobfetch.RedactURLError(err))
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.JoinPath(path).String(), nil)
 	if err != nil {
-		return 0, blobfetch.RedactURLError(err)
+		return 0, fmt.Errorf("beacon %s: %w", path, blobfetch.RedactURLError(err))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		err = blobfetch.RedactURLError(err)
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+		return 0, fmt.Errorf("beacon %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, fmt.Errorf("beacon %s: bad status code %d", path, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return resp.StatusCode, fmt.Errorf("beacon %s: %w", path, err)
+	}
+	return resp.StatusCode, nil
+}
+
+func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
+	var headResponse struct {
+		Data []struct {
+			Slot string `json:"slot"`
+		} `json:"data"`
+	}
+	if _, err := getBeaconJSON(ctx, beaconApiURL, "eth/v2/debug/beacon/heads", &headResponse); err != nil {
 		return 0, err
 	}
-	data := headResponse["data"].([]any)
-	if len(data) == 0 {
-		return 0, errors.New("no head found")
+	if len(headResponse.Data) == 0 {
+		return 0, errors.New("beacon eth/v2/debug/beacon/heads: no head found")
 	}
-	head := data[0].(map[string]any)
-	slotStr, ok := head["slot"].(string)
-	if !ok {
-		return 0, errors.New("no slot found")
-	}
-	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	slot, err := strconv.ParseUint(headResponse.Data[0].Slot, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, errors.New("beacon eth/v2/debug/beacon/heads: invalid beacon head slot")
 	}
 	return slot, nil
 }
 
+var errNoStateRoot = errors.New("no state root found")
+
+type beaconRoot struct {
+	hash common.Hash
+}
+
+func (r *beaconRoot) UnmarshalJSON(b []byte) error {
+	var s *string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if s == nil || *s == "" {
+		return errNoStateRoot
+	}
+	if err := r.hash.UnmarshalText([]byte(*s)); err != nil {
+		return err
+	}
+	if r.hash == (common.Hash{}) {
+		return errNoStateRoot
+	}
+	return nil
+}
+
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
-	response := map[string]any{}
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
-	if err != nil {
-		return common.Hash{}, blobfetch.RedactURLError(err)
+	var response struct {
+		Data struct {
+			Root beaconRoot `json:"root"`
+		} `json:"data"`
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return common.Hash{}, blobfetch.RedactURLError(err)
-	}
-	if resp.StatusCode == http.StatusNotFound {
+	path := fmt.Sprintf("eth/v1/beacon/states/%d/root", slot)
+	status, err := getBeaconJSON(ctx, beaconApiURL, path, &response)
+	if status == http.StatusNotFound {
 		return common.Hash{}, nil
 	}
-	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err != nil {
 		return common.Hash{}, err
 	}
-	data := response["data"].(map[string]any)
-	if len(data) == 0 {
-		return common.Hash{}, errors.New("no head found")
+	if response.Data.Root.hash == (common.Hash{}) {
+		return common.Hash{}, fmt.Errorf("beacon %s: %w", path, errNoStateRoot)
 	}
-	rootStr := data["root"].(string)
-
-	return common.HexToHash(rootStr), nil
+	return response.Data.Root.hash, nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
@@ -873,6 +905,10 @@ func (a *ArchiveSanitizer) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	base, err := url.Parse(a.BeaconApiURL)
+	if err != nil {
+		return blobfetch.RedactURLError(err)
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
@@ -889,7 +925,7 @@ func (a *ArchiveSanitizer) Run(ctx context.Context) error {
 		if stateRoot == (common.Hash{}) {
 			continue
 		}
-		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
+		state, err := getBeaconState(ctx, beaconConfig, base.JoinPath(fmt.Sprintf("eth/v2/debug/beacon/states/%d", i)).String(), i)
 		if err != nil {
 			return err
 		}
@@ -930,6 +966,10 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	base, err := url.Parse(b.BaseURL)
+	if err != nil {
+		return blobfetch.RedactURLError(err)
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
@@ -955,10 +995,15 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 	}
 
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
-		uri := b.BaseURL + b.Endpoint
-		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
-		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
-		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
+		path := strings.Replace(b.Endpoint, "{slot}", strconv.FormatUint(i, 10), 1)
+		path = strings.Replace(path, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
+		ref, err := url.Parse(path)
+		if err != nil {
+			return blobfetch.RedactURLError(err)
+		}
+		u := base.JoinPath(ref.EscapedPath())
+		u.RawQuery = joinRawQueries(base.RawQuery, ref.RawQuery)
+		elapsed, err := timeRequest(ctx, u.String(), b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
@@ -970,6 +1015,17 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 		log.Info("Benchmarked", "slot", i, "elapsed", elapsed)
 	}
 	return nil
+}
+
+func joinRawQueries(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "&" + b
+	}
 }
 
 func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {

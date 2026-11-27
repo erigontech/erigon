@@ -199,14 +199,26 @@ func (cc *commitmentCalculator) foldView(vm *state.VersionMap, lastTxNum uint64,
 	return vm.View(lastTxNum, base)
 }
 
+// cachedAccountReader serves accounts from a map before its base reader. With fill set it also stores
+// what it reads; only a map that no other reader shares may be filled.
 type cachedAccountReader struct {
 	state.StateReader
 	accounts map[accounts.Address]*accounts.Account
+	fill     bool
+}
+
+// newMemoAccountReader caches every successful read from base, including an absent account.
+func newMemoAccountReader(base state.StateReader) *cachedAccountReader {
+	return &cachedAccountReader{StateReader: base, accounts: map[accounts.Address]*accounts.Account{}, fill: true}
 }
 
 func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	if acc, ok := r.accounts[addr]; ok {
 		return acc, nil
 	}
-	return r.StateReader.ReadAccountData(addr)
+	acc, err := r.StateReader.ReadAccountData(addr)
+	if err == nil && r.fill {
+		r.accounts[addr] = acc
+	}
+	return acc, err
 }

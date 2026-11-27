@@ -96,16 +96,21 @@ func (arr *RawUint64List) Static() bool {
 }
 
 func (arr *RawUint64List) Bytes() []byte {
-	out, _ := arr.EncodeSSZ(nil)
-	return out
+	return arr.appendBytes(nil)
 }
 
-func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
+func (arr *RawUint64List) appendBytes(dst []byte) []byte {
 	for _, v := range arr.u {
 		dst = binary.LittleEndian.AppendUint64(dst, v)
 	}
-	return dst, nil
+	return dst
+}
+
+func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	if len(arr.u) > arr.c {
+		return nil, fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(arr.u), arr.c)
+	}
+	return arr.appendBytes(buf), nil
 }
 
 func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {

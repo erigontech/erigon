@@ -17,9 +17,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,18 +29,29 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden file")
+var update = flag.Bool("update", false, "rewrite the golden files")
 
 // testdata/sample carries one field per branch, so this fails when any of them changes shape:
 // omitempty per kind, a pointer written as null, an embedded struct flattened, a promoted name
 // reached through its own selector, a json tag with no name, and the forms a field may declare.
 func TestGenerateSample(t *testing.T) {
-	golden, err := filepath.Abs("testdata/sample_golden.go.txt")
-	require.NoError(t, err)
-	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
+	requireGolden(t, "testdata/sample", "testdata/sample_golden.go.txt", "Sample", "writeComputedJSON", "")
+}
 
-	t.Chdir("testdata/sample")
-	require.NoError(t, run("Sample", out, "writeComputedJSON"))
+// internal/shared carries the shapes of a shared group, and its golden file is its own generated
+// encoder, so that package's tests check the bytes this output writes.
+func TestGenerateShared(t *testing.T) {
+	requireGolden(t, "internal/shared", "internal/shared/gen_item_json.go", "Item", "", "Items")
+}
+
+func requireGolden(t *testing.T, pkg, goldenPath, typeName, computed, slice string) {
+	t.Helper()
+	golden, err := filepath.Abs(goldenPath)
+	require.NoError(t, err)
+	out := filepath.Join(t.TempDir(), "gen_json.go")
+
+	t.Chdir(pkg)
+	require.NoError(t, run(typeName, out, computed, slice))
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
 
@@ -48,25 +61,48 @@ func TestGenerateSample(t *testing.T) {
 	}
 	want, err := os.ReadFile(golden)
 	require.NoError(t, err)
-	require.Equal(t, string(want), string(got))
+	// A checkout may turn the golden file's line endings into CRLF, while the generator writes LF.
+	require.Equal(t, strings.ReplaceAll(string(want), "\r\n", "\n"), string(got))
+}
+
+func TestGenerateSliceOfAliasedElements(t *testing.T) {
+	t.Chdir("internal/shared")
+	require.NoError(t, run("Item", filepath.Join(t.TempDir(), "out.go"), "", "ItemPtrs"))
+}
+
+// The shared block must hold the name exactly as s.Field writes it, raw, or the two encoders
+// disagree and a name with an escape outgrows the block's buffer.
+func TestSharedLabelIsWrittenRaw(t *testing.T) {
+	var w bytes.Buffer
+	writeGroupMethod(&w, "sharedItems", "Item", 0, group{{ref: "x.N", name: "a\tb", appendFmt: "%s", size: 1}})
+	require.Contains(t, w.String(), `append(b, "\"a\tb\":"...)`)
 }
 
 // A field the generator cannot place must stop it, rather than produce a file that quietly
 // omits the field or writes what encoding/json would not. A form that does not suit the field's
 // type is not here: the ethjson writers are typed, so the generated file fails to compile.
 func TestGenerateRejects(t *testing.T) {
-	for name, typeName := range map[string]string{
-		"no ethjson tag":    "MissingForm",
-		"unknown form":      "UnknownForm",
-		"duplicate name":    "DuplicateName",
-		"tagged embedded":   "TaggedEmbedded",
-		"embedded pointer":  "PointerEmbedded",
-		"unknown option":    "UnknownOption",
-		"omitempty objects": "OmitemptyObjects",
+	for name, tc := range map[string]struct{ typeName, slice string }{
+		"no ethjson tag":        {"MissingForm", ""},
+		"unknown form":          {"UnknownForm", ""},
+		"duplicate name":        {"DuplicateName", ""},
+		"tagged embedded":       {"TaggedEmbedded", ""},
+		"embedded pointer":      {"PointerEmbedded", ""},
+		"unknown option":        {"UnknownOption", ""},
+		"omitempty objects":     {"OmitemptyObjects", ""},
+		"unknown form option":   {"UnknownFormOption", ""},
+		"shared string":         {"SharedString", "SharedStrings"},
+		"shared without slice":  {"SharedWithoutSlice", ""},
+		"slice of values":       {"SliceOfValues", "SlicesOfValues"},
+		"slice of another type": {"SliceOfValues", "SharedStrings"},
+		"no such slice":         {"SliceOfValues", "Missing"},
+		"aliased slice":         {"SliceOfValues", "AliasedSlice"},
+		"slice variable":        {"SliceOfValues", "SliceVariable"},
+		"generic slice":         {"SliceOfValues", "GenericSlice"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir("testdata/bad")
-			require.Error(t, run(typeName, filepath.Join(t.TempDir(), "out.go"), ""))
+			require.Error(t, run(tc.typeName, filepath.Join(t.TempDir(), "out.go"), "", tc.slice))
 		})
 	}
 }
@@ -88,7 +124,7 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	}
 
 	t.Chdir(pkg)
-	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON"))
+	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON", ""))
 	got, err := os.ReadFile("gen_sample_json.go")
 	require.NoError(t, err)
 	require.NotContains(t, string(got), "x.SinceRenamed")
@@ -106,7 +142,7 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 		[]byte("package sample\n\nvar _ = undefinedHere\nvar _ = "+method+"\n"), 0o644))
 
 	t.Chdir(pkg)
-	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
+	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON", ""), "undefinedHere")
 }
 
 // A Windows path carries a colon of its own, and CI runs there.

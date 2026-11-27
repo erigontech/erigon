@@ -2,6 +2,7 @@ package verify_test
 
 import (
 	"context"
+	"math"
 	"math/big"
 	"testing"
 
@@ -14,14 +15,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/verify"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+const collateAll = uint64(math.MaxUint64)
 
 // TestHistoryVerification_SimpleBlocks is an integration test that generates blocks
 // with state changes, builds snapshot files, and verifies history via re-execution.
@@ -79,7 +79,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, collateAll)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {
@@ -168,7 +168,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, collateAll)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {

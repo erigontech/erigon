@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -69,13 +68,12 @@ func TestCheckFilesDBGapChecksHistory(t *testing.T) {
 // returns a STALE older value instead of surfacing the gap.
 func TestDomain_RmStateLatestHole(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	ctx := t.Context()
 	logEvery := time.NewTicker(time.Hour)
 	defer logEvery.Stop()
 
 	const aggStep = uint64(4)
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep)
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -133,13 +131,12 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 // and never false-positives. Removing the newest file breaks that and is caught.
 func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	t.Parallel()
-	logger := log.New()
 	ctx := t.Context()
 	logEvery := time.NewTicker(time.Hour)
 	defer logEvery.Stop()
 
 	const aggStep = uint64(4)
-	db, ii := testDbAndInvertedIndex(t, aggStep, logger)
+	db, ii := testDbAndInvertedIndex(t, aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

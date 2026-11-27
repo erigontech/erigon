@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -393,11 +394,11 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 		key := crypto.Keccak256(a)
 		want, err := fullTrie.Prove(key, 0, false)
 		require.NoError(t, err)
-		got, _, err := trie.ProofFromNodes(byHash, root, key)
+		got, _, err := witnesstypes.ProofFromNodes(byHash, root, key)
 		require.NoError(t, err)
 		require.Equal(t, want, got, "account %x", a)
 	}
-	accountProof, accountRLP, err := trie.ProofFromNodes(byHash, root, crypto.Keccak256(accts[0]))
+	accountProof, accountRLP, err := witnesstypes.ProofFromNodes(byHash, root, crypto.Keccak256(accts[0]))
 	require.NoError(t, err)
 	var acc accounts.Account
 	require.NoError(t, acc.DecodeForHashing(accountRLP))
@@ -405,7 +406,7 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 		fullKey := append(crypto.Keccak256(accts[0]), crypto.Keccak256(slots[sk])...)
 		want, err := fullTrie.Prove(fullKey, len(accountProof), true)
 		require.NoError(t, err)
-		got, _, err := trie.ProofFromNodes(byHash, acc.Root[:], crypto.Keccak256(slots[sk]))
+		got, _, err := witnesstypes.ProofFromNodes(byHash, acc.Root[:], crypto.Keccak256(slots[sk]))
 		require.NoError(t, err)
 		require.Equal(t, want, got, "slot %x", slots[sk])
 	}

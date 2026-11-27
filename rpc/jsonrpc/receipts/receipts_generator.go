@@ -68,12 +68,11 @@ type Generator struct {
 }
 
 type ReceiptEnv struct {
-	ibs        *state.IntraBlockState
-	gasUsed    *protocol.GasUsed
-	gp         *protocol.GasPool
-	noopWriter *state.NoopWriter
-	getHeader  func(hash common.Hash, number uint64) (*types.Header, error)
-	header     *types.Header
+	ibs       *state.IntraBlockState
+	gasUsed   *protocol.GasUsed
+	gp        *protocol.GasPool
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
+	header    *types.Header
 }
 
 var (
@@ -205,8 +204,6 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 
-	noopWriter := state.NewNoopWriter()
-
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		h, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
@@ -215,12 +212,11 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 		return h, e
 	}
 	return &ReceiptEnv{
-		ibs:        ibs,
-		gasUsed:    gasUsed,
-		gp:         gp,
-		noopWriter: noopWriter,
-		getHeader:  getHeader,
-		header:     header,
+		ibs:       ibs,
+		gasUsed:   gasUsed,
+		gp:        gp,
+		getHeader: getHeader,
+		header:    header,
 	}, nil
 }
 
@@ -401,7 +397,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			currTxn := postState.Txns[txnIndex]
 
 			genEnv.ibs.SetTxContext(blockNum, txnIndex)
-			_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
+			_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
 			}
@@ -421,7 +417,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		genEnv.ibs.SetNoConflictDetection()
-		stateWriter = genEnv.noopWriter
 	}
 
 	evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
@@ -429,7 +424,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	defer cancel()
 	defer context.AfterFunc(ctx, evm.Cancel)()
 
-	receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
+	receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 	}
@@ -623,8 +618,6 @@ func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config
 			}
 			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains, tx: tx, blockStart: minTxNum}
 			stateWriter = state.NewWriter(written, nil, latestTxNum)
-		} else {
-			stateWriter = genEnv.noopWriter
 		}
 
 		for i, txn := range block.Transactions() {
@@ -637,7 +630,7 @@ func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
 			genEnv.ibs.SetTxContext(blockNum, i)
 			receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
-				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
