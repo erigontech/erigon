@@ -23,6 +23,21 @@ var (
 	npProfHz   = dbg.EnvInt("NP_PROF_HZ", 1000)
 )
 
+func init() {
+	if r := dbg.EnvInt("NP_MEMRATE", 0); r > 0 {
+		runtime.MemProfileRate = r
+	}
+}
+
+// npHeapDump writes the cumulative allocs profile after a GC, so that two dumps bound one window exactly.
+func npHeapDump(path string) {
+	runtime.GC()
+	if f, err := os.Create(path); err == nil {
+		_ = pprof.Lookup("allocs").WriteTo(f, 0)
+		_ = f.Close()
+	}
+}
+
 // npProfile profiles one newPayload whose block hash starts with an NP_PROF_HASH
 // prefix into $TMPDIR/npprof; the returned func stops it.
 func npProfile(hash common.Hash, t0 time.Time) func() {
@@ -37,6 +52,11 @@ func npProfile(hash common.Hash, t0 time.Time) func() {
 		return func() {}
 	}
 	switch npProfMode {
+	case "heap":
+		_ = f.Close()
+		base := f.Name()
+		npHeapDump(base + ".a")
+		return func() { npHeapDump(base + ".b") }
 	case "trace":
 		if err := trace.Start(f); err != nil {
 			_ = f.Close()
