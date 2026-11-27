@@ -978,6 +978,55 @@ func TestFramePoolResimulatesRemovedDuplicate(t *testing.T) {
 	require.Contains(t, backend.calls[1:], common.Hash(frame.IDHash))
 }
 
+func TestFramePoolDuplicateAfterPossibleSenderPenalty(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		accountSlots   uint64
+		ordinaryResult txpoolcfg.DiscardReason
+		frameResult    txpoolcfg.DiscardReason
+	}{
+		{"penalty evicts the frame", 1, txpoolcfg.Spammer, txpoolcfg.Success},
+		{"frame stays pooled", 2, txpoolcfg.Success, txpoolcfg.DuplicateHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.cfg.AccountSlots = tc.accountSlots
+			key := uint256.Int{1}
+			pooled := framePoolSlot(t, sender, 1, 2, key)
+			var seed TxnSlots
+			seed.Append(newTestSenderTxnSlot(t, sender, 0), sender[:], false)
+			seed.Append(pooled, sender[:], false)
+			reasons, err := pool.AddLocalTxns(ctx, seed)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+			localCopy := framePoolSlot(t, sender, 1, 2, key)
+			var batch TxnSlots
+			batch.Append(newTestSenderTxnSlot(t, sender, 1), sender[:], false)
+			batch.Append(localCopy, sender[:], true)
+			reasons, err = pool.AddLocalTxns(ctx, batch)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.ordinaryResult, tc.frameResult}, reasons)
+
+			entry := pool.byHash[string(pooled.IDHash[:])]
+			require.NotNil(t, entry)
+			want := pooled
+			if tc.frameResult == txpoolcfg.Success {
+				want = localCopy
+			}
+			require.Same(t, want, entry.TxnSlot)
+		})
+	}
+}
+
+func TestFramePoolMissingDuplicateAtInsertion(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.Equal(t, txpoolcfg.FrameValidationUnavailable, pool.finalizeFrameRejection(frame, txpoolcfg.DuplicateHash))
+}
+
 func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 	for _, nonce := range []uint64{0, 1} {
 		t.Run(fmt.Sprintf("sequence %d", nonce), func(t *testing.T) {
@@ -1387,26 +1436,38 @@ func TestFramePoolUnavailableWithConsumedKeyedNonce(t *testing.T) {
 
 func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	var restored TxnSlots
 	restored.Append(blocker, sender[:], true)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.err = status.Error(codes.Unavailable, "backend unavailable")
 	backend.onValidate = func() {
+		backend.onValidate = nil
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.Len(t, pool.restoreFramesLocked(pool.lastSeenBlock.Load(), restored), 1)
 	}
 
-	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	staleLegacy := framePoolSlot(t, sender, 1, 2)
+	currentLegacy := framePoolSlotWithNonce(t, sender, 1, 1, 2)
+	keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
 	var txns TxnSlots
-	txns.Append(candidate, sender[:], true)
+	txns.Append(staleLegacy, sender[:], true)
+	txns.Append(currentLegacy, sender[:], true)
+	txns.Append(keyed, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
-	rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow, txpoolcfg.InvalidFrame, txpoolcfg.InvalidFrame}, reasons)
+
+	rejection, ok := pool.frameRejections.Peek(string(staleLegacy.IDHash[:]))
 	require.True(t, ok)
-	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	require.Equal(t, frameRejection{generation: pool.stateGeneration, reason: txpoolcfg.NonceTooLow}, rejection)
+	for _, candidate := range []*TxnSlot{currentLegacy, keyed} {
+		rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+		require.True(t, ok)
+		require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	}
 }
 
 func TestFramePoolRechecksSetCodePrecheckAfterStateChange(t *testing.T) {

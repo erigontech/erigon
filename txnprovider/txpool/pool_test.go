@@ -3537,6 +3537,24 @@ func TestAddLocalTxnsKeepsEachReplacementOutcome(t *testing.T) {
 	}, reasons)
 }
 
+func TestAddLocalTxnsReportsDuplicateAfterGasLimitFalls(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	txn := newTestSenderTxnSlot(t, sender, 0)
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.BlockGasLimit = txn.GetGas() - 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	txns.Txns[0] = newTestSenderTxnSlot(t, sender, 0)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
+}
+
 func TestAddLocalTxnsClearsPreviousDiscardReason(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
@@ -3798,6 +3816,18 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
 }
 
+func submitRemoteTxns(t *testing.T, pool *TxPool, sender common.Address, txns ...*TxnSlot) []txpoolcfg.DiscardReason {
+	t.Helper()
+	var slots TxnSlots
+	for _, txn := range txns {
+		slots.Append(txn, sender[:], false)
+	}
+	pool.AddRemoteTxns(t.Context(), slots, nil, nil)
+	reasons, err := pool.processRemoteBatch(t.Context())
+	require.NoError(t, err)
+	return reasons
+}
+
 func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -3866,6 +3896,34 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 			require.Zero(t, queued)
 		})
 	}
+}
+
+func TestRemoteCopyStaysEvictedAfterSenderPenalty(t *testing.T) {
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+	highest := newTestSenderTxnSlot(t, sender, 2)
+	reasons := submitRemoteTxns(t, pool, sender,
+		newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), highest)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	resubmitted := *highest
+	reasons = submitRemoteTxns(t, pool, sender, &resubmitted, newTestSenderTxnSlot(t, sender, 3))
+	require.Contains(t, reasons, txpoolcfg.Spammer)
+	require.NotContains(t, pool.byHash, string(highest.IDHash[:]), "the earlier copy must stay evicted")
+}
+
+func TestRemoteSetCodeKeepsSpammerAfterEviction(t *testing.T) {
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+	reasons := submitRemoteTxns(t, pool, sender,
+		newTestSenderTxnSlot(t, sender, 0), newTestSenderTxnSlot(t, sender, 1), newTestSenderTxnSlot(t, sender, 2))
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	setCode := remoteSetCodeTxn(t, 3, 1)
+	reasons = submitRemoteTxns(t, pool, sender, setCode)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer}, reasons)
+	require.Len(t, pool.byHash, 2, "the penalty frees one slot")
+	require.NotContains(t, pool.byHash, string(setCode.IDHash[:]))
 }
 
 func nonceRetryBlob(t testing.TB, fork string, nonce uint64) (*TxPool, *TxnSlot) {

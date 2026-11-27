@@ -4,6 +4,9 @@
 package types
 
 import (
+	"strconv"
+
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
@@ -37,4 +40,81 @@ func (x *Log) writeJSONFields(s *jsonstream.Stream) error {
 		ethjson.Quantity(s, "blockTimestamp", *x.BlockTimestamp)
 	}
 	return nil
+}
+
+// MarshalFastJSONTo writes the elements as a bare array, each as Log.MarshalFastJSONTo does.
+func (xs Logs) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if xs == nil {
+		s.WriteNil()
+		return nil
+	}
+	var shared sharedLogs
+	s.WriteArrayStart()
+	for _, x := range xs {
+		if x == nil {
+			s.WriteNil()
+			continue
+		}
+		s.WriteObjectStart()
+		ethjson.Data(s, "address", x.Address[:])
+		ethjson.DataList(s, "topics", x.Topics)
+		ethjson.Data(s, "data", x.Data[:])
+		s.RawFields(shared.group0(x))
+		ethjson.Quantity(s, "logIndex", x.Index)
+		s.RawFields(shared.group1(x))
+		s.WriteObjectEnd()
+		shared.prev = x
+	}
+	s.WriteArrayEnd()
+	return nil
+}
+
+// sharedLogs holds each group of shared Log fields as last encoded, and the previous element, which
+// the next one is compared with.
+type sharedLogs struct {
+	prev *Log
+	len0 int
+	buf0 [242]byte
+	len1 int
+	buf1 [53]byte
+}
+
+// group0 returns blockNumber, transactionHash, transactionIndex, blockHash of x, encoded again only when they differ from the previous element's.
+func (c *sharedLogs) group0(x *Log) []byte {
+	if c.prev != nil &&
+		x.BlockNumber == c.prev.BlockNumber &&
+		x.TxHash == c.prev.TxHash &&
+		x.TxIndex == c.prev.TxIndex &&
+		x.BlockHash == c.prev.BlockHash {
+		return c.buf0[:c.len0]
+	}
+	b := c.buf0[:0]
+	b = append(b, "\"blockNumber\":"...)
+	b = append(hexutil.AppendUint64(append(b, '"'), uint64(x.BlockNumber)), '"')
+	b = append(b, ",\"transactionHash\":"...)
+	b = hexutil.AppendQuoted(b, x.TxHash[:])
+	b = append(b, ",\"transactionIndex\":"...)
+	b = append(hexutil.AppendUint64(append(b, '"'), uint64(x.TxIndex)), '"')
+	b = append(b, ",\"blockHash\":"...)
+	b = hexutil.AppendQuoted(b, x.BlockHash[:])
+	c.len0 = len(b)
+	return b
+}
+
+// group1 returns removed, blockTimestamp of x, encoded again only when they differ from the previous element's.
+func (c *sharedLogs) group1(x *Log) []byte {
+	if c.prev != nil &&
+		x.Removed == c.prev.Removed &&
+		(x.BlockTimestamp == nil) == (c.prev.BlockTimestamp == nil) && (x.BlockTimestamp == nil || *x.BlockTimestamp == *c.prev.BlockTimestamp) {
+		return c.buf1[:c.len1]
+	}
+	b := c.buf1[:0]
+	b = append(b, "\"removed\":"...)
+	b = strconv.AppendBool(b, x.Removed)
+	if x.BlockTimestamp != nil {
+		b = append(b, ",\"blockTimestamp\":"...)
+		b = append(hexutil.AppendUint64(append(b, '"'), uint64(*x.BlockTimestamp)), '"')
+	}
+	c.len1 = len(b)
+	return b
 }

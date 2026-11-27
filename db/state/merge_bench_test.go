@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -49,9 +48,8 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 
 	txs := uint64(numFiles) * aggStep
 	ctx := b.Context()
-	logger := log.New()
 
-	db, ii, _ := filledInvIndexOfSize(b, txs, aggStep, module, logger)
+	db, ii, _ := filledInvIndexOfSize(b, txs, aggStep, module)
 	_ = db
 
 	// Collate every step to build numFiles segment files; do NOT merge.

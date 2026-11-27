@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -31,10 +30,9 @@ import (
 // BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys
 // across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
 func BenchmarkHistoryRange(b *testing.B) {
-	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -60,10 +58,9 @@ func BenchmarkHistoryRange(b *testing.B) {
 // BenchmarkRangeAsOf benchmarks iterating the full key-space at a given txNum
 // from segment files (exercises HistoryRangeAsOfFiles.advanceInFiles).
 func BenchmarkRangeAsOf(b *testing.B) {
-	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -91,10 +88,9 @@ func BenchmarkRangeAsOf(b *testing.B) {
 // BenchmarkHistoryRange_MultiFile is like BenchmarkHistoryRange but keeps all
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkHistoryRange_MultiFile(b *testing.B) {
-	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
@@ -120,10 +116,9 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 // BenchmarkRangeAsOf_MultiFile is like BenchmarkRangeAsOf but keeps all
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
-	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
@@ -153,8 +148,7 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 // they decoded; `coldReaders` drops those readers before every seek; `coldTx` opens a fresh
 // HistoryRoTx per seek, which is what an rpcdaemon request does.
 func BenchmarkHistorySeekInFiles(b *testing.B) {
-	logger := log.New()
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	ht := h.beginForTests()
@@ -212,10 +206,9 @@ func BenchmarkHistorySeekInFiles(b *testing.B) {
 // where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
 // its files un-merged, so it never reaches that path.
 func BenchmarkHistoryRangePaged(b *testing.B) {
-	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, true)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)

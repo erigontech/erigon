@@ -1392,10 +1392,7 @@ func (p *TxPool) validateOrdinaryTxn(txn *TxnSlot, isLocal bool, stateCache kvca
 	// An unwind can return a transaction when the sender is already above its
 	// per-account slot limit. Rejecting it as spam can evict some higher-nonce
 	// transactions and leave others queued behind the missing nonce.
-	// A pooled hash uses no extra slot. A sender penalty can evict it during batch
-	// validation, so only the insertion loop can decide whether the copy is a duplicate.
-	if !unwinding && !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots &&
-		p.byHash[string(txn.IDHash[:])] == nil {
+	if !unwinding && !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
@@ -1462,11 +1459,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
-	// A pooled hash already counts toward both limits. Sidecar verification is
-	// separate because different sidecars can accompany the same transaction.
-	if p.byHash[string(txn.IDHash[:])] != nil {
-		return txpoolcfg.Success
-	}
 	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))

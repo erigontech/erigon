@@ -256,6 +256,21 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
 }
 
+func TestRemotePooledBlobCopyRequiresItsOwnSidecar(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	sender := common.Address{1}
+	blob := makeBlobSlot(0x65, false)
+	reasons := submitRemoteTxns(t, pool, sender, &blob)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	withoutSidecar := blob
+	withoutSidecar.BlobBundles = nil
+	reasons = submitRemoteTxns(t, pool, sender, &withoutSidecar)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnequalBlobTxExt}, reasons)
+}
+
 func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
