@@ -504,8 +504,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// balBuilder holds the current block's access list up to its last published tx.
-		var balBuilder *state.BlockAccessListBuilder
+		var balBuilder *asyncBALBuilder
+		defer func() { balBuilder.close() }()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
@@ -669,12 +669,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
+							balBuilder = startBALBuilder(applyResult.txIO)
 						}
-						for balBuilder.Next()+1 < applyResult.balSealed {
-							i := balBuilder.Next()
-							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
-						}
+						balBuilder.seal(applyResult.balSealed)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -682,8 +679,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
-					built := balBuilder
+					pendingBAL := balBuilder
 					balBuilder = nil
+					pendingBAL.close()
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
@@ -770,7 +768,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
-						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						computedBAL, balErr = bal.Process(blockBAL, h, pendingBAL.builder(), txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
