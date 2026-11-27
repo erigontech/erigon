@@ -282,7 +282,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 		return beaconhttp.NewNoContentResponse(), nil
 	}
 
-	payloadDueMs := a.beaconChainCfg.SecondsPerSlot * a.beaconChainCfg.PayloadDueBps / (clparams.BpsFactor / 1000)
+	payloadDueMs := a.beaconChainCfg.BpsToMs(a.beaconChainCfg.PayloadDueBps)
 	payloadDeadline := a.ethClock.GetSlotTime(slot).Add(time.Duration(payloadDueMs) * time.Millisecond)
 	payloadPresent := a.forkchoiceStore.ExecutionPayloadReceivedBefore(headRoot, payloadDeadline)
 
@@ -926,7 +926,7 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 	}
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
-		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
+		WithOptimistic(a.forkchoiceStore.IsNodeOptimistic(forkchoice.ForkChoiceNode{Root: blockRoot, PayloadStatus: cltypes.PayloadStatusFull})).
 		WithFinalized(isFinalized), nil
 }
 
@@ -1379,7 +1379,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
 				Slot: block.Block.Slot, BuilderIndex: signedEnvelope.Message.BuilderIndex,
 				BlockHash: signedEnvelope.Message.Payload.BlockHash, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
-				ExecutionOptimistic: a.forkchoiceStore.IsRootOptimistic(signedEnvelope.Message.BeaconBlockRoot),
+				ExecutionOptimistic: a.forkchoiceStore.IsNodeOptimistic(forkchoice.ForkChoiceNode{Root: signedEnvelope.Message.BeaconBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}),
 			})
 			a.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
 				Slot: block.Block.Slot, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
@@ -1463,7 +1463,7 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if head.PayloadStatus != cltypes.PayloadStatusFull {
 		return
 	}
-	optimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+	optimistic := a.forkchoiceStore.IsNodeOptimistic(head)
 	var event *beaconevents.HeadV2Data
 	err = a.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
 		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, head.Root, block.Block.StateRoot, "full", optimistic)
@@ -1475,7 +1475,7 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	a.emitters.EmitHeadV2IfCurrent(event, func() bool {
 		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
 		if err != nil || currentHead != head || currentSlot != headSlot ||
-			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
+			a.forkchoiceStore.IsNodeOptimistic(currentHead) != optimistic {
 			return false
 		}
 		return true

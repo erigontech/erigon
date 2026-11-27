@@ -236,9 +236,9 @@ func (s *storedParentPayloadTestStore) GetBlock(common.Hash) (*cltypes.SignedBea
 	return s.block, s.block != nil
 }
 
-func (s *storedParentPayloadTestStore) MarkPayloadStatusAndGasLimitIfRetained(_ common.Hash, _ common.Hash, status execution_client.PayloadStatus, gasLimit uint64) (execution_client.PayloadStatus, bool) {
+func (s *storedParentPayloadTestStore) RecordGloasPayloadResult(_ common.Hash, payload *cltypes.Eth1Block, status execution_client.PayloadStatus, _ error) (execution_client.PayloadStatus, bool) {
 	s.marked = status
-	s.markedGas = gasLimit
+	s.markedGas = payload.GasLimit
 	return status, s.markRetained
 }
 

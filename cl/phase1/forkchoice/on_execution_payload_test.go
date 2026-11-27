@@ -1615,7 +1615,7 @@ func TestPendingEnvelopeIndexWriteRetriesThroughOriginQueue(t *testing.T) {
 		db:                             db,
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	require.False(t, pending.Contains(blockRoot))
 	require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
 	require.Equal(t, 1, db.calls)
@@ -1645,7 +1645,7 @@ func TestIndexRepairSurvivesUnknownRootQueueAdmissions(t *testing.T) {
 		db:                             db,
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	require.False(t, pending.Contains(blockRoot))
 	require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
 	for i := range queueCacheSize {
@@ -1823,7 +1823,7 @@ func TestIndexRepairFailureQueuesPersistedEnvelope(t *testing.T) {
 		db:                             &failingUpdateDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB), fail: true},
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	repairs := f.envelopeIndexRepairs.repairs()
 	require.Len(t, repairs, 1)
 	require.Equal(t, blockRoot, repairs[0].root)
@@ -1855,7 +1855,7 @@ func TestIndexRepairRewritesWellShapedWrongIndices(t *testing.T) {
 		db:                             db,
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
 	db.fail = false
 	f.RetryPendingExecutionPayloadEnvelopeIndices(context.Background(), 1)
@@ -1913,7 +1913,7 @@ func TestIndexRepairSurvivesEnvelopePruning(t *testing.T) {
 		db:                             db,
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
 	f.forkGraph = pendingRetryForkGraph{}
 	db.fail = false
@@ -2451,12 +2451,12 @@ func TestIndexRepairReadFailureQueuesRootRepair(t *testing.T) {
 		db:                             db,
 	}
 
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	queued, ok := pending.Get(blockRoot)
 	require.True(t, ok)
 	require.Nil(t, queued)
 	graph.fail.Store(false)
-	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 	require.False(t, pending.Contains(blockRoot))
 	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
 		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
@@ -2744,7 +2744,7 @@ func TestPendingEnvelopeRepairsMalformedIndices(t *testing.T) {
 			}
 
 			require.NotPanics(t, func() {
-				f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+				f.ProcessPendingExecutionPayloadEnvelope(context.Background(), blockRoot, false)
 			})
 			require.Equal(t, int32(2), graph.reads.Load())
 			require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
@@ -3534,7 +3534,7 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			}
 			require.Equal(t, tt.wantVerify, f.IsPayloadVerified(blockRoot))
 			if tt.status == execution_client.PayloadStatusInvalidated {
-				require.Equal(t, blockRoot, invalidatedHeader)
+				require.Equal(t, common.Hash{}, invalidatedHeader)
 			}
 		})
 	}
@@ -4140,7 +4140,7 @@ func TestExecutionPayloadIngressRejectsPayloadThatDoesNotDeriveClaimedBlockHash(
 	}
 }
 
-func TestExecutionPayloadGossipDefersDerivedHashValidationUntilIntegration(t *testing.T) {
+func TestExecutionPayloadGossipRejectsIncorrectBlockHash(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	envelope.Message.Payload.GasUsed++
 	resignAdmissionEnvelope(t, cfg, blockState, envelope)
@@ -4150,10 +4150,10 @@ func TestExecutionPayloadGossipDefersDerivedHashValidationUntilIntegration(t *te
 	}
 	f.finalizedCheckpoint.Store(solid.Checkpoint{})
 
-	require.NoError(t, f.ValidateExecutionPayloadEnvelopeForGossip(envelope))
+	require.Error(t, f.ValidateExecutionPayloadEnvelopeForGossip(envelope))
 }
 
-func TestExecutionPayloadGossipDefersNonGossipCommitmentsUntilIntegration(t *testing.T) {
+func TestExecutionPayloadGossipRejectsMismatchedCommitments(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*cltypes.ExecutionPayloadEnvelope)
@@ -4173,7 +4173,7 @@ func TestExecutionPayloadGossipDefersNonGossipCommitmentsUntilIntegration(t *tes
 			}
 			f.finalizedCheckpoint.Store(solid.Checkpoint{})
 
-			require.NoError(t, f.ValidateExecutionPayloadEnvelopeForGossip(envelope))
+			require.Error(t, f.ValidateExecutionPayloadEnvelopeForGossip(envelope))
 		})
 	}
 }
@@ -4428,7 +4428,7 @@ func TestExecutionPayloadDecodeFailureIsTerminal(t *testing.T) {
 				status, recorded := f.GetRecentExecutionPayloadStatus(payload.BlockHash)
 				require.True(t, recorded, "authenticated decode failures must record an execution verdict")
 				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
-				require.True(t, graph.invalid.Load())
+				require.False(t, graph.invalid.Load())
 				require.False(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
 				require.False(t, f.HasEnvelope(envelope.Message.BeaconBlockRoot))
 
@@ -4597,7 +4597,7 @@ func TestAuthenticatedExecutionPayloadInvalidationRevokesVerifiedSibling(t *test
 	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
 	require.False(t, f.IsPayloadVerified(verifiedRoot))
 	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
-	require.True(t, graph.invalid.Load())
+	require.False(t, graph.invalid.Load())
 	status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -4700,7 +4700,7 @@ func TestExecutionPayloadIngressDoesNotPersistUncheckedHashWhenEngineUnavailable
 	require.False(t, optimisticStore.IsOptimistic(envelope.Message.BeaconBlockRoot))
 }
 
-func TestExecutionPayloadIngressPersistsLocallyVerifiedHashWhenEngineUnavailable(t *testing.T) {
+func TestExecutionPayloadIngressQueuesEnvelopeWhenEngineUnavailable(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
 	resignAdmissionEnvelope(t, cfg, blockState, envelope)
@@ -4728,13 +4728,15 @@ func TestExecutionPayloadIngressPersistsLocallyVerifiedHashWhenEngineUnavailable
 		executionPayloadGasLimit: executionPayloadGasLimit,
 		eth2Roots:                eth2Roots,
 	}
+	f.pendingEnvelopes, _ = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 	f.finalizedCheckpoint.Store(solid.Checkpoint{})
 
 	err = f.OnExecutionPayload(context.Background(), envelope, false, true)
 
-	require.NoError(t, err)
-	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
-	require.Len(t, f.pendingELPayloads, 1)
+	require.ErrorIs(t, err, injected)
+	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+	_, queued := f.pendingEnvelopes.Peek(envelope.Message.BeaconBlockRoot)
+	require.True(t, queued)
 }
 
 func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
@@ -4791,17 +4793,16 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 				executionPayloadGasLimit: executionPayloadGasLimit,
 				eth2Roots:                eth2Roots,
 			}
+			f.pendingLocalSelfBuildEnvelopes, _ = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 			f.finalizedCheckpoint.Store(solid.Checkpoint{})
 
 			err = f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope)
 
 			if valid {
-				require.NoError(t, err)
-				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
-				exits, ok := f.GetCachedParentBuilderExitRequests(envelope.Message.BeaconBlockRoot)
-				require.True(t, ok)
-				require.Equal(t, []solid.BuilderExitRequest{exit}, exits)
-				require.Len(t, f.pendingELPayloads, 1)
+				require.ErrorIs(t, err, injected)
+				require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				_, queued := f.pendingLocalSelfBuildEnvelopes.Peek(envelope.Message.BeaconBlockRoot)
+				require.True(t, queued)
 			} else {
 				require.ErrorContains(t, err, "mismatching hash")
 				require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
@@ -4968,7 +4969,7 @@ func TestExecutionPayloadIngressAppliesTerminalResultBeforeDuplicateShortCircuit
 
 			if tc.status == execution_client.PayloadStatusInvalidated {
 				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
-				require.True(t, graph.invalid.Load())
+				require.False(t, graph.invalid.Load())
 				require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 			} else {
 				if tc.local {
@@ -5143,7 +5144,7 @@ func TestCachedTerminalHashProjectsToSiblingRoot(t *testing.T) {
 
 			if tc.wantInvalid {
 				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
-				require.True(t, graph.invalid.Load())
+				require.False(t, graph.invalid.Load())
 				require.False(t, f.IsPayloadVerified(root))
 			} else {
 				require.NoError(t, err)
@@ -5257,7 +5258,7 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 			}()
 			<-engineStarted
 			if tc.status == execution_client.PayloadStatusNotValidated {
-				f.MarkPayloadInvalid(envelope.Message.BeaconBlockRoot, envelope.Message.Payload.BlockHash)
+				f.RecordGloasPayloadResult(envelope.Message.BeaconBlockRoot, envelope.Message.Payload, execution_client.PayloadStatusInvalidated, nil)
 			} else {
 				require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
 			}
@@ -5269,7 +5270,7 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 				require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 			} else {
 				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
-				require.True(t, graph.invalid.Load())
+				require.False(t, graph.invalid.Load())
 				require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 			}
 			status, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
@@ -5399,14 +5400,17 @@ func TestPayloadHashFallbackReconcilesInvalidationWhileLockYielded(t *testing.T)
 	f.mu.Lock()
 	err = f.validatePayloadHashFallbackLocked(blockRoot, executionBlockHash, func() error {
 		require.True(t, f.mu.TryLock())
-		f.markPayloadStatusLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+		executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
 		f.mu.Unlock()
 		return nil
 	})
 	f.mu.Unlock()
 
 	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
-	require.True(t, graph.invalid.Load())
+	require.False(t, graph.invalid.Load())
+	rootStatus, ok := payloadStatusByRoot.Get(blockRoot)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, rootStatus)
 	status, ok := executionPayloadStatus.Get(executionBlockHash)
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -5858,7 +5862,7 @@ func validAdmissionCancellationFixtureAtSlot(t testing.TB, slot uint64) (*clpara
 	payload.Withdrawals = withdrawals
 	payload.Transactions = &solid.TransactionsSSZ{}
 	payload.Extra = solid.NewExtraData()
-	payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xc0}))
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(&cfg, requests))
 	blockHash, err := payload.ComputeBlockHash(&parentRoot, requestsHash, nil)
 	require.NoError(t, err)

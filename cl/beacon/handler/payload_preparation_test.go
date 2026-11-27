@@ -271,7 +271,7 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 		unpreparedAt        time.Duration
 		unpreparedPollUntil time.Duration
 	}{
-		{clparams.ElectraVersion, 2 * time.Second, 899_750 * time.Microsecond, 2_999_250 * time.Microsecond, 2_899_250 * time.Microsecond, 2_999_250 * time.Microsecond},
+		{clparams.ElectraVersion, 2 * time.Second, 900 * time.Millisecond, 3 * time.Second, 2900 * time.Millisecond, 3 * time.Second},
 		{clparams.GloasVersion, 1500 * time.Millisecond, 650 * time.Millisecond, 2250 * time.Millisecond, 900 * time.Millisecond, time.Second},
 	} {
 		t.Run(test.version.String(), func(t *testing.T) {
@@ -307,8 +307,8 @@ func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
 
 	// One second of work before production advances collection by one second. It does not have to
 	// cross a minimum-age threshold before it becomes useful.
-	require.Equal(t, slotStart.Add(1_999_250*time.Microsecond).Add(-minPayloadPollingWindow), window.firstGetAt)
-	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
+	require.Equal(t, slotStart.Add(2*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
 }
 
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
@@ -347,7 +347,7 @@ func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 
-	require.Equal(t, 1_999_500*time.Microsecond, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
+	require.Equal(t, 2*time.Second, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
 	require.Equal(t, 1500*time.Millisecond, maximumPreparedAdvance(cfg, clparams.GloasVersion))
 }
 

@@ -1315,12 +1315,12 @@ func (d *peerdas) buildBlobSidecars(slot uint64, blockRoot common.Hash, result *
 	return true
 }
 
-func hasSignedHeaderOfBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash) bool {
+func VerifyDataColumnSidecarForBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash) bool {
 	if sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 		return false
 	}
 	root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-	return err == nil && root == blockRoot
+	return err == nil && root == blockRoot && VerifyDataColumnSidecar(sidecar) && VerifyDataColumnSidecarInclusionProof(sidecar)
 }
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
@@ -1400,7 +1400,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 					if isGloas {
 						wellFormed = VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock)
 					} else {
-						wellFormed = VerifyDataColumnSidecar(sidecar) && hasSignedHeaderOfBlock(sidecar, blockRoot) && VerifyDataColumnSidecarInclusionProof(sidecar)
+						wellFormed = VerifyDataColumnSidecarForBlock(sidecar, blockRoot)
 					}
 					if !wellFormed {
 						log.Warn("[blobsRecover] removing malformed column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex,
@@ -2469,7 +2469,7 @@ func (d *peerdas) slotDuration() time.Duration {
 }
 
 func (d *peerdas) payloadDueMs() uint64 {
-	return d.beaconConfig.SecondsPerSlot * d.beaconConfig.PayloadDueBps / (clparams.BpsFactor / 1000)
+	return d.beaconConfig.BpsToMs(d.beaconConfig.PayloadDueBps)
 }
 
 // deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A

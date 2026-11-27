@@ -484,7 +484,7 @@ func (s *Service) submitExecutionPayloadEnvelope(
 func (s *Service) executionPayloadEnvelopeDeadline(slot uint64) time.Time {
 	slotDuration := time.Duration(s.cfg.SecondsPerSlot) * time.Second
 	slotStart := time.Unix(int64(s.genesisTime), 0).Add(time.Duration(slot) * slotDuration)
-	return slotStart.Add(slotDuration * time.Duration(s.cfg.PayloadDueBps) / time.Duration(clparams.BpsFactor))
+	return slotStart.Add(time.Duration(s.cfg.BpsToMs(s.cfg.PayloadDueBps)) * time.Millisecond)
 }
 
 func (s *Service) expireEnvelopeSubmission(root common.Hash, deadline time.Time) {

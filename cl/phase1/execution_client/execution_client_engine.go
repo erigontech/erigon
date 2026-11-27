@@ -154,8 +154,12 @@ func (cc *ExecutionClientEngine) NewPayload(
 	}
 	status := newPayloadStatusByEngineStatus(payloadStatus.Status)
 	err = checkPayloadStatus(payloadStatus)
-	if payloadStatus.Status == engine_types.InvalidStatus && payloadStatus.LatestValidHash != nil && *payloadStatus.LatestValidHash != (common.Hash{}) {
-		err = &InvalidPayloadError{LatestValidHash: *payloadStatus.LatestValidHash, Err: err}
+	if payloadStatus.Status == engine_types.InvalidStatus {
+		if payloadStatus.LatestValidHash != nil && (payload.Version() >= clparams.GloasVersion || *payloadStatus.LatestValidHash != (common.Hash{})) {
+			err = &InvalidPayloadError{LatestValidHash: *payloadStatus.LatestValidHash, Err: err}
+		} else if payload.Version() >= clparams.GloasVersion {
+			err = errors.Join(ErrInvalidEnvelope, err)
+		}
 	}
 	return status, err
 }

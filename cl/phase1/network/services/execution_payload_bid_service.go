@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -51,27 +52,26 @@ type seenBidKey struct {
 
 type seenBidStore struct {
 	mu     sync.RWMutex
-	bySlot map[uint64]map[seenBidKey]struct{}
+	bySlot map[uint64]map[seenBidKey]uint64
 }
 
 func newSeenBidStore() *seenBidStore {
-	return &seenBidStore{bySlot: make(map[uint64]map[seenBidKey]struct{})}
+	return &seenBidStore{bySlot: make(map[uint64]map[seenBidKey]uint64)}
 }
 
-func (s *seenBidStore) Contains(key seenBidKey) bool {
+func (s *seenBidStore) Count(key seenBidKey) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.bySlot[key.slot][key]
-	return ok
+	return s.bySlot[key.slot][key]
 }
 
 func (s *seenBidStore) Add(key seenBidKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.bySlot[key.slot] == nil {
-		s.bySlot[key.slot] = make(map[seenBidKey]struct{})
+		s.bySlot[key.slot] = make(map[seenBidKey]uint64)
 	}
-	s.bySlot[key.slot][key] = struct{}{}
+	s.bySlot[key.slot][key]++
 }
 
 func (s *seenBidStore) PruneExpired(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time) {
@@ -121,6 +121,7 @@ type bidBuilder struct {
 	version          uint8
 	active           bool
 	hasBidCapacity   bool
+	bidLimit         uint64
 	bidCapacity      uint64
 }
 
@@ -158,6 +159,7 @@ type executionPayloadBidService struct {
 	emitters          *beaconevents.EventEmitter
 	now               func() time.Time
 
+	validators           *validator_params.ValidatorParams
 	seenCache            *seenBidStore
 	bidStoreMu           sync.Mutex
 	validationStateMu    sync.Mutex
@@ -178,6 +180,7 @@ func NewExecutionPayloadBidService(
 	beaconCfg *clparams.BeaconChainConfig,
 	epbsPool *pool.EpbsPool,
 	emitters *beaconevents.EventEmitter,
+	validators *validator_params.ValidatorParams,
 ) ExecutionPayloadBidService {
 	validationStateCache := lru.NewWithTTL[bidValidationStateKey, *bidValidationStateEntry](
 		"execution_payload_bid_validation_states",
@@ -198,7 +201,8 @@ func NewExecutionPayloadBidService(
 		beaconCfg:            beaconCfg,
 		epbsPool:             epbsPool,
 		emitters:             emitters,
-		now:                  time.Now,
+		now:                  ethClock.Now,
+		validators:           validators,
 		seenCache:            newSeenBidStore(),
 		validationStateCache: validationStateCache,
 		parentExitsCalls:     make(map[common.Hash]*parentBuilderExitsCall),
@@ -240,21 +244,20 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 	now := s.now()
 	// [IGNORE] bid.slot is the current or next slot
-	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, maximumGossipClockDisparity) {
+	if slot == 0 || !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, maximumGossipClockDisparity) {
 		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, slot)
 	}
-	s.epbsPool.HighestBids.PruneSlots(func(entrySlot uint64) bool {
+	previousSlot := s.ethClock.GetSlotTime(slot - 1)
+	if now.Before(previousSlot.Add(time.Duration(s.beaconCfg.PayloadAttestationDueMs()) * time.Millisecond)) {
+		return fmt.Errorf("%w: before previous slot's payload attestation deadline", ErrIgnore)
+	}
+	s.epbsPool.PruneBids(func(entrySlot uint64) bool {
 		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
 	})
 	s.epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
 		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
 	})
 
-	seenKey := newSeenBidKey(bid)
-	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen bid from builder %d for slot %d",
-			ErrIgnore, builderIndex, slot)
-	}
 	if err := s.validateHighestBid(bid); err != nil {
 		return err
 	}
@@ -306,10 +309,22 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	if err != nil {
 		return err
 	}
-	if err := s.validateBidAuthentication(ctx, msg, validationStateEntry, now); err != nil {
+	localProposer := s.validators != nil && s.validators.HasAttachedValidator(prefs.ValidatorIndex)
+	builder, err := validationStateEntry.builderForBid(bid, s.beaconCfg)
+	if err != nil {
+		return fmt.Errorf("bid validation failed: %w", err)
+	}
+	overLimit := s.seenCache.Count(newSeenBidKey(bid)) >= builder.bidLimit
+	if !localProposer && overLimit {
+		return fmt.Errorf("%w: builder bid limit reached", ErrIgnore)
+	}
+	if err := s.validateBidAuthentication(ctx, msg, validationStateEntry, builder, now); err != nil {
+		if overLimit {
+			return fmt.Errorf("%w: builder bid limit reached", ErrIgnore)
+		}
 		return err
 	}
-	if err := s.storeValidBidAt(msg, now); err != nil {
+	if err := s.storeValidBidAt(msg, now, builder.bidLimit, localProposer); err != nil {
 		return err
 	}
 	s.emitters.Operation().SendExecutionPayloadBid(msg)
@@ -344,7 +359,11 @@ func (s *executionPayloadBidService) ValidateBid(ctx context.Context, msg *cltyp
 	if err != nil {
 		return err
 	}
-	return s.validateBidAuthentication(ctx, msg, validationStateEntry, now)
+	builder, err := validationStateEntry.builderForBid(bid, s.beaconCfg)
+	if err != nil {
+		return fmt.Errorf("bid validation failed: %w", err)
+	}
+	return s.validateBidAuthentication(ctx, msg, validationStateEntry, builder, now)
 }
 
 func isCurrentOrNextSlot(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64, disparity time.Duration) bool {
@@ -443,18 +462,18 @@ func bidValidationStateCacheTTL(beaconCfg *clparams.BeaconChainConfig) time.Dura
 	return time.Duration(secondsPerSlot*bidValidationStateTTLSlots) * time.Second
 }
 
-func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Context, msg *cltypes.SignedExecutionPayloadBid, validationStateEntry *bidValidationStateEntry, now time.Time) error {
+func (entry *bidValidationStateEntry) builderForBid(bid *cltypes.ExecutionPayloadBid, cfg *clparams.BeaconChainConfig) (bidBuilder, error) {
+	if bid.Slot <= entry.parentSlot {
+		return bidBuilder{}, fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, entry.parentSlot)
+	}
+	if bid.PrevRandao != entry.parentRandao {
+		return bidBuilder{}, errors.New("bid prev_randao does not match parent state randao mix")
+	}
+	return entry.view.builderForBid(bid, cfg)
+}
+
+func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Context, msg *cltypes.SignedExecutionPayloadBid, validationStateEntry *bidValidationStateEntry, builder bidBuilder, now time.Time) error {
 	bid := msg.Message
-	if bid.Slot <= validationStateEntry.parentSlot {
-		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, validationStateEntry.parentSlot)
-	}
-	if bid.PrevRandao != validationStateEntry.parentRandao {
-		return errors.New("bid prev_randao does not match parent state randao mix")
-	}
-	builder, err := validationStateEntry.view.builderForBid(bid, s.beaconCfg)
-	if err != nil {
-		return fmt.Errorf("bid validation failed: %w", err)
-	}
 	builderPubkey := builder.pubkey
 	builderAddress := builder.executionAddress
 	parentVersion := validationStateEntry.parentVersion
@@ -613,7 +632,7 @@ func (s *executionPayloadBidService) readParentBuilderExitRequests(root common.H
 	return requests, nil
 }
 
-func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutionPayloadBid, now time.Time) error {
+func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutionPayloadBid, now time.Time, limit uint64, localProposer bool) error {
 	bid := msg.Message
 	seenKey := newSeenBidKey(bid)
 
@@ -621,20 +640,22 @@ func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutio
 	defer s.bidStoreMu.Unlock()
 	if !now.IsZero() {
 		s.seenCache.PruneExpired(s.ethClock, s.beaconCfg, now)
-		s.epbsPool.HighestBids.PruneSlots(func(entrySlot uint64) bool {
+		s.epbsPool.PruneBids(func(entrySlot uint64) bool {
 			return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
 		})
 	}
 
-	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen bid from builder %d for slot %d",
-			ErrIgnore, bid.BuilderIndex, bid.Slot)
-	}
 	if err := s.validateHighestBid(bid); err != nil {
 		return err
 	}
-	s.seenCache.Add(seenKey)
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
+	if s.seenCache.Count(seenKey) >= limit {
+		if localProposer {
+			s.epbsPool.ConsiderProposerBid(bidKey, msg)
+		}
+		return fmt.Errorf("%w: builder bid limit reached", ErrIgnore)
+	}
+	s.seenCache.Add(seenKey)
 	s.epbsPool.StoreHighestBid(bidKey, msg)
 	return nil
 }
@@ -653,7 +674,7 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 	if hasBlock && headBlock != nil && headBlock.Block != nil && headBlock.Block.Body != nil {
 		signedHeadBid := headBlock.Block.Body.GetSignedExecutionPayloadBid()
 		if signedHeadBid != nil && signedHeadBid.Message != nil {
-			return bidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
+			return s.bidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
 		}
 		if headPayload := headBlock.Block.Body.ExecutionPayload; headPayload != nil {
 			return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
@@ -668,7 +689,7 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 		if headBid == nil {
 			return false, fmt.Errorf("%w: head bid unavailable", errBidDependencyUnavailable)
 		}
-		return bidCompatibleWithHead(bid, headRoot, headHeader, headBid, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
+		return s.bidCompatibleWithHead(bid, headRoot, headHeader, headBid, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
 	}
 	headPayload := headState.LatestExecutionPayloadHeader()
 	if headPayload == nil {
@@ -677,11 +698,11 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 	return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
 }
 
-func bidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid, headRoot common.Hash, headHeader *cltypes.BeaconBlockHeader, headBid *cltypes.ExecutionPayloadBid, buildOnFull bool) bool {
+func (s *executionPayloadBidService) bidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid, headRoot common.Hash, headHeader *cltypes.BeaconBlockHeader, headBid *cltypes.ExecutionPayloadBid, buildOnFull bool) bool {
 	buildsOnParentBlock := bid.ParentBlockRoot == headHeader.ParentRoot
 	buildsOnParentPayload := bid.ParentBlockHash == headBid.ParentBlockHash
 	if buildsOnParentBlock && buildsOnParentPayload {
-		return true
+		return bid.Slot != 0 && bid.Slot-1 == headHeader.Slot && (s.forkchoiceStore.IsHeadLate(headRoot) || s.forkchoiceStore.HasBlockEquivocation(headHeader.Slot, headHeader.ProposerIndex, headRoot))
 	}
 	if bid.ParentBlockRoot != headRoot {
 		return false
@@ -694,13 +715,13 @@ func bidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid, headRoot common.Has
 
 func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	existing, found := s.epbsPool.GetHighestBid(bidKey)
-	if !found || existing == nil || existing.Message == nil {
+	existing, found := s.epbsPool.ForwardedBidValues.Get(bidKey)
+	if !found {
 		return nil
 	}
-	if bid.Value <= existing.Message.Value {
+	if bid.Value <= existing {
 		return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",
-			ErrIgnore, bid.Value, existing.Message.Value, bid.Slot)
+			ErrIgnore, bid.Value, existing, bid.Slot)
 	}
 	return nil
 }
@@ -861,6 +882,7 @@ func newBidValidationView(s *state.CachingBeaconState, cfg *clparams.BeaconChain
 			active:           state.IsActiveBuilder(s, uint64(index)),
 			hasBidCapacity:   hasBidCapacity,
 			bidCapacity:      bidCapacity,
+			bidLimit:         (builder.Balance - min(builder.Balance, pendingWithdrawals)) / common.GWei,
 		}
 		return true
 	})

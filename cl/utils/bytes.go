@@ -147,19 +147,14 @@ func IsBitOn(b []byte, idx int) bool {
 
 // IsNonStrictSupersetBitlist checks if bitlist 'a' is a non-strict superset of bitlist 'b'
 func IsNonStrictSupersetBitlist(a, b []byte) bool {
-	// Ensure 'a' is at least as long as 'b'
-	if len(a) < len(b) {
+	if len(a) != len(b) || GetBitlistLength(a) != GetBitlistLength(b) {
 		return false
 	}
-
-	// Check each bit in 'b' to ensure it is also set in 'a'
 	for i := range b {
-		if (a[i] & b[i]) != b[i] {
+		if a[i]&b[i] != b[i] {
 			return false
 		}
 	}
-
-	// If all bits required by 'b' are present in 'a', return true
 	return true
 }
 

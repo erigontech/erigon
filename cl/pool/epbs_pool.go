@@ -127,7 +127,8 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
-	HighestBids *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
+	ForwardedBidValues *slotMap[HighestBidKey, uint64]
+	HighestBids        *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
 
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
@@ -145,9 +146,23 @@ func (p *EpbsPool) HighestBidKeys() []HighestBidKey {
 	return p.HighestBids.Keys()
 }
 
-// StoreHighestBid replaces the current entry for key.
+// StoreHighestBid records a forwarded bid and considers it for local proposals.
 func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
-	p.HighestBids.Add(key, bid)
+	p.ForwardedBidValues.Add(key, bid.Message.Value)
+	p.ConsiderProposerBid(key, bid)
+}
+
+func (p *EpbsPool) ConsiderProposerBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
+	p.HighestBids.mu.Lock()
+	defer p.HighestBids.mu.Unlock()
+	if previous := p.HighestBids.values[key]; previous == nil || previous.Message.Value < bid.Message.Value {
+		p.HighestBids.add(key, bid)
+	}
+}
+
+func (p *EpbsPool) PruneBids(expired func(uint64) bool) {
+	p.HighestBids.PruneSlots(expired)
+	p.ForwardedBidValues.PruneSlots(expired)
 }
 
 // RemoveHighestBid preserves a concurrently stored replacement for the same key.
@@ -171,6 +186,7 @@ func NewEpbsPool() *EpbsPool {
 	return &EpbsPool{
 		ProposerPreferences: preferencesCache,
 		HighestBids:         highestBidsCache,
+		ForwardedBidValues:  newSlotMap[HighestBidKey, uint64](func(key HighestBidKey) uint64 { return key.Slot }),
 		PayloadAttestations: payloadAttestationsCache,
 	}
 }

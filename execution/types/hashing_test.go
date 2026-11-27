@@ -76,6 +76,16 @@ func TestDeriveSha(t *testing.T) {
 	}
 }
 
+func TestDeriveShaEmbeddedTransactionNodes(t *testing.T) {
+	for _, count := range []int{1, 2, 17, 129, 7331} {
+		txs := make(BinaryTransactions, count)
+		for i := range txs {
+			txs[i] = []byte{0x99}
+		}
+		checkDeriveSha(t, txs)
+	}
+}
+
 func checkDeriveSha(t *testing.T, list DerivableList) {
 	t.Helper()
 

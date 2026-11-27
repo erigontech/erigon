@@ -128,7 +128,7 @@ func init() {
 		With("gossip_beacon_block", spectest.UnimplementedHandler).
 		With("gossip_blob_sidecar", spectest.UnimplementedHandler).
 		With("gossip_data_column_sidecar", spectest.UnimplementedHandler).
-		With("gossip_execution_payload_bid", spectest.UnimplementedHandler).
+		WithFn("gossip_execution_payload_bid", gloasGossipHandler).
 		WithFn("gossip_execution_payload_envelope", gloasGossipHandler).
 		With("gossip_partial_data_column_sidecar", spectest.UnimplementedHandler).
 		WithFn("gossip_payload_attestation_message", gloasGossipHandler).

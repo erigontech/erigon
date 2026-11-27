@@ -333,6 +333,7 @@ func TestGloasHeadUsesAnchorWhenJustifiedRootIsPrunedDuringLookup(t *testing.T) 
 	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	require.Equal(t, anchorRoot, head.Root)
+	require.False(t, store.IsHeadOptimistic())
 }
 
 func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {

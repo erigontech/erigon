@@ -69,6 +69,14 @@ func (s *anchorEnvelopeTestStore) IsEnvelopeRejected(root common.Hash) bool {
 	return root == s.root && s.rejected
 }
 
+func (*anchorEnvelopeTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
+	return execution_client.PayloadStatusNone, false
+}
+
+func (*selectedHeadEnvelopeTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
+	return execution_client.PayloadStatusNone, false
+}
+
 func (*anchorEnvelopeTestStore) IsBlockInvalid(common.Hash) bool { return false }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
@@ -642,7 +650,7 @@ func TestGloasRecoveryReleasesTerminalPayload(t *testing.T) {
 
 			switch verdict {
 			case "invalidated":
-				cfg.forkChoice.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+				cfg.forkChoice.RecordGloasPayloadResult(parentRoot, envelope.Message.Payload, execution_client.PayloadStatusInvalidated, nil)
 			case "rejected":
 				cfg.forkChoice.RejectEnvelope(parentRoot)
 			}
@@ -655,7 +663,9 @@ func TestGloasRecoveryReleasesTerminalPayload(t *testing.T) {
 			for range 2 {
 				recoverMissingEnvelopes(ctx, cfg)
 				require.Equal(t, verdict == "rejected", cfg.forkChoice.IsEnvelopeRejected(parentRoot))
-				require.Equal(t, verdict != "rejected", cfg.forkChoice.IsBlockInvalid(parentRoot))
+				require.False(t, cfg.forkChoice.IsBlockInvalid(parentRoot))
+				status, _ := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+				require.Equal(t, verdict != "rejected", status == execution_client.PayloadStatusInvalidated)
 				require.Empty(t, cfg.gloasEnvelopeRecoveryPending)
 			}
 			if verdict == "invalidated during recovery" {
@@ -1273,7 +1283,7 @@ func TestAnchorPayloadDecodeFailureIsTerminal(t *testing.T) {
 				status, ok = store.GetRecentExecutionPayloadStatus(payload.BlockHash)
 				require.True(t, ok)
 				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
-				require.True(t, store.IsBlockInvalid(root))
+				require.False(t, store.IsBlockInvalid(root))
 				require.False(t, store.IsEnvelopeRejected(root))
 				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.FinalizedCheckpoint().Root))
 				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.JustifiedCheckpoint().Root))
@@ -2040,7 +2050,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	payload.Extra = solid.NewExtraData()
 	payload.Transactions = &solid.TransactionsSSZ{}
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
-	payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xc0}))
 	payload.BlockHash = anchorPayloadHeaderHash(t, payload, parentRoot, requestsHash)
 
 	bid := &cltypes.ExecutionPayloadBid{

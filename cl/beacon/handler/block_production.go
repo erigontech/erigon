@@ -2627,8 +2627,7 @@ func (a *ApiHandler) builderHandoffDeadline(slot uint64) time.Time {
 	if a.ethClock == nil || a.beaconChainCfg == nil || a.beaconChainCfg.SecondsPerSlot == 0 {
 		return time.Now()
 	}
-	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
-	payloadDue := slotDuration * time.Duration(a.beaconChainCfg.PayloadDueBps) / time.Duration(clparams.BpsFactor)
+	payloadDue := time.Duration(a.beaconChainCfg.BpsToMs(a.beaconChainCfg.PayloadDueBps)) * time.Millisecond
 	return a.ethClock.GetSlotTime(slot).Add(payloadDue)
 }
 

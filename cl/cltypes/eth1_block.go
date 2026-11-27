@@ -609,7 +609,7 @@ func (b *Eth1Block) rlpHeader(parentRoot *common.Hash, executionReqHash common.H
 				return nil, fmt.Errorf("hash block access list: %w", err)
 			}
 			*blockAccessListHash = hash
-		case b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0:
+		case b.BlockAccessList == nil:
 			*blockAccessListHash = empty.BlockAccessListHash
 		default:
 			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())

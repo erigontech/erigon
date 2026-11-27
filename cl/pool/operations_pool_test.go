@@ -456,7 +456,7 @@ func TestEpbsPoolRetainsLiveEntriesBeyondFormerCapacity(t *testing.T) {
 func TestEpbsPoolRemoveHighestBidRemovesSlotIndexEntry(t *testing.T) {
 	pool := NewEpbsPool()
 	key := HighestBidKey{Slot: 100, ParentBlockRoot: common.Hash{1}}
-	bid := &cltypes.SignedExecutionPayloadBid{}
+	bid := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{}}
 	pool.StoreHighestBid(key, bid)
 
 	require.True(t, pool.RemoveHighestBid(key, bid))

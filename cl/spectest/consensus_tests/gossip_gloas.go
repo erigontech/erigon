@@ -37,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -63,6 +65,7 @@ type gloasGossipMeta struct {
 type gloasGossipBlock struct {
 	Block         string `yaml:"block"`
 	Failed        bool   `yaml:"failed"`
+	Late          bool   `yaml:"late"`
 	Pending       bool   `yaml:"pending"`
 	Payload       string `yaml:"payload"`
 	PayloadStatus string `yaml:"payload_status"`
@@ -101,9 +104,11 @@ func (n *gossipFixtureNow) Set(now time.Time) {
 
 type gossipFixtureStore struct {
 	*forkchoice.ForkChoiceStore
-	finalized *solid.Checkpoint
-	config    *clparams.BeaconChainConfig
-	timeMs    uint64
+	admissions           forkchoice.ExecutionPayloadEnvelopeAdmissions
+	seenPayloadGasLimits map[common.Hash]uint64
+	finalized            *solid.Checkpoint
+	config               *clparams.BeaconChainConfig
+	timeMs               uint64
 	// minTimeMs keeps fork-choice time at or after the slot of the newest imported block, which
 	// Caplin requires even though fixture message times may be earlier.
 	minTimeMs uint64
@@ -116,7 +121,42 @@ func (s *gossipFixtureStore) FinalizedCheckpoint() solid.Checkpoint {
 	return s.ForkChoiceStore.FinalizedCheckpoint()
 }
 
+// Gossip fixtures start with empty seen caches even when the setup store contains envelopes.
+func (s *gossipFixtureStore) ClaimExecutionPayloadEnvelopeForGossip(ctx context.Context, root common.Hash, builder uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	return s.admissions.Claim(ctx, root, builder)
+}
+
+func (s *gossipFixtureStore) FinishExecutionPayloadEnvelopeForGossip(token forkchoice.ExecutionPayloadEnvelopeAdmissionToken, seen bool) {
+	s.admissions.Finish(token, seen)
+}
+
+func (s *gossipFixtureStore) GetExecutionPayloadGasLimit(hash common.Hash) (uint64, bool) {
+	limit, ok := s.seenPayloadGasLimits[hash]
+	return limit, ok
+}
+
+func (s *gossipFixtureStore) GetRecentExecutionPayloadStatus(hash common.Hash) (execution_client.PayloadStatus, bool) {
+	_, seen := s.seenPayloadGasLimits[hash]
+	return execution_client.PayloadStatusNotValidated, seen
+}
+
+func (s *gossipFixtureStore) ViewStateAtBlockRoot(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+	return s.ForkChoiceStore.ViewStateAtBlockRoot(root, func(st *state.CachingBeaconState) error {
+		if s.finalized == nil {
+			return fn(st)
+		}
+		view, err := st.Copy()
+		if err != nil {
+			return err
+		}
+		view.SetFinalizedCheckpoint(*s.finalized)
+		return fn(view)
+	})
+}
+
 type gloasGossipServices struct {
+	store       *gossipFixtureStore
+	bid         services.ExecutionPayloadBidService
 	envelope    services.ExecutionPayloadService
 	attestation services.PayloadAttestationService
 	preferences services.ProposerPreferencesService
@@ -170,13 +210,13 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	}
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
-	store := &gossipFixtureStore{ForkChoiceStore: forkStore, config: cfg}
+	store := &gossipFixtureStore{ForkChoiceStore: forkStore, config: cfg, seenPayloadGasLimits: make(map[common.Hash]uint64)}
 	store.timeMs = (anchorState.GenesisTime() + anchorState.Slot()*cfg.SecondsPerSlot) * 1000
 	store.minTimeMs = store.timeMs
 	if err := store.setFinalizedCheckpoint(root, c, meta.FinalizedCheckpoint); err != nil {
 		return err
 	}
-	if err := store.importBlocks(ctx, meta.Blocks); err != nil {
+	if err := store.importBlocks(ctx, root, c.Version(), meta.Blocks); err != nil {
 		return err
 	}
 
@@ -197,6 +237,8 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 
 	epbsPool := pool.NewEpbsPool()
 	fixtureServices := gloasGossipServices{
+		store:       store,
+		bid:         services.NewExecutionPayloadBidService(ctx, syncedData, store, clock, &gossipCfg, epbsPool, emitters, nil),
 		envelope:    services.NewExecutionPayloadService(ctx, store, &gossipCfg, emitters, nil),
 		attestation: services.NewPayloadAttestationService(ctx, store, clock, networkCfg, epbsPool, emitters, nil),
 		preferences: services.NewProposerPreferencesService(syncedData, store, clock, &gossipCfg, epbsPool, emitters),
@@ -248,7 +290,7 @@ func (s *gossipFixtureStore) setFinalizedCheckpoint(root fs.FS, c spectest.TestC
 	return nil
 }
 
-func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGossipBlock) error {
+func (s *gossipFixtureStore) importBlocks(ctx context.Context, root fs.FS, version clparams.StateVersion, blocks []gloasGossipBlock) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -261,15 +303,21 @@ func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGos
 	}
 	floor := s.minTimeMs
 	for i, entry := range blocks {
-		if entry.Payload != "" || entry.PayloadStatus != "" {
-			return fmt.Errorf("setup block %d %s: payload and payload_status are not supported", i, entry.Block)
+		if entry.PayloadStatus != "" {
+			return fmt.Errorf("unsupported setup payload status %q", entry.PayloadStatus)
 		}
-		// Caplin keeps no block without a post-state, so a pending block stays unknown.
-		if i == 0 || entry.Pending {
+		if entry.Pending {
 			continue
 		}
-		s.tick((entry.decoded.Block.Slot*s.config.SecondsPerSlot + s.GenesisTime()) * 1000)
-		importErr := s.ForkChoiceStore.OnBlock(ctx, entry.decoded, true, true, true)
+		arrival := (entry.decoded.Block.Slot*s.config.SecondsPerSlot + s.GenesisTime()) * 1000
+		if entry.Late {
+			arrival += s.config.AttestationDueMs(true)
+		}
+		s.tick(arrival)
+		var importErr error
+		if i > 0 {
+			importErr = s.ForkChoiceStore.OnBlock(ctx, entry.decoded, true, true, true)
+		}
 		if entry.Failed && importErr == nil {
 			return fmt.Errorf("setup block %d %s: expected import failure", i, entry.Block)
 		}
@@ -278,6 +326,19 @@ func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGos
 		}
 		if importErr == nil {
 			floor = s.timeMs
+			if entry.Payload != "" {
+				envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(s.config, version)}
+				if err := spectest.ReadSsz(root, version, entry.Payload+".ssz_snappy", envelope); err != nil {
+					return err
+				}
+				if i == 0 {
+					if err := s.StoreAnchorEnvelope(anchorRoot, envelope); err != nil {
+						return err
+					}
+				} else if err := s.OnExecutionPayload(ctx, envelope, false, true); err != nil {
+					return fmt.Errorf("import setup payload %s: %w", entry.Payload, err)
+				}
+			}
 		}
 	}
 	s.minTimeMs = floor
@@ -304,8 +365,17 @@ func (s gloasGossipServices) process(ctx context.Context, root fs.FS, version cl
 		return nil, err
 	}
 	switch {
+	case strings.HasPrefix(name, "execution_payload_bid_"):
+		return processGossip(ctx, s.bid, data, version), nil
 	case strings.HasPrefix(name, "execution_payload_envelope_"):
-		return processGossip(ctx, s.envelope, data, version), nil
+		msg, err := s.envelope.DecodeGossipMessage("", data, version)
+		if err == nil {
+			err = s.envelope.ProcessMessage(ctx, nil, msg)
+			if err == nil {
+				s.store.seenPayloadGasLimits[msg.Message.Payload.BlockHash] = msg.Message.Payload.GasLimit
+			}
+		}
+		return err, nil
 	case strings.HasPrefix(name, "payload_attestation_message_"):
 		return processGossip(ctx, s.attestation, data, version), nil
 	case strings.HasPrefix(name, "proposer_preferences_"):

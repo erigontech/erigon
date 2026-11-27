@@ -901,12 +901,17 @@ type envelopeStatusReader interface {
 	HasEnvelope(common.Hash) bool
 	IsEnvelopeRejected(common.Hash) bool
 	IsBlockInvalid(common.Hash) bool
+	GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool)
 }
 
 // envelopeResolved reports whether fetching or waiting for an envelope can stop.
 // This includes terminal failures and stored envelopes that still need execution validation.
 func envelopeResolved(store envelopeStatusReader, root common.Hash) bool {
-	return store.HasEnvelope(root) || store.IsEnvelopeRejected(root) || store.IsBlockInvalid(root)
+	if store.HasEnvelope(root) || store.IsEnvelopeRejected(root) || store.IsBlockInvalid(root) {
+		return true
+	}
+	status, _ := store.GetRecentExecutionPayloadStatusByRoot(root)
+	return status == execution_client.PayloadStatusInvalidated
 }
 
 type selectedHeadEnvelopeStore interface {
@@ -1101,7 +1106,7 @@ type gloasPayloadValidator interface {
 }
 
 type gloasPayloadRetryResultStore interface {
-	MarkPayloadStatusAndGasLimitIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus, uint64) (execution_client.PayloadStatus, bool)
+	RecordGloasPayloadResult(common.Hash, *cltypes.Eth1Block, execution_client.PayloadStatus, error) (execution_client.PayloadStatus, bool)
 	RequeuePendingELPayload(forkchoice.PendingELPayload)
 	RejectEnvelope(common.Hash)
 }
@@ -1178,12 +1183,7 @@ func ensureStoredParentPayloadAccepted(
 	if status, ok := store.GetRecentExecutionPayloadStatusByRoot(root); ok {
 		switch status {
 		case execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusValidated:
-			return acceptedParentPayloadStatus(store.MarkPayloadStatusAndGasLimitIfRetained(
-				root,
-				envelope.Message.Payload.BlockHash,
-				status,
-				envelope.Message.Payload.GasLimit,
-			))
+			return acceptedParentPayloadStatus(store.RecordGloasPayloadResult(root, envelope.Message.Payload, status, nil))
 		case execution_client.PayloadStatusInvalidated:
 			return errors.New("parent payload invalid")
 		}
@@ -1192,12 +1192,7 @@ func ensureStoredParentPayloadAccepted(
 		return errors.New("parent envelope not stored")
 	}
 	if !canValidateGloasPayloads(cfg) {
-		return acceptedParentPayloadStatus(store.MarkPayloadStatusAndGasLimitIfRetained(
-			root,
-			envelope.Message.Payload.BlockHash,
-			execution_client.PayloadStatusNotValidated,
-			envelope.Message.Payload.GasLimit,
-		))
+		return acceptedParentPayloadStatus(store.RecordGloasPayloadResult(root, envelope.Message.Payload, execution_client.PayloadStatusNotValidated, nil))
 	}
 	block, ok := store.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {
@@ -1253,12 +1248,12 @@ func recordGloasPayloadRetryResult(
 		return execution_client.PayloadStatusNone, false
 	}
 	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
-	if errors.Is(validationErr, misc.ErrMismatchBlobHashes) {
+	if errors.Is(validationErr, misc.ErrMismatchBlobHashes) || errors.Is(validationErr, execution_client.ErrInvalidEnvelope) {
 		store.RejectEnvelope(beaconRoot)
 		return execution_client.PayloadStatusNone, false
 	}
 	executionPayload := payload.Envelope.Message.Payload
-	status, recorded := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, answer, executionPayload.GasLimit)
+	status, recorded := store.RecordGloasPayloadResult(beaconRoot, executionPayload, answer, validationErr)
 	pending := status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated
 	if recorded && pending && !notValidatedBelowDepth(answer, status, executionPayload.BlockNumber, depth) {
 		store.RequeuePendingELPayload(payload)
@@ -1541,13 +1536,13 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
-		execHash, ok := gloasEnvelopePayloadHash(envelope)
+		_, ok := gloasEnvelopePayloadHash(envelope)
 		if !ok {
 			log.Warn("[chainTipSync] missing GLOAS envelope payload during verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root)
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
 		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
+			cfg.forkChoice.RecordGloasPayloadResult(item.root, envelope.Message.Payload, execution_client.PayloadStatusInvalidated, nil)
 			return true
 		}
 		answer, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
@@ -1640,12 +1635,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if err != nil {
 		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", answer, "err", err)
 	}
-	status, recorded := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
-		anchorRoot,
-		envelope.Message.Payload.BlockHash,
-		answer,
-		envelope.Message.Payload.GasLimit,
-	)
+	status, recorded := cfg.forkChoice.RecordGloasPayloadResult(anchorRoot, envelope.Message.Payload, answer, err)
 	if !recorded {
 		return
 	}
@@ -1730,6 +1720,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			}
 			if canValidateGloasPayloads(cfg) {
 				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+				cfg.forkChoice.ProcessPendingExecutionPayloadEnvelope(verifyCtx, headRoot, true)
 				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
 				cancelVerify()
 			}

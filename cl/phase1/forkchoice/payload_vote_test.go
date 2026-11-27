@@ -1202,3 +1202,74 @@ func hasPayloadStatus(nodes []ForkChoiceNode, status cltypes.PayloadStatus) bool
 	}
 	return false
 }
+
+func TestGloasBlockOptimismFollowsExecutionParent(t *testing.T) {
+	parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+	parentHash, childHash := common.Hash{11}, common.Hash{12}
+	f := newPayloadVoteTestStore(t, childRoot, true, false)
+	accepted := map[common.Hash]bool{}
+	g := payloadVoteForkGraph{hasEnvelope: true, acceptedPayloads: accepted}
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock)
+	for _, item := range []struct{ root, parent, hash, parentHash common.Hash }{
+		{parentRoot, common.Hash{}, parentHash, common.Hash{}}, {childRoot, parentRoot, childHash, parentHash},
+	} {
+		block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+		block.Block.ParentRoot = item.parent
+		block.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{ParentBlockHash: item.parentHash, BlockHash: item.hash}}
+		blocks[item.root] = block
+	}
+	f.forkGraph = optimisticTestGraph{payloadVoteForkGraph: g, blocks: blocks}
+	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+	envelope := cltypes.NewExecutionPayloadEnvelope(f.beaconCfg)
+	envelope.Payload.BlockHash = parentHash
+	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusNotValidated, nil, envelope, blocks[parentRoot], parentRoot))
+	require.False(t, f.IsRootOptimistic(parentRoot))
+	require.True(t, f.IsRootOptimistic(childRoot))
+	envelope.Payload.ParentHash, envelope.Payload.BlockHash = parentHash, childHash
+	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusValidated, nil, envelope, blocks[childRoot], childRoot))
+	require.False(t, f.IsRootOptimistic(childRoot))
+	require.True(t, f.IsPayloadVerified(parentRoot))
+}
+
+type optimisticTestGraph struct {
+	payloadVoteForkGraph
+	blocks map[common.Hash]*cltypes.SignedBeaconBlock
+}
+
+func (g optimisticTestGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	b, ok := g.blocks[root]
+	return b, ok
+}
+
+func TestRejectedGloasFullWeightIsExcludedFromAncestors(t *testing.T) {
+	root, child := common.Hash{1}, common.Hash{2}
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.forkGraph = payloadVoteForkGraph{rejectedEnvelopes: map[common.Hash]bool{root: true}}
+	tree := newGloasWeightTree(f)
+	tree.nodes[root] = &gloasWeightNode{directEmpty: 2, directPending: 3, directFull: 5, children: []common.Hash{child}}
+	tree.nodes[child] = &gloasWeightNode{parentPayloadStatus: cltypes.PayloadStatusFull, directPending: 10}
+	tree.recompute(root)
+	require.Equal(t, uint64(0), tree.nodes[root].fullWeight)
+	require.Equal(t, uint64(5), tree.nodes[root].pendingWeight)
+}
+
+func TestGloasInvalidationFollowsPayloadsAcrossBids(t *testing.T) {
+	root, child, sibling := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	hash, childHash, validHash := common.Hash{11}, common.Hash{12}, common.Hash{10}
+	f := newPayloadVoteTestStore(t, root, true, false)
+	rejected := make(map[common.Hash]bool)
+	badHeader := common.Hash{}
+	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, rejectedEnvelopes: rejected, invalidatedHeader: &badHeader, acceptedPayloads: make(map[common.Hash]bool)}
+	parentPayload := &cltypes.Eth1Block{BlockHash: hash, ParentHash: validHash}
+	childPayload := &cltypes.Eth1Block{BlockHash: childHash, ParentHash: hash}
+	f.RecordGloasPayloadResult(root, parentPayload, execution_client.PayloadStatusNotValidated, nil)
+	f.RecordGloasPayloadResult(child, childPayload, execution_client.PayloadStatusNotValidated, nil)
+	f.RecordGloasPayloadResult(sibling, parentPayload, execution_client.PayloadStatusInvalidated, execution_client.ErrInvalidEnvelope)
+	require.True(t, f.IsEnvelopeRejected(sibling))
+	require.True(t, f.isPayloadAvailable(root))
+	f.RecordGloasPayloadResult(child, childPayload, execution_client.PayloadStatusInvalidated, &execution_client.InvalidPayloadError{LatestValidHash: validHash})
+	for _, h := range []common.Hash{hash, childHash} {
+		require.True(t, f.executionHashMarkedInvalid(h))
+	}
+	require.Equal(t, common.Hash{}, badHeader)
+}

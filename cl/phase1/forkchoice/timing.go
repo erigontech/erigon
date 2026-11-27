@@ -298,6 +298,11 @@ func (f *ForkChoiceStore) headEpochCommitteeState(root common.Hash, headSlot uin
 	return justifiedState
 }
 
+func (f *ForkChoiceStore) IsHeadLate(root common.Hash) bool {
+	timeliness, known := f.getBlockTimeliness(root)
+	return known && !timeliness[clparams.AttestationTimelinessIndex]
+}
+
 // getBlockTimeliness returns the timeliness vector for a block root.
 // Returns (timeliness, true) if found, or (zero value, false) if not tracked.
 func (f *ForkChoiceStore) getBlockTimeliness(root common.Hash) ([clparams.NumBlockTimelinessDeadlines]bool, bool) {

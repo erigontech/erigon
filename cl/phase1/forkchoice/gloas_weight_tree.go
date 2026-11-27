@@ -346,6 +346,10 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 				node.fullWeight += childNode.pendingWeight
 			}
 		}
+		if t.f != nil && t.f.forkGraph != nil && (t.f.IsEnvelopeRejected(item.root) || t.f.forkGraph.IsBlockInvalid(item.root) || t.f.forkGraph.IsPayloadUnavailable(item.root) && t.f.payloadExecutionHashInvalidated(item.root)) {
+			node.pendingWeight -= node.fullWeight
+			node.fullWeight = 0
+		}
 	}
 }
 

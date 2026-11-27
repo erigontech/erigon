@@ -18,6 +18,7 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -31,6 +32,9 @@ const (
 	PayloadStatusInvalidated
 	PayloadStatusValidated
 )
+
+// ErrInvalidEnvelope marks an INVALID response without a latestValidHash. The execution hash can still be valid for another bid.
+var ErrInvalidEnvelope = errors.New("execution engine rejected the envelope without a latest valid hash")
 
 // InvalidPayloadError accompanies an INVALID verdict whose latestValidHash is known.
 type InvalidPayloadError struct {

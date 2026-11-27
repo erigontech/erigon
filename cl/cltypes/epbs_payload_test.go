@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -599,4 +600,17 @@ func TestIndexedPayloadAttestationCloneZeroLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, expectedRoot, root)
 	require.Equal(t, 0, source.AttestingIndices.Cap())
+}
+
+func TestGloasExecutionHeaderHashesBlockAccessListBytes(t *testing.T) {
+	payload := NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](16, 44)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZ()
+	payload.Extra = solid.NewExtraData()
+	for _, encoded := range [][]byte{{}, {0xc0}} {
+		require.NoError(t, payload.BlockAccessList.SetBytes(encoded))
+		header, err := payload.rlpHeader(&common.Hash{}, common.Hash{}, nil)
+		require.NoError(t, err)
+		require.Equal(t, crypto.Keccak256Hash(encoded), *header.BlockAccessListHash)
+	}
 }

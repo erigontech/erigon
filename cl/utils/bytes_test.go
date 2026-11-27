@@ -66,3 +66,9 @@ func TestDecompressSnappyWithLimit(t *testing.T) {
 		_, _ = utils.DecompressSnappyWithLimit(compressed, 1023)
 	}), "an oversized declared length must be rejected before allocating")
 }
+
+func TestIsNonStrictSupersetBitlist(t *testing.T) {
+	require.True(t, utils.IsNonStrictSupersetBitlist([]byte{0b1111}, []byte{0b1010}))
+	require.False(t, utils.IsNonStrictSupersetBitlist([]byte{0b1111}, []byte{0b0111}))
+	require.False(t, utils.IsNonStrictSupersetBitlist([]byte{0xff, 0x01}, []byte{0xff}))
+}

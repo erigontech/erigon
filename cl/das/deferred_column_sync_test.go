@@ -189,8 +189,8 @@ func TestDeferredColumnSyncQueueFailedAfterForgetLeavesNoEntry(t *testing.T) {
 	require.Empty(t, queue.entries)
 }
 
-// preGloasCustodyGrace is half the time to the attestation deadline: 1999.5 ms on 12 s slots,
-// where ATTESTATION_DUE_BPS puts the deadline at 3999 ms.
+// preGloasCustodyGrace is half the time to the attestation deadline: 2 seconds on 12 s slots,
+// where ATTESTATION_DUE_BPS puts the deadline at 4 seconds.
 func preGloasCustodyGrace(cfg *clparams.BeaconChainConfig) time.Duration {
 	return time.Duration(cfg.AttestationDueMs(false)) * time.Millisecond / 2
 }
@@ -218,7 +218,7 @@ func TestDeferredColumnSyncTick(t *testing.T) {
 	fiveSecondSlots := clparams.MainnetBeaconConfig
 	fiveSecondSlots.SecondsPerSlot = 5
 	d := &peerdas{beaconConfig: &fiveSecondSlots}
-	require.Equal(t, 833*time.Millisecond, d.custodyGrace(false))
+	require.Equal(t, 833500*time.Microsecond, d.custodyGrace(false))
 	require.Equal(t, 625*time.Millisecond, d.custodyGrace(true))
 	require.Equal(t, 156250*time.Microsecond, d.deferredColumnSyncTick())
 }

@@ -115,6 +115,18 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
 }
 
+func TestValidPreGloasBlockVerifiesOptimisticParentPayload(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	selfConsistentPayload(t, block)
+	parentHash := block.Block.Body.ExecutionPayload.ParentHash
+	store.optimisticPayloadParents.Store(parentHash, common.Hash{0xaa})
+	require.NoError(t, store.OnBlock(t.Context(), block, true, false, false))
+	_, optimistic := store.optimisticPayloadParents.Load(parentHash)
+	require.False(t, optimistic)
+}
+
 // A GetHead that runs while f.mu is released caches a head computed without the
 // incoming block, so OnBlock has to drop that cache again after it resumes.
 func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {

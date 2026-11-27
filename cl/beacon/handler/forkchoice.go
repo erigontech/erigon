@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 )
 
 func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -33,12 +34,16 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
+	head, ok := a.forkchoiceStore.TryGetHeadNode()
+	if !ok || head.Root != root {
+		head = forkchoice.ForkChoiceNode{Root: root}
+	}
 	return newBeaconResponse(
 		[]any{
 			map[string]any{
 				"slot":                 strconv.FormatUint(slot, 10),
 				"root":                 root,
-				"execution_optimistic": a.forkchoiceStore.IsRootOptimistic(root),
+				"execution_optimistic": a.forkchoiceStore.IsNodeOptimistic(head),
 			},
 		},
 	), nil
