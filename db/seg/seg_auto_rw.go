@@ -38,8 +38,7 @@ type Reader struct {
 }
 
 // NewReader creates a Reader for the given Getter.
-// For V2+ files the compression flags are read from the file header (ground truth);
-// for older files the caller-supplied c is used as a fallback.
+// When the file header records the word-level compression, it is used instead of c.
 func NewReader(g *Getter, c FileCompression) *Reader {
 	if fc, ok := g.d.WordLevelCompression(); ok {
 		c = fc
@@ -102,7 +101,7 @@ func (g *Reader) MadvSequential() MadvDisabler {
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
 
-// Compression is the word-level compression Next applies: the file header's for V2+ files.
+// Compression is the word-level compression Next applies: the file header's when it has one.
 func (g *Reader) Compression() FileCompression { return g.c }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
@@ -146,21 +145,18 @@ type Writer struct {
 }
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
-	// Upgrade to V2: NewWriter is the only path that sets word-level compression
-	// flags, so V2 files are only created here — never by direct Compressor use.
 	// The bits are replaced rather than OR-ed: the header has to describe this
 	// Writer's compression, not that of an earlier one over the same Compressor.
-	bitmask := kv.featureFlagBitmask &^ FeatureFlagBitmask(WordLevelKeyCompressionEnabled|WordLevelValCompressionEnabled)
+	bitmask := kv.featureFlagBitmask&^FeatureFlagBitmask(WordLevelKeyCompressionEnabled|WordLevelValCompressionEnabled) | FeatureFlagBitmask(WordLevelCompressionKnown)
 	if compress.Has(CompressKeys) {
 		bitmask.Set(WordLevelKeyCompressionEnabled)
 	}
 	if compress.Has(CompressVals) {
 		bitmask.Set(WordLevelValCompressionEnabled)
 	}
-	if kv.Count() > 0 && (kv.version != FileCompressionFormatV2 || bitmask != kv.featureFlagBitmask) {
+	if kv.Count() > 0 && bitmask != kv.featureFlagBitmask {
 		panic("seg.NewWriter: the header would not describe the words already written")
 	}
-	kv.version = FileCompressionFormatV2
 	kv.featureFlagBitmask = bitmask
 	return &Writer{kv, false, compress}
 }

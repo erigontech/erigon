@@ -29,7 +29,6 @@ const (
 const (
 	FileCompressionFormatV0 = uint8(0)
 	FileCompressionFormatV1 = uint8(1)
-	FileCompressionFormatV2 = uint8(2)
 )
 
 type FeatureFlag uint8
@@ -38,6 +37,9 @@ const (
 	PageLevelCompressionEnabled    FeatureFlag = 1 << iota // 0b001
 	WordLevelKeyCompressionEnabled                         // 0b010
 	WordLevelValCompressionEnabled                         // 0b100
+	// WordLevelCompressionKnown says the two bits above describe the file. Older files
+	// never set it, and older readers ignore all three bits, so they still read new files.
+	WordLevelCompressionKnown // 0b1000
 )
 
 type FeatureFlagBitmask uint8

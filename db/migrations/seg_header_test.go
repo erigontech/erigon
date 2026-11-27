@@ -43,8 +43,8 @@ func manyPairs() [][2]string {
 	return pairs
 }
 
-// writeV1SegFile writes a genuine V1 seg file (raw Compressor, not seg.NewWriter
-// which forces V2) whose key/val words follow the given compression scheme.
+// writeV1SegFile writes a seg file as older releases did (raw Compressor, not seg.NewWriter,
+// which records the compression) whose key/val words follow the given compression scheme.
 func writeV1SegFile(t *testing.T, path string, compress seg.FileCompression, pairs [][2]string) {
 	t.Helper()
 	cfg := seg.DefaultCfg
@@ -69,7 +69,8 @@ func writeV1SegFile(t *testing.T, path string, compress seg.FileCompression, pai
 
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
-	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion(), "helper must produce a V1 file")
+	_, known := d.WordLevelCompression()
+	require.False(t, known, "helper must not record the compression")
 	d.Close()
 }
 
@@ -90,9 +91,9 @@ func readBackPairs(t *testing.T, path string) [][2]string {
 	return out
 }
 
-// TestUpgradeSegHeadersV2 patches a V1 file per compression class via content
+// TestUpgradeSegHeaders patches a file per compression class via content
 // detection, then reads it back through the patched header.
-func TestUpgradeSegHeadersV2(t *testing.T) {
+func TestUpgradeSegHeaders(t *testing.T) {
 	pairs := manyPairs()
 
 	cases := []struct {
@@ -116,11 +117,11 @@ func TestUpgradeSegHeadersV2(t *testing.T) {
 			path := filepath.Join(d, tc.file)
 			writeV1SegFile(t, path, tc.written, pairs)
 
-			require.NoError(t, upgradeSegFileToV2(path, log.New()))
+			require.NoError(t, upgradeSegHeader(path, log.New()))
 
 			dec, err := seg.NewDecompressor(path)
 			require.NoError(t, err)
-			require.Equal(t, seg.FileCompressionFormatV2, dec.CompressionFormatVersion())
+			require.Equal(t, seg.FileCompressionFormatV1, dec.CompressionFormatVersion())
 			fc, ok := dec.WordLevelCompression()
 			dec.Close()
 			require.True(t, ok)
@@ -131,8 +132,8 @@ func TestUpgradeSegHeadersV2(t *testing.T) {
 	}
 }
 
-func TestUpgradeSegHeadersV2_MissingDirs(t *testing.T) {
-	require.NoError(t, UpgradeSegHeadersV2(t.Context(), datadir.New(t.TempDir()), log.New()))
+func TestUpgradeSegHeaders_MissingDirs(t *testing.T) {
+	require.NoError(t, UpgradeSegHeaders(t.Context(), datadir.New(t.TempDir()), log.New()))
 }
 
 func requireHeader(t *testing.T, path string, want seg.FileCompression) {
@@ -141,29 +142,30 @@ func requireHeader(t *testing.T, path string, want seg.FileCompression) {
 	require.NoError(t, err)
 	defer d.Close()
 	fc, ok := d.WordLevelCompression()
-	require.True(t, ok, "%s still has a V1 header", filepath.Base(path))
+	require.True(t, ok, "%s is not patched", filepath.Base(path))
 	require.Equal(t, want, fc)
 }
 
-func requireV1(t *testing.T, path string) {
+func requireNotPatched(t *testing.T, path string) {
 	t.Helper()
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
 	defer d.Close()
-	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
+	_, known := d.WordLevelCompression()
+	require.False(t, known)
 }
 
-func TestUpgradeSegHeadersV2_EmptySample(t *testing.T) {
+func TestUpgradeSegHeaders_EmptySample(t *testing.T) {
 	pairs := append(make([][2]string, 100), manyPairs()...)
 	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
 	writeV1SegFile(t, path, seg.CompressKeys|seg.CompressVals, pairs)
 
-	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	require.NoError(t, upgradeSegHeader(path, log.New()))
 	requireHeader(t, path, seg.CompressKeys|seg.CompressVals)
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
-func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
+func TestUpgradeSegHeaders_KeepsPageLevelFlag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
 	cfg := seg.DefaultCfg
 	cfg.MinPatternScore = 1
@@ -179,11 +181,11 @@ func TestUpgradeSegHeadersV2_KeepsPageLevelFlag(t *testing.T) {
 	require.NoError(t, c.Compress())
 	c.Close()
 
-	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	require.NoError(t, upgradeSegHeader(path, log.New()))
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
-func TestUpgradeSegHeadersV2_LatePatterns(t *testing.T) {
+func TestUpgradeSegHeaders_LatePatterns(t *testing.T) {
 	rnd := rand.New(rand.NewPCG(1, 2))
 	var pairs [][2]string
 	for range 2_000 {
@@ -197,12 +199,12 @@ func TestUpgradeSegHeadersV2_LatePatterns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.0-storage.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressKeys, pairs)
 
-	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+	require.NoError(t, upgradeSegHeader(path, log.New()))
 	requireHeader(t, path, seg.CompressKeys)
 	require.Equal(t, pairs, readBackPairs(t, path))
 }
 
-func TestUpgradeSegHeadersV2_SymlinkedDirs(t *testing.T) {
+func TestUpgradeSegHeaders_SymlinkedDirs(t *testing.T) {
 	root := t.TempDir()
 	external := filepath.Join(root, "external")
 	require.NoError(t, os.MkdirAll(filepath.Join(external, "domain"), 0o755))
@@ -221,12 +223,12 @@ func TestUpgradeSegHeadersV2_SymlinkedDirs(t *testing.T) {
 	writeV1SegFile(t, kvPath, seg.CompressVals, manyPairs())
 	writeV1SegFile(t, segPath, seg.CompressKeys|seg.CompressVals, manyPairs())
 
-	require.NoError(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
+	require.NoError(t, UpgradeSegHeaders(t.Context(), dirs, log.New()))
 	requireHeader(t, kvPath, seg.CompressVals)
 	requireHeader(t, segPath, seg.CompressKeys|seg.CompressVals)
 }
 
-func TestUpgradeSegHeadersV2_BadFileKeepsGoing(t *testing.T) {
+func TestUpgradeSegHeaders_BadFileKeepsGoing(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	good := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
 	writeV1SegFile(t, good, seg.CompressVals, manyPairs())
@@ -248,12 +250,12 @@ func TestUpgradeSegHeadersV2_BadFileKeepsGoing(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-code.2048-3072.kv"), nil, 0o644))
 
-	require.NoError(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
+	require.NoError(t, UpgradeSegHeaders(t.Context(), dirs, log.New()))
 	requireHeader(t, good, seg.CompressVals)
-	requireV1(t, truncated)
+	requireNotPatched(t, truncated)
 }
 
-func TestUpgradeSegHeadersV2_TorrentRemovalFails(t *testing.T) {
+func TestUpgradeSegHeaders_TorrentRemovalFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.SnapDomain, "v1.0-code.0-1024.kv")
 	writeV1SegFile(t, path, seg.CompressVals, manyPairs())
@@ -261,6 +263,31 @@ func TestUpgradeSegHeadersV2_TorrentRemovalFails(t *testing.T) {
 	require.NoError(t, os.Chmod(dirs.SnapDomain, 0o555))
 	defer os.Chmod(dirs.SnapDomain, 0o755) //nolint:errcheck
 
-	require.Error(t, UpgradeSegHeadersV2(t.Context(), dirs, log.New()))
-	requireV1(t, path)
+	require.Error(t, UpgradeSegHeaders(t.Context(), dirs, log.New()))
+	requireNotPatched(t, path)
+}
+
+func TestUpgradeSegHeaders_HistoryRandomAccess(t *testing.T) {
+	pairs := manyPairs()
+	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
+	writeV1SegFile(t, path, seg.CompressVals, pairs)
+
+	require.NoError(t, upgradeSegHeader(path, log.New()))
+
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+	var valueOffsets []uint64
+	for g.HasNext() {
+		_, keyEnd := g.Next(nil)
+		valueOffsets = append(valueOffsets, keyEnd)
+		g.Skip()
+	}
+	r := seg.NewReader(d.MakeGetter(), seg.CompressNone)
+	for i, off := range valueOffsets { // history reads a value at its own offset, as the first word after Reset
+		r.Reset(off)
+		v, _ := r.Next(nil)
+		require.Equal(t, pairs[i][1], string(v))
+	}
 }

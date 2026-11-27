@@ -58,9 +58,9 @@ func makeTestFileCompressed(t *testing.T, compress FileCompression) string {
 	return file
 }
 
-// TestNewWriterSetsV2Header verifies that NewWriter always produces a V2 file
-// and that the header bitmask reflects the requested key/val compression flags.
-func TestNewWriterSetsV2Header(t *testing.T) {
+// TestNewWriterSetsWordLevelFlags verifies that NewWriter keeps the V1 version byte,
+// which older readers understand, and records the key/val compression in the bitmask.
+func TestNewWriterSetsWordLevelFlags(t *testing.T) {
 	cases := []struct {
 		name        string
 		compress    FileCompression
@@ -80,23 +80,22 @@ func TestNewWriterSetsV2Header(t *testing.T) {
 			require.NoError(t, err)
 			defer d.Close()
 
-			require.Equal(t, FileCompressionFormatV2, d.CompressionFormatVersion(),
-				"NewWriter must produce a V2 file")
+			require.Equal(t, FileCompressionFormatV1, d.CompressionFormatVersion())
 
 			fc, ok := d.WordLevelCompression()
-			require.True(t, ok, "V2 file must report WordLevelCompression ok=true")
+			require.True(t, ok)
 			require.Equal(t, tc.wantKeyFlag, fc.Has(CompressKeys), "CompressKeys flag mismatch")
 			require.Equal(t, tc.wantValFlag, fc.Has(CompressVals), "CompressVals flag mismatch")
 		})
 	}
 }
 
-// TestNewReaderUsesHeaderForV2 verifies that NewReader ignores the caller-supplied
-// fallback and routes purely from the V2 header.
+// TestNewReaderUsesHeader verifies that NewReader ignores the caller-supplied
+// fallback and routes purely from the header.
 //
 // A wrong fallback for CompressNone files would call Next() (huffman) on
 // uncompressed data → crash.  The test passes iff the header overrides the fallback.
-func TestNewReaderUsesHeaderForV2(t *testing.T) {
+func TestNewReaderUsesHeader(t *testing.T) {
 	pairs := [][2]string{
 		{"key1", "val1"},
 		{"key2", "val2"},
@@ -113,7 +112,7 @@ func TestNewReaderUsesHeaderForV2(t *testing.T) {
 		require.NoError(t, err)
 		defer d.Close()
 
-		// V2 header says no word-level compression; passing wrong fallback
+		// the header says no word-level compression; passing wrong fallback
 		// (CompressKeys|CompressVals) must be ignored.
 		g := d.MakeGetter()
 		r := NewReader(g, CompressKeys|CompressVals)

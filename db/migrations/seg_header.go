@@ -34,12 +34,12 @@ import (
 // version/feature-flag header.
 var segFormatExts = map[string]bool{".kv": true, ".v": true, ".ef": true, ".seg": true}
 
-// UpgradeSegHeadersV2 patches every V1 seg-format snapshot file (.kv/.v/.ef/.seg)
-// to a V2 header in-place, recording the word-level key/val compression detected
-// from the file's contents. Run once after upgrading:
+// UpgradeSegHeaders records in the header of every seg-format snapshot file
+// (.kv/.v/.ef/.seg) the word-level key/val compression detected from its contents.
+// Run once after upgrading:
 //
 //	erigon snapshots upgrade-seg-headers --datadir=<path>
-func UpgradeSegHeadersV2(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+func UpgradeSegHeaders(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	// each dir separately: any of them can be a symlink to another disk
 	for _, d := range []string{dirs.Snap, dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors, dirs.SnapCaplin} {
 		entries, err := os.ReadDir(d)
@@ -56,7 +56,7 @@ func UpgradeSegHeadersV2(ctx context.Context, dirs datadir.Dirs, logger log.Logg
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := upgradeSegFileToV2(filepath.Join(d, e.Name()), logger); err != nil {
+			if err := upgradeSegHeader(filepath.Join(d, e.Name()), logger); err != nil {
 				return err
 			}
 		}
@@ -64,22 +64,28 @@ func UpgradeSegHeadersV2(ctx context.Context, dirs datadir.Dirs, logger log.Logg
 	return nil
 }
 
-// upgradeSegFileToV2 patches a single seg-format file to a V2 header. A file that
-// cannot be read keeps its V1 header, which readers open with the caller's compression.
-func upgradeSegFileToV2(path string, logger log.Logger) error {
+// upgradeSegHeader patches the header of a single seg-format file. A file that cannot
+// be read keeps its header, and readers open it with the caller's compression.
+func upgradeSegHeader(path string, logger log.Logger) error {
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
-		logger.Warn("[seg_header_v2] keeping V1 header", "file", filepath.Base(path), "err", err)
+		logger.Warn("[seg_header] keeping the header", "file", filepath.Base(path), "err", err)
 		return nil
 	}
 	defer d.Close()
 	if d.CompressionFormatVersion() != seg.FileCompressionFormatV1 {
-		return nil // V0 has no header to patch, V2 is already upgraded
+		return nil // V0 has no header to patch
+	}
+	if _, ok := d.WordLevelCompression(); ok {
+		return nil
 	}
 	fc, err := detectCompression(d)
 	if err != nil {
-		logger.Warn("[seg_header_v2] keeping V1 header", "file", filepath.Base(path), "err", err)
+		logger.Warn("[seg_header] keeping the header", "file", filepath.Base(path), "err", err)
 		return nil
+	}
+	if fc != seg.CompressNone && filepath.Ext(path) != ".kv" {
+		fc = seg.CompressKeys | seg.CompressVals // only .kv readers start at a key; others Reset to any word, which reads with the key flag
 	}
 	d.Close() // release mmap before writing
 
@@ -90,10 +96,10 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 	if err := dir.FsyncDir(filepath.Dir(path)); err != nil {
 		return err
 	}
-	if err := setV2Header(path, fc); err != nil {
+	if err := setWordLevelFlags(path, fc); err != nil {
 		return err
 	}
-	logger.Info("[seg_header_v2] upgraded", "file", filepath.Base(path), "compression", fc)
+	logger.Info("[seg_header] upgraded", "file", filepath.Base(path), "compression", fc)
 	return nil
 }
 
@@ -144,10 +150,10 @@ func readsUncompressed(g *seg.Getter, offset uint64, want []byte, wantEnd uint64
 	return end == wantEnd && bytes.Equal(got, want)
 }
 
-// setV2Header adds the word-level bits of fc to the bitmask, then sets the V2 version
-// byte, each synced: a crash in between leaves a V1 file, whose readers ignore the bits.
-// Snapshot files are read-only (0444), so it adds the owner-write bit for the write.
-func setV2Header(path string, fc seg.FileCompression) error {
+// setWordLevelFlags adds WordLevelCompressionKnown and the word-level bits of fc to the
+// bitmask byte. Snapshot files are read-only (0444), so it adds the owner-write bit for
+// the write.
+func setWordLevelFlags(path string, fc seg.FileCompression) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -165,6 +171,7 @@ func setV2Header(path string, fc seg.FileCompression) error {
 	if _, err := f.ReadAt(bitmask, 1); err != nil {
 		return err
 	}
+	bitmask[0] |= byte(seg.WordLevelCompressionKnown)
 	if fc.Has(seg.CompressKeys) {
 		bitmask[0] |= byte(seg.WordLevelKeyCompressionEnabled)
 	}
@@ -172,12 +179,6 @@ func setV2Header(path string, fc seg.FileCompression) error {
 		bitmask[0] |= byte(seg.WordLevelValCompressionEnabled)
 	}
 	if _, err := f.WriteAt(bitmask, 1); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if _, err := f.WriteAt([]byte{seg.FileCompressionFormatV2}, 0); err != nil {
 		return err
 	}
 	return f.Sync()
