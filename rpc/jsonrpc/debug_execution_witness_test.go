@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -33,17 +34,28 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -724,6 +736,10 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 // tests do not reach: genesis, a block hash, an unknown block, and the transaction
 // index bound.
 func TestGetWitness(t *testing.T) {
+	runCommitmentV3Tests(t, testGetWitness)
+}
+
+func testGetWitness(t *testing.T, v3 bool) {
 	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
 	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
@@ -734,6 +750,7 @@ func TestGetWitness(t *testing.T) {
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
+	requireCommitmentVariant(t, m, v3)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	// An empty witness is the one-byte version header, not zero bytes.
@@ -813,6 +830,46 @@ func TestGetWitness(t *testing.T) {
 	}
 }
 
+func TestGetWitnessV3HistoryPastBlock(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain))
+	requireCommitmentVariant(t, m, true)
+	ctx := context.Background()
+	debugAPI := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	bn := rpc.BlockNumber(3)
+	at := rpc.BlockNumberOrHash{BlockNumber: &bn}
+
+	witness, err := ethAPI.GetWitness(ctx, at)
+	require.NoError(t, err)
+	require.NotEmpty(t, witness)
+	txWitness, err := ethAPI.GetTxWitness(ctx, at, 0)
+	require.NoError(t, err)
+	require.Equal(t, witness, txWitness)
+	decodedTrie := witnessStreamTrie(t, witness)
+	require.Equal(t, testChain.Blocks[1].Root(), decodedTrie.Hash())
+
+	for _, mode := range []string{"legacy", "canonical"} {
+		result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+		require.NoError(t, err, "mode %s", mode)
+		require.NotEmpty(t, result.State, "mode %s state", mode)
+		require.NotEmpty(t, result.Keys, "mode %s keys", mode)
+		var accountKeys int
+		for _, key := range result.Keys {
+			if len(key) != len(common.Address{}) {
+				continue
+			}
+			accountKeys++
+			_, resolved := decodedTrie.GetAccount(crypto.Keccak256(key))
+			require.True(t, resolved, "mode %s account %x must resolve from eth_getWitness", mode, key)
+		}
+		require.NotZero(t, accountKeys, "mode %s account keys", mode)
+		root, err := ReplayExecutionWitness(result, testChain.Blocks[2], m.ChainConfig, m.Engine)
+		require.NoError(t, err, "mode %s stateless replay", mode)
+		require.Equal(t, testChain.Blocks[2].Root(), root, "mode %s post-state root", mode)
+	}
+}
+
 // TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
 // prerequisite rather than failing deeper in the build.
 func TestGetWitnessRequiresCommitmentHistory(t *testing.T) {
@@ -863,6 +920,126 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+func TestWitnessParentForAuRaGasLimit(t *testing.T) {
+	config := &chain.Config{Aura: &chain.AuRaConfig{
+		StepDuration:                     common.NewUint64(5),
+		Validators:                       &chain.ValidatorSetJson{List: []common.Address{{1}}},
+		BlockGasLimitContractTransitions: map[uint64]common.Address{0: {2}},
+	}}
+	engine, err := aura.NewAuRa(config.Aura, mdbxtest.NewTestDB(t, dbcfg.ChainDB))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+
+	parent := &types.Header{Number: *uint256.NewInt(1)}
+	header := &types.Header{Number: *uint256.NewInt(2), ParentHash: parent.Hash(), Difficulty: *uint256.NewInt(1)}
+	reader := witnessHeaderReader{config: config, parent: parent}
+	var gasLimitHeader *types.Header
+	syscall := func(_ accounts.Address, _ []byte, _ *state.IntraBlockState, h *types.Header, _ bool) ([]byte, error) {
+		gasLimitHeader = h
+		return nil, nil
+	}
+	require.NoError(t, engine.Initialize(config, reader, header, nil, syscall, nil, nil))
+	require.NotNil(t, gasLimitHeader)
+	require.Equal(t, parent.Hash(), gasLimitHeader.Hash())
+	require.Nil(t, reader.GetHeaderByHash(header.Hash()))
+}
+
+func TestExecBlockStatelesslyEIP8253(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		parentTime        uint64
+		before, wantNonce uint64
+	}{
+		{name: "activation", parentTime: 99, wantNonce: 1},
+		{name: "after activation", parentTime: 100, before: 2, wantNonce: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			witness, block, config := eip8253ReplayWitness(t, tc.parentTime, tc.before, tc.wantNonce)
+			root, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))
+			require.NoError(t, err)
+			require.Equal(t, block.Root(), root)
+		})
+	}
+}
+
+func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
+	witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
+	parentNumber := block.NumberU64() - 1
+	parent := witness.headerByNumber[parentNumber]
+	parentAtWrongHeight := types.CopyHeader(parent)
+	parentAtWrongHeight.Number.SetUint64(block.NumberU64())
+
+	for _, tc := range []struct {
+		name          string
+		parent        *types.Header
+		requestedHash common.Hash
+	}{
+		{name: "missing", requestedHash: parent.Hash()},
+		{name: "wrong hash", parent: parent, requestedHash: common.Hash{}},
+		{name: "wrong number", parent: parentAtWrongHeight, requestedHash: parentAtWrongHeight.Hash()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testWitness := *witness
+			testWitness.headerByNumber = make(map[uint64]*types.Header)
+			if tc.parent != nil {
+				testWitness.headerByNumber[parentNumber] = tc.parent
+			}
+			header := block.Header()
+			header.ParentHash = tc.requestedHash
+			testBlock := types.NewBlockWithHeader(header, nil)
+			_, _, err := execBlockStatelessly(&testWitness, testBlock, config, merge.New(ethash.NewFaker()))
+			require.ErrorIs(t, err, rules.ErrUnknownAncestor)
+		})
+	}
+}
+
+func eip8253ReplayWitness(t *testing.T, parentTime, beforeNonce, afterNonce uint64) (*ExecutionWitnessResult, *types.Block, *chain.Config) {
+	t.Helper()
+	target := common.HexToAddress("0x8253")
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(100)
+	config.ZeroNonceStorageAccounts = []common.Address{target}
+
+	storage := trie.NewInMemoryTrie(nil)
+	key := common.Hash{1}
+	storage.Update(crypto.Keccak256(key[:]), []byte{42})
+	account := accounts.NewAccount()
+	account.Balance.SetUint64(100)
+	account.Nonce = beforeNonce
+	account.Root = storage.Hash()
+	prestate := trie.NewInMemoryTrie(nil)
+	addressHash := crypto.Keccak256(target[:])
+	prestate.UpdateAccount(addressHash, &account)
+	code := []byte{byte(vm.STOP)}
+	requestContract := accounts.NewAccount()
+	requestContract.Nonce = 1
+	requestContract.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	for _, address := range []accounts.Address{
+		config.GetWithdrawalRequestContract(), config.GetConsolidationRequestContract(),
+		config.GetBuilderDepositContract(), config.GetBuilderExitContract(),
+	} {
+		value := address.Value()
+		prestate.UpdateAccount(crypto.Keccak256(value[:]), &requestContract)
+	}
+	nodes, err := prestate.RLPEncode()
+	require.NoError(t, err)
+	witness := &ExecutionWitnessResult{Codes: []hexutil.Bytes{code}}
+	for _, node := range nodes {
+		witness.State = append(witness.State, node)
+	}
+
+	parent := &types.Header{Number: *uint256.NewInt(1), Time: parentTime, Root: prestate.Hash()}
+	witness.headerByNumber = map[uint64]*types.Header{1: parent}
+
+	account.Nonce = afterNonce
+	prestate.UpdateAccount(addressHash, &account)
+	header := &types.Header{
+		Number: *uint256.NewInt(2), Time: parentTime + 1, ParentHash: parent.Hash(),
+		GasLimit: 30_000_000, Root: prestate.Hash(),
+	}
+	return witness, types.NewBlockWithHeader(header, nil), config
 }
 
 type fixedParentState struct {
@@ -970,14 +1147,45 @@ type chainWitnesses struct {
 	GetWitness []hexutil.Bytes
 }
 
-func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
+func requireWitnessStateSuperset(t *testing.T, hph, v3 []hexutil.Bytes, label string) {
+	t.Helper()
+	missing := countMissing(byteSet(hph), byteSet(v3))
+	require.Zero(t, missing, "%s missing %d HPH state nodes", label, missing)
+}
+
+func witnessStreamTrie(t *testing.T, witness hexutil.Bytes) *trie.Trie {
+	t.Helper()
+	decoded, err := opstream.NewWitnessFromReader(bytes.NewReader(witness), false)
+	require.NoError(t, err)
+	decodedTrie, err := trie.BuildTrieFromWitness(decoded, false)
+	require.NoError(t, err)
+	return decodedTrie
+}
+
+func witnessStreamNodes(t *testing.T, witness hexutil.Bytes) []hexutil.Bytes {
+	t.Helper()
+	nodes, err := witnessStreamTrie(t, witness).RLPEncode()
+	require.NoError(t, err)
+	out := make([]hexutil.Bytes, len(nodes))
+	for i, node := range nodes {
+		out[i] = node
+	}
+	return out
+}
+
+func requireWitnessStreamSuperset(t *testing.T, hph, v3 hexutil.Bytes, label string) {
+	t.Helper()
+	missing := countMissing(byteSet(witnessStreamNodes(t, hph)), byteSet(witnessStreamNodes(t, v3)))
+	require.Zero(t, missing, "%s missing %d HPH witness nodes", label, missing)
+}
+
+func collectChainWitnesses(t *testing.T, commitmentV3 bool, m *execmoduletester.ExecModuleTester, testChain *blockgen.ChainPack) chainWitnesses {
 	previousAssert := dbg.AssertEnabled
 	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
 	dbg.AssertEnabled = true
 	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
 	statecfg.EnableHistoricalCommitment()
 
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
@@ -989,6 +1197,8 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 		return err
 	}))
 	require.Positive(t, latest)
+	require.Equal(t, uint64(testChain.Length()), latest)
+	requireCommitmentVariant(t, m, commitmentV3)
 
 	debugAPI := newDebugApiForTest(m)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -1016,13 +1226,26 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 
 func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
 	var hph, v3 chainWitnesses
-	require.True(t, t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) }))
-	require.True(t, t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) }))
+	require.True(t, t.Run("hph", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		statecfg.EnableHistoricalCommitment()
+		m, testChain, _ := rpcdaemontest.CreateTestExecModule(t)
+		hph = collectChainWitnesses(t, false, m, testChain)
+	}))
+	require.True(t, t.Run("v3", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(true))
+		statecfg.EnableHistoricalCommitment()
+		m, testChain, _ := rpcdaemontest.CreateTestExecModule(t)
+		v3 = collectChainWitnesses(t, true, m, testChain)
+	}))
 	require.NotEmpty(t, hph.Legacy)
 	for n := range hph.Legacy {
-		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
+		var hphLegacy, v3Legacy ExecutionWitnessResult
+		require.NoError(t, json.Unmarshal(hph.Legacy[n], &hphLegacy))
+		require.NoError(t, json.Unmarshal(v3.Legacy[n], &v3Legacy))
+		requireWitnessStateSuperset(t, hphLegacy.State, v3Legacy.State, fmt.Sprintf("debug_executionWitness legacy, block %d", n+1))
 		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
-		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+		requireWitnessStreamSuperset(t, hph.GetWitness[n], v3.GetWitness[n], fmt.Sprintf("eth_getWitness, block %d", n+1))
 	}
 }
 

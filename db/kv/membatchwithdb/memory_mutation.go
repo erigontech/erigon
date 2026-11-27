@@ -1468,11 +1468,11 @@ func (td temporaldb) MaxPrunableStepsBacklog() uint64 {
 	return 0
 }
 
-func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, kv.FinalityContext, bool) error {
+func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, uint64, bool) error {
 	return errors.New("memory temporal db does not support state file maintenance")
 }
 
-func (td temporaldb) BuildFilesInBackground(kv.FinalityContext) chan struct{} {
+func (td temporaldb) BuildFilesInBackground(uint64) chan struct{} {
 	finished := make(chan struct{})
 	close(finished)
 	return finished
@@ -1482,7 +1482,7 @@ func (td temporaldb) BuildMissedAccessors(context.Context, int, ...kv.BuildAcces
 	return errors.New("memory temporal db does not support state file maintenance")
 }
 
-func (td temporaldb) CollateAndPrune(context.Context, func(kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+func (td temporaldb) CollateAndPrune(context.Context, func(kv.TemporalRwTx) (uint64, error)) (bool, <-chan struct{}, error) {
 	finished := make(chan struct{})
 	close(finished)
 	return false, finished, nil

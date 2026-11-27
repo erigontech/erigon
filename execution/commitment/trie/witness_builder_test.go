@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -20,7 +21,7 @@ func TestBlockWitness(t *testing.T) {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
 
-	var w *Witness
+	var w *opstream.Witness
 	var err error
 	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
@@ -57,7 +58,7 @@ func TestBlockWitnessAccount(t *testing.T) {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
 
-	var w *Witness
+	var w *opstream.Witness
 	var err error
 	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
 		t.Errorf("Could not make block witness: %v", err)

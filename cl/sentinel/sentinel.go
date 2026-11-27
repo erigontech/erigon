@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -74,6 +75,7 @@ type Sentinel struct {
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
+	staticPeers        map[peer.ID]struct{} // never evicted as idle
 	pidToEnodeId       sync.Map
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
@@ -186,6 +188,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 		},
 	})
+	s.staticPeers = staticPeerIDs(s.cfg.NetworkConfig.StaticPeers)
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
@@ -247,13 +250,22 @@ func peerIsInbound(conns []network.Conn) bool {
 	return len(conns) > 0 && conns[0].Stat().Direction != network.DirOutbound
 }
 
+// openConns leaves out connections that are closed but not yet removed from the network.
+func openConns(n network.Network, pid peer.ID) []network.Conn {
+	return slices.DeleteFunc(n.ConnsToPeer(pid), network.Conn.IsClosed)
+}
+
 func (s *Sentinel) peerCountsByDirection(exclude peer.ID) peerCounts {
 	var counts peerCounts
 	for _, pid := range s.p2p.Host().Network().Peers() {
 		if pid == exclude {
 			continue
 		}
-		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(pid)) {
+		conns := openConns(s.p2p.Host().Network(), pid)
+		if len(conns) == 0 {
+			continue
+		}
+		if peerIsInbound(conns) {
 			counts.inbound++
 		} else {
 			counts.outbound++
@@ -293,7 +305,11 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		if s.p2p.Host().Network().Connectedness(p) != network.Connected {
 			entry.State = "disconnected"
 		}
-		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(p)) {
+		conns := openConns(s.p2p.Host().Network(), p)
+		if len(conns) == 0 {
+			conns = s.p2p.Host().Network().ConnsToPeer(p)
+		}
+		if peerIsInbound(conns) {
 			entry.Direction = "inbound"
 		} else {
 			entry.Direction = "outbound"
