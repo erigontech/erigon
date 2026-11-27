@@ -41,7 +41,7 @@ import (
 // these are view functions for the beacon state cache
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
-func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
+func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint32 {
 	// Check per-state cache first
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
@@ -63,14 +63,15 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	// Compute active validators
 	shuffling_metrics.ActiveValidatorsIndicesComputed.Inc()
-	scratch := make([]uint64, 0, b.ValidatorLength())
+	CheckValidatorCountFitsUint32(b.ValidatorLength())
+	scratch := make([]uint32, 0, b.ValidatorLength())
 	for i := 0; i < b.ValidatorLength(); i++ {
 		if b.ValidatorSet().Get(i).Active(epoch) {
-			scratch = append(scratch, uint64(i))
+			scratch = append(scratch, uint32(i))
 		}
 	}
 	// Cached lists live long; copy to drop the registry-sized spare capacity.
-	indicies := make([]uint64, len(scratch))
+	indicies := make([]uint32, len(scratch))
 	copy(indicies, scratch)
 
 	b.activeValidatorsCache.Add(epoch, indicies)
@@ -119,14 +120,14 @@ func (b *CachingBeaconState) GetTotalActiveBalance() uint64 {
 
 // ComputeCommittee uses cache to compute compittee
 func (b *CachingBeaconState) ComputeCommittee(
-	indicies []uint64,
+	indicies []uint32,
 	slot uint64,
 	index, count uint64,
-) ([]uint64, error) {
+) ([]uint32, error) {
 	lenIndicies := uint64(len(indicies))
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
-	var shuffledIndicies []uint64
+	var shuffledIndicies []uint32
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	beaconConfig := b.BeaconConfig()
 
@@ -150,7 +151,7 @@ func (b *CachingBeaconState) ComputeCommittee(
 			}
 		}
 		if shuffledIndicies == nil {
-			shuffledIndicies = make([]uint64, lenIndicies)
+			shuffledIndicies = make([]uint32, lenIndicies)
 			start := time.Now()
 			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
 			shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
@@ -371,7 +372,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 }
 
 // GetBeaconCommitee grabs beacon committee using cache first
-func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint32, error) {
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	indicies := b.GetActiveValidatorsIndices(epoch)
@@ -537,7 +538,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 				return nil, errors.New("GetAttestingIndicies: committee is too big")
 			}
 			if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-				attestingIndices = append(attestingIndices, member)
+				attestingIndices = append(attestingIndices, uint64(member))
 			}
 		}
 		return attestingIndices, nil
@@ -562,7 +563,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 					slot, committeeIndex, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
-				attesters = append(attesters, member)
+				attesters = append(attesters, uint64(member))
 			}
 		}
 		committeeOffset += len(committee)
@@ -674,7 +675,7 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	seed := crypto.Sha256(seedInput)
 
 	// Concatenate all committees for this slot in order
-	indices := []uint64{}
+	indices := []uint32{}
 	committeesPerSlot := b.CommitteeCount(epoch)
 	for i := range committeesPerSlot {
 		committee, err := b.GetBeaconCommitee(slot, i)

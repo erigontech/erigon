@@ -135,7 +135,7 @@ func TestGetIndexedPayloadAttestationLimit(t *testing.T) {
 
 func TestGetActiveValidatorsIndicesIsExactLengthAndCounted(t *testing.T) {
 	s := state.New(&clparams.MainnetBeaconConfig)
-	var want []uint64
+	var want []uint32
 	for i := range 100 {
 		var pk [48]byte
 		binary.BigEndian.PutUint64(pk[:], uint64(i))
@@ -150,7 +150,7 @@ func TestGetActiveValidatorsIndicesIsExactLengthAndCounted(t *testing.T) {
 		case i%5 == 2:
 			v.SetExitEpoch(1)
 		default:
-			want = append(want, uint64(i))
+			want = append(want, uint32(i))
 		}
 		require.NoError(t, s.AddValidator(v, 32_000_000_000))
 	}

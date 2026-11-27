@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -333,14 +332,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 	for i, validatorIndex := range committee {
 		if aggregate.AggregationBits.GetBitAt(i) {
-			attestingIndices = append(attestingIndices, validatorIndex)
+			attestingIndices = append(attestingIndices, uint64(validatorIndex))
 		}
 	}
 	if len(attestingIndices) == 0 {
 		return errors.New("no attesting indicies")
 	}
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
-	if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
+	if contains(aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex, committee) < 0 {
 		return errors.New("committee index not in committee")
 	}
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root

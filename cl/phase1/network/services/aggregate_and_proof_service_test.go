@@ -254,7 +254,7 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	committee, err := s.GetBeaconCommitee(nextEpochSlot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
 	require.NoError(t, err)
 	require.NotEmpty(t, committee)
-	agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+	agg.SignedAggregateAndProof.Message.AggregatorIndex = uint64(committee[0])
 
 	err = aggService.ProcessMessage(context.Background(), nil, agg)
 	require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestAggregateAndProofAllowsEpochReachedByClockBeforeItsFirstBlock(t *testin
 			committee, err := s.GetBeaconCommitee(slot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
 			require.NoError(t, err)
 			require.NotEmpty(t, committee)
-			agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+			agg.SignedAggregateAndProof.Message.AggregatorIndex = uint64(committee[0])
 
 			clock := eth_clock.NewMockEthereumClock(ctrl)
 			clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
@@ -401,12 +401,12 @@ func (f *captureAttestingIndicesForkChoice) ProcessAttestingIndicies(_ *solid.At
 	f.attestingIndices = append([]uint64(nil), indices...)
 }
 
-func targetCommitteeOutsideHead(t *testing.T, s *state.CachingBeaconState, committee []uint64, count int) []uint64 {
+func targetCommitteeOutsideHead(t *testing.T, s *state.CachingBeaconState, committee []uint32, count int) []uint32 {
 	t.Helper()
-	target := make([]uint64, 0, count)
+	target := make([]uint32, 0, count)
 	for index := range s.ValidatorLength() {
-		if !slices.Contains(committee, uint64(index)) {
-			target = append(target, uint64(index))
+		if !slices.Contains(committee, uint32(index)) {
+			target = append(target, uint32(index))
 			if len(target) == count {
 				return target
 			}
@@ -421,7 +421,7 @@ func prepareTargetShufflingAggregate(
 	s *state.CachingBeaconState,
 	fc *mock_services.ForkChoiceStorageMock,
 	aggregate *SignedAggregateAndProofForGossip,
-	targetCommittee []uint64,
+	targetCommittee []uint32,
 	includeHeader bool,
 ) {
 	t.Helper()
@@ -436,7 +436,7 @@ func prepareTargetShufflingAggregate(
 		expectedCommitteeIndex = uint64(indices[0])
 	}
 	fc.HeadLacksTargetShuffling = true
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint32, uint64, error) {
 		require.Equal(t, data.Target, target)
 		require.Equal(t, data.Slot, slot)
 		require.Equal(t, expectedCommitteeIndex, committeeIndex)
@@ -466,12 +466,12 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 		return true, nil
 	})
 	targetCommitteeFn := fc.TargetBeaconCommitteeFn
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint32, uint64, error) {
 		require.Equal(t, []string{"bls"}, callOrder)
 		callOrder = append(callOrder, "target")
 		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
 	}
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 	aggregate.ImmediateProcess = true
 	for i := range 256 {
@@ -484,7 +484,11 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	service.(*aggregateAndProofServiceImpl).forkchoiceStore = capture
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
-	require.Equal(t, targetCommittee, capture.attestingIndices)
+	wantAttesters := make([]uint64, len(targetCommittee))
+	for i, member := range targetCommittee {
+		wantAttesters[i] = uint64(member)
+	}
+	require.Equal(t, wantAttesters, capture.attestingIndices)
 	require.Equal(t, []string{"bls", "target", "bls"}, callOrder)
 }
 
@@ -499,12 +503,12 @@ func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testin
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	targetCalls := 0
 	targetCommitteeFn := fc.TargetBeaconCommitteeFn
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint32, uint64, error) {
 		targetCalls++
 		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
 	}
 	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil })
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -524,11 +528,11 @@ func TestAggregateAndProofAlreadySeenBeforeTargetShuffling(t *testing.T) {
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	targetCalls := 0
 	targetCommitteeFn := fc.TargetBeaconCommitteeFn
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint32, uint64, error) {
 		targetCalls++
 		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
 	}
-	aggregatorIndex := targetCommittee[0]
+	aggregatorIndex := uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = aggregatorIndex
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 	aggregate.ImmediateProcess = true
@@ -565,7 +569,7 @@ func TestAggregateAndProofBuildsUncachedTargetOncePerAggregatorAndEpoch(t *testi
 		}
 		return fc.Ancestors[slot]
 	}
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b1111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -588,7 +592,7 @@ func TestAggregateAndProofRejectsAggregatorOutsideTargetCommittee(t *testing.T) 
 	require.NotEmpty(t, headCommittee)
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = headCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(headCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -624,7 +628,7 @@ func TestAggregateAndProofElectraUsesCommitteeBitsIndexForTargetShuffling(t *tes
 	require.NoError(t, err)
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
@@ -656,13 +660,13 @@ func TestAggregateAndProofBuildsVotedBlockTargetBeforeRejectingMessageTarget(t *
 		return fc.Ancestors[slot]
 	}
 	var gotTarget solid.Checkpoint
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, gotCommitteeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, gotCommitteeIndex uint64, _ func() bool) ([]uint32, uint64, error) {
 		gotTarget = target
 		require.Equal(t, data.Slot, slot)
 		require.Equal(t, committeeIndex, gotCommitteeIndex)
 		return targetCommittee, s.CommitteeCount(data.Target.Epoch), nil
 	}
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -698,7 +702,7 @@ func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
 		return true, nil
 	})
 	targetCalls := 0
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint32, uint64, error) {
 		targetCalls++
 		require.Equal(t, data.Target, target)
 		require.Equal(t, data.Slot, slot)
@@ -706,7 +710,7 @@ func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
 		return nil, 0, errors.New("target state unavailable")
 	}
 	delete(fc.Ancestors, data.Target.Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch)
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -729,14 +733,14 @@ func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) 
 		return true, nil
 	})
 	targetCalls := 0
-	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint32, uint64, error) {
 		targetCalls++
 		require.Equal(t, data.Target, target)
 		require.Equal(t, data.Slot, slot)
 		require.Equal(t, data.CommitteeIndex, committeeIndex)
 		return nil, 0, errors.New("target state unavailable")
 	}
-	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = uint64(targetCommittee[0])
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
@@ -1478,7 +1482,7 @@ func TestAggregateAndProofRejectsAggregationBitsLengthMismatch(t *testing.T) {
 					aggregate := &SignedAggregateAndProofForGossip{
 						SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{
 							Message: &cltypes.AggregateAndProof{
-								AggregatorIndex: committee[0],
+								AggregatorIndex: uint64(committee[0]),
 								Aggregate: &solid.Attestation{
 									AggregationBits: aggregationBitsWithLength(
 										len(committee)+testCase.lengthDelta,
@@ -1628,7 +1632,7 @@ func TestAggregateAndProofIsVerifiedWithoutValidators(t *testing.T) {
 	var expectedIndices []uint64
 	for i, validatorIndex := range committee {
 		if aggregate.AggregationBits.GetBitAt(i) {
-			expectedIndices = append(expectedIndices, validatorIndex)
+			expectedIndices = append(expectedIndices, uint64(validatorIndex))
 		}
 	}
 	require.NotEmpty(t, expectedIndices)

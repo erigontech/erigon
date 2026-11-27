@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
+func ComputeProposerIndex[T uint32 | uint64](b *raw.BeaconState, indices []T, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
 		return 0, nil
 	}
@@ -45,7 +45,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 		if err != nil {
 			return 0, err
 		}
-		candidateIndex := indices[shuffled]
+		candidateIndex := uint64(indices[shuffled])
 		if candidateIndex >= uint64(b.ValidatorLength()) {
 			return 0, fmt.Errorf("candidate index out of range: %d for validator set of length: %d", candidateIndex, b.ValidatorLength())
 		}
@@ -63,7 +63,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 	}
 }
 
-func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
+func computeProposerIndexElectra[T uint32 | uint64](b *raw.BeaconState, indices []T, seed [32]byte) (uint64, error) {
 	maxRandomValue := uint64(1<<16 - 1)
 	maxEffBal := b.BeaconConfig().MaxEffectiveBalanceForVersion(b.Version())
 	i := uint64(0)
@@ -81,7 +81,7 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 		if err != nil {
 			return 0, err
 		}
-		candidateIndex := indices[shuffled]
+		candidateIndex := uint64(indices[shuffled])
 		// [Modified in Electra]
 		// random_bytes = hash(seed + uint_to_bytes(i // 16))
 		// offset = i % 16 * 2
@@ -106,7 +106,7 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 	}
 }
 
-func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, indices []uint64) ([]uint64, error) {
+func ComputeProposerIndices[T uint32 | uint64](b *raw.BeaconState, epoch uint64, seed [32]byte, indices []T) ([]uint64, error) {
 	startSlot := epoch * b.BeaconConfig().SlotsPerEpoch
 	proposerIndices := make([]uint64, b.BeaconConfig().SlotsPerEpoch)
 
@@ -148,9 +148,9 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 	return proposerIndices, nil
 }
 
-func ComputeUnslashedBalanceWeightedSelection(
+func ComputeUnslashedBalanceWeightedSelection[T uint32 | uint64](
 	s *raw.BeaconState,
-	indices []uint64,
+	indices []T,
 	seed [32]byte,
 	size uint64,
 	shuffleIndices bool,
@@ -165,7 +165,7 @@ func ComputeUnslashedBalanceWeightedSelection(
 	return ComputeBalanceWeightedSelection(s, indices, seed, size, shuffleIndices)
 }
 
-func ComputeUnslashedBalanceWeightedProposerIndex(s *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
+func ComputeUnslashedBalanceWeightedProposerIndex[T uint32 | uint64](s *raw.BeaconState, indices []T, seed [32]byte) (uint64, error) {
 	selected, err := ComputeUnslashedBalanceWeightedSelection(s, indices, seed, 1, true)
 	if err != nil {
 		return 0, err
@@ -176,9 +176,9 @@ func ComputeUnslashedBalanceWeightedProposerIndex(s *raw.BeaconState, indices []
 // ComputeBalanceWeightedSelection returns `size` validator indices sampled by effective balance,
 // using `indices` as candidates. If `shuffleIndices` is true, candidate indices are sampled
 // from `indices` by shuffling; otherwise `indices` is traversed in order.
-func ComputeBalanceWeightedSelection(
+func ComputeBalanceWeightedSelection[T uint32 | uint64](
 	s *raw.BeaconState,
-	indices []uint64,
+	indices []T,
 	seed [32]byte,
 	size uint64,
 	shuffleIndices bool,
@@ -217,7 +217,7 @@ func ComputeBalanceWeightedSelection(
 				return nil, fmt.Errorf("ComputeBalanceWeightedSelection: %w", err)
 			}
 		}
-		candidateIndex := indices[nextIndex]
+		candidateIndex := uint64(indices[nextIndex])
 
 		// Inline balance-weighted acceptance with cached hashing.
 		// Spec: random_byte = hash(seed + uint_to_bytes(i // 16))[2*(i%16) : 2*(i%16)+2]
@@ -242,8 +242,8 @@ func ComputeBalanceWeightedSelection(
 	return selected, nil
 }
 
-func filterSlashedValidators(s *raw.BeaconState, indices []uint64) ([]uint64, error) {
-	filtered := make([]uint64, 0, len(indices))
+func filterSlashedValidators[T uint32 | uint64](s *raw.BeaconState, indices []T) ([]T, error) {
+	filtered := make([]T, 0, len(indices))
 	for _, index := range indices {
 		validator, err := s.ValidatorForValidatorIndex(int(index))
 		if err != nil {

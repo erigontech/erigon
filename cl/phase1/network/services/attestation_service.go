@@ -74,9 +74,9 @@ func beaconCommittee(
 	slotsPerEpoch uint64,
 	verifyBeforeBuild func() error,
 	claimBuild func() bool,
-) ([]uint64, uint64, error) {
+) ([]uint32, uint64, error) {
 	var (
-		committee         []uint64
+		committee         []uint32
 		committeesPerSlot uint64
 		useTargetState    bool
 	)
@@ -435,7 +435,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if onBitIndex >= len(committee) {
 			return errors.New("on bit index out of committee range")
 		}
-		vIndex = committee[onBitIndex]
+		vIndex = uint64(committee[onBitIndex])
 		attestation = att.Attestation
 	} else {
 		// electra and after
@@ -500,9 +500,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
 }
 
-func contains[T comparable](target T, slices []T) int {
+func contains[T uint32 | uint64](target uint64, slices []T) int {
 	for i, s := range slices {
-		if s == target {
+		if uint64(s) == target {
 			return i
 		}
 	}

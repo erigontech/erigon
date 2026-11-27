@@ -41,7 +41,7 @@ const randaoMixesLength = 65536
 type checkpointState struct {
 	beaconConfig *clparams.BeaconChainConfig
 	randaoMixes  solid.HashVectorSSZ
-	shuffledSet  []uint64 // shuffled set of active validators
+	shuffledSet  []uint32 // shuffled set of active validators
 	// validator data
 	balances []uint64
 	// bitlists of active indexes and slashed indexes
@@ -111,7 +111,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies()
 	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
-	c.shuffledSet = make([]uint64, len(activeIndicies))
+	c.shuffledSet = make([]uint32, len(activeIndicies))
 	start := time.Now()
 	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
@@ -150,7 +150,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 		for i, member := range committee {
 			bitPosition := committeeOffset + i
 			if aggregationBits[bitPosition/8]&(1<<uint(bitPosition%8)) > 0 {
-				attestingIndices = append(attestingIndices, member)
+				attestingIndices = append(attestingIndices, uint64(member))
 			}
 		}
 		committeeOffset += len(committee)
@@ -158,7 +158,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 	return attestingIndices, nil
 }
 
-func (c *checkpointState) beaconCommittee(slot, committeeIndex uint64) ([]uint64, uint64) {
+func (c *checkpointState) beaconCommittee(slot, committeeIndex uint64) ([]uint32, uint64) {
 	validatorCount := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(validatorCount)
 	if committeeIndex >= committeesPerSlot {
@@ -171,12 +171,13 @@ func (c *checkpointState) beaconCommittee(slot, committeeIndex uint64) ([]uint64
 	return c.shuffledSet[start:end], committeesPerSlot
 }
 
-func (c *checkpointState) getActiveIndicies() (activeIndicies []uint64) {
+func (c *checkpointState) getActiveIndicies() (activeIndicies []uint32) {
+	corestate.CheckValidatorCountFitsUint32(c.validatorSetSize)
 	for i := 0; i < c.validatorSetSize; i++ {
 		if !readFromBitset(c.actives, i) {
 			continue
 		}
-		activeIndicies = append(activeIndicies, uint64(i))
+		activeIndicies = append(activeIndicies, uint32(i))
 	}
 	return activeIndicies
 }

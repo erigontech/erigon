@@ -271,7 +271,7 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, justifiedState *check
 	for ci := range committeeState.committeeCount(uint64(len(committeeState.shuffledSet))) {
 		committee, _ := committeeState.beaconCommittee(headSlot, ci)
 		for _, validatorIndex := range committee {
-			if !f.isUnequivocating(validatorIndex) {
+			if !f.isUnequivocating(uint64(validatorIndex)) {
 				continue
 			}
 			vi := int(validatorIndex)

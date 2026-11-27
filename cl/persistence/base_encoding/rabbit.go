@@ -24,7 +24,7 @@ import (
 	"math"
 )
 
-func WriteRabbits(in []uint64, w io.Writer) error {
+func WriteRabbits[T uint32 | uint64](in []T, w io.Writer) error {
 	// Retrieve compressor first.
 	compressor := getZstdWriter(w)
 	defer putZstdWriter(compressor)
@@ -48,7 +48,8 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 	if err := writeNum(uint64(len(in))); err != nil {
 		return err
 	}
-	for _, element := range in {
+	for _, e := range in {
+		element := uint64(e)
 		if expectedNum != element {
 			// [1,2,5,6]
 			// write contiguous sequence

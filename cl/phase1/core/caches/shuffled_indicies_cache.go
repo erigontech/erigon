@@ -16,7 +16,7 @@ type shuffledIndiciesCacheKey struct {
 }
 
 type ShuffledIndiciesCache struct {
-	cache *lru.Cache[shuffledIndiciesCacheKey, []uint64]
+	cache *lru.Cache[shuffledIndiciesCacheKey, []uint32]
 }
 
 var (
@@ -25,7 +25,7 @@ var (
 )
 
 func NewShuffledIndiciesCache(name string, size int) *ShuffledIndiciesCache {
-	cache, err := lru.New[shuffledIndiciesCacheKey, []uint64](name, size)
+	cache, err := lru.New[shuffledIndiciesCacheKey, []uint32](name, size)
 	if err != nil {
 		panic(err)
 	}
@@ -34,10 +34,10 @@ func NewShuffledIndiciesCache(name string, size int) *ShuffledIndiciesCache {
 	}
 }
 
-func (c *ShuffledIndiciesCache) Get(epoch uint64, root common.Hash) ([]uint64, bool) {
+func (c *ShuffledIndiciesCache) Get(epoch uint64, root common.Hash) ([]uint32, bool) {
 	return c.cache.Get(shuffledIndiciesCacheKey{epoch: epoch, root: root})
 }
 
-func (c *ShuffledIndiciesCache) Put(epoch uint64, root common.Hash, shuffledSet []uint64) {
+func (c *ShuffledIndiciesCache) Put(epoch uint64, root common.Hash, shuffledSet []uint32) {
 	c.cache.Add(shuffledIndiciesCacheKey{epoch: epoch, root: root}, shuffledSet)
 }

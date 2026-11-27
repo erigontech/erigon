@@ -258,8 +258,8 @@ func TestTargetBeaconCommitteeUsesCheckpointState(t *testing.T) {
 	committee, committeesPerSlot, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex, nil)
 	require.NoError(t, err)
 	require.Equal(t, fixture.targetState.CommitteeCount(fixture.targetEpoch), committeesPerSlot)
-	require.Equal(t, fixture.targetValidator, committee[fixture.committeePosition])
-	require.NotContains(t, committee, fixture.headValidator)
+	require.Equal(t, uint32(fixture.targetValidator), committee[fixture.committeePosition])
+	require.NotContains(t, committee, uint32(fixture.headValidator))
 
 	committee, count, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, committeesPerSlot, nil)
 	require.NoError(t, err)
@@ -571,11 +571,11 @@ func TestOnAttestationHeadStateTooOldUsesTargetState(t *testing.T) {
 			}
 
 			require.NoError(t, store.OnAttestation(attestation, true, false))
-			message, credited := store.getLatestMessage(targetValidator)
+			message, credited := store.getLatestMessage(uint64(targetValidator))
 			require.True(t, credited, "target-state validator was not credited")
 			require.Equal(t, headRoot, message.Root)
 			if test.wantDifferentShuffling {
-				_, credited = store.getLatestMessage(headValidator)
+				_, credited = store.getLatestMessage(uint64(headValidator))
 				require.False(t, credited, "old-head-state validator was credited")
 			}
 			if test.wantStateRead {
@@ -638,10 +638,10 @@ func TestOnAttestationRandaoMixWrapUsesTargetState(t *testing.T) {
 	}
 
 	require.NoError(t, store.OnAttestation(attestation, true, false))
-	message, credited := store.getLatestMessage(targetValidator)
+	message, credited := store.getLatestMessage(uint64(targetValidator))
 	require.True(t, credited, "target-state validator was not credited")
 	require.Equal(t, targetRoot, message.Root)
-	_, credited = store.getLatestMessage(headValidator)
+	_, credited = store.getLatestMessage(uint64(headValidator))
 	require.False(t, credited, "wrapped-head-state validator was credited")
 	require.Equal(t, []common.Hash{targetRoot}, graph.stateRoots())
 }
@@ -713,7 +713,7 @@ func TestCheckpointStateAttestingIndiciesCoversAllCommittees(t *testing.T) {
 				0,
 				len(firstCommittee)+thirdPosition,
 			),
-			wantIndices: []uint64{firstCommittee[0], thirdCommittee[thirdPosition]},
+			wantIndices: []uint64{uint64(firstCommittee[0]), uint64(thirdCommittee[thirdPosition])},
 		},
 		{
 			name:             "rejects an out-of-range committee bit",
@@ -786,8 +786,8 @@ func newTargetShufflingFixture(t *testing.T) targetShufflingFixture {
 		attestationSlot:     attestationSlot,
 		committeeIndex:      committeeIndex,
 		committeePosition:   committeePosition,
-		headValidator:       headValidator,
-		targetValidator:     targetValidator,
+		headValidator:       uint64(headValidator),
+		targetValidator:     uint64(targetValidator),
 		dependentSlot:       dependentSlot,
 		headDependentRoot:   common.Hash{0xa2},
 		targetDependentRoot: common.Hash{0xb2},
@@ -880,7 +880,7 @@ func findDifferentCommitteeMember(
 	first *state.CachingBeaconState,
 	second *state.CachingBeaconState,
 	epoch uint64,
-) (uint64, uint64, int, uint64, uint64) {
+) (uint64, uint64, int, uint32, uint32) {
 	t.Helper()
 	for slot := epoch * first.BeaconConfig().SlotsPerEpoch; slot < (epoch+1)*first.BeaconConfig().SlotsPerEpoch; slot++ {
 		for committeeIndex := range first.CommitteeCount(epoch) {

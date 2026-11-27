@@ -84,7 +84,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 					return nil, err
 				}
 				for _, idx := range idxs {
-					data.Validators = append(data.Validators, strconv.FormatUint(idx, 10))
+					data.Validators = append(data.Validators, strconv.FormatUint(uint64(idx), 10))
 				}
 				resp = append(resp, data)
 			}

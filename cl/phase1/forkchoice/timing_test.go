@@ -373,7 +373,7 @@ func newHeadWeakCommitteeStore(t *testing.T, cacheHeadEpochState bool) (*ForkCho
 	graph.blocks[headRoot] = headBlock
 
 	const validators, balance = 64, 1000
-	newState := func(shuffled []uint64) *checkpointState {
+	newState := func(shuffled []uint32) *checkpointState {
 		cs := &checkpointState{
 			beaconConfig:           cfg,
 			shuffledSet:            shuffled,
@@ -387,11 +387,11 @@ func newHeadWeakCommitteeStore(t *testing.T, cacheHeadEpochState bool) (*ForkCho
 		}
 		return cs
 	}
-	justifiedSet := make([]uint64, validators)
-	headEpochSet := make([]uint64, validators)
+	justifiedSet := make([]uint32, validators)
+	headEpochSet := make([]uint32, validators)
 	for i := range justifiedSet {
-		justifiedSet[i] = uint64(i)
-		headEpochSet[i] = validators - 1 - uint64(i)
+		justifiedSet[i] = uint32(i)
+		headEpochSet[i] = validators - 1 - uint32(i)
 	}
 	justifiedState := newState(justifiedSet)
 	f.checkpointStates.Store(f.JustifiedCheckpoint(), justifiedState)
@@ -480,9 +480,9 @@ func testIsHeadWeakUsesHeadEpochShufflingCaches(t *testing.T, slotsBeforeBoundar
 	previous := caches.ShuffledIndiciesCacheGlobal
 	caches.ShuffledIndiciesCacheGlobal = caches.NewShuffledIndiciesCache("shuffled_indicies", caches.MaxShuffledIndiciesCacheSize)
 	t.Cleanup(func() { caches.ShuffledIndiciesCacheGlobal = previous })
-	headEpochSet := make([]uint64, len(justifiedState.shuffledSet))
+	headEpochSet := make([]uint32, len(justifiedState.shuffledSet))
 	for i := range headEpochSet {
-		headEpochSet[i] = uint64(len(headEpochSet) - 1 - i)
+		headEpochSet[i] = uint32(len(headEpochSet) - 1 - i)
 	}
 	caches.ShuffledIndiciesCacheGlobal.Put(2, decisionRoot, headEpochSet)
 

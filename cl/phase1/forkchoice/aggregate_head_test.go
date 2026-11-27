@@ -19,6 +19,7 @@ package forkchoice_test
 import (
 	"context"
 	"encoding/binary"
+	"slices"
 	"testing"
 	"time"
 
@@ -97,7 +98,11 @@ func newReorgScenario(t *testing.T) *reorgScenario {
 
 	committeeB, err := headState.GetBeaconCommitee(attB.Data.Slot, attB.Data.CommitteeIndex)
 	require.NoError(t, err)
-	store.ProcessAttestingIndicies(attB, committeeB[:3])
+	attestersB := make([]uint64, 3)
+	for i := range attestersB {
+		attestersB[i] = uint64(committeeB[i])
+	}
+	store.ProcessAttestingIndicies(attB, attestersB)
 
 	head, _, err := store.GetHead(nil)
 	require.NoError(t, err)
@@ -119,7 +124,11 @@ func (s *reorgScenario) slotThreeAggregate(t *testing.T) *services.SignedAggrega
 	const slot = 3
 	committee, err := s.headState.GetBeaconCommitee(slot, 0)
 	require.NoError(t, err)
-	aggregatorIndex := committee[0]
+	members := make([]uint64, len(committee))
+	for i, member := range committee {
+		members[i] = uint64(member)
+	}
+	aggregatorIndex := members[0]
 
 	checkpoint := s.store.JustifiedCheckpoint()
 	bits := make([]byte, len(committee)/8+1)
@@ -142,10 +151,10 @@ func (s *reorgScenario) slotThreeAggregate(t *testing.T) *services.SignedAggrega
 	}
 	signed.SetVersion(clparams.Phase0Version)
 
-	_, attestationRoot, _, err := services.AggregateMessageSignature(s.headState, signed, committee)
+	_, attestationRoot, _, err := services.AggregateMessageSignature(s.headState, signed, slices.Clone(members))
 	require.NoError(t, err)
 	memberSignatures := make([][]byte, 0, len(committee))
-	for _, member := range committee {
+	for _, member := range members {
 		memberSignatures = append(memberSignatures, sign(t, member, attestationRoot))
 	}
 	aggregateSignature, err := bls.AggregateSignatures(memberSignatures)
