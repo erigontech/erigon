@@ -356,7 +356,7 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 
 	// The temporary segments are not part of a pinned visible generation. Copy only
 	// their ranges before returning so a later reclaim cannot invalidate the result.
-	visible := buildVisibleSegments(dirty)
+	visible := buildVisibleSegments(dirty, nil)
 	ranges := make([]Range, 0, len(visible))
 	for _, segment := range visible {
 		ranges = append(ranges, segment.Range)
