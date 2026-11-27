@@ -160,6 +160,9 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 	return nil
 }
 
+// fileExist is replaced in tests, because Windows cannot remove a file that is still mapped.
+var fileExist = dir.FileExist
+
 // Merge does merge segments in given ranges
 func (m *Merger) Merge(
 	ctx context.Context,
@@ -265,7 +268,7 @@ func (m *Merger) Merge(
 				// A stopped merge already wrote this output; writing over the open file would fail on Windows.
 				// The inputs are deleted next, so the output must still be on disk.
 				for _, f := range reused {
-					exists, err := dir.FileExist(filepath.Join(snapDir, f))
+					exists, err := fileExist(filepath.Join(snapDir, f))
 					if err == nil && !exists {
 						err = fmt.Errorf("reused output %s is missing from disk", f)
 					}
