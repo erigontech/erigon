@@ -39,6 +39,7 @@ func TestRunZkevmTestsReadsAPipe(t *testing.T) {
 	if _, err := os.Stat("/proc/self/fd"); err == nil {
 		path = fmt.Sprintf("/proc/self/fd/%d", r.Fd())
 	}
-	_, err = runZkevmTests(path, regexp.MustCompile("^none$"), 1)
+	results, err := runZkevmTests(path, regexp.MustCompile("/one$"), 1)
 	require.NoError(t, err)
+	require.Len(t, results, 1)
 }
