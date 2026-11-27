@@ -60,10 +60,30 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
+	return runWithService(ctx, cfg.Svc.Run, func(ctx context.Context) error { return runParallel(ctx, logger, cfg) })
+}
+
+// runWithService runs svc alongside download and returns when download ends or
+// either one fails.
+func runWithService(ctx context.Context, svc, download func(context.Context) error) error {
+	ctx, stopSvc := context.WithCancel(ctx)
+	defer stopSvc()
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return cfg.Svc.Run(ctx) })
-	eg.Go(func() error { return runParallel(ctx, logger, cfg) })
-	return eg.Wait()
+	eg.Go(func() error { return svc(ctx) })
+	downloaded := false
+	eg.Go(func() error {
+		if err := download(ctx); err != nil {
+			return err
+		}
+		downloaded = true
+		stopSvc()
+		return nil
+	})
+	err := eg.Wait()
+	if downloaded {
+		return nil
+	}
+	return err
 }
 
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
