@@ -843,8 +843,10 @@ func TestHistoricalDutiesWithoutArchive(t *testing.T) {
 		want                     int
 	}{
 		{"attester", http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`, false, http.StatusBadRequest},
-		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, http.StatusNotFound},
-		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, http.StatusNotFound},
+		{"proposer missing genesis root", http.MethodGet, "/eth/v1/validator/duties/proposer/0", "", false, http.StatusBadRequest},
+		{"proposer v2 missing genesis root", http.MethodGet, "/eth/v2/validator/duties/proposer/0", "", false, http.StatusBadRequest},
+		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, http.StatusBadRequest},
+		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, http.StatusBadRequest},
 		{"proposer with root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", true, http.StatusBadRequest},
 		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, http.StatusBadRequest},
 	} {

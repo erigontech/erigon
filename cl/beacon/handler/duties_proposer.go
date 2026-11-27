@@ -312,7 +312,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 
 func (a *ApiHandler) historicalProposerMissingRootStatus() int {
 	if !a.stateReader.ArchiveStates() {
-		return http.StatusNotFound
+		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
 }
