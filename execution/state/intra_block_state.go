@@ -184,6 +184,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
+	cancel              func() // cancels the running EVM once a read dependency voids the run
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only

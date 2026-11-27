@@ -2441,9 +2441,9 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
 	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
-	ev.versionMap.SetSpecRun(ev.Version().TxIndex, &state.SpecRun{Run: evm, Incarnation: ev.Version().Incarnation})
+	ibs.SetCancel(evm.Cancel)
 	defer func() {
-		ev.versionMap.SetSpecRun(ev.Version().TxIndex, nil)
+		ibs.SetCancel(nil)
 		// The cancel must not reach this worker's next task, which may run without a Reset.
 		evm.Reset(evm.TxContext, evm.IntraBlockState())
 	}()
@@ -3688,7 +3688,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
-		be.versionMap.InitSpecRuns(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}

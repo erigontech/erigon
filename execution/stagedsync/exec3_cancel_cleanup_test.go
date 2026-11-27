@@ -18,6 +18,12 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// readsUnfinishedWrite is a tx whose run reads a balance that an earlier, unfinished tx wrote.
+type readsUnfinishedWrite struct {
+	exec.Task
+	addr accounts.Address
+}
+
 type panicsAfterDependencyRead struct {
 	readsUnfinishedWrite
 }
@@ -33,7 +39,6 @@ func (r *panicsAfterDependencyRead) Execute(_ *vm.EVM, _ rules.Engine, _ *types.
 func TestSpeculativeRunPanicClearsWorkerCancellation(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xce"))
 	versions := state.NewVersionMap(nil)
-	versions.InitSpecRuns(2)
 	versions.WriteBalance(addr, state.Version{TxIndex: 1}, *uint256.NewInt(1), false)
 	ibs := state.NewWithVersionMap(state.NewNoopReader(), versions)
 	defer ibs.Close()

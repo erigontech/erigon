@@ -271,7 +271,6 @@ func TestSpeculativeRunStopsAtTheJumpAfterADependency(t *testing.T) {
 	marker := accounts.InternKey(common.BigToHash(common.Big1))
 
 	vmap := state.NewVersionMap(nil)
-	vmap.InitStamps(3)
 	vmap.WriteBalance(accounts.InternAddress(other), state.Version{TxIndex: 1}, *uint256.NewInt(7), false)
 
 	run := func(inc state.Incarnation) (*state.IntraBlockState, mdgas.MdGas) {
@@ -281,8 +280,8 @@ func TestSpeculativeRunStopsAtTheJumpAfterADependency(t *testing.T) {
 		ibs.SetVersion(inc)
 		require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))
 		evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		vmap.SetSpecRun(2, &state.SpecRun{Run: evm, Incarnation: inc})
-		defer vmap.SetSpecRun(2, nil)
+		ibs.SetCancel(evm.Cancel)
+		defer ibs.SetCancel(nil)
 		_, left, _, err := evm.Call(accounts.ZeroAddress, contract, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
 		require.NoError(t, err)
 		return ibs, left

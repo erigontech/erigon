@@ -1590,10 +1590,13 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 // its run is cancelled at the next jump or call.
 func (ibs *IntraBlockState) recordDep(dep int) {
 	ibs.dep = max(ibs.dep, dep)
-	if ibs.HadInvalidRead() {
-		ibs.versionMap.cancelRun(ibs.txIndex, ibs.version)
+	if ibs.HadInvalidRead() && ibs.cancel != nil {
+		ibs.cancel()
 	}
 }
+
+// SetCancel sets what recordDep calls to stop the current run; nil clears it before the EVM is reused.
+func (ibs *IntraBlockState) SetCancel(cancel func()) { ibs.cancel = cancel }
 
 func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool) {
 	if ibs.codeByHash == nil {

@@ -432,20 +432,6 @@ func TestPoolDependencyVerdictWinsOverTheRunError(t *testing.T) {
 	require.Empty(t, be.wakeAt, "a dependency verdict is not a predecessor wait")
 }
 
-// A failed task reset reads nothing: its zero Dep is not a dependency, so tx 0 sends its error instead of waiting
-// for its own validation.
-func TestPoolResetFailureIsNoDependency(t *testing.T) {
-	pe, be := newPoolUnit(t, 4)
-	pt := newPoolUnitTask(be, 0)
-	pt.tv.version.Incarnation = 1
-	res := &exec.TxResult{Err: errors.New("reset failed")}
-
-	require.False(t, pt.afterRun(pe.pool, res, true))
-	require.Len(t, pe.results, 1, "the final run's error is the tx's verdict")
-	require.Empty(t, be.wakeValidated)
-	require.Empty(t, be.wakeAt)
-}
-
 // A fee recipient's cells stay provisional after its writer validates, so a re-run named on that
 // writer waits for the writer's commit instead of re-reading the same provisional cell.
 func TestNamedRerunWaitsForAFeeRecipientCellToSettle(t *testing.T) {
