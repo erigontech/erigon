@@ -111,9 +111,16 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 ) (pendingEnvelopeFound bool, err error) {
 	blockEpoch := f.computeEpochAtSlot(block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
+	// record_block_timeliness: store [block_timely, ptc_timely] vector.
+	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
+	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
+	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
 	// update_proposer_boost_root takes the head right before the block is added. Before Gloas the import
-	// releases f.mu during the EL call, so the head is taken here, before the block enters the tree.
-	if blockVersion < clparams.GloasVersion && f.slotAtTimeMs(storeTimeMs) == block.Slot {
+	// releases f.mu during the EL call, so the head is taken here, before the block enters the tree, and
+	// only when the block can get the boost.
+	timeliness, _ := f.getBlockTimeliness(blockRoot)
+	if blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
+		f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		head, err := f.headBeforeBlockPreGloasLocked(block.Slot)
 		if err != nil {
 			log.Debug("[OnBlock] head before the block unavailable, no proposer boost", "slot", block.Slot, "err", err)
@@ -135,10 +142,6 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// Remove the parent from the head set
 	delete(f.headSet, block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// record_block_timeliness: store [block_timely, ptc_timely] vector.
-	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
-	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
 	// update_proposer_boost_root: conditionally set proposer boost root.
 	f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
 
