@@ -19,12 +19,16 @@ package forkchoice
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
@@ -108,4 +112,78 @@ func TestProposerBoostUsesTheHeadWhenTheBlockIsApplied(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Before each block, the head that decides the boost must have the shuffling dependent root of the head
+// GetHead returns, whether the justified block stands in or the votes are counted.
+func TestHeadBeforeBlockMatchesGetHead(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		load func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+	}{
+		{name: "bellatrix", load: tests.GetBellatrixRandom},
+		{name: "capella", load: tests.GetCapellaRandom},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			blocks, anchor, _ := fixture.load()
+			f := newBlockTestStore(t, anchor)
+			votesCounted := 0
+			for i, block := range blocks {
+				slot := block.Block.Slot
+				f.OnTick((f.genesisTime+slot*f.beaconCfg.SecondsPerSlot)*1000 + 1)
+				head, _, err := f.GetHead(nil)
+				require.NoError(t, err)
+				func() {
+					f.mu.Lock()
+					defer f.mu.Unlock()
+					if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), slot); !standsIn {
+						votesCounted++
+					}
+					before, err := f.headBeforeBlockPreGloasLocked(slot)
+					require.NoError(t, err)
+					require.Equal(t, f.getDependentRoot(head, slot), f.getDependentRoot(before, slot), "block %d", i)
+				}()
+				require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+			}
+			require.NotZero(t, votesCounted, "the fixture must count the votes before some blocks")
+			t.Log("votes counted before", votesCounted, "of", len(blocks), "blocks")
+		})
+	}
+}
+
+// When the head before a block needs the votes, the import builds the justified checkpoint state while
+// f.mu is released for the EL call, not under f.mu.
+func TestImportBuildsJustifiedStateWhileLockIsReleased(t *testing.T) {
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	f := newBlockTestStore(t, anchor)
+	slotMs := func(slot uint64) uint64 { return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000 }
+	var block *cltypes.SignedBeaconBlock
+	for _, candidate := range blocks {
+		f.OnTick(slotMs(candidate.Block.Slot) + 100)
+		if _, standsIn := f.preGloasHeadStandInLocked(f.JustifiedCheckpoint(), candidate.Block.Slot); !standsIn {
+			block = candidate
+			break
+		}
+		require.NoError(t, f.OnBlock(t.Context(), candidate, false, true, false))
+	}
+	require.NotNil(t, block, "the fixture must count the votes before some block")
+	justified := f.JustifiedCheckpoint()
+	f.checkpointStates.Delete(justified)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	f.engine = engine
+
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	// A reader holding f.mu keeps the import from taking it back after the EL call.
+	f.mu.RLock()
+	close(releaseEL)
+	built := assert.Eventually(t, func() bool {
+		_, ok := f.checkpointStates.Load(justified)
+		return ok
+	}, lockScopeTimeout, time.Millisecond, "the justified state must be built before the import takes f.mu")
+	f.mu.RUnlock()
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
+	require.True(t, built)
+	require.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
 }

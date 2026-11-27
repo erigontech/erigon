@@ -104,7 +104,7 @@ func preparePostState(postState *state.CachingBeaconState, block *cltypes.Beacon
 func (f *ForkChoiceStore) applyBlockImportLocked(
 	block *cltypes.BeaconBlock,
 	blockRoot common.Hash,
-	headBeforeBlock common.Hash,
+	gloasHeadBeforeBlock common.Hash,
 	storeTimeMs uint64,
 	postState *state.CachingBeaconState,
 	prepared *preparedPostState,
@@ -115,9 +115,12 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
 	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
-	// update_proposer_boost_root takes the head right before the block is added. Before Gloas the import
-	// releases f.mu during the EL call, so the head is taken here, before the block enters the tree, and
-	// only when the block can get the boost.
+	// update_proposer_boost_root takes the head right before the block is added. Gloas holds f.mu for the whole
+	// import, so onBlock takes it before the state transition, where a failure still rejects the block. Before
+	// Gloas the import releases f.mu during the EL call, so the head is taken here, before the block enters the
+	// tree, and only when the block can get the boost. The block is already in the fork graph, so a failure here
+	// imports it without the boost.
+	headBeforeBlock := gloasHeadBeforeBlock
 	timeliness, _ := f.getBlockTimeliness(blockRoot)
 	if blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
 		f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {

@@ -559,18 +559,12 @@ func (f *ForkChoiceStore) selectHeadLocked(justifiedCheckpoint solid.Checkpoint,
 }
 
 // headBeforeBlockPreGloasLocked returns the pre-Gloas head before a block of currentSlot is added, or a root
-// with the same shuffling dependent root, which is all update_proposer_boost_root reads. Every head descends
-// from the justified checkpoint block, so while that block is not older than the dependent slot, it stands in
-// for the head and the votes are not counted.
+// with the same shuffling dependent root, which is all update_proposer_boost_root reads. The block must not be
+// in the tree yet.
 func (f *ForkChoiceStore) headBeforeBlockPreGloasLocked(currentSlot uint64) (common.Hash, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	header, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
-	if !hasJustified {
-		return f.forkGraph.AnchorRoot(), nil
-	}
-	dependentSlot := computeShufflingDependentSlot(f.computeEpochAtSlot(currentSlot), f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
-	if header.Slot >= dependentSlot {
-		return justifiedCheckpoint.Root, nil
+	if root, ok := f.preGloasHeadStandInLocked(justifiedCheckpoint, currentSlot); ok {
+		return root, nil
 	}
 	justificationState, err := f.getCheckpointStateLocked(justifiedCheckpoint)
 	if err != nil {
@@ -578,6 +572,38 @@ func (f *ForkChoiceStore) headBeforeBlockPreGloasLocked(currentSlot uint64) (com
 	}
 	head, _, _, err := f.selectHeadLocked(justifiedCheckpoint, f.computeVotes(justifiedCheckpoint, justificationState, nil), currentSlot)
 	return head, err
+}
+
+// preGloasHeadStandInLocked returns a root with the shuffling dependent root of every pre-Gloas head at
+// currentSlot, or false if the votes must be counted. Every head descends from the justified checkpoint block,
+// so while that block is not older than the dependent slot, it stands in for the head. Without the justified
+// block the anchor is the head, as in getHeadNode.
+func (f *ForkChoiceStore) preGloasHeadStandInLocked(justifiedCheckpoint solid.Checkpoint, currentSlot uint64) (common.Hash, bool) {
+	header, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
+	if !hasJustified {
+		return f.forkGraph.AnchorRoot(), true
+	}
+	dependentSlot := computeShufflingDependentSlot(f.computeEpochAtSlot(currentSlot), f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	if header.Slot >= dependentSlot {
+		return justifiedCheckpoint.Root, true
+	}
+	return common.Hash{}, false
+}
+
+// headCheckpointToWarmLocked returns the justified checkpoint whose state headBeforeBlockPreGloasLocked would
+// build under f.mu for a pre-Gloas block of slot, so that the import can build it while f.mu is released.
+func (f *ForkChoiceStore) headCheckpointToWarmLocked(slot uint64) (solid.Checkpoint, bool) {
+	if f.Slot() != slot || f.proposerBoostRoot.Load().(common.Hash) != (common.Hash{}) {
+		return solid.Checkpoint{}, false
+	}
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	if _, standsIn := f.preGloasHeadStandInLocked(justifiedCheckpoint, slot); standsIn {
+		return solid.Checkpoint{}, false
+	}
+	if _, cached := f.checkpointStates.Load(justifiedCheckpoint); cached {
+		return solid.Checkpoint{}, false
+	}
+	return justifiedCheckpoint, true
 }
 
 func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
