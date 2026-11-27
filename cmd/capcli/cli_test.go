@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -719,4 +720,101 @@ func TestCommandsBuildRequestURLsFromTheEndpointQuery(t *testing.T) {
 		require.True(t, requests.ContainsOne("/prefix/eth/v2/beacon/blocks/head?apikey=K"))
 		require.True(t, requests.ContainsOne("/prefix/eth/v2/beacon/blocks/0x0100000000000000000000000000000000000000000000000000000000000000?apikey=K"))
 	})
+}
+
+func TestBeaconAPITypedResponses(t *testing.T) {
+	rootText := "0x" + strings.Repeat("0", 63) + "1"
+	for _, tc := range []struct {
+		name string
+		body string
+		want common.Hash
+	}{
+		{"plain", `{"data":{"root":"` + rootText + `"}}`, common.Hash{31: 1}},
+		{"escaped prefix", `{"data":{"root":"\u0030x` + strings.Repeat("0", 63) + `1"}}`, common.Hash{31: 1}},
+		{"escaped digit", `{"data":{"root":"0x` + strings.Repeat("0", 63) + `\u0031"}}`, common.Hash{31: 1}},
+		{"zero", `{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`, common.Hash{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/eth/v2/debug/beacon/heads" {
+					_, _ = w.Write([]byte(`{"data":[{"slot":"12345"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			slot, err := getHead(t.Context(), srv.URL)
+			require.NoError(t, err)
+			require.Equal(t, uint64(12345), slot)
+			root, err := getStateRootAtSlot(t.Context(), srv.URL, slot)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, root)
+		})
+	}
+}
+
+func TestBeaconAPIEmptyData(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		request func(string) error
+		want    string
+	}{
+		{"head", `{"data":[]}`, func(base string) error { _, err := getHead(t.Context(), base); return err }, "no head found"},
+		{"missing root", `{"data":{}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err }, "no state root found"},
+		{"empty root", `{"data":{"root":""}}`, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 0); return err }, "no state root found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
+			t.Cleanup(srv.Close)
+			require.EqualError(t, tc.request(srv.URL), tc.want)
+		})
+	}
+}
+
+func TestBeaconAPIErrorContext(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		request func(string) error
+		path    string
+	}{
+		{"head status", http.StatusUnauthorized, func(base string) error { _, err := getHead(t.Context(), base); return err }, "eth/v2/debug/beacon/heads"},
+		{"root status", http.StatusUnauthorized, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 42); return err }, "eth/v1/beacon/states/42/root"},
+		{"head empty", http.StatusOK, func(base string) error { _, err := getHead(t.Context(), base); return err }, "eth/v2/debug/beacon/heads"},
+		{"root empty", http.StatusOK, func(base string) error { _, err := getStateRootAtSlot(t.Context(), base, 42); return err }, "eth/v1/beacon/states/42/root"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tc.status) }))
+			t.Cleanup(srv.Close)
+			err := tc.request(srv.URL + "?apikey=query-secret")
+			require.ErrorContains(t, err, "beacon "+tc.path+": ")
+			require.NotContains(t, err.Error(), "query-secret")
+			require.NotContains(t, err.Error(), srv.URL)
+		})
+	}
+}
+
+func TestBeaconAPIUsesDefaultClient(t *testing.T) {
+	original := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: recordingTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"data":[{"slot":"12345"}]}`))}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = original })
+	slot, err := getHead(t.Context(), "http://beacon")
+	require.NoError(t, err)
+	require.Equal(t, uint64(12345), slot)
+}
+
+func TestBeaconAPITransportErrorOmitsBaseURL(t *testing.T) {
+	original := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: recordingTransport(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("connection failed")
+	})}
+	t.Cleanup(func() { http.DefaultClient = original })
+	_, err := getHead(t.Context(), "https://beacon.example?apikey=query-secret")
+	require.ErrorContains(t, err, "beacon eth/v2/debug/beacon/heads: ")
+	require.ErrorContains(t, err, "connection failed")
+	require.NotContains(t, err.Error(), "https://beacon.example")
+	require.NotContains(t, err.Error(), "query-secret")
 }
