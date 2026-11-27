@@ -176,6 +176,53 @@ func TestStorageWriteDoesNotWaitForOtherAccountReader(t *testing.T) {
 	}
 }
 
+type txWithAggTx struct {
+	kv.Tx
+	aggTx *AggregatorRoTx
+}
+
+func (tx txWithAggTx) AggTx() any { return tx.aggTx }
+
+// A storage scan of one account must not stop writes to accounts in other shards.
+func TestStoragePrefixScanDoesNotBlockOtherAccountWrite(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 16)
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	aggTx := agg.BeginFilesRo()
+	defer aggTx.Close()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	key := func(addr byte) string {
+		return string(append(bytes.Repeat([]byte{addr}, length.Addr), make([]byte, length.Hash)...))
+	}
+	scanned := key(1)
+	writing := key(2)
+	for b := byte(3); latestShardIndex(writing[:length.Addr]) == latestShardIndex(scanned[:length.Addr]); b++ {
+		writing = key(b)
+	}
+	sd.putLatest(kv.StorageDomain, scanned, []byte{1}, 1)
+
+	written := make(chan struct{})
+	err = sd.IteratePrefix(kv.StorageDomain, []byte(scanned[:length.Addr]), txWithAggTx{roTx, aggTx}, func(k, v []byte) (bool, error) {
+		go func() {
+			sd.putLatest(kv.StorageDomain, writing, []byte{1}, 1)
+			close(written)
+		}()
+		select {
+		case <-written:
+		case <-time.After(5 * time.Second):
+			t.Error("storage write waited for a prefix scan of another account")
+		}
+		return false, nil
+	})
+	require.NoError(t, err)
+	<-written
+}
+
 // Commit borrows the batch's value buffers instead of copying, which is only
 // sound while a later write to the same key leaves the earlier bytes alone.
 func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
