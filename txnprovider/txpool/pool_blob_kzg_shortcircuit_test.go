@@ -307,30 +307,31 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	}, reasons)
 }
 
-func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
+func TestBlobPoolLimitsApplyToNewHashesBeforeKZG(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		limit  func(cfg *txpoolcfg.Config)
+		limit  func(cfg *txpoolcfg.Config, blobs uint64)
 		reason txpoolcfg.DiscardReason
 	}{
-		{"total", func(cfg *txpoolcfg.Config) { cfg.TotalBlobPoolLimit = 0 }, txpoolcfg.BlobPoolOverflow},
-		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.BlobSlotsOverflow},
+		{"total", func(cfg *txpoolcfg.Config, blobs uint64) { cfg.TotalBlobPoolLimit = blobs }, txpoolcfg.BlobPoolOverflow},
+		{"per-sender", func(cfg *txpoolcfg.Config, blobs uint64) { cfg.BlobSlots = blobs }, txpoolcfg.BlobSlotsOverflow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
+			ctx := t.Context()
 			pool := seedBlobKZGTestPool(t, ctx)
 			require.NoError(t, pool.start(ctx))
-			tc.limit(&pool.cfg)
+			sender := common.Address{1}
+			blob := makeBlobSlot(0x7f, false)
+			tc.limit(&pool.cfg, uint64(len(blob.GetBlobHashes())))
+			reasons := submitRemoteTxns(t, pool, sender, &blob)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			resubmitted := blob
+			reasons = submitRemoteTxns(t, pool, sender, &resubmitted)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash}, reasons)
 
 			bad := makeBlobSlot(0x80, true)
-			a0 := [20]byte{1}
-			var slots TxnSlots
-			slots.Append(&bad, a0[:], false)
-			pool.AddRemoteTxns(ctx, slots, nil, nil)
-
-			reasons, err := pool.processRemoteBatch(ctx)
-			require.NoError(t, err)
+			reasons = submitRemoteTxns(t, pool, sender, &bad)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})
 	}
@@ -358,7 +359,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
 		batch := newAdmissionBatch(slots, nil)
-		require.NoError(t, pool.validateTxns(batch.txns, cacheView, nil))
+		require.ErrorIs(t, pool.planPreparation(&batch, cacheView), errPreparationRequired)
 		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 
@@ -403,4 +404,21 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 	for _, slot := range local.Txns {
 		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 	}
+}
+
+func TestRemoteBlobReadmissionAfterSenderPenalty(t *testing.T) {
+	_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, testforks.Forks["Cancun"])
+	pool.cfg.AccountSlots = 1
+	blob := makeBlobSlot(3, false)
+	blob.Nonce = 1
+	blobTx := blob.Txn.(*types.BlobTx)
+	blobTx.Nonce, blobTx.GasLimit = blob.Nonce, 100_000
+	pool.cfg.BlobSlots = uint64(len(blob.GetBlobHashes()))
+	pool.cfg.TotalBlobPoolLimit = pool.cfg.BlobSlots
+	resubmitted := blob
+	reasons := submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 0), &blob)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	reasons = submitRemoteTxns(t, pool, sender, newTestSenderTxnSlot(t, sender, 2), &resubmitted)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Spammer, txpoolcfg.Success}, reasons)
+	require.Contains(t, pool.byHash, string(blob.IDHash[:]))
 }
