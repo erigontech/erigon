@@ -37,7 +37,7 @@ type finalityContextStub struct {
 var unboundedFinalityCtx = finalityContextStub{ready: true}
 
 type temporalRoDBStub struct {
-	kv.RoDB
+	kv.RwDB
 }
 
 func (temporalRoDBStub) OnFilesChange(kv.OnFilesChange, kv.OnFilesChange) {
@@ -63,8 +63,8 @@ func (temporalRoDBStub) Debug() kv.TemporalDebugDB {
 	panic("not implemented")
 }
 
-func asTemporalRoDB(db kv.RoDB) kv.TemporalRoDB {
-	return temporalRoDBStub{RoDB: db}
+func asTemporalRoDB(db kv.RwDB) kv.TemporalRoDB {
+	return temporalRoDBStub{RwDB: db}
 }
 
 func (c finalityContextStub) PruneToBlockNum() uint64 {

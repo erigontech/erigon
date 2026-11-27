@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -45,11 +46,27 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
 	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
 	require.NoError(err)
+	require.NoError(m.DB.View(ctx, func(tx kv.Tx) error {
+		next, target, found, err := dbstate.ReceiptBackfillProgress(tx, kv.ReceiptDomain)
+		require.True(found)
+		require.Zero(next)
+		require.Greater(target, next)
+		return err
+	}))
 
 	err = stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log)
 	require.NoError(err)
 
 	err = m.DB.ViewTemporal(ctx, func(rtx kv.TemporalTx) error {
+		head, err := stages.GetStageProgress(rtx, stages.Execution)
+		require.NoError(err)
+		last, err := m.BlockReader.TxnumReader().Max(ctx, rtx, head)
+		require.NoError(err)
+		next, target, found, err := dbstate.ReceiptBackfillProgress(rtx, kv.ReceiptDomain)
+		require.NoError(err)
+		require.True(found)
+		require.Equal(last+1, next)
+		require.Equal(next, target)
 		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
@@ -71,6 +88,7 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
+	require.NoError(stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log))
 }
 
 func TestCustomTraceInvalidProduceMode(t *testing.T) {

@@ -628,6 +628,17 @@ func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *Domain
 		name:      dt.d.Name,
 		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
+	// Receipt backfill can run behind execution. Even a writer that saw files
+	// must check for a newer reservation in its write transaction.
+	switch {
+	case isReceiptDomain(w.name):
+		w.checkWritesBefore = kv.NoStepBound
+		w.visibleEnd = dt.files.EndTxNum()
+	case len(dt.files) == 0:
+		w.checkWritesBefore = kv.NoStepBound
+	case dt.files[0].startTxNum != 0:
+		w.checkWritesBefore = kv.Step(dt.files[0].startTxNum/dt.stepSize) + 1
+	}
 	return w
 }
 
@@ -635,7 +646,10 @@ type DomainBufferedWriter struct {
 	values *etl.Collector
 	name   kv.Domain
 
-	discard bool
+	discard           bool
+	checkWritesBefore kv.Step
+	minWriteStep      kv.Step
+	visibleEnd        uint64
 
 	valsTable string
 	largeVals bool
@@ -681,6 +695,15 @@ func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) erro
 		return nil
 	}
 
+	if w.minWriteStep < w.checkWritesBefore {
+		if w.checkWritesBefore != kv.NoStepBound {
+			return fmt.Errorf("cannot write %s step %d: first snapshot starts at step %d", w.name, w.minWriteStep, w.checkWritesBefore-1)
+		}
+		if err := w.recordSnapshotStart(tx); err != nil {
+			return err
+		}
+	}
+
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
@@ -721,6 +744,9 @@ func (w *DomainBufferedWriter) valsCollector() *etl.Collector {
 func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
 		return nil
+	}
+	if w.checkWritesBefore != 0 && (w.values == nil || step < w.minWriteStep) {
+		w.minWriteStep = step
 	}
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^uint64(step))
 
@@ -1509,6 +1535,11 @@ func (dt *DomainRoTx) unwind(
 ) error {
 	d := dt.d
 	step := txNumUnwindTo / dt.stepSize
+	if isReceiptDomain(d.Name) {
+		if err := unwindReceiptBackfill(rwTx, d.Name, txNumUnwindTo); err != nil {
+			return err
+		}
+	}
 
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)

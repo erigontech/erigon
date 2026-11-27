@@ -138,6 +138,7 @@ type execRange struct {
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
+	lastCommittedTxNum    uint64
 	verdict               *blockVerdict
 	exhausted             *ErrLoopExhausted
 }
@@ -271,6 +272,7 @@ func ExecV3(ctx context.Context,
 	out = execV3Outcome{
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
+		lastCommittedTxNum:    pe.lastCommittedTxNum.Load(),
 		verdict:               pe.verdict,
 		exhausted:             pe.exhausted,
 	}
@@ -287,7 +289,7 @@ func ExecV3(ctx context.Context,
 		return out, nil
 	}
 
-	execErr = execV3Finalize(ctx, cfg, doms, startBlockNum, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
+	execErr = execV3Finalize(ctx, cfg, doms, startBlockNum, out.lastCommittedTxNum, out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
 	return finalizeExecV3Outcome(out, execErr)
 }
