@@ -537,3 +537,11 @@ func TestTracerRecursionAsDeepAsCallFrames(t *testing.T) {
 	_, err := newJsTracer(code, new(tracers.Context), nil)
 	require.NoError(t, err)
 }
+
+func TestEmptyOutputIsAnEmptyBuffer(t *testing.T) {
+	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return toHex(ctx.output); }}`, nil, nil)
+	require.NoError(t, err)
+	res, err := runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	require.NoError(t, err)
+	require.JSONEq(t, `"0x"`, string(res))
+}

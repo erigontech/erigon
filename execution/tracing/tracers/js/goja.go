@@ -330,7 +330,8 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 	t.ctx["from"] = t.vm.ToValue(fromValue[:])
 	toValue := to.Value()
 	t.ctx["to"] = t.vm.ToValue(toValue[:])
-	t.ctx["input"] = t.vm.ToValue(input)
+	// goja turns a nil slice into null, which the buffer helpers reject; an empty call has an empty buffer.
+	t.ctx["input"] = t.vm.ToValue(append([]byte{}, input...))
 	if gas.State != 0 {
 		t.ctx["stateGas"] = t.vm.ToValue(gas.State)
 	}
@@ -382,7 +383,7 @@ func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdG
 
 // onEnd is called after the call finishes to finalize the tracing.
 func (t *jsTracer) onEnd(output []byte, err error) {
-	t.ctx["output"] = t.vm.ToValue(bytes.Clone(output))
+	t.ctx["output"] = t.vm.ToValue(append([]byte{}, output...))
 	if err != nil {
 		t.ctx["error"] = t.vm.ToValue(err.Error())
 	}
