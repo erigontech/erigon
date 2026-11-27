@@ -1440,8 +1440,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 // untouchedInBlock reports that no tx of the block has a version-map cell for addr,
 // so a slot of it resolves from the origin layer or the state reader only.
 func (ibs *IntraBlockState) untouchedInBlock(addr accounts.Address) bool {
-	_, probed := ibs.sdProbeMemo(addr)
-	return !probed && ibs.versionMap.load(addr) == nil
+	return ibs.versionMap.load(addr) == nil
 }
 
 // readUntouchedState is readStateCore for an address without own writes or
