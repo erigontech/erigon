@@ -297,6 +297,23 @@ func TestCatchupCommitObservations(t *testing.T) {
 	mu.Lock()
 	observed = nil
 	mu.Unlock()
+	// The catch-up prunes only after its cycle commits, so changesets a staged unwind needs are never deleted.
+	provider, ok := m.DB.(state.HasAgg)
+	require.True(t, ok)
+	agg, ok := provider.Agg().(*state.Aggregator)
+	require.True(t, ok)
+	var pruned []uint64
+	agg.SetMaintenanceObserver(func(_ context.Context, event state.MaintenanceEvent) {
+		if event.Point != state.MaintenancePruneReady {
+			return
+		}
+		progress, err := stages.GetStageProgress(event.PruneTx, stages.Execution)
+		require.NoError(t, err)
+		mu.Lock()
+		defer mu.Unlock()
+		pruned = append(pruned, progress)
+	})
+	defer agg.SetMaintenanceObserver(nil)
 	chain, err := m.GenerateChain(20, nil)
 	require.NoError(t, err)
 	status, err := m.InsertBlocks(t.Context(), chain.Blocks)
@@ -317,43 +334,6 @@ func TestCatchupCommitObservations(t *testing.T) {
 		execmodule.StateTransitionCommitComplete,
 		execmodule.StateTransitionOverlayCleared,
 	}, observed)
-}
-
-// A catch-up forkchoice prunes only after its cycle commits, so changesets that a staged unwind
-// needs are never deleted.
-func TestCatchupPruneSeesTheCommittedCycle(t *testing.T) {
-	m := execmoduletester.New(t)
-	m.ExecModule.Drain()
-	provider, ok := m.DB.(state.HasAgg)
-	require.True(t, ok)
-	agg, ok := provider.Agg().(*state.Aggregator)
-	require.True(t, ok)
-	var mu sync.Mutex
-	var pruned []uint64
-	agg.SetMaintenanceObserver(func(_ context.Context, event state.MaintenanceEvent) {
-		if event.Point != state.MaintenancePruneReady {
-			return
-		}
-		progress, err := stages.GetStageProgress(event.PruneTx, stages.Execution)
-		require.NoError(t, err)
-		mu.Lock()
-		defer mu.Unlock()
-		pruned = append(pruned, progress)
-	})
-	defer agg.SetMaintenanceObserver(nil)
-
-	chain, err := m.GenerateChain(20, nil)
-	require.NoError(t, err)
-	status, err := m.InsertBlocks(t.Context(), chain.Blocks)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	result, err := m.UpdateForkChoice(t.Context(), chain.TopBlock.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	m.ExecModule.Drain()
-
-	mu.Lock()
-	defer mu.Unlock()
 	require.NotEmpty(t, pruned, "the catch-up forkchoice must prune")
 	require.Equal(t, chain.TopBlock.NumberU64(), pruned[0], "the first prune must see the cycle's committed execution")
 }
