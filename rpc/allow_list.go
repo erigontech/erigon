@@ -43,5 +43,3 @@ func (a *AllowList) UnmarshalJSON(data []byte) error {
 func (a *AllowList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(slices.Collect(maps.Keys(*a)))
 }
-
-type ForbiddenList map[string]struct{}

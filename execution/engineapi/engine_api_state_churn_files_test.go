@@ -198,7 +198,7 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 			lastFileBlock = block
 			oldestChangeset, err := changeset.ReadLowestUnwindableBlock(tx)
 			require.NoError(t, err)
-			require.LessOrEqual(t, oldestChangeset, block, "changesets must cover both unwind requests")
+			require.Equal(t, block+1, oldestChangeset, "the first retained changeset must undo the child of the last block in files")
 			return nil
 		}))
 

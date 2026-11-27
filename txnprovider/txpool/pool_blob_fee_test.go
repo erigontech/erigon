@@ -74,20 +74,35 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
-// best() reads RLPs through a snapshot taken before it retakes the pool lock, so a flush in between can move a txn's RLP
-// to a row the snapshot does not see. The txn stays pending and is offered on the next call.
-func TestBestKeepsATxnWhoseRlpTheSnapshotMisses(t *testing.T) {
-	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	mt := pool.pending.best.ms[0]
-	rlp := mt.TxnSlot.Rlp
-	mt.TxnSlot.Rlp = nil
+// The inner transaction alone cannot supply a blob sidecar. A transaction with a missing
+// network wrapper stays pending and can be selected once the full wrapper is available.
+func TestBestKeepsPendingBlobTxnWithMissingWrapper(t *testing.T) {
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Osaka")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	wrapper := slot.Rlp
+	slot.Rlp = nil
 
+	reader, err := pool.poolDB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer reader.Rollback()
+	raw, err := pool.GetRlp(reader, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Nil(t, raw, "the inner body cannot supply the missing blob sidecar")
 	require.Zero(t, bestOf(t, pool))
 	require.Equal(t, 1, pool.pending.Len())
-	require.Contains(t, pool.byHash, string(mt.TxnSlot.IDHash[:]))
+	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 
-	mt.TxnSlot.Rlp = rlp
-	require.Equal(t, 1, bestOf(t, pool))
+	slot.Rlp = wrapper
+	raw, err = pool.GetRlp(reader, slot.IDHash[:])
+	require.NoError(t, err)
+	require.Equal(t, wrapper, raw)
+	require.NotSame(t, &wrapper[0], &raw[0])
+	provided, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	require.Len(t, provided, 1)
+	require.IsType(t, &types.BlobTxWrapper{}, provided[0])
 }
 
 // Removing a txn from the middle of pending swaps the last one into its place; best() must leave pending sorted.

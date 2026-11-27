@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -854,7 +853,7 @@ func TestUpdateForkChoiceBelowSnapshotState(t *testing.T) {
 	m.ExecModule.Drain()
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.WaitForFiles()
-	require.NoError(t, agg.BuildFiles2(t.Context(), m.DB, 0, 3, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, m.BlockReader.TxnumReader()), false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), m.DB, 0, 3, math.MaxUint64, false))
 	agg.WaitForFiles()
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		require.Equal(t, uint64(24), tx.Debug().TxNumsInFiles(kv.AccountsDomain))

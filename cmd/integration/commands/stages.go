@@ -856,17 +856,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
+		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (uint64, error) {
+			irreversibleBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
-			pruneStage.FinalityCtx = finalityCtx
-			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.IrreversibleBlock = irreversibleBlock
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return 0, err
+			}
+			return execfinality.IrreversibleTxNum(ctx, tx, br.TxnumReader(), irreversibleBlock)
 		})
 		return err
 	}

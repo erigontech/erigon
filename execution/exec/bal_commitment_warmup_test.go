@@ -121,23 +121,31 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	storageAddress := accounts.InternAddress(common.Address{19: 3})
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
+	otherSlot := accounts.InternKey(common.Hash{31: 6})
+	slotChange := func(slot accounts.StorageKey) types.SlotChanges {
+		return types.SlotChanges{Slot: slot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}}}
+	}
 	bal := types.BlockAccessList{
 		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
-		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
-			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
-		}}},
+		{
+			Address:        accountAddress.Value(),
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+			StorageChanges: []types.SlotChanges{slotChange(changedSlot), slotChange(otherSlot)},
+		},
+		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{slotChange(changedSlot), slotChange(otherSlot)}},
 	}
 
+	storageKey := func(address accounts.Address, slot accounts.StorageKey) []byte {
+		addressValue, slotValue := address.Value(), slot.Value()
+		return commitment.KeyToHexNibbleHash(append(addressValue[:], slotValue[:]...))
+	}
 	accountValue := accountAddress.Value()
-	storageValue := storageAddress.Value()
-	slotValue := changedSlot.Value()
-	storageKey := make([]byte, len(storageValue)+len(slotValue))
-	copy(storageKey, storageValue[:])
-	copy(storageKey[len(storageValue):], slotValue[:])
 	want := [][]byte{
 		commitment.KeyToHexNibbleHash(accountValue[:]),
-		commitment.KeyToHexNibbleHash(storageKey),
+		storageKey(accountAddress, changedSlot),
+		storageKey(accountAddress, otherSlot),
+		storageKey(storageAddress, changedSlot),
+		storageKey(storageAddress, otherSlot),
 	}
 	slices.SortFunc(want, bytes.Compare)
 

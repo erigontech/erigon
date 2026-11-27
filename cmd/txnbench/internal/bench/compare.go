@@ -13,9 +13,9 @@ type agg struct {
 	Warm []float64 // averages (per-tx)
 }
 
-// CompareResults groups all blocks into 10 clusters and compares averaged cold & warm latencies.
+// CompareResults groups shared blocks into up to 10 clusters and compares average cold and warm latencies.
 func CompareResults(old BenchOutput, newer BenchOutput) string {
-	const clusters = 10 // number of clusters for grouping
+	const maxClusters = 10
 
 	oldAgg := aggregateByBlock(old)
 	newAgg := aggregateByBlock(newer)
@@ -32,10 +32,8 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	}
 	slices.Sort(keys)
 
+	clusters := min(maxClusters, len(keys))
 	clusterSize := len(keys) / clusters
-	if clusterSize == 0 {
-		clusterSize = 1
-	}
 
 	type cluster struct {
 		start, end           uint64
@@ -49,13 +47,10 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	for i := range clusters {
 		startIdx := i * clusterSize
 		endIdx := startIdx + clusterSize
-		if i == clusters-1 || endIdx > len(keys) {
+		if i == clusters-1 {
 			endIdx = len(keys)
 		}
 		sub := keys[startIdx:endIdx]
-		if len(sub) == 0 {
-			continue
-		}
 
 		var oldColdSum, newColdSum, oldWarmSum, newWarmSum float64
 		var cnt int

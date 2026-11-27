@@ -55,6 +55,13 @@ func TestInitialSelection(t *testing.T) {
 			wantAbsent:  []string{".efi", ".kv", ".bt"},
 		},
 		{
+			name:           "include-exts selects the inverted index of a domain",
+			includeDomains: []string{"storage"},
+			includeExts:    []string{".ef", ".efi"},
+			wantPresent:    []string{"storage", ".ef", ".efi"},
+			wantAbsent:     []string{".kv", ".v"},
+		},
+		{
 			name:        "exclude-exts is a blacklist",
 			excludeExts: []string{".bt"},
 			wantPresent: []string{".kv", ".kvi", ".kvei", ".vi", ".v", ".efi", ".ef"},

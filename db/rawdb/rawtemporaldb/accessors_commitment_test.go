@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/execfinality"
 )
 
 type unwindFilesTx struct {
@@ -97,8 +96,8 @@ func TestMinimumUnwindKeepsFilesHiddenByLaggingIndex(t *testing.T) {
 		}
 		return nil
 	}))
-	finality := execfinality.NewContext(4, 4, 0, false, rawdbv3.TxNums)
-	require.NoError(t, db.BuildFiles2(t.Context(), 0, 2, finality, false))
+	// Older databases can retain changesets for blocks already in value files.
+	require.NoError(t, db.BuildFiles2(t.Context(), 0, 2, kv.Step(1).LastTxNum(stepSize), false))
 	agg.WaitForFiles()
 	checkBoundary := func(name string, visibleEnd uint64) {
 		t.Run(name, func(t *testing.T) {

@@ -6,14 +6,15 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
+func BuildTrieFromWitness(witness *opstream.Witness, trace bool) (*Trie, error) {
 	hb := NewHashBuilder(false)
 	for _, operator := range witness.Operators {
 		switch op := operator.(type) {
-		case *OperatorLeafValue:
+		case *opstream.OperatorLeafValue:
 			if trace {
 				fmt.Printf("LEAF ")
 			}
@@ -22,28 +23,28 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 			if err := hb.leaf(len(op.Key), keyHex, rlp.RlpSerializableBytes(val)); err != nil {
 				return nil, err
 			}
-		case *OperatorExtension:
+		case *opstream.OperatorExtension:
 			if trace {
 				fmt.Printf("EXTENSION ")
 			}
 			if err := hb.extension(op.Key); err != nil {
 				return nil, err
 			}
-		case *OperatorBranch:
+		case *opstream.OperatorBranch:
 			if trace {
 				fmt.Printf("BRANCH ")
 			}
 			if err := hb.branch(uint16(op.Mask)); err != nil {
 				return nil, err
 			}
-		case *OperatorHash:
+		case *opstream.OperatorHash:
 			if trace {
 				fmt.Printf("HASH ")
 			}
 			if err := hb.hash(op.Hash[:]); err != nil {
 				return nil, err
 			}
-		case *OperatorCode:
+		case *opstream.OperatorCode:
 			if trace {
 				fmt.Printf("CODE ")
 			}
@@ -52,7 +53,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 				return nil, err
 			}
 
-		case *OperatorLeafAccount:
+		case *opstream.OperatorLeafAccount:
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
@@ -74,7 +75,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 			if err := hb.accountLeaf(len(op.Key), op.Key, balance, nonce, incarnation, fieldSet, int(op.CodeSize)); err != nil {
 				return nil, err
 			}
-		case *OperatorEmptyRoot:
+		case *opstream.OperatorEmptyRoot:
 			if trace {
 				fmt.Printf("EMPTYROOT ")
 			}

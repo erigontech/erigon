@@ -1442,9 +1442,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
 
 	runtime.GC()
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	logger.Info("before open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	compress := seg.CompressKeys | seg.CompressVals
 	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress)
 	if err != nil {
@@ -1454,8 +1453,8 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	defer kv.Close()
 
 	runtime.GC()
-	dbg.ReadMemStats(&m)
-	logger.Info("after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys = dbg.MemUsage()
+	logger.Info("after open", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	seek := common.FromHex(cliCtx.String("key"))
 
@@ -3211,9 +3210,8 @@ func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
 
 func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	defer func() {
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		alloc, sys := dbg.MemUsage()
+		log.Info("done", "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	}()
 
 	dirs, lck, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
@@ -3520,8 +3518,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false, blockReader.TxnumReader())
-	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
+	irreversibleBlock := execfinality.IrreversibleBlock(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	if err := br.BuildFiles(ctx, blocksInSnapshots, irreversibleBlock, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3565,17 +3563,23 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	txNumsReader := blockReader.TxnumReader()
-	var lastTxNum uint64
+	var lastTxNum, irreversibleTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress); err != nil {
+			return err
+		}
+		irreversibleTxNum, err = execfinality.IrreversibleTxNum(ctx, tx, txNumsReader, irreversibleBlock)
 		return err
 	}); err != nil {
 		return err
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := temporalDb.BuildFiles(lastTxNum, finalityCtx); err != nil {
+	if err := temporalDb.BuildFiles(lastTxNum, irreversibleTxNum); err != nil {
 		return err
 	}
 

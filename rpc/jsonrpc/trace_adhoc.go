@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -94,6 +93,36 @@ func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	return ethapi.CheckCallData(args.Data, args.Input)
+}
+
+// TraceCallConfig is the override parameter of trace_call and trace_callMany. It accepts either
+// an eth_simulateV1 state override map, keyed by account address, or a TraceConfig object.
+type TraceCallConfig config.TraceConfig
+
+func (c *TraceCallConfig) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	addresses := 0
+	for key := range members {
+		if common.IsHexAddress(key) || hexutil.Has0xPrefix(key) {
+			addresses++
+		}
+	}
+	switch addresses {
+	case 0:
+		return json.Unmarshal(data, (*config.TraceConfig)(c))
+	case len(members):
+		var overrides ethapi.StateOverrides
+		if err := json.Unmarshal(data, &overrides); err != nil {
+			return err
+		}
+		*c = TraceCallConfig{StateOverrides: &overrides}
+		return nil
+	default:
+		return errors.New("override object mixes account addresses with configuration fields")
+	}
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -746,7 +775,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
 				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD, vm.DUPN,
-				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE, vm.TXDIFF:
+				vm.TXPARAM, vm.FRAMEPARAM, vm.SIGPARAM, vm.FRAMEDATALOAD, vm.TXTRACE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -1096,7 +1125,8 @@ func parseTraceTypes(traceTypes []string) (trace, stateDiff, vmTrace bool, err e
 	return trace, stateDiff, vmTrace, nil
 }
 
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (_ *TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1142,7 +1172,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	return trace, nil
 }
 
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) (_ []*TraceCallResult, err error) {
+	defer func() { err = wrapPrunedHistory(err) }()
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return nil, err
 	}
@@ -1257,7 +1288,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ *TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1281,7 +1314,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *blockNrOrHash)
 	}
@@ -1297,11 +1330,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
@@ -1463,7 +1491,9 @@ func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, k
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ []*TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
+	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1527,7 +1557,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, callBlockError(err, *parentNrOrHash)
 	}
@@ -1562,11 +1592,6 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to txn: %w", err)
 		}
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
@@ -1963,7 +1988,7 @@ func (b *bufferedWriter) CreateContract(address accounts.Address) error {
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
 	// Checked before decoding to bound its allocations: on every fork an authorization costs at
 	// least ExecutionPerAuthBaseCostEIP8038 of intrinsic gas, so a larger list cannot fit under the gas cap.
-	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
+	if n := types.SetCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
 		return nil, clientLimitExceededError(fmt.Sprintf("authorization list of %d entries exceeds the RPC gas cap %d", n, api.gasCap))
 	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
@@ -1989,7 +2014,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
+	blockNumber, hash, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -2005,11 +2030,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, latest, 0, api._txNumReader)
@@ -2106,37 +2126,4 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	return traceResult, nil
-}
-
-// setCodeAuthorizationCount returns the authorization-list length of a canonical or
-// RLP-enveloped SetCode transaction without decoding it, or 0 for any other input.
-func setCodeAuthorizationCount(encoded []byte) int {
-	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
-		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
-		if err != nil || isList {
-			return 0
-		}
-		encoded = encoded[dataPos : dataPos+dataLen]
-	}
-	if len(encoded) == 0 || encoded[0] != types.SetCodeTxType {
-		return 0
-	}
-	payload := encoded[1:]
-	pos, _, err := rlp.ParseList(payload, 0)
-	if err != nil {
-		return 0
-	}
-	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
-	for range 9 {
-		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
-		if err != nil {
-			return 0
-		}
-		pos = dataPos + dataLen
-	}
-	dataPos, dataLen, err := rlp.ParseList(payload, pos)
-	if err != nil {
-		return 0
-	}
-	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
 }

@@ -738,13 +738,6 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
-type FinalityContext interface {
-	PruneToBlockNum() uint64
-	RetireToBlockNum() uint64
-	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
-}
-
 type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
@@ -761,10 +754,11 @@ type TemporalRwDB interface {
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 	OpenStateSnapshots(ctx context.Context) error
-	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
-	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
+	// irreversibleTxNum is the last txnum no unwind can reach; only steps ending at or below it are collated.
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, irreversibleTxNum uint64, doMerge bool) error
+	BuildFilesInBackground(irreversibleTxNum uint64) chan struct{}
 	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
-	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (FinalityContext, error)) (bool, <-chan struct{}, error)
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (irreversibleTxNum uint64, err error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities

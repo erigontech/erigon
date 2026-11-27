@@ -1114,7 +1114,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, <-chan struct
 	baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 	pruneTimeout := min(baseTimeout+time.Duration(e.db.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (uint64, error) {
 		return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
 	})
 	if err != nil {
