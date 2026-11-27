@@ -1162,11 +1162,15 @@ func witnessStreamTrie(t *testing.T, witness hexutil.Bytes) *trie.Trie {
 	return decodedTrie
 }
 
-func witnessStreamNodes(t *testing.T, witness hexutil.Bytes) [][]byte {
+func witnessStreamNodes(t *testing.T, witness hexutil.Bytes) []hexutil.Bytes {
 	t.Helper()
 	nodes, err := witnessStreamTrie(t, witness).RLPEncode()
 	require.NoError(t, err)
-	return nodes
+	out := make([]hexutil.Bytes, len(nodes))
+	for i, node := range nodes {
+		out[i] = node
+	}
+	return out
 }
 
 func requireWitnessStreamSuperset(t *testing.T, hph, v3 hexutil.Bytes, label string) {

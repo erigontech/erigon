@@ -21,7 +21,6 @@ import (
 	"maps"
 	"math/bits"
 	"slices"
-	"sort"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -59,10 +58,7 @@ func traceCollapsesDeletes(ctx commitment.PatriciaContext, items []feedEntry, tr
 		if err != nil {
 			return err
 		}
-		if root == nil {
-			continue
-		}
-		deletes := deleteRange(groups[groupKey], root.path, nil)
+		deletes := deleteRange(groups[groupKey], root.path)
 		if len(deletes) == 0 {
 			continue
 		}
@@ -85,14 +81,10 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 	if child := rootExtensionChild(n); child != nil {
 		return walkDeletedNode(ctx, g, child, deletes, tracer, ownerPath)
 	}
-	if n.childMask == n.leafMask && bits.OnesCount16(n.childMask) == 1 {
-		nib := bits.TrailingZeros16(n.childMask)
-		return len(deleteRange(deletes, deleteChildPath(n, nib), nil)) == 0, nil
-	}
 	survivorCount, survivor := 0, 15-bits.LeadingZeros16(n.childMask)
 	for mask := n.childMask; mask != 0; mask &= mask - 1 {
 		nib := bits.TrailingZeros16(mask)
-		childDeletes := deleteRange(deletes, deleteChildPath(n, nib), nil)
+		childDeletes := deleteRange(deletes, deleteChildPath(n, nib))
 		live := true
 		if n.leafMask&(uint16(1)<<nib) != 0 {
 			live = len(childDeletes) == 0
@@ -130,7 +122,7 @@ func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib 
 	addrHash := hashAddressPath(path)
 	storage := graph{plane: planeStorage, addrHash: addrHash[:]}
 	root, err := storage.loadRoot(ctx)
-	if err != nil || root == nil || root.childMask == 0 {
+	if err != nil || root.childMask == 0 {
 		return path, err
 	}
 	switch {
@@ -153,16 +145,9 @@ func deleteChildPath(n *node, nib int) []byte {
 	return append(path, unpackPath(suffix, 63-len(n.path), nil)...)
 }
 
-func deleteRange(deletes [][]byte, prefix []byte, comparisons *int) [][]byte {
-	compare := func(left, right []byte) int {
-		if comparisons != nil {
-			*comparisons++
-		}
-		return bytes.Compare(left, right)
-	}
-	start := sort.Search(len(deletes), func(i int) bool { return compare(deletes[i], prefix) >= 0 })
-	upper := append(slices.Clone(prefix), 0x10)
-	end := sort.Search(len(deletes), func(i int) bool { return compare(deletes[i], upper) >= 0 })
+func deleteRange(deletes [][]byte, prefix []byte) [][]byte {
+	start, _ := slices.BinarySearchFunc(deletes, prefix, bytes.Compare)
+	end, _ := slices.BinarySearchFunc(deletes, append(slices.Clone(prefix), 0x10), bytes.Compare)
 	return deletes[start:end]
 }
 
