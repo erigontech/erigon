@@ -18,7 +18,6 @@ package bscsync
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -92,21 +91,29 @@ func (s *fakeRangeService) Penalize(_ context.Context, peerId *p2p.PeerId) error
 	return nil
 }
 
-// fakeExecutor commits every inserted batch and rejects the first block that is
-// not on the valid chain.
+// fakeExecutor executes inserted blocks on commit and rejects the first block
+// that is not on the valid chain.
 type fakeExecutor struct {
-	valid []*types.Block
-	head  *types.Header
+	valid   []*types.Block
+	pending []*types.Block
+	head    *types.Header
 }
 
-func (e *fakeExecutor) insert(_ context.Context, blocks []*types.Block) (bool, error) {
-	for _, b := range blocks {
+func (e *fakeExecutor) insert(_ context.Context, blocks []*types.Block) error {
+	e.pending = append(e.pending, blocks...)
+	return nil
+}
+
+func (e *fakeExecutor) commit(context.Context, *types.Block) error {
+	pending := e.pending
+	e.pending = nil
+	for _, b := range pending {
 		if b.Hash() != e.valid[b.NumberU64()].Hash() {
-			return false, &badBlockError{lastValid: e.head}
+			return &badBlockError{lastValid: e.head}
 		}
 		e.head = b.Header()
 	}
-	return true, nil
+	return nil
 }
 
 func TestDownloadRanges_BadBlockPenalizesPeerAndRefetches(t *testing.T) {
@@ -120,7 +127,7 @@ func TestDownloadRanges_BadBlockPenalizesPeerAndRefetches(t *testing.T) {
 	}
 	exec := &fakeExecutor{valid: good, head: good[0].Header()}
 
-	err := downloadRanges(t.Context(), log.New(), svc, 1, 10, good[0].Header(), exec.insert)
+	err := downloadRanges(t.Context(), log.New(), svc, 1, 10, good[0].Header(), 1, exec.insert, exec.commit)
 
 	require.NoError(t, err)
 	require.Equal(t, []*p2p.PeerId{badPeer}, svc.penalized)
@@ -138,7 +145,7 @@ func TestDownloadRanges_UnlinkedRangePenalizesPeer(t *testing.T) {
 	}
 	exec := &fakeExecutor{valid: good, head: good[0].Header()}
 
-	err := downloadRanges(t.Context(), log.New(), svc, 1, 10, good[0].Header(), exec.insert)
+	err := downloadRanges(t.Context(), log.New(), svc, 1, 10, good[0].Header(), 1, exec.insert, exec.commit)
 
 	require.NoError(t, err)
 	require.Equal(t, []*p2p.PeerId{badPeer}, svc.penalized)
@@ -146,32 +153,30 @@ func TestDownloadRanges_UnlinkedRangePenalizesPeer(t *testing.T) {
 }
 
 type fakeForkChoice struct {
-	status  execmodule.ExecutionStatus
-	headers map[common.Hash]*types.Header
-	valid   common.Hash
+	status    execmodule.ExecutionStatus
+	lastValid *types.Header
 }
 
 func (f *fakeForkChoice) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash, ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	return f.status, nil, f.valid, nil
+	return f.status, nil, f.lastValid.Hash(), nil
 }
 
 func (f *fakeForkChoice) GetHeaderByHash(_ context.Context, hash common.Hash) *types.Header {
-	return f.headers[hash]
+	if hash == f.lastValid.Hash() {
+		return f.lastValid
+	}
+	return nil
 }
 
 func TestCommitHead_BadBlockReportsLastValidHeader(t *testing.T) {
 	t.Parallel()
 	chain := makeChain(nil, 3, "")
 	lastValid := chain[1].Header()
-	fc := &fakeForkChoice{
-		status:  execmodule.ExecutionStatusBadBlock,
-		headers: map[common.Hash]*types.Header{lastValid.Hash(): lastValid},
-		valid:   lastValid.Hash(),
-	}
+	fc := &fakeForkChoice{status: execmodule.ExecutionStatusBadBlock, lastValid: lastValid}
 
 	err := commitHead(t.Context(), log.New(), fc, chain[3])
 
 	var bad *badBlockError
-	require.ErrorAs(t, err, &bad, fmt.Sprint(err))
+	require.ErrorAs(t, err, &bad)
 	require.Equal(t, lastValid.Hash(), bad.lastValid.Hash())
 }

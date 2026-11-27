@@ -63,27 +63,23 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 	return runWithService(ctx, cfg.Svc.Run, func(ctx context.Context) error { return runParallel(ctx, logger, cfg) })
 }
 
+var errDownloaded = errors.New("download finished")
+
 // runWithService runs svc alongside download and returns when download ends or
 // either one fails.
 func runWithService(ctx context.Context, svc, download func(context.Context) error) error {
-	ctx, stopSvc := context.WithCancel(ctx)
-	defer stopSvc()
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return svc(ctx) })
-	downloaded := false
 	eg.Go(func() error {
 		if err := download(ctx); err != nil {
 			return err
 		}
-		downloaded = true
-		stopSvc()
-		return nil
+		return errDownloaded
 	})
-	err := eg.Wait()
-	if downloaded {
-		return nil
+	if err := eg.Wait(); !errors.Is(err, errDownloaded) {
+		return err
 	}
-	return err
+	return nil
 }
 
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
@@ -95,27 +91,8 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
 		logger.Info("[bsc] reached target", "block", head)
 		return nil
 	}
-	lastFcu := head
-	insert := func(ctx context.Context, blocks []*types.Block) (bool, error) {
-		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
-			return false, err
-		}
-		last := blocks[len(blocks)-1]
-		head = last.NumberU64()
-		if head-lastFcu < cfg.FcuInterval && head < cfg.TargetBlock {
-			return false, nil
-		}
-		if err := commitHead(ctx, logger, cfg.ChainRW, last); err != nil {
-			if bad, ok := errors.AsType[*badBlockError](err); ok {
-				head = bad.lastValid.Number.Uint64()
-				lastFcu = head
-			}
-			return false, err
-		}
-		lastFcu = head
-		return true, nil
-	}
-	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, insert); err != nil {
+	commit := func(ctx context.Context, head *types.Block) error { return commitHead(ctx, logger, cfg.ChainRW, head) }
+	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, cfg.FcuInterval, cfg.ChainRW.InsertBlocks, commit); err != nil {
 		return err
 	}
 	logger.Info("[bsc] reached target", "block", cfg.TargetBlock)

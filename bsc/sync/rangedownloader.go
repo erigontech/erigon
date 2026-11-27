@@ -44,10 +44,13 @@ import (
 // so RAM/worker ≈ rangeSize × estBlockSize.
 const estBlockSize = 1 * datasize.MB
 
-// insertFunc persists an ascending, gap-free batch of blocks and reports whether
-// the batch was committed as the canonical head. It is the seam bor filled with
-// store.InsertBlocks; here it wraps the exec-module client.
-type insertFunc func(ctx context.Context, blocks []*types.Block) (committed bool, err error)
+// insertFunc persists an ascending, gap-free batch of blocks. It is the seam
+// bor filled with store.InsertBlocks; here it wraps the exec-module client.
+type insertFunc func(ctx context.Context, blocks []*types.Block) error
+
+// commitFunc makes head canonical and executes up to it. It returns a
+// *badBlockError when execution rejects a block.
+type commitFunc func(ctx context.Context, head *types.Block) error
 
 // badBlockError reports that execution rejected an inserted block; lastValid is
 // the canonical head that execution kept.
@@ -70,7 +73,6 @@ type blockRange struct {
 	from, to uint64 // inclusive
 }
 
-// rangeSource records the peer that sent an inserted range.
 type rangeSource struct {
 	blockRange
 	peer *p2p.PeerId
@@ -82,12 +84,13 @@ type rangeSource struct {
 // only at genesis. It returns when the range is fully inserted or ctx is
 // cancelled. Peer backoff uses peerBackoff (poll for peers, not bor's 1m
 // steady-state wait).
-func downloadRanges(ctx context.Context, logger log.Logger, svc rangeService, from, to uint64, parent *types.Header, insert insertFunc) error {
+func downloadRanges(ctx context.Context, logger log.Logger, svc rangeService, from, to uint64, parent *types.Header, fcuInterval uint64, insert insertFunc, commit commitFunc) error {
 	maxWorkers := estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
 	prev := parent
 	fetchStart := time.Now()
 	var done uint64
 	var uncommitted []rangeSource
+	lastFcu := from - 1
 
 	// Ranges are generated lazily from a cursor rather than materialized up front:
 	// a full-chain sync (0 → ~126M at 1024/range) would otherwise pre-allocate
@@ -152,7 +155,7 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc rangeService, fr
 				break
 			}
 			assembled = append(assembled, blocks...)
-			uncommitted = append(uncommitted, rangeSource{blockRange{r.from, blocks[len(blocks)-1].NumberU64()}, peers[i]})
+			uncommitted = append(uncommitted, rangeSource{r, peers[i]})
 			prev = blocks[len(blocks)-1].HeaderNoCopy()
 		}
 		nextFrom = advanceTo
@@ -161,24 +164,30 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc rangeService, fr
 			continue
 		}
 
-		committed, err := insert(ctx, assembled)
-		if bad, ok := errors.AsType[*badBlockError](err); ok {
-			badNum := bad.lastValid.Number.Uint64() + 1
-			logger.Warn("[bsc] execution rejected block, will retry", "block", badNum, "err", err)
-			for _, src := range uncommitted {
-				if src.from <= badNum && badNum <= src.to {
-					penalize(ctx, logger, svc, src.peer)
-				}
-			}
-			uncommitted = nil
-			prev = bad.lastValid
-			nextFrom = badNum
-			continue
-		}
-		if err != nil {
+		if err := insert(ctx, assembled); err != nil {
 			return err
 		}
-		if committed {
+		last := assembled[len(assembled)-1]
+		if last.NumberU64()-lastFcu >= fcuInterval || last.NumberU64() >= to {
+			err := commit(ctx, last)
+			if bad, ok := errors.AsType[*badBlockError](err); ok {
+				lastFcu = bad.lastValid.Number.Uint64()
+				badNum := lastFcu + 1
+				logger.Warn("[bsc] execution rejected block, will retry", "block", badNum, "err", err)
+				for _, src := range uncommitted {
+					if src.from <= badNum && badNum <= src.to {
+						penalize(ctx, logger, svc, src.peer)
+					}
+				}
+				uncommitted = nil
+				prev = bad.lastValid
+				nextFrom = badNum
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			lastFcu = last.NumberU64()
 			uncommitted = nil
 		}
 
