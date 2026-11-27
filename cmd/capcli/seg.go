@@ -29,13 +29,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/afero"
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	cliutils "github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
@@ -61,7 +68,39 @@ func segCommand() *cli.Command {
 		Name:        "seg",
 		Usage:       "inspect and manage snapshot segments",
 		Description: "Read and manage Caplin snapshot files and retention metadata. Read-only commands do not take the datadir lock; commands that write segments, the index, or the stored regime take it.",
-		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand(), caplinResetCommand()},
+		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand(), caplinResetCommand(), caplinRegimeCommand(), caplinCheckManifestCommand()},
+	}
+}
+
+func caplinRegimeCommand() *cli.Command {
+	chainFlag := cli.StringFlag{Name: cliutils.ChainFlag.Name, Usage: cliutils.ChainFlag.Usage}
+	return &cli.Command{
+		Name:        "regime",
+		Usage:       "show or set the Caplin retention regime; show reads without a lock, set writes with the datadir lock",
+		Description: "Show reads the stored Caplin regime, oldest stored data, and local sidecar files without writing or taking the datadir lock. Set validates and writes a regime while holding the datadir lock.",
+		Commands: []*cli.Command{
+			{
+				Name:        "show",
+				Usage:       "show the stored Caplin retention regime; reads the index and local files without the datadir lock",
+				Description: "Reads the stored regime, floors, oldest stored data, and matching legacy flags. It does not write the datadir or take its lock.",
+				Flags:       []cli.Flag{&chainFlag, &cliutils.DataDirFlag},
+				Action:      runCaplinRegimeShow,
+			},
+			{
+				Name:        "set",
+				Usage:       "set the Caplin retention regime; writes the index with the datadir lock",
+				Description: "Validates and writes the requested Caplin regime and takes the datadir lock for the full operation.",
+				ArgsUsage:   "<mode>",
+				Flags: []cli.Flag{
+					&chainFlag,
+					&cliutils.DataDirFlag,
+					&cli.StringFlag{Name: "distance", Usage: "block distance in epochs or all"},
+					&cli.StringFlag{Name: "sidecars", Usage: "sidecar distance in epochs, all or slot:N"},
+					&cli.StringFlag{Name: "states", Usage: "state distance in epochs or all"},
+				},
+				Action: runCaplinRegimeSet,
+			},
+		},
 	}
 }
 
@@ -129,6 +168,271 @@ func runCaplinReset(ctx context.Context, cmd *cli.Command) error {
 		fmt.Fprintf(writer, "progress %d -> %d\n", plan.Progress, plan.ProgressAfter)
 	}
 	fmt.Fprintln(writer, "stored regime kept")
+	return nil
+}
+
+func caplinOldestStored(ctx context.Context, dirs datadir.Dirs, chainName string, beaconConfig *clparams.BeaconChainConfig, db kv.RoDB) (clparams.OldestStoredResult, error) {
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = chainName
+	var snapshots *freezeblocks.CaplinSnapshots
+	if info, err := os.Stat(dirs.Snap); err == nil && info.IsDir() {
+		snapshots = freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+		if err := snapshots.OpenFolder(); err != nil {
+			return clparams.OldestStoredResult{}, err
+		}
+		defer snapshots.Close()
+	}
+	var stateSnapshots *snapshotsync.CaplinStateSnapshots
+	if info, err := os.Stat(dirs.SnapCaplin); err == nil && info.IsDir() {
+		stateSnapshots = snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db, beaconConfig), log.Root())
+		if err := stateSnapshots.OpenFolder(); err != nil {
+			return clparams.OldestStoredResult{}, err
+		}
+		defer stateSnapshots.Close()
+	}
+	var blobStorage blob_storage.BlobStorage
+	blobPath := filepath.Join(dirs.CaplinBlobs, "chaindata")
+	if fileExists(filepath.Join(blobPath, "mdbx.dat")) {
+		blobDB, err := antiquary.OpenCaplinDuIndexDB(ctx, blobPath, log.Root())
+		if err != nil {
+			return clparams.OldestStoredResult{}, err
+		}
+		defer blobDB.Close()
+		blobStorage = blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+	}
+	var columnStorage blob_storage.DataColumnStorage
+	if info, err := os.Stat(dirs.CaplinColumnData); err == nil && info.IsDir() {
+		columnStorage = blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, beaconevents.NewEventEmitter())
+	}
+	oldest, err := antiquary.OldestStored(ctx, db, snapshots, stateSnapshots, blobStorage, columnStorage)
+	if err != nil {
+		return clparams.OldestStoredResult{}, err
+	}
+	hotSidecars, err := antiquary.CaplinDuOldestHotSlot(dirs.CaplinBlobs)
+	if err != nil {
+		return clparams.OldestStoredResult{}, err
+	}
+	if hotSidecars.Holds && (!oldest.Sidecars.Holds || hotSidecars.Slot < oldest.Sidecars.Slot) {
+		oldest.Sidecars = hotSidecars
+	}
+	return oldest, nil
+}
+
+func caplinGenesisState(ctx context.Context, dirs datadir.Dirs, chainName string, beaconConfig *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
+	genesis := genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
+	initialized, err := genesis.IsInitialized()
+	if err != nil {
+		return nil, err
+	}
+	if initialized {
+		return genesis.ReadGenesisState()
+	}
+	if chainName == networkname.Dev {
+		data, err := os.ReadFile(filepath.Join(dirs.DataDir, "dev-beacon", "genesis.ssz"))
+		if err != nil {
+			return nil, err
+		}
+		genesisState := state.New(beaconConfig)
+		version := beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch)
+		if err := genesisState.DecodeSSZ(data, int(version)); err != nil {
+			return nil, err
+		}
+		return genesisState, nil
+	}
+	_, _, networkID, err := clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		return nil, err
+	}
+	return initial_state.GetGenesisState(ctx, networkID)
+}
+
+func caplinCurrentSlotForDatadir(ctx context.Context, dirs datadir.Dirs, chainName string, beaconConfig *clparams.BeaconChainConfig) (uint64, error) {
+	genesisState, err := caplinGenesisState(ctx, dirs, chainName, beaconConfig)
+	if err != nil {
+		return 0, err
+	}
+	return eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig).GetCurrentSlot(), nil
+}
+
+func caplinRetentionBinary(dirs datadir.Dirs) string {
+	if fileExists(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+		return "erigon"
+	}
+	return "caplin"
+}
+
+func caplinRetentionStored(ctx context.Context, db kv.RoDB) (clparams.CaplinRetention, bool, error) {
+	if db == nil {
+		return clparams.CaplinRetention{}, false, nil
+	}
+	var stored clparams.CaplinRetention
+	var found bool
+	err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		stored, found, err = beacon_indicies.ReadCaplinRetention(tx)
+		return err
+	})
+	return stored, found, err
+}
+
+func runCaplinRegimeShow(ctx context.Context, cmd *cli.Command) error {
+	folder := outputFolder{}
+	if err := folder.fromCmd(cmd); err != nil {
+		return err
+	}
+	dirs := datadir.Open(folder.Datadir)
+	chainName, beaconConfig, err := caplinDuChainConfig(ctx, cmd, dirs)
+	if err != nil {
+		return err
+	}
+	indexDB, err := antiquary.OpenCaplinDuIndexDB(ctx, dirs.CaplinIndexing, log.Root())
+	if err != nil {
+		return err
+	}
+	if indexDB != nil {
+		defer indexDB.Close()
+	}
+	stored, found, err := caplinRetentionStored(ctx, indexDB)
+	if err != nil {
+		return err
+	}
+	writer := cmd.Writer
+	fmt.Fprintf(writer, "chain %s\n", chainName)
+	if !found {
+		fmt.Fprintln(writer, "stored regime none stored")
+	} else {
+		if beaconConfig == nil {
+			return errors.New("caplin retention needs a beacon config; pass --chain")
+		}
+		stored, err = stored.Normalize(beaconConfig)
+		if err != nil {
+			return err
+		}
+		currentSlot, err := caplinCurrentSlotForDatadir(ctx, dirs, chainName, beaconConfig)
+		if err != nil {
+			return err
+		}
+		floors, err := stored.Floors(beaconConfig, currentSlot)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(writer, "stored regime %s\n", stored.Mode)
+		fmt.Fprintf(writer, "current slot %d\n", currentSlot)
+		fmt.Fprintf(writer, "floor blocks %s at slot %d\n", stored.Blocks, floors.Blocks)
+		fmt.Fprintf(writer, "floor sidecars %s at slot %d\n", stored.Sidecars, floors.Sidecars)
+		fmt.Fprintf(writer, "floor states %s at slot %d\n", stored.States, floors.States)
+		flags, exact, err := clparams.LegacyRetentionFlags(stored, beaconConfig)
+		if err != nil {
+			return err
+		}
+		if !exact || len(flags) == 0 {
+			fmt.Fprintln(writer, "legacy flags none")
+		} else {
+			fmt.Fprintf(writer, "legacy flags %s\n", strings.Join(flags, " "))
+		}
+	}
+	if beaconConfig == nil {
+		fmt.Fprintln(writer, "current slot unavailable")
+		fmt.Fprintln(writer, "oldest blocks none")
+		fmt.Fprintln(writer, "oldest sidecars none")
+		fmt.Fprintln(writer, "oldest states none")
+		return nil
+	}
+	oldest, err := caplinOldestStored(ctx, dirs, chainName, beaconConfig, indexDB)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(writer, "oldest blocks %s\n", caplinStoredSlotText(oldest.Blocks))
+	fmt.Fprintf(writer, "oldest sidecars %s\n", caplinStoredSlotText(oldest.Sidecars))
+	fmt.Fprintf(writer, "oldest states %s\n", caplinStoredSlotText(oldest.States))
+	return nil
+}
+
+func caplinStoredSlotText(slot clparams.StoredSlot) string {
+	if !slot.Holds {
+		return "none"
+	}
+	return strconv.FormatUint(slot.Slot, 10)
+}
+
+func runCaplinRegimeSet(ctx context.Context, cmd *cli.Command) error {
+	folder := outputFolder{}
+	if err := folder.fromCmd(cmd); err != nil {
+		return err
+	}
+	if cmd.Args().Len() != 1 {
+		return errors.New("caplin seg regime set requires one mode")
+	}
+	dirs, unlock, err := lockCaplinDirs(folder.Datadir, false)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	chainName, beaconConfig, err := caplinDuChainConfig(ctx, cmd, dirs)
+	if err != nil {
+		return err
+	}
+	if beaconConfig == nil {
+		return errors.New("caplin retention needs a beacon config; pass --chain")
+	}
+	requested, err := clparams.ParseCaplinRetentionWithSlots(
+		cmd.Args().First(),
+		cmd.String("distance"),
+		cmd.String("sidecars"),
+		cmd.String("states"),
+		cmd.IsSet("distance"),
+		cmd.IsSet("sidecars"),
+		cmd.IsSet("states"),
+	)
+	if err != nil {
+		return err
+	}
+	requested, err = requested.Normalize(beaconConfig)
+	if err != nil {
+		return err
+	}
+	currentSlot, err := caplinCurrentSlotForDatadir(ctx, dirs, chainName, beaconConfig)
+	if err != nil {
+		return err
+	}
+	requestedFloors, err := requested.Floors(beaconConfig, currentSlot)
+	if err != nil {
+		return err
+	}
+	dirs = datadir.New(dirs.DataDir)
+	db, err := caplin1.OpenCaplinIndexDb(ctx, dirs.CaplinIndexing)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	stored, found, err := caplinRetentionStored(ctx, db)
+	if err != nil {
+		return err
+	}
+	oldest, err := caplinOldestStored(ctx, dirs, chainName, beaconConfig, db)
+	if err != nil {
+		return err
+	}
+	var away bool
+	if found {
+		stored, err = stored.Normalize(beaconConfig)
+		if err != nil {
+			return err
+		}
+		if stored != requested {
+			storedFloors, storedErr := stored.Floors(beaconConfig, currentSlot)
+			away = storedErr != nil || clparams.CaplinRetentionMovesAwayFromTip(requestedFloors, storedFloors)
+		}
+	}
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return beacon_indicies.WriteCaplinRetention(tx, requested) }); err != nil {
+		return err
+	}
+	writer := cmd.Writer
+	if away {
+		fmt.Fprintln(writer, clparams.CaplinRetentionHint(requested, oldest, currentSlot, beaconConfig, caplinRetentionBinary(dirs), dirs.DataDir))
+		return nil
+	}
+	fmt.Fprintf(writer, "stored regime %s\n", requested.Mode)
 	return nil
 }
 
