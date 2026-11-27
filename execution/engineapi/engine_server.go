@@ -375,6 +375,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
+	defer npProfile(req.BlockHash, npT0)()
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
