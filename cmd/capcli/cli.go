@@ -827,7 +827,7 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
 	var response struct {
 		Data struct {
-			Root string `json:"root"`
+			Root *string `json:"root"`
 		} `json:"data"`
 	}
 	status, err := getBeaconJSON(ctx, beaconApiURL, fmt.Sprintf("eth/v1/beacon/states/%d/root", slot), &response)
@@ -837,12 +837,15 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if response.Data.Root == "" {
+	if response.Data.Root == nil || *response.Data.Root == "" {
 		return common.Hash{}, errors.New("no state root found")
 	}
 	var root common.Hash
-	if err := root.UnmarshalText([]byte(response.Data.Root)); err != nil {
+	if err := root.UnmarshalText([]byte(*response.Data.Root)); err != nil {
 		return common.Hash{}, err
+	}
+	if root == (common.Hash{}) {
+		return common.Hash{}, errors.New("no state root found")
 	}
 	return root, nil
 }

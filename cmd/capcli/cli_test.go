@@ -732,7 +732,6 @@ func TestBeaconAPITypedResponses(t *testing.T) {
 		{"plain", `{"data":{"root":"` + rootText + `"}}`, common.Hash{31: 1}},
 		{"escaped prefix", `{"data":{"root":"\u0030x` + strings.Repeat("0", 63) + `1"}}`, common.Hash{31: 1}},
 		{"escaped digit", `{"data":{"root":"0x` + strings.Repeat("0", 63) + `\u0031"}}`, common.Hash{31: 1}},
-		{"zero", `{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`, common.Hash{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -817,4 +816,50 @@ func TestBeaconAPITransportErrorOmitsBaseURL(t *testing.T) {
 	require.ErrorContains(t, err, "connection failed")
 	require.NotContains(t, err.Error(), "https://beacon.example")
 	require.NotContains(t, err.Error(), "query-secret")
+}
+
+func TestArchiveSanitizerRejectsInvalidStateRoots(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		status  int
+		wantErr string
+	}{
+		{"zero root", `{"data":{"root":"0x` + strings.Repeat("0", 64) + `"}}`, http.StatusOK, "no state root found"},
+		{"duplicate null root", `{"data":{"root":"0x` + strings.Repeat("0", 63) + `1","root":null}}`, http.StatusOK, "no state root found"},
+		{"not found", "", http.StatusNotFound, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := mapset.NewSet[string]()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(r.URL.Path)
+				switch r.URL.Path {
+				case "/eth/v2/debug/beacon/heads":
+					_, _ = w.Write([]byte(`{"data":[{"slot":"2"}]}`))
+				case "/eth/v1/beacon/states/0/root":
+					w.WriteHeader(http.StatusNotFound)
+				case "/eth/v1/beacon/states/1/root":
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			a := &ArchiveSanitizer{
+				chainCfg:     chainCfg{Chain: networkname.Mainnet},
+				BeaconApiURL: srv.URL,
+				IntervalSlot: 1,
+			}
+			err := a.Run(t.Context())
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.wantErr)
+			}
+			require.True(t, requests.Contains("/eth/v1/beacon/states/0/root"))
+			require.True(t, requests.Contains("/eth/v1/beacon/states/1/root"))
+			require.False(t, requests.Contains("/eth/v2/debug/beacon/states/1"))
+		})
+	}
 }
