@@ -2190,6 +2190,12 @@ func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*c
 	return block, block != nil
 }
 
+func (g *getFinalizedExecutionHashForkGraph) RangeRetainedBlocks(visit func(*cltypes.BeaconBlock)) {
+	for _, block := range g.blocks {
+		visit(block.Block)
+	}
+}
+
 func (g *getFinalizedExecutionHashForkGraph) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
 	for _, block := range g.blocks {
 		if block != nil && block.Block != nil && block.Block.ParentRoot == blockRoot && block.Block.Slot >= slot {

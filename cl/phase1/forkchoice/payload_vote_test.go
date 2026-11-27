@@ -1205,40 +1205,156 @@ func hasPayloadStatus(nodes []ForkChoiceNode, status cltypes.PayloadStatus) bool
 
 func TestGloasBlockOptimismFollowsExecutionParent(t *testing.T) {
 	parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+	siblingRoot, otherRoot := common.Hash{3}, common.Hash{4}
 	parentHash, childHash := common.Hash{11}, common.Hash{12}
-	f := newPayloadVoteTestStore(t, childRoot, true, false)
-	accepted := map[common.Hash]bool{}
-	g := payloadVoteForkGraph{hasEnvelope: true, acceptedPayloads: accepted}
-	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock)
-	for _, item := range []struct{ root, parent, hash, parentHash common.Hash }{
-		{parentRoot, common.Hash{}, parentHash, common.Hash{}}, {childRoot, parentRoot, childHash, parentHash},
-	} {
-		block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
-		block.Block.ParentRoot = item.parent
-		block.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{ParentBlockHash: item.parentHash, BlockHash: item.hash}}
-		blocks[item.root] = block
-	}
-	f.forkGraph = optimisticTestGraph{payloadVoteForkGraph: g, blocks: blocks}
-	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+	f, _, _ := prepareEmbeddedPtcVoteBlock(t, 0, nil, nil, false, nil)
+	f.verifiedExecutionPayloadHashes.Resize(1)
+	g := newOptimisticTestGraph(f)
+	parent := &cltypes.Eth1Block{BlockHash: parentHash}
+	child := &cltypes.Eth1Block{BlockHash: childHash, ParentHash: parentHash}
+	other := &cltypes.Eth1Block{BlockHash: common.Hash{14}}
+	parentBlock := g.addBlock(parentRoot, parent)
+	childBlock := g.addBlock(childRoot, child)
+	childBlock.Block.ParentRoot = parentRoot
+	g.addBlock(siblingRoot, parent)
+	g.addBlock(otherRoot, other)
 	envelope := cltypes.NewExecutionPayloadEnvelope(f.beaconCfg)
-	envelope.Payload.BlockHash = parentHash
-	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusNotValidated, nil, envelope, blocks[parentRoot], parentRoot))
+	envelope.Payload = parent
+	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusNotValidated, nil, envelope, parentBlock, parentRoot))
 	require.False(t, f.IsRootOptimistic(parentRoot))
 	require.True(t, f.IsRootOptimistic(childRoot))
-	envelope.Payload.ParentHash, envelope.Payload.BlockHash = parentHash, childHash
-	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusValidated, nil, envelope, blocks[childRoot], childRoot))
+	f.RecordGloasPayloadResult(siblingRoot, parent, execution_client.PayloadStatusNotValidated, nil)
+	f.RecordGloasPayloadResult(otherRoot, other, execution_client.PayloadStatusValidated, nil)
+	require.False(t, f.verifiedExecutionPayloadHashes.Contains(parentRoot))
+	require.False(t, f.verifiedExecutionPayloadHashes.Contains(siblingRoot))
+	require.True(t, f.IsNodeOptimistic(ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}))
+	require.True(t, f.IsNodeOptimistic(ForkChoiceNode{Root: parentRoot, PayloadStatus: cltypes.PayloadStatusFull}))
+	envelope.Payload = child
+	require.NoError(t, f.applyPayloadValidationResultLocked(execution_client.PayloadStatusValidated, nil, envelope, childBlock, childRoot))
 	require.False(t, f.IsRootOptimistic(childRoot))
 	require.True(t, f.IsPayloadVerified(parentRoot))
+	require.True(t, f.IsPayloadVerified(siblingRoot))
 }
 
 type optimisticTestGraph struct {
 	payloadVoteForkGraph
+	cfg    *clparams.BeaconChainConfig
 	blocks map[common.Hash]*cltypes.SignedBeaconBlock
+}
+
+func newOptimisticTestGraph(f *ForkChoiceStore) optimisticTestGraph {
+	g := optimisticTestGraph{
+		payloadVoteForkGraph: payloadVoteForkGraph{hasEnvelope: true, acceptedPayloads: make(map[common.Hash]bool)},
+		cfg:                  f.beaconCfg,
+		blocks:               make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	f.forkGraph = g
+	return g
+}
+
+func (g optimisticTestGraph) addBlock(root common.Hash, payload *cltypes.Eth1Block) *cltypes.SignedBeaconBlock {
+	block := cltypes.NewSignedBeaconBlock(g.cfg, clparams.GloasVersion)
+	block.Block.Slot = payload.SlotNumber
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.BlockHash, bid.ParentBlockHash = payload.BlockHash, payload.ParentHash
+	g.blocks[root] = block
+	return block
 }
 
 func (g optimisticTestGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	b, ok := g.blocks[root]
 	return b, ok
+}
+
+func (g optimisticTestGraph) IsBlockRetained(root common.Hash) bool {
+	return g.blocks[root] != nil
+}
+
+func (g optimisticTestGraph) WithRetainedBlock(root common.Hash, visit func(func(common.Hash) bool)) bool {
+	if !g.IsBlockRetained(root) {
+		return false
+	}
+	visit(g.IsBlockRetained)
+	return true
+}
+
+func (g optimisticTestGraph) Prune(slot uint64) error {
+	for root, block := range g.blocks {
+		if block.Block.Slot < slot {
+			delete(g.blocks, root)
+		}
+	}
+	return nil
+}
+
+func (g optimisticTestGraph) RangeRetainedBlocks(visit func(*cltypes.BeaconBlock)) {
+	for _, block := range g.blocks {
+		visit(block.Block)
+	}
+}
+
+func TestPruneOptimisticPayloadsKeepsAncestorsOfRetainedEmptyNode(t *testing.T) {
+	f := newPayloadVoteTestStore(t, common.Hash{}, true, false)
+	g := newOptimisticTestGraph(f)
+	parentHash, childHash, orphanHash := common.Hash{11}, common.Hash{12}, common.Hash{13}
+	headRoot := common.Hash{4}
+	for _, b := range []struct {
+		root, hash, parent common.Hash
+		slot               uint64
+	}{
+		{common.Hash{1}, parentHash, common.Hash{}, 1},
+		{common.Hash{2}, childHash, parentHash, 2},
+		{common.Hash{3}, orphanHash, parentHash, 2},
+	} {
+		payload := &cltypes.Eth1Block{BlockHash: b.hash, ParentHash: b.parent, SlotNumber: b.slot}
+		g.addBlock(b.root, payload)
+		f.RecordGloasPayloadResult(b.root, payload, execution_client.PayloadStatusNotValidated, nil)
+	}
+	g.addBlock(headRoot, &cltypes.Eth1Block{BlockHash: common.Hash{14}, ParentHash: childHash, SlotNumber: 10})
+	f.queuePrune(10)
+	f.drainQueuedWork()
+	require.True(t, f.IsRootOptimistic(headRoot))
+	for _, hash := range []common.Hash{parentHash, childHash} {
+		_, ok := f.optimisticPayloads.Load(hash)
+		require.True(t, ok)
+	}
+	_, orphan := f.optimisticPayloads.Load(orphanHash)
+	require.False(t, orphan)
+	f.queuePrune(11)
+	f.drainQueuedWork()
+	for _, hash := range []common.Hash{parentHash, childHash} {
+		_, ok := f.optimisticPayloads.Load(hash)
+		require.False(t, ok)
+	}
+}
+
+func TestGloasInvalidationAfterParentBlockPruned(t *testing.T) {
+	f, _, _ := prepareEmbeddedPtcVoteBlock(t, 0, nil, nil, false, nil)
+	f.anchorExecutionPayloadBid = nil
+	f.verifiedExecutionPayloadHashes.Resize(1)
+	g := newOptimisticTestGraph(f)
+	validHash := common.Hash{10}
+	parentRoot, childRoot := common.Hash{1}, common.Hash{2}
+	parent := &cltypes.Eth1Block{SlotNumber: 1, BlockHash: common.Hash{11}, ParentHash: validHash}
+	child := &cltypes.Eth1Block{SlotNumber: 2, BlockHash: common.Hash{12}, ParentHash: parent.BlockHash}
+	g.addBlock(parentRoot, parent)
+	childBlock := g.addBlock(childRoot, child).Block
+	childBlock.ParentRoot = parentRoot
+	f.RecordGloasPayloadResult(parentRoot, parent, execution_client.PayloadStatusNotValidated, nil)
+	f.RecordGloasPayloadResult(childRoot, child, execution_client.PayloadStatusNotValidated, nil)
+	f.queuePrune(childBlock.Slot)
+	f.drainQueuedWork()
+	require.False(t, g.IsBlockRetained(parentRoot))
+	require.True(t, f.IsRootOptimistic(childRoot))
+
+	f.RecordGloasPayloadResult(childRoot, child, execution_client.PayloadStatusInvalidated, &execution_client.InvalidPayloadError{LatestValidHash: validHash})
+	f.verifiedExecutionPayloadHashes.Purge()
+	f.executionPayloadStatus.Purge()
+	require.ErrorContains(t, f.validateParentPayloadPath(childBlock, false), "parent execution payload is invalid")
+
+	f.queuePrune(childBlock.Slot + 1)
+	f.drainQueuedWork()
+	require.False(t, f.executionHashMarkedInvalid(parent.BlockHash))
 }
 
 func TestRejectedGloasFullWeightIsExcludedFromAncestors(t *testing.T) {
@@ -1256,7 +1372,9 @@ func TestRejectedGloasFullWeightIsExcludedFromAncestors(t *testing.T) {
 func TestGloasInvalidationFollowsPayloadsAcrossBids(t *testing.T) {
 	root, child, sibling := common.Hash{1}, common.Hash{2}, common.Hash{3}
 	hash, childHash, validHash := common.Hash{11}, common.Hash{12}, common.Hash{10}
-	f := newPayloadVoteTestStore(t, root, true, false)
+	f, _, _ := prepareEmbeddedPtcVoteBlock(t, 0, nil, nil, false, nil)
+	f.anchorExecutionPayloadBid = nil
+	f.verifiedExecutionPayloadHashes.Resize(1)
 	rejected := make(map[common.Hash]bool)
 	badHeader := common.Hash{}
 	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, rejectedEnvelopes: rejected, invalidatedHeader: &badHeader, acceptedPayloads: make(map[common.Hash]bool)}
@@ -1264,6 +1382,7 @@ func TestGloasInvalidationFollowsPayloadsAcrossBids(t *testing.T) {
 	childPayload := &cltypes.Eth1Block{BlockHash: childHash, ParentHash: hash}
 	f.RecordGloasPayloadResult(root, parentPayload, execution_client.PayloadStatusNotValidated, nil)
 	f.RecordGloasPayloadResult(child, childPayload, execution_client.PayloadStatusNotValidated, nil)
+	require.False(t, f.verifiedExecutionPayloadHashes.Contains(root))
 	f.RecordGloasPayloadResult(sibling, parentPayload, execution_client.PayloadStatusInvalidated, execution_client.ErrInvalidEnvelope)
 	require.True(t, f.IsEnvelopeRejected(sibling))
 	require.True(t, f.isPayloadAvailable(root))
@@ -1271,5 +1390,7 @@ func TestGloasInvalidationFollowsPayloadsAcrossBids(t *testing.T) {
 	for _, h := range []common.Hash{hash, childHash} {
 		require.True(t, f.executionHashMarkedInvalid(h))
 	}
+	require.False(t, f.isPayloadAvailable(root))
+	require.False(t, f.isPayloadAvailable(child))
 	require.Equal(t, common.Hash{}, badHeader)
 }

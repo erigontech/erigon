@@ -345,6 +345,17 @@ func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBl
 	return block, true
 }
 
+func (f *forkGraphDisk) RangeRetainedBlocks(visit func(*cltypes.BeaconBlock)) {
+	lowest := f.lowestAvailableBlock.Load()
+	f.blocks.Range(func(_, value any) bool {
+		block := value.(*cltypes.SignedBeaconBlock).Block
+		if !isBelowPrunedBoundary(block.Slot, lowest) {
+			visit(block)
+		}
+		return true
+	})
+}
+
 func (f *forkGraphDisk) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
 	f.childrenMu.RLock()
 	defer f.childrenMu.RUnlock()

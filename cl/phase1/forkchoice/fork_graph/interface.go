@@ -45,6 +45,7 @@ type ForkGraph interface {
 	SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	RangeRetainedBlocks(visit func(*cltypes.BeaconBlock))
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// CurrentStateLocked is valid only while the caller holds the fork-choice lock.

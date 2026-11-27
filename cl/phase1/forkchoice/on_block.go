@@ -405,14 +405,14 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
 				return fmt.Errorf("%w: %w", ErrNewPayloadNoStatus, err)
 			case execution_client.PayloadStatusNotValidated:
-				f.optimisticPayloadParents.Store(executionBlockHash, block.Block.Body.ExecutionPayload.ParentHash)
+				f.trackOptimisticPayloadLocked(blockRoot, block.Block.Body.ExecutionPayload, false)
 				log.Trace("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 				// optimistic block candidate
 				if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to add block to optimistic store: %w", err)
 				}
 			case execution_client.PayloadStatusInvalidated:
-				f.optimisticPayloadParents.Delete(executionBlockHash)
+				f.resolveOptimisticPayloadLocked(executionBlockHash, execution_client.PayloadStatusInvalidated)
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
 				if ancestorsErr := f.invalidateOptimisticAncestorsLocked(err, block.Block); ancestorsErr != nil {
 					return ancestorsErr

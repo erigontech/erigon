@@ -121,9 +121,9 @@ func TestValidPreGloasBlockVerifiesOptimisticParentPayload(t *testing.T) {
 	store, block := buildExAnteStorePendingLast(t, engine)
 	selfConsistentPayload(t, block)
 	parentHash := block.Block.Body.ExecutionPayload.ParentHash
-	store.optimisticPayloadParents.Store(parentHash, common.Hash{0xaa})
+	store.trackOptimisticPayloadLocked(block.Block.ParentRoot, &cltypes.Eth1Block{BlockHash: parentHash, ParentHash: common.Hash{0xaa}}, false)
 	require.NoError(t, store.OnBlock(t.Context(), block, true, false, false))
-	_, optimistic := store.optimisticPayloadParents.Load(parentHash)
+	_, optimistic := store.optimisticPayloads.Load(parentHash)
 	require.False(t, optimistic)
 }
 
@@ -641,7 +641,7 @@ func TestNewPayloadHonoursTheAuthoritativeInvalidSet(t *testing.T) {
 	derived := selfConsistentPayload(t, block)
 
 	// Only the authoritative set knows, as it would be once the LRUs evicted the entry.
-	store.invalidatedExecutionPayloads.Store(payload.BlockHash, struct{}{})
+	store.invalidatedExecutionPayloads.Store(payload.BlockHash, &optimisticPayload{parentHash: payload.ParentHash})
 
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),

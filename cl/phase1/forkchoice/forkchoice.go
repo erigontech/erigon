@@ -130,8 +130,8 @@ type ForkChoiceStore struct {
 	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
 	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
 	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads   *sync.Map
-	optimisticPayloadParents       sync.Map
+	invalidatedExecutionPayloads   *sync.Map // execution hash -> prior *optimisticPayload, or nil for a cached verdict
+	optimisticPayloads             sync.Map  // execution hash -> *optimisticPayload
 	// Carries an invalid verdict until the caller makes it durable, since the bounded
 	// caches below can evict in between. Not refcounted, so the writer clears its own key.
 	inFlightInvalidPayloads *sync.Map
@@ -338,15 +338,13 @@ func NewForkChoiceStore(
 	}
 	executionPayloadRoots := make(map[common.Hash]map[common.Hash]struct{})
 	invalidatedExecutionPayloads := &sync.Map{}
-	var f *ForkChoiceStore
 	verifiedExecutionPayloadHashes, err := lru.NewWithEvict[common.Hash, common.Hash](65536, func(blockRoot, executionBlockHash common.Hash) {
 		verifiedExecutionPayload.Remove(blockRoot)
 		roots := executionPayloadRoots[executionBlockHash]
 		delete(roots, blockRoot)
 		if len(roots) == 0 {
 			delete(executionPayloadRoots, executionBlockHash)
-			invalidatedExecutionPayloads.Delete(executionBlockHash)
-			f.optimisticPayloadParents.Delete(executionBlockHash)
+			invalidatedExecutionPayloads.CompareAndDelete(executionBlockHash, nil)
 		}
 	})
 	if err != nil {
@@ -480,7 +478,7 @@ func NewForkChoiceStore(
 
 	headSet := make(map[common.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
-	f = &ForkChoiceStore{
+	f := &ForkChoiceStore{
 		forkGraph:                      forkGraph,
 		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		latestMessages:                 newLatestMessagesStore(anchorState.ValidatorLength()),
@@ -1251,7 +1249,7 @@ func (f *ForkChoiceStore) trackExecutionPayloadRootLocked(blockRoot, executionBl
 			if len(previousRoots) == 0 {
 				delete(f.executionPayloadRoots, previousHash)
 				if f.invalidatedExecutionPayloads != nil {
-					f.invalidatedExecutionPayloads.Delete(previousHash)
+					f.invalidatedExecutionPayloads.CompareAndDelete(previousHash, nil)
 				}
 			}
 		}
@@ -1379,7 +1377,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		if f.invalidatedExecutionPayloads == nil {
 			f.invalidatedExecutionPayloads = &sync.Map{}
 		}
-		f.invalidatedExecutionPayloads.Store(executionBlockHash, struct{}{})
+		f.invalidatedExecutionPayloads.LoadOrStore(executionBlockHash, nil)
 		for root := range f.executionPayloadRoots[executionBlockHash] {
 			if root == blockRoot {
 				continue
@@ -1586,7 +1584,7 @@ func (f *ForkChoiceStore) IsRootOptimistic(root common.Hash) bool {
 func (f *ForkChoiceStore) IsNodeOptimistic(node ForkChoiceNode) bool {
 	if f.forkGraph != nil {
 		if hash, ok := f.executionHead(node); ok {
-			_, optimistic := f.optimisticPayloadParents.Load(hash)
+			_, optimistic := f.optimisticPayloads.Load(hash)
 			return optimistic
 		}
 	}

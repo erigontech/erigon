@@ -732,7 +732,7 @@ func (f *ForkChoiceStore) recordGloasPayloadResultLocked(root common.Hash, paylo
 	}
 	switch effective {
 	case execution_client.PayloadStatusNotValidated:
-		f.optimisticPayloadParents.Store(payload.BlockHash, payload.ParentHash)
+		f.trackOptimisticPayloadLocked(root, payload, true)
 	case execution_client.PayloadStatusValidated:
 		f.validateOptimisticPayloadChainLocked(payload)
 	case execution_client.PayloadStatusInvalidated:
@@ -744,16 +744,16 @@ func (f *ForkChoiceStore) recordGloasPayloadResultLocked(root common.Hash, paylo
 					first = child
 					break
 				}
-				next, ok := f.optimisticPayloadParents.Load(parent)
-				if !ok || next == parent {
+				next, ok := f.optimisticPayloads.Load(parent)
+				if !ok || next.(*optimisticPayload).parentHash == parent {
 					break
 				}
-				child, parent = parent, next.(common.Hash)
+				child, parent = parent, next.(*optimisticPayload).parentHash
 			}
 		}
 		children := make(map[common.Hash][]common.Hash)
-		f.optimisticPayloadParents.Range(func(hash, parent any) bool {
-			p := parent.(common.Hash)
+		f.optimisticPayloads.Range(func(hash, payload any) bool {
+			p := payload.(*optimisticPayload).parentHash
 			children[p] = append(children[p], hash.(common.Hash))
 			return true
 		})
@@ -769,25 +769,110 @@ func (f *ForkChoiceStore) recordGloasPayloadResultLocked(root common.Hash, paylo
 	return effective, true
 }
 
+type optimisticPayload struct {
+	parentHash common.Hash
+	roots      map[common.Hash]bool // true if the beacon block has a separate payload envelope
+}
+
+func (f *ForkChoiceStore) trackOptimisticPayloadLocked(root common.Hash, payload *cltypes.Eth1Block, separatePayload bool) {
+	if entry, ok := f.optimisticPayloads.Load(payload.BlockHash); ok {
+		entry.(*optimisticPayload).roots[root] = separatePayload
+		return
+	}
+	f.optimisticPayloads.Store(payload.BlockHash, &optimisticPayload{
+		parentHash: payload.ParentHash,
+		roots:      map[common.Hash]bool{root: separatePayload},
+	})
+}
+
 func (f *ForkChoiceStore) validateOptimisticPayloadChainLocked(payload *cltypes.Eth1Block) {
 	f.resolveOptimisticPayloadLocked(payload.BlockHash, execution_client.PayloadStatusValidated)
 	for parent := payload.ParentHash; ; {
-		next, found := f.optimisticPayloadParents.Load(parent)
+		next, found := f.optimisticPayloads.Load(parent)
 		if !found {
 			return
 		}
 		f.resolveOptimisticPayloadLocked(parent, execution_client.PayloadStatusValidated)
-		parent = next.(common.Hash)
+		parent = next.(*optimisticPayload).parentHash
 	}
 }
 
 func (f *ForkChoiceStore) resolveOptimisticPayloadLocked(hash common.Hash, status execution_client.PayloadStatus) {
-	if _, wasOptimistic := f.optimisticPayloadParents.LoadAndDelete(hash); !wasOptimistic {
+	entry, ok := f.optimisticPayloads.Load(hash)
+	if !ok {
 		return
 	}
-	for root := range f.executionPayloadRoots[hash] {
-		separatePayload := f.optimisticStore == nil || !f.optimisticStore.IsOptimistic(root)
+	payload := entry.(*optimisticPayload)
+	for root, separatePayload := range payload.roots {
 		f.markPayloadStatusIfRetainedLocked(root, hash, status, nil, separatePayload)
+	}
+	if status == execution_client.PayloadStatusInvalidated {
+		payload.roots = nil
+		f.invalidatedExecutionPayloads.Store(hash, payload)
+	} else if f.executionPayloadStatus != nil && !f.executionHashMarkedInvalid(hash) {
+		f.executionPayloadStatus.Add(hash, status)
+	}
+	f.optimisticPayloads.Delete(hash)
+}
+
+func (f *ForkChoiceStore) pruneOptimisticPayloads() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	unreferenced := make(map[common.Hash]*optimisticPayload)
+	collect := func(hash, entry any) bool {
+		if p, ok := entry.(*optimisticPayload); ok {
+			unreferenced[hash.(common.Hash)] = p
+		}
+		return true
+	}
+	f.optimisticPayloads.Range(collect)
+	if f.invalidatedExecutionPayloads != nil {
+		f.invalidatedExecutionPayloads.Range(collect)
+	}
+	if len(unreferenced) == 0 {
+		return
+	}
+	keepChain := func(hash common.Hash) {
+		for {
+			p, ok := unreferenced[hash]
+			if !ok {
+				return
+			}
+			delete(unreferenced, hash)
+			hash = p.parentHash
+		}
+	}
+	if bid := f.anchorExecutionPayloadBid; bid != nil {
+		keepChain(bid.BlockHash)
+		keepChain(bid.ParentBlockHash)
+	}
+	// An EMPTY node can still build on a payload whose beacon block was pruned.
+	f.forkGraph.RangeRetainedBlocks(func(block *cltypes.BeaconBlock) {
+		if bid := block.Body.SignedExecutionPayloadBid; bid != nil && bid.Message != nil {
+			keepChain(bid.Message.BlockHash)
+			keepChain(bid.Message.ParentBlockHash)
+		} else if payload := block.Body.ExecutionPayload; payload != nil {
+			keepChain(payload.BlockHash)
+			keepChain(payload.ParentHash)
+		}
+	})
+	if len(f.blockImportsInFlight) != 0 {
+		for hash, p := range unreferenced {
+			for root := range p.roots {
+				if _, importing := f.blockImportsInFlight[root]; importing {
+					keepChain(hash)
+					break
+				}
+			}
+		}
+	}
+	for hash, p := range unreferenced {
+		if p.roots == nil {
+			f.invalidatedExecutionPayloads.Delete(hash)
+		} else {
+			f.optimisticPayloads.Delete(hash)
+		}
 	}
 }
 
@@ -909,7 +994,7 @@ func (f *ForkChoiceStore) invalidateOptimisticAncestorsLocked(newPayloadErr erro
 			break
 		}
 		hash := a.block.Body.ExecutionPayload.BlockHash
-		f.optimisticPayloadParents.Delete(hash)
+		f.resolveOptimisticPayloadLocked(hash, execution_client.PayloadStatusInvalidated)
 		f.markPayloadStatusLocked(a.root, hash, execution_client.PayloadStatusInvalidated)
 		if err := f.optimisticStore.InvalidateBlock(a.root, a.block); err != nil {
 			return fmt.Errorf("failed to remove block from optimistic store: %w", err)

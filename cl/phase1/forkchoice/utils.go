@@ -78,6 +78,7 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 			log.Warn("Failed to prune fork graph", "pruneSlot", pruneSlot, "err", err)
 			continue
 		}
+		f.pruneOptimisticPayloads()
 		f.pruneExecutionPayloadFirstSeen(pruneSlot)
 	}
 }
