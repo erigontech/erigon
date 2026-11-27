@@ -127,7 +127,6 @@ type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
 	BuildFilesInBackground(
 		ctx context.Context,
-		minBlockNum uint64,
 		retireToBlock uint64,
 		lvl log.Lvl,
 		seeder SeederClient,

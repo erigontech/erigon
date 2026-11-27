@@ -330,14 +330,13 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 
 func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
-	minBlockNum uint64,
 	retireToBlock uint64,
 	lvl log.Lvl,
 	seeder dbservices.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
-	br.scheduleRetire(&blockRetireRequest{minBlockNum: minBlockNum, retireToBlock: retireToBlock})
+	br.scheduleRetire(&blockRetireRequest{retireToBlock: retireToBlock})
 
 	if !br.working.CompareAndSwap(false, true) {
 		return false
@@ -364,7 +363,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.BuildFiles(ctx, minBlockNum, retireToBlock, lvl, seeder, onFinishRetire)
+		err := br.BuildFiles(ctx, 0, retireToBlock, lvl, seeder, onFinishRetire)
 		if errors.Is(err, snapshotsync.ErrRangeBuildInProgress) {
 			br.logger.Debug("[snapshots] retire blocks: deferred to in-flight build", "err", err)
 			return

@@ -2245,13 +2245,14 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum, collateToTxNum uint64) chan struct{} {
-	finished, _ := a.buildFilesInBackground(db, txNum, true, collateToTxNum)
+func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, toTxNum, collateToTxNum uint64) chan struct{} {
+	finished, _ := a.buildFilesInBackground(db, toTxNum, true, collateToTxNum)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, collateToTxNum uint64) (chan struct{}, bool) {
+// toTxNum only gates the "enough new data" early exit; collateToTxNum caps each built step.
+func (a *Aggregator) buildFilesInBackground(db kv.RoDB, toTxNum uint64, doMerge bool, collateToTxNum uint64) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
@@ -2266,8 +2267,8 @@ func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bo
 	}
 
 	visMin := a.visible.Load().minimaxTxNum
-	if (txNum + 1) <= visMin+a.stepSize.Load() {
-		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
+	if (toTxNum + 1) <= visMin+a.stepSize.Load() {
+		a.logger.Debug("[snapshots] buildFiles: not enough data", "toTxNum", toTxNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
 		close(fin)
 		return fin, false
 	}
@@ -2301,7 +2302,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bo
 			lastIdInDB(db, a.d[kv.StorageDomain]),
 			lastIdInDB(db, a.d[kv.CommitmentDomain]),
 		)
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(toTxNum/a.StepSize()),
 			"collateToStep", fmt.Sprintf("%.2f", float64(collateToTxNum)/float64(a.StepSize())))
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
