@@ -465,7 +465,7 @@ func TestWitnessMatchesHPH(t *testing.T) {
 	}
 }
 
-func TestWitnessEncoderMatchesTask3Shapes(t *testing.T) {
+func TestWitnessEncoderMatchesShapes(t *testing.T) {
 	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
 		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
 	})
