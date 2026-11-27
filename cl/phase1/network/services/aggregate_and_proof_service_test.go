@@ -107,6 +107,25 @@ func getAggregateAndProofAndState() (*SignedAggregateAndProofForGossip, *state.C
 	return a, s
 }
 
+const aggregateTestGenesisTime = 1_000_000
+
+var aggregateTestNetworkConfig = &clparams.NetworkConfig{
+	AttestationPropagationSlotRange: 32,
+	MaximumGossipClockDisparity:     clparams.ConfigDurationMSec(500 * time.Millisecond),
+}
+
+func clockAtSlot(cfg *clparams.BeaconChainConfig, slot uint64, offset time.Duration) eth_clock.EthereumClock {
+	now := time.Unix(int64(aggregateTestGenesisTime+cfg.SecondsPerSlot*slot), 0).Add(offset)
+	return eth_clock.NewEthereumClockWithNow(aggregateTestGenesisTime, common.Hash{}, cfg, func() time.Time { return now })
+}
+
+// headSlotClock keeps the wall clock at the start of the head state's slot, as on a synced node.
+func headSlotClock(cfg *clparams.BeaconChainConfig, syncedData *synced_data.SyncedDataManager) eth_clock.EthereumClock {
+	return eth_clock.NewEthereumClockWithNow(aggregateTestGenesisTime, common.Hash{}, cfg, func() time.Time {
+		return time.Unix(int64(aggregateTestGenesisTime+cfg.SecondsPerSlot*syncedData.HeadSlot()), 0)
+	})
+}
+
 func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
@@ -119,8 +138,8 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier)
+	clock := headSlotClock(cfg, syncedDataManager)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, aggregateTestNetworkConfig, p, true, batchSignatureVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -245,6 +264,7 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	aggService.(*aggregateAndProofServiceImpl).ethClock = clockAtSlot(&clparams.MainnetBeaconConfig, nextEpochSlot, -400*time.Millisecond)
 	require.NoError(t, sd.OnHeadState(s))
 	fcu.HighestSeenVal = nextEpochSlot
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
@@ -314,6 +334,7 @@ func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	aggService.(*aggregateAndProofServiceImpl).ethClock = clockAtSlot(&clparams.MainnetBeaconConfig, nextEpochSlot, -400*time.Millisecond)
 	require.NoError(t, sd.OnHeadState(s))
 	fcu.HighestSeenVal = s.Slot()
 
@@ -334,6 +355,7 @@ func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t 
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = beyondNextEpoch
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	aggService.(*aggregateAndProofServiceImpl).ethClock = clockAtSlot(&clparams.MainnetBeaconConfig, beyondNextEpochSlot, -400*time.Millisecond)
 	require.NoError(t, sd.OnHeadState(s))
 	fcu.HighestSeenVal = beyondNextEpochSlot
 
@@ -870,8 +892,8 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier)
+	clock := headSlotClock(cfg, syncedDataManager)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, aggregateTestNetworkConfig, p, true, batchSignatureVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -1584,8 +1606,8 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 	verifier := NewBatchSignatureVerifier(ctx, nil)
 	verifier.Start()
 	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier)
+	clock := headSlotClock(cfg, syncedDataManager)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, aggregateTestNetworkConfig, opPool, false, verifier)
 
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, agg), ErrIgnore)
 
@@ -1647,8 +1669,8 @@ func TestAggregateAndProofIsVerifiedWithoutValidators(t *testing.T) {
 	verifier := NewBatchSignatureVerifier(ctx, nil)
 	verifier.Start()
 	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier)
+	clock := headSlotClock(cfg, syncedDataManager)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, aggregateTestNetworkConfig, opPool, false, verifier)
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, agg))
 	require.Eventually(t, func() bool {
@@ -1658,4 +1680,132 @@ func TestAggregateAndProofIsVerifiedWithoutValidators(t *testing.T) {
 	require.Eventually(t, func() bool { return len(forkChoice.calls()) > 0 }, 5*time.Second, 10*time.Millisecond,
 		"a verified aggregate must reach fork choice")
 	require.Equal(t, [][]uint64{expectedIndices}, forkChoice.calls())
+}
+
+func TestAggregateAndProofIgnoresAggregateOutsideGossipSlotWindow(t *testing.T) {
+	denebCfg := clparams.MainnetBeaconConfig
+	denebCfg.AltairForkEpoch = 0
+	denebCfg.BellatrixForkEpoch = 0
+	denebCfg.CapellaForkEpoch = 0
+	denebCfg.DenebForkEpoch = 0
+	for _, tc := range []struct {
+		name      string
+		cfg       *clparams.BeaconChainConfig
+		slotDelta uint64
+		nowSlot   uint64
+		ignored   bool
+	}{
+		{name: "current slot", cfg: &clparams.MainnetBeaconConfig, nowSlot: 160},
+		{name: "future slot in the head epoch", cfg: &clparams.MainnetBeaconConfig, slotDelta: 5, nowSlot: 160, ignored: true},
+		{name: "deneb previous epoch", cfg: &denebCfg, nowSlot: 223},
+		{name: "deneb two epochs old while the head lags", cfg: &denebCfg, nowSlot: 225, ignored: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agg, s := getAggregateAndProofAndState()
+			data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+			data.Slot += tc.slotDelta
+			aggService, sd, fcu := setupAggregateAndProofTestWithConfig(t, tc.cfg)
+			aggService.(*aggregateAndProofServiceImpl).ethClock = clockAtSlot(tc.cfg, tc.nowSlot, 0)
+			require.NoError(t, sd.OnHeadState(s))
+			fcu.HighestSeenVal = s.Slot()
+			fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+			fcu.Ancestors[s.FinalizedCheckpoint().Epoch*tc.cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+			fcu.Ancestors[data.Target.Epoch*tc.cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+			fcu.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+			committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+			require.NoError(t, err)
+			agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+
+			err = aggService.ProcessMessage(context.Background(), nil, agg)
+			if !tc.ignored {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorContains(t, err, "not in propagation range")
+		})
+	}
+}
+
+func TestAggregateAndProofGossipSlotWindow(t *testing.T) {
+	const (
+		inMargin   = 400 * time.Millisecond
+		pastMargin = 600 * time.Millisecond
+	)
+	farFuture := clparams.MainnetBeaconConfig.FarFutureEpoch
+	for _, tc := range []struct {
+		name          string
+		slotsPerEpoch uint64
+		denebEpoch    uint64
+		electra       bool
+		slot          uint64
+		nowSlot       uint64
+		nowOffset     time.Duration
+		inWindow      bool
+	}{
+		{name: "capella within range", denebEpoch: farFuture, slot: 288, nowSlot: 320, inWindow: true},
+		{name: "capella previous epoch beyond range", denebEpoch: farFuture, slot: 288, nowSlot: 351},
+		{name: "capella range end within disparity", denebEpoch: farFuture, slot: 288, nowSlot: 321, nowOffset: inMargin, inWindow: true},
+		{name: "capella range end past disparity", denebEpoch: farFuture, slot: 288, nowSlot: 321, nowOffset: pastMargin},
+		{name: "capella future slot", denebEpoch: farFuture, slot: 288, nowSlot: 287},
+		{name: "deneb previous epoch beyond range", slot: 288, nowSlot: 351, inWindow: true},
+		{name: "deneb current epoch", slot: 320, nowSlot: 351, inWindow: true},
+		{name: "deneb two epochs old within disparity", slot: 319, nowSlot: 352, nowOffset: inMargin, inWindow: true},
+		{name: "deneb two epochs old past disparity", slot: 319, nowSlot: 352, nowOffset: pastMargin},
+		{name: "deneb future slot within disparity", slot: 288, nowSlot: 288, nowOffset: -inMargin, inWindow: true},
+		{name: "deneb future slot past disparity", slot: 288, nowSlot: 288, nowOffset: -pastMargin},
+		{name: "deneb future slot in the current epoch", slot: 300, nowSlot: 290},
+		{name: "first deneb epoch accepts previous capella epoch", denebEpoch: 10, slot: 288, nowSlot: 340, inWindow: true},
+		{name: "electra previous epoch beyond range", electra: true, slot: 288, nowSlot: 351, inWindow: true},
+		{name: "electra two epochs old past disparity", electra: true, slot: 319, nowSlot: 352, nowOffset: pastMargin},
+		{name: "16-slot epoch two epochs old within disparity", slotsPerEpoch: 16, slot: 143, nowSlot: 160, nowOffset: inMargin, inWindow: true},
+		{name: "16-slot epoch two epochs old past disparity", slotsPerEpoch: 16, slot: 143, nowSlot: 160, nowOffset: pastMargin},
+		{name: "8-slot epoch previous epoch", slotsPerEpoch: 8, slot: 8, nowSlot: 23, inWindow: true},
+		{name: "8-slot epoch two epochs old within range", slotsPerEpoch: 8, slot: 8, nowSlot: 31},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			if tc.slotsPerEpoch != 0 {
+				cfg.SlotsPerEpoch = tc.slotsPerEpoch
+			}
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = tc.denebEpoch
+			cfg.ElectraForkEpoch = farFuture
+			if tc.electra {
+				cfg.ElectraForkEpoch = 0
+			}
+			cfg.FuluForkEpoch = farFuture
+			cfg.GloasForkEpoch = farFuture
+			service, _, _ := setupAggregateAndProofTestWithConfig(t, &cfg)
+			service.(*aggregateAndProofServiceImpl).ethClock = clockAtSlot(&cfg, tc.nowSlot, tc.nowOffset)
+
+			aggregate := &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{1, 1}, 2048),
+				Data: &solid.AttestationData{
+					Slot:   tc.slot,
+					Target: solid.Checkpoint{Epoch: tc.slot / cfg.SlotsPerEpoch},
+				},
+			}
+			if tc.electra {
+				aggregate.CommitteeBits = solid.NewBitVector(64)
+				require.NoError(t, aggregate.CommitteeBits.SetBitAt(0, true))
+			}
+			msg := &SignedAggregateAndProofForGossip{
+				SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{Aggregate: aggregate}},
+				ImmediateProcess:        true,
+			}
+
+			err := service.ProcessMessage(context.Background(), nil, msg)
+
+			require.Error(t, err)
+			if tc.inWindow {
+				require.NotContains(t, err.Error(), "not in propagation range")
+				return
+			}
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorContains(t, err, "not in propagation range")
+		})
+	}
 }

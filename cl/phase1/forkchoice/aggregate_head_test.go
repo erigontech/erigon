@@ -192,7 +192,7 @@ func TestSlotVotesFromGossipAggregatesKeepHeadOnNodeWithoutValidators(t *testing
 		opPool := pool.NewOperationsPool(cfg)
 		forkChoice := &votesAppliedForkChoice{ForkChoiceStore: scenario.store, applied: make(chan struct{})}
 		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-4*cfg.SecondsPerSlot, common.Hash{}, cfg)
-		service := services.NewAggregateAndProofService(ctx, scenario.syncedData, forkChoice, clock, cfg, opPool, false, verifier)
+		service := services.NewAggregateAndProofService(ctx, scenario.syncedData, forkChoice, clock, cfg, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, opPool, false, verifier)
 
 		require.NoError(t, service.ProcessMessage(ctx, nil, aggregate))
 		select {
