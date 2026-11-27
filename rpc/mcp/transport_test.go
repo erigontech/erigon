@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net/http"
@@ -159,4 +160,62 @@ func TestGuardHTTPLimitsTheBody(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	var tooLarge *http.MaxBytesError
 	require.ErrorAs(t, readErr, &tooLarge)
+}
+
+// The transports take requests up to the same size limit as JSON-RPC.
+func TestListenAndServeTakesRequestsUpToTheRPCLimit(t *testing.T) {
+	addr := freeAddr(t)
+	srv := NewErigonMCPServer(nil, "", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.ListenAndServe(ctx, addr) }()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	big := strings.Repeat("x", 5<<20)
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"` + big + `","version":"0"}}}`
+	var resp *http.Response
+	var err error
+	for range 100 {
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr+"/mcp", strings.NewReader(initBody))
+		require.NoError(t, reqErr)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode, "a 5 MiB request is below the 32 MiB JSON-RPC limit")
+
+	sseReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/sse", nil)
+	require.NoError(t, err)
+	sseResp, err := client.Do(sseReq)
+	require.NoError(t, err)
+	defer sseResp.Body.Close()
+	var endpoint string
+	lines := bufio.NewScanner(sseResp.Body)
+	for lines.Scan() {
+		if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+			endpoint = data
+			break
+		}
+	}
+	require.NotEmpty(t, endpoint, "the SSE stream must advertise its message endpoint")
+	if !strings.HasPrefix(endpoint, "http") {
+		endpoint = "http://" + addr + endpoint
+	}
+	msgReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(initBody))
+	require.NoError(t, err)
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgResp, err := client.Do(msgReq)
+	require.NoError(t, err)
+	require.NoError(t, msgResp.Body.Close())
+	require.Less(t, msgResp.StatusCode, 300, "a 5 MiB SSE message is below the 32 MiB JSON-RPC limit")
+
+	cancel()
+	require.NoError(t, <-done)
 }
