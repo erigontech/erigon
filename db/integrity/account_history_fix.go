@@ -95,15 +95,7 @@ func codeHashProblemAccounts(ctx context.Context, db kv.TemporalRoDB, logger log
 		defer mu.Unlock()
 		set[string(addr)] = struct{}{}
 	}
-	err := walkAccountHistory(ctx, sc, db, 0, logger, CodeHash, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
-		codeHash := accounts.DeserialiseV3CodeHash(after)
-		if bytes.Equal(accounts.DeserialiseV3CodeHash(before), codeHash) {
-			return nil
-		}
-		code, _, err := tx.GetAsOf(kv.CodeDomain, addr, txNum+1)
-		if err != nil {
-			return err
-		}
+	err := walkCodeHashChanges(ctx, sc, db, 0, logger, func(addr []byte, _ uint64, codeHash, code []byte) error {
 		if !codeMatchesHash(codeHash, code) {
 			add(addr)
 		}

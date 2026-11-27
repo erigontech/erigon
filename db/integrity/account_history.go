@@ -261,15 +261,7 @@ func firstStorageAsOf(tx kv.TemporalTx, addr []byte, txNum uint64) (slot []byte,
 // the latest state, and after every code hash change in the accounts history.
 func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	var probs problems
-	err := walkAccountHistory(ctx, sc, db, fromStep, logger, CodeHash, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
-		codeHash := accounts.DeserialiseV3CodeHash(after)
-		if bytes.Equal(accounts.DeserialiseV3CodeHash(before), codeHash) {
-			return nil
-		}
-		code, _, err := tx.GetAsOf(kv.CodeDomain, addr, txNum+1)
-		if err != nil {
-			return err
-		}
+	err := walkCodeHashChanges(ctx, sc, db, fromStep, logger, func(addr []byte, txNum uint64, codeHash, code []byte) error {
 		return reportCodeMismatch(&probs, failFast, addr, codeHash, code, fmt.Sprintf("after txNum %d", txNum))
 	})
 	if err != nil {
@@ -345,18 +337,20 @@ func reportCodeMismatch(probs *problems, failFast bool, addr, codeHash, code []b
 		ErrIntegrity, CodeHash, addr, when, want, common.Shorten(code, 32)))
 }
 
-type accountChangeVisitor func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error
-
-type accountChanges struct {
+type codeHashWork struct {
 	addr    []byte
-	txNums  []uint64
-	befores [][]byte // the account before the change at txNums[i]
+	changes []codeHashChange // the changes within the file whose code hash after is known
+	// the last change of the account in the file, whose account after is in a later file
+	lastTxNum    uint64
+	lastCodeHash []byte // before the last change
 }
 
-// walkAccountHistory calls visit for every change of the sampled accounts in the accounts
-// history files, with the account before and after the change. Each file is read
-// sequentially by one goroutine, and the sampled accounts are visited by a pool of workers.
-func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, check Check, visit accountChangeVisitor) error {
+// walkCodeHashChanges calls visit for every change of the code hash of the sampled accounts
+// in the accounts history files, with the code hash after the change and the code then. Each
+// file is read sequentially by one goroutine, which finds the code hash changes from the
+// values before each change. Only the last change of an account in a file needs a history
+// read, by a pool of workers.
+func walkCodeHashChanges(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, visit func(addr []byte, txNum uint64, codeHash, code []byte) error) error {
 	files, err := historyIndexFiles(ctx, db, kv.AccountsDomain, fromStep)
 	if err != nil {
 		return err
@@ -368,12 +362,12 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 	progress := func() {
 		select {
 		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[integrity] %s", check), "scannedFiles", fmt.Sprintf("%d/%d", scanned.Load(), len(files)), "changes", common.PrettyCounter(changes.Load()))
+			logger.Info(fmt.Sprintf("[integrity] %s", CodeHash), "scannedFiles", fmt.Sprintf("%d/%d", scanned.Load(), len(files)), "changes", common.PrettyCounter(changes.Load()))
 		default:
 		}
 	}
 
-	work := make(chan []accountChanges, 1024)
+	work := make(chan []codeHashWork, 1024)
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(work)
@@ -382,16 +376,16 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 		for _, f := range files {
 			scans.Go(func() error {
 				defer scanned.Add(1)
-				return scanAccountHistoryFile(scanCtx, sc.NewWindowSampler(f.StartRootNum()), db, f, work)
+				return scanCodeHashChanges(scanCtx, sc.NewWindowSampler(f.StartRootNum()), db, f, work, &changes)
 			})
 		}
 		return scans.Wait()
 	})
 	for range estimate.AlmostAllCPUs() {
-		g.Go(func() error { return visitAccountWork(gCtx, db, work, visit, &changes, progress) })
+		g.Go(func() error { return visitCodeHashWork(gCtx, db, work, visit, progress) })
 	}
 	err = g.Wait()
-	logger.Info(fmt.Sprintf("[integrity] %s: history walked", check), "files", len(files), "changes", common.PrettyCounter(changes.Load()), "took", time.Since(start))
+	logger.Info(fmt.Sprintf("[integrity] %s: history walked", CodeHash), "files", len(files), "changes", common.PrettyCounter(changes.Load()), "took", time.Since(start))
 	return err
 }
 
@@ -411,18 +405,35 @@ func historyIndexFiles(ctx context.Context, db kv.TemporalRoDB, domain kv.Domain
 	return files, nil
 }
 
-func visitAccountWork(ctx context.Context, db kv.TemporalRoDB, work <-chan []accountChanges, visit accountChangeVisitor, changes *atomic.Uint64, progress func()) error {
+func visitCodeHashWork(ctx context.Context, db kv.TemporalRoDB, work <-chan []codeHashWork, visit func(addr []byte, txNum uint64, codeHash, code []byte) error, progress func()) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	visitChange := func(addr []byte, c codeHashChange) error {
+		code, _, err := tx.GetAsOf(kv.CodeDomain, addr, c.txNum+1)
+		if err != nil {
+			return err
+		}
+		return visit(addr, c.txNum, c.codeHash, code)
+	}
 	for batch := range work {
-		for _, acc := range batch {
-			if err := visitAccountChanges(tx, acc, visit); err != nil {
+		for _, w := range batch {
+			for _, c := range w.changes {
+				if err := visitChange(w.addr, c); err != nil {
+					return err
+				}
+			}
+			after, _, err := tx.GetAsOf(kv.AccountsDomain, w.addr, w.lastTxNum+1)
+			if err != nil {
 				return err
 			}
-			changes.Add(uint64(len(acc.txNums)))
+			if codeHash := accounts.DeserialiseV3CodeHash(after); !bytes.Equal(codeHash, w.lastCodeHash) {
+				if err := visitChange(w.addr, codeHashChange{txNum: w.lastTxNum, codeHash: bytes.Clone(codeHash)}); err != nil {
+					return err
+				}
+			}
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -432,18 +443,22 @@ func visitAccountWork(ctx context.Context, db kv.TemporalRoDB, work <-chan []acc
 	return nil
 }
 
-func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.TemporalRoDB, f kv.VisibleFile, work chan<- []accountChanges) error {
+func scanCodeHashChanges(ctx context.Context, sampler *Sampler, db kv.TemporalRoDB, f kv.VisibleFile, work chan<- []codeHashWork, changes *atomic.Uint64) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	const batchChanges = 4096
-	var batch []accountChanges
-	var batchLen int
-	send := func() error {
-		if len(batch) == 0 {
+	const batchSize = 4096
+	var batch []codeHashWork
+	var cur *codeHashWork
+	var n uint64
+	flush := func() error {
+		cur = nil
+		changes.Add(n)
+		n = 0
+		if len(batch) < batchSize {
 			return nil
 		}
 		select {
@@ -451,48 +466,42 @@ func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.Tempora
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		batch, batchLen = nil, 0
+		batch = nil
 		return nil
 	}
 	sampled := false
 	var addr []byte
 	err = state.AggTx(tx).ScanHistory(ctx, kv.AccountsDomain, f.StartRootNum(), f.EndRootNum(), func(k []byte, txNum uint64, before []byte) error {
+		n++
+		codeHash := accounts.DeserialiseV3CodeHash(before)
 		if !bytes.Equal(k, addr) {
 			addr = append(addr[:0], k...)
-			if sampled = !sampler.CanSkip(); sampled {
-				if batchLen >= batchChanges {
-					if sendErr := send(); sendErr != nil {
-						return sendErr
-					}
-				}
-				batch = append(batch, accountChanges{addr: bytes.Clone(k)})
+			if flushErr := flush(); flushErr != nil {
+				return flushErr
 			}
+			if sampled = !sampler.CanSkip(); sampled {
+				batch = append(batch, codeHashWork{addr: bytes.Clone(k)})
+				cur = &batch[len(batch)-1]
+			}
+		} else if sampled && !bytes.Equal(codeHash, cur.lastCodeHash) {
+			cur.changes = append(cur.changes, codeHashChange{txNum: cur.lastTxNum, codeHash: bytes.Clone(codeHash)})
 		}
 		if sampled {
-			last := &batch[len(batch)-1]
-			last.txNums, last.befores = append(last.txNums, txNum), append(last.befores, bytes.Clone(before))
-			batchLen++
+			cur.lastTxNum, cur.lastCodeHash = txNum, bytes.Clone(codeHash)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	return send()
-}
-
-// visitAccountChanges takes each change's after-value from the next change's before-value,
-// so an account costs one history read per file: the after-value of its last change.
-func visitAccountChanges(tx kv.TemporalTx, acc accountChanges, visit accountChangeVisitor) error {
-	last := len(acc.txNums) - 1
-	for i, txNum := range acc.txNums[:last] {
-		if err := visit(tx, acc.addr, txNum, acc.befores[i], acc.befores[i+1]); err != nil {
-			return err
-		}
+	changes.Add(n)
+	if len(batch) == 0 {
+		return nil
 	}
-	after, _, err := tx.GetAsOf(kv.AccountsDomain, acc.addr, acc.txNums[last]+1)
-	if err != nil {
-		return err
+	select {
+	case work <- batch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return visit(tx, acc.addr, acc.txNums[last], acc.befores[last], bytes.Clone(after))
 }
