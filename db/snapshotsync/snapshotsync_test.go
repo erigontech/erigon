@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -1015,4 +1016,220 @@ func TestSkipBlobDownload(t *testing.T) {
 	for _, name := range []string{"v1.1-008620-008630-beaconblocks.seg", "v1.1-000000-000500-bodies.seg"} {
 		require.False(t, skipBlobDownload(name, false, 8_630_000), name)
 	}
+}
+
+func TestSnapshotDownloadFiltersRegisteredTypes(t *testing.T) {
+	var caplinBlocks, caplinState, other []string
+	for _, typ := range snaptype.CaplinSnapshotTypes {
+		caplinBlocks = append(caplinBlocks, typ.FileName(snaptype.Version{}, 0, 100))
+		caplinBlocks = append(caplinBlocks, typ.IdxFileNames(0, 100)...)
+	}
+	for _, typ := range snaptype.CaplinStateSnapshotTypes {
+		for _, name := range append([]string{typ.FileName(snaptype.Version{}, 0, 100)}, typ.IdxFileNames(0, 100)...) {
+			caplinState = append(caplinState, filepath.ToSlash(filepath.Join("caplin", name)))
+		}
+	}
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		other = append(other, typ.FileName(snaptype.Version{}, 0, 100))
+	}
+	other = append(other,
+		filepath.ToSlash(filepath.Join("domain", snaptype2.Domains.FileName(snaptype.Version{}, 0, 100))),
+		"salt-blocks.txt", "erigondb.toml")
+	unregistered := []string{
+		"v1.1-000000-000100-beaconblocks-extra.seg",
+		"v1.1-000000-000100-blobsidecars-extra.seg",
+		"caplin/v1.1-000000-000100-BlockProposers.seg",
+	}
+	unregisteredRoot := unregistered[:2]
+	unregisteredPath := unregistered[2:]
+
+	all := slices.Concat(caplinBlocks, caplinState, other, unregistered)
+	wantedRegistered := slices.Concat(caplinBlocks, caplinState, other)
+	items := make(snapcfg.PreverifiedItems, len(all))
+	for i, name := range all {
+		items[i] = snapcfg.PreverifiedItem{Name: name}
+	}
+	for _, tc := range []struct {
+		mode        CaplinMode
+		caplinState bool
+		name        string
+		want        []string
+	}{
+		{mode: NoCaplin, name: "no-caplin-without-state", want: slices.Concat(other, unregisteredRoot)},
+		{mode: OnlyCaplin, name: "only-caplin-without-state", want: caplinBlocks},
+		{mode: OnlyCaplin, caplinState: true, name: "only-caplin-with-state", want: slices.Concat(caplinBlocks, caplinState, unregisteredPath)},
+		{mode: AlsoCaplin, name: "also-caplin-without-state", want: slices.Concat(other, caplinBlocks, unregisteredRoot)},
+		{mode: AlsoCaplin, caplinState: true, name: "also-caplin-with-state", want: slices.Concat(wantedRegistered, unregistered)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SnapshotsToDownload(
+				context.Background(), "test", false, true, tc.caplinState, BlobRetention{}, prune.ArchiveMode, tc.mode,
+				nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1,
+				snapcfg.Preverified{Items: items}, 0, 0,
+			)
+			require.NoError(t, err)
+			gotNames := make([]string, len(got))
+			for i := range got {
+				gotNames[i] = got[i].Name
+			}
+			require.ElementsMatch(t, tc.want, gotNames)
+		})
+	}
+
+	got, err := SnapshotsToDownload(context.Background(), "test", false, false, true, BlobRetention{}, prune.ArchiveMode, AlsoCaplin,
+		nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1, snapcfg.Preverified{Items: items}, 0, 0)
+	require.NoError(t, err)
+	gotNames := make([]string, len(got))
+	for i := range got {
+		gotNames[i] = got[i].Name
+	}
+	require.Contains(t, gotNames, "v1.1-000000-000100-blobsidecars-extra.seg")
+	for _, name := range []string{"v1.1-000000000-000000100-blobsidecars.seg", "v1.1-000000000-000000100-blocksidecars.idx"} {
+		require.NotContains(t, gotNames, name)
+	}
+
+	nested := filepath.ToSlash(filepath.Join("caplin", snaptype2.Headers.FileName(snaptype.Version{}, 0, 100)))
+	got, err = SnapshotsToDownload(context.Background(), "test", false, true, true, BlobRetention{}, prune.ArchiveMode, AlsoCaplin,
+		nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: nested}}}, 42, 0)
+	require.NoError(t, err)
+	require.Equal(t, []snapcfg.PreverifiedItem{{Name: nested}}, got)
+}
+
+func checkDownloadDecision(t *testing.T, item snapcfg.Preverified, mode CaplinMode, state bool, limit uint64, want bool) {
+	t.Helper()
+	got, err := SnapshotsToDownload(t.Context(), "review", false, true, state, BlobRetention{}, prune.ArchiveMode, mode, nil, &requestListBlockReader{}, nil, ethconfig.Defaults.Sync, 1, item, limit, 32)
+	require.NoError(t, err)
+	require.Equal(t, want, len(got) != 0, "selected %v", got)
+}
+
+func TestDownloadUnknownCaplinPath(t *testing.T) {
+	const name = "caplin/v1.1-000000-000050-NoSuchTable.seg"
+	raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+	require.Empty(t, raw.Typed(snaptype.CaplinSnapshotTypes).Items)
+	for _, state := range []bool{false, true} {
+		t.Run(fmt.Sprintf("state=%t", state), func(t *testing.T) {
+			checkDownloadDecision(t, raw, NoCaplin, state, 0, false)
+		})
+	}
+}
+
+func TestDownloadUnknownCaplinPathIgnoresBlockLimit(t *testing.T) {
+	const name = "caplin/v1.1-000000-000050-BlockProposers.seg"
+	item := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+	for _, limit := range []uint64{0, 42} {
+		t.Run(fmt.Sprintf("toBlock=%d", limit), func(t *testing.T) {
+			checkDownloadDecision(t, item, AlsoCaplin, true, limit, true)
+		})
+	}
+}
+
+func TestDownloadNameContainingCaplinUsesLocation(t *testing.T) {
+	const name = "domain/caplin-v1.1-000000-000050-headers.seg"
+	checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}, NoCaplin, false, 0, true)
+}
+
+func TestDownloadTypedCaplinPaths(t *testing.T) {
+	fixtures := []struct {
+		basename string
+		keep     bool
+	}{
+		{basename: "salt-blocks.txt"},
+		{basename: "salt-state.txt"},
+		{basename: "erigondb.toml"},
+		{basename: "v1.0-accounts.0-32.kv"},
+		{basename: snaptype2.Headers.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype2.Headers.IdxFileNames(0, 50_000)[0]},
+		{basename: snaptype.BeaconBlocks.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype.BeaconBlocks.IdxFileNames(0, 50_000)[0], keep: true},
+		{basename: snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000), keep: true},
+		{basename: snaptype.PendingDepositsDump.IdxFileNames(0, 50_000)[0], keep: true},
+	}
+	for _, fixture := range fixtures {
+		name := "caplin/" + fixture.basename
+		raw := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+		typed := raw.Typed(snaptype2.BlockSnapshotTypes)
+		t.Run("typed/"+fixture.basename, func(t *testing.T) {
+			if fixture.keep {
+				require.Equal(t, raw.Items, typed.Items)
+			} else {
+				require.Empty(t, typed.Items)
+			}
+		})
+	}
+
+	beacon := "caplin/" + snaptype.BeaconBlocks.FileName(snaptype.Version{}, 0, 50_000)
+	header := "caplin/" + snaptype2.Headers.FileName(snaptype.Version{}, 0, 50_000)
+	cases := []struct {
+		name        string
+		useTyped    bool
+		mode        CaplinMode
+		caplinState bool
+		toBlock     uint64
+		want        bool
+	}{
+		{name: beacon, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: beacon, useTyped: true, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: beacon, useTyped: true, mode: AlsoCaplin, caplinState: true, want: true},
+		{name: beacon, useTyped: true, mode: OnlyCaplin, toBlock: 0, want: false},
+		{name: beacon + ".torrent", useTyped: true, mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: header, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: header, mode: OnlyCaplin, toBlock: 0, want: false},
+		{name: header, mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/salt-blocks.txt", mode: OnlyCaplin, caplinState: true, toBlock: 42, want: true},
+		{name: "caplin/erigondb.toml", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: "caplin/v1.0-accounts.0-64.kv", mode: AlsoCaplin, caplinState: true, toBlock: 42, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/typed=%t/mode=%d/state=%t/toBlock=%d", tc.name, tc.useTyped, tc.mode, tc.caplinState, tc.toBlock), func(t *testing.T) {
+			items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: tc.name}}}
+			if tc.useTyped {
+				items = items.Typed(snaptype2.BlockSnapshotTypes)
+			}
+			checkDownloadDecision(t, items, tc.mode, tc.caplinState, tc.toBlock, tc.want)
+		})
+	}
+}
+
+func TestDownloadMalformedRootBlobSidecarIsRejected(t *testing.T) {
+	const name = "v1.1-bad-000050-blobsidecars.seg"
+	items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: name}}}
+	require.Empty(t, items.Typed(snaptype.CaplinSnapshotTypes).Items)
+}
+
+func TestDownloadBareCaplinState(t *testing.T) {
+	seg := snaptype.PendingDepositsDump.FileName(snaptype.Version{}, 0, 50_000)
+	idx := snaptype.PendingDepositsDump.IdxFileNames(0, 50_000)[0]
+	cases := []struct {
+		name        string
+		mode        CaplinMode
+		caplinState bool
+		toBlock     uint64
+		want        bool
+	}{
+		{name: seg, mode: NoCaplin, want: true},
+		{name: seg, mode: NoCaplin, caplinState: true, toBlock: 42, want: false},
+		{name: seg, mode: OnlyCaplin, caplinState: true, want: false},
+		{name: seg, mode: AlsoCaplin, want: true},
+		{name: seg + ".torrent", mode: AlsoCaplin, caplinState: true, want: true},
+		{name: idx, mode: NoCaplin, want: true},
+		{name: idx, mode: OnlyCaplin, caplinState: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/mode=%d/state=%t/toBlock=%d", tc.name, tc.mode, tc.caplinState, tc.toBlock), func(t *testing.T) {
+			checkDownloadDecision(t, snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: tc.name}}}, tc.mode, tc.caplinState, tc.toBlock, tc.want)
+		})
+	}
+}
+
+func TestFilterToBlockSkipsUnparsableSaltPrefixedPath(t *testing.T) {
+	require.True(t, filterToBlock("salt-backup/notes.txt", 42, 0, false))
+	require.False(t, filterToBlock("salt-blocks.txt", 42, 0, false))
+}
+
+// A registry entry can name an index the type does not have: it is dropped, not a crash.
+func TestTypedDropsAnIndexTheTypeDoesNotHave(t *testing.T) {
+	items := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{{Name: "v1.1-000000-000100-domain.idx", Hash: "h"}}}
+	require.NotPanics(t, func() {
+		require.Empty(t, items.Typed([]snaptype.Type{snaptype2.Domains}).Items)
+	})
 }
