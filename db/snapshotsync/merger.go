@@ -218,16 +218,9 @@ func (m *Merger) Merge(
 	for _, r := range mergeRanges {
 		mergedFileNames = mergedFileNames[:0]
 		in = make(map[snaptype.Enum][]*DirtySegment)
-		out := make(map[snaptype.Enum][]*DirtySegment)
 		toMerge, err := m.filesByRange(v, r.From(), r.To())
 		if err != nil {
 			return err
-		}
-		for snapType, t := range toMerge {
-			if out[snapType] == nil {
-				out[snapType] = make([]*DirtySegment, 0, len(t))
-			}
-			out[snapType] = append(out[snapType], t...)
 		}
 
 		for _, t := range snapTypes {
@@ -237,7 +230,6 @@ func (m *Merger) Merge(
 				// file would fail on Windows, and an input with the output's path must be neither deleted nor retired.
 				isOutput := func(s *DirtySegment) bool { return s.FilePath() == output.Path }
 				toMerge[t.Enum()] = slices.DeleteFunc(toMerge[t.Enum()], isOutput)
-				out[t.Enum()] = slices.DeleteFunc(out[t.Enum()], isOutput)
 				mergedFileNames = append(mergedFileNames, output.Path)
 				continue
 			}
@@ -251,6 +243,9 @@ func (m *Merger) Merge(
 			)
 			if err != nil {
 				return err
+			}
+			if newDirtySegment == nil { // the type has no visible file inside the range
+				continue
 			}
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
@@ -278,7 +273,7 @@ func (m *Merger) Merge(
 				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
-		m.integrateMergedDirtyFiles(snapshots, in, out)
+		m.integrateMergedDirtyFiles(snapshots, in, toMerge)
 		in = nil
 	}
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
