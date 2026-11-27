@@ -402,7 +402,8 @@ const maxPooledEntries = 16 * 1024
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
 	reads := ibs.reads
-	poolable := ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	poolable := ibs.accessList.entries()+reads.entries() <= maxPooledEntries &&
+		len(ibs.logs.entries)+len(ibs.logs.pool) <= maxPooledStateLogs
 	ibs.Reset()
 	if !poolable {
 		return false

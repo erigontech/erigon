@@ -601,4 +601,3 @@ func TestLogPoolReusesTxMaxLogsAcrossTxs(t *testing.T) {
 	require.Equal(t, maxLogsPerTxn, reused)
 	require.Equal(t, slots, cap(ibs.logs.entries), "slots reallocated")
 }
-
