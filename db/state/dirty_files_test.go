@@ -189,7 +189,7 @@ func newBufferedTestLogger() (log.Logger, *bytes.Buffer) {
 func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16)
 	// Bump this (accounts) domain's read ceiling to v2.1 so the mixed-version fixtures open without
 	// tripping MustSupport; unrelated to commitment-domain versioning.
 	d.FileVersion.DataKV = version.Versions{Current: version.V2_1, MinSupported: version.V1_0}
@@ -235,7 +235,7 @@ func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
 	} {
 		t.Run(strings.Join(order, ","), func(t *testing.T) {
 			logger := log.New()
-			_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+			_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16)
 			tmp := t.TempDir()
 			for _, name := range order {
 				writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, name), tmp, logger)
@@ -339,7 +339,7 @@ func TestDirtyFilesEndTxNumMinimax(t *testing.T) {
 func TestOpenDirtyFilesKeepsDataOnlyFile(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16)
 	names := []string{"v1.0-accounts.0-1.kv"}
 	writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, names[0]), t.TempDir(), logger)
 
@@ -358,7 +358,7 @@ func TestOpenDirtyFilesKeepsDataOnlyFile(t *testing.T) {
 func TestOpenDirtyFilesDropsEmptyDataFile(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16)
 	names := []string{"v1.0-accounts.0-1.kv", "v1.0-accounts.1-2.kv"}
 	writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, names[0]), t.TempDir(), logger)
 	require.NoError(t, os.WriteFile(filepath.Join(d.dirs.SnapDomain, names[1]), nil, 0o644))
