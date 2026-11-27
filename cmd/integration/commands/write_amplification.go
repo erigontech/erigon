@@ -18,6 +18,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -158,13 +159,14 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 	}
 
 	results := make([]domainStats, 0, len(domains))
+	var errs []error
 
 	for _, domain := range domains {
 		logger.Info("Processing domain", "domain", domain.String())
 
 		stats, err := calculateDomainWriteAmplification(ctx, tx, aggTx, domain, logger)
 		if err != nil {
-			logger.Error("Failed to process domain", "domain", domain.String(), "error", err)
+			errs = append(errs, fmt.Errorf("domain %s: %w", domain, err))
 			continue
 		}
 		results = append(results, stats)
@@ -187,7 +189,7 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 		)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func calculateDomainWriteAmplification(
