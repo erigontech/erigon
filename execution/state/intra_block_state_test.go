@@ -1256,6 +1256,13 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
+
+	logs := New(NewNoopReader())
+	logs.SetTxContext(1, 0)
+	for range maxPooledStateLogs + 1 {
+		logs.AllocLog(common.HexToAddress("0x1"), 0, 0)
+	}
+	require.False(t, logs.resetForPool(), "a log arena grown past what a pooled state keeps")
 }
 
 func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
