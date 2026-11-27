@@ -2442,11 +2442,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 
 	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
 	ev.versionMap.SetSpecRun(ev.Version().TxIndex, &state.SpecRun{Run: evm, Incarnation: ev.Version().Incarnation})
+	defer func() {
+		ev.versionMap.SetSpecRun(ev.Version().TxIndex, nil)
+		// The cancel must not reach this worker's next task, which may run without a Reset.
+		evm.Reset(evm.TxContext, evm.IntraBlockState())
+	}()
 	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
-	ev.versionMap.SetSpecRun(ev.Version().TxIndex, nil)
-	// The cancel must not reach this worker's next task, which may run without a Reset.
-	evm.Reset(evm.TxContext, evm.IntraBlockState())
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
 	// occupancy reveals whether workers are starved or compute-bound.
