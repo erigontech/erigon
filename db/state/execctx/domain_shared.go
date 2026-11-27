@@ -1197,6 +1197,9 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 // Commit verifies both its starting version and the version it will publish.
 // Validation callbacks run after the domain flush and before the MDBX commit.
 // A callback error leaves the transaction uncommitted for the caller to roll back.
+// NpFlushNs is the wall of the last Commit's flushMem (probe).
+var NpFlushNs atomic.Int64
+
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
@@ -1262,9 +1265,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.stateCache != nil {
 		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain), stash(kv.CodeDomain))
 	}
+	npFlush0 := time.Now()
 	if err := sd.flushMem(ctx, tx, opts...); err != nil {
 		return err
 	}
+	NpFlushNs.Store(int64(time.Since(npFlush0)))
 	if err := runValidate(); err != nil {
 		return err
 	}

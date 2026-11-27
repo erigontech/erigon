@@ -235,6 +235,7 @@ func newCommitmentCalculator(
 	drTemplate *state.LayeredDomainReader,
 	logCommit func(commitment.CommitProgress),
 ) (*commitmentCalculator, error) {
+	npCcT0 := time.Now()
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader and v3 owns its own collected
 	// feed, so only ModeDirect needs the upgrade.
@@ -296,6 +297,7 @@ func newCommitmentCalculator(
 		}
 		cc.branchPrefetch = newBranchPrefetcher(workCtx, db)
 		asOfReader.prefetched = cc.branchPrefetch
+		defer func() { cc.branchPrefetch.np.ccConsNs = int64(time.Since(npCcT0)) }()
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.prefetchFn = func(plainKey []byte) {
@@ -314,10 +316,22 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 }
 
 func (cc *commitmentCalculator) Stop() {
+	npT0 := time.Now()
 	close(cc.done)
 	cc.wg.Wait()
+	npLoop := time.Now()
 	if p := cc.branchPrefetch; p != nil {
+		npLeft := len(p.work)
 		p.close()
+		if logNpPhases {
+			args := []any{"blk", cc.lastComputedBlock, "consUs", p.np.consNs / 1000, "ccConsUs", p.np.ccConsNs / 1000, "loopWaitUs", npLoop.Sub(npT0).Microseconds(),
+				"closeUs", time.Since(npLoop).Microseconds(), "left", npLeft, "added", p.np.added.Load(), "dropped", p.dropped.Load(), "recBytes", p.bytes.Load(),
+				"foldQueue", p.np.foldQueue, "foldWN", p.np.foldWN, "foldHit", p.np.foldHit.Load(), "foldMem", p.np.foldMem.Load()}
+			args = append(args, p.np.worker.args("w")...)
+			args = append(args, p.np.fold.args("f")...)
+			cc.logger.Info("[np-bp] stop", args...)
+			bpPrev.Store(p)
+		}
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
@@ -1162,6 +1176,9 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
+		if logNpPhases && r.prefetched != nil {
+			return r.npReadBranch(plainKey)
+		}
 		if enc, step, ok := r.prefetchedBranch(plainKey); ok {
 			return enc, step, nil
 		}
@@ -1192,6 +1209,33 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 		enc = nil
 	}
 	return enc, step, nil
+}
+
+// npReadBranch is Read for a branch with the prefetch hit/miss counted.
+func (r *asOfStateReader) npReadBranch(plainKey []byte) ([]byte, kv.Step, error) {
+	p := r.prefetched
+	if p.np.foldSeen.CompareAndSwap(false, true) {
+		p.np.foldQueue, p.np.foldWN = int64(len(p.work)), p.np.worker.n.Load()
+	}
+	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, plainKey); inMem || maxStep != kv.NoStepBound {
+		p.np.foldMem.Add(1)
+	} else if enc, step, ok := p.get(plainKey); ok {
+		p.np.foldHit.Add(1)
+		return enc, step, nil
+	}
+	t := time.Now()
+	var enc []byte
+	var step kv.Step
+	var err error
+	if r.workerCtx != nil {
+		enc, step, err = r.sd.GetLatestContext(r.workerCtx, kv.CommitmentDomain, r.roTx, plainKey)
+	} else {
+		enc, step, err = r.sd.GetLatest(kv.CommitmentDomain, r.roTx, plainKey)
+	}
+	if err == nil {
+		p.np.fold.note(plainKey, enc, time.Since(t))
+	}
+	return enc, step, err
 }
 
 func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {

@@ -459,6 +459,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
+	npF0 := time.Now()
+	var npSD0, npSD1, npM0, npM1 time.Time
 	var restoreStateChanges func()
 	// Roll back only uncommitted changes; earlier catch-up commits still need delivery.
 	checkpointStateChanges := func() {
@@ -510,6 +512,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Create SharedDomains on the raw RO tx. Domain state (accounts,
 	// storage, code, commitment) is read from the committed DB state.
 	var isDomainAheadOfBlocks bool
+	npSD0 = time.Now()
 	currentContext, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
 	if err != nil {
 		// we handle isDomainAheadOfBlocks=true after AppendCanonicalTxNums to allow the node to catch up
@@ -565,6 +568,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	blockHash := originalBlockHash
+	npSD1 = time.Now()
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
@@ -730,9 +734,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
+		npM0 = time.Now()
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		npM1 = time.Now()
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice.
@@ -955,6 +961,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
+		if !npM1.IsZero() {
+			flush := time.Duration(execctx.NpFlushNs.Load())
+			e.logger.Info("[np-sd] fcu", "blk", headNum, "startUs", npF0.UnixMicro(), "sdBuildUs", npSD1.Sub(npSD0).Microseconds(), "preMergeUs", npM0.Sub(npF0).Microseconds(),
+				"mergeUs", npM1.Sub(npM0).Microseconds(), "runLoopUs", persistStart.Sub(npM1).Microseconds(), "flushUs", flush.Microseconds(),
+				"commitUs", (persist - flush).Microseconds(), "totalUs", time.Since(npF0).Microseconds())
+		}
 		e.emitBlockMetrics(blockHash, e.forkValidator.GetTimings(blockHash), persist, headNum, finishProgressBefore, mergeExtendingFork)
 	}
 
