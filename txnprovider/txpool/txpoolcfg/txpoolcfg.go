@@ -135,6 +135,7 @@ const (
 	DelegatedTxnLimit          // Delegated account already has an executable transaction
 	BlobSlotsOverflow
 	BlobReplacementTypeMismatch
+	SkippedAfterKZGFailure // an earlier remote blob proof failed in this batch
 )
 
 func (r DiscardReason) String() string {
@@ -193,6 +194,8 @@ func (r DiscardReason) String() string {
 		return "can't replace blob-txn with a non-blob-txn"
 	case BlobReplacementTypeMismatch:
 		return "type-3 blob transactions and blob-carrying frame transactions cannot replace each other"
+	case SkippedAfterKZGFailure:
+		return "skipped after an earlier blob proof failed"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
 	case BlobSlotsOverflow:

@@ -113,6 +113,72 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
+func TestStateReadsAtLatestExecutedIgnoreForkchoiceFloor(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	executed := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+	wantBalance, err := apis.eth.GetBalance(ctx, testAddr, &executed)
+	require.NoError(t, err)
+
+	forkchoiceHead := chainInfo.head + uint64(pruneGatingDistance) + 1
+	headHash := common.Hash{0xfc}
+	require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, headHash)
+		return rawdb.WriteHeaderNumber(tx, headHash, forkchoiceHead)
+	}))
+	require.Greater(t, pruneGatingDistance.PruneTo(forkchoiceHead), chainInfo.head, "the executed block must fall below the forkchoice prune floor")
+
+	for name, blockNumber := range map[string]rpc.BlockNumber{
+		"latest_executed": rpc.LatestExecutedBlockNumber,
+		"executed_number": rpc.BlockNumber(chainInfo.head),
+	} {
+		t.Run(name, func(t *testing.T) {
+			selector := rpc.BlockNumberOrHashWithNumber(blockNumber)
+			balance, err := apis.eth.GetBalance(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, *wantBalance, *balance)
+
+			nonce, err := apis.eth.GetTransactionCount(ctx, testAddr, &selector)
+			require.NoError(t, err)
+			require.Equal(t, hexutil.Uint64(pruneGatingChainLen-1), *nonce)
+
+			values, err := apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+			require.NoError(t, err)
+			require.Equal(t, []hexutil.Bytes{make([]byte, 32)}, values[testAddr])
+
+			graphqlBalance, graphqlNonce, _, err := apis.graphql.GetAccountInfo(ctx, testAddr, blockNumber)
+			require.NoError(t, err)
+			require.Equal(t, wantBalance.String(), graphqlBalance)
+			require.Equal(t, uint64(pruneGatingChainLen-1), graphqlNonce)
+
+			_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", blockNumber)
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("block_below_forkchoice_floor", func(t *testing.T) {
+		belowFloor := rpc.BlockNumber(chainInfo.head - 1)
+		require.GreaterOrEqual(t, uint64(belowFloor), pruneGatingDistance.PruneTo(chainInfo.head), "the block must be above the execution prune floor")
+		selector := rpc.BlockNumberOrHashWithNumber(belowFloor)
+
+		_, err := apis.eth.GetBalance(ctx, testAddr, &selector)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.eth.GetStorageValues(ctx, map[common.Address][]common.Hash{testAddr: {{}}}, &selector)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, _, _, err = apis.graphql.GetAccountInfo(ctx, testAddr, belowFloor)
+		require.ErrorIs(t, err, state.ErrPruned)
+
+		_, err = apis.graphql.GetAccountStorage(ctx, testAddr, "0x0", belowFloor)
+		require.ErrorIs(t, err, state.ErrPruned)
+	})
+}
+
 // TestCallBundleGatesTxBlockAndStateBlockSeparately pins the two blocks eth_callBundle
 // reads apart: the bundle's transactions come from the bodies of the blocks that hold
 // them, the state they run against comes from the block the caller names. A retention
