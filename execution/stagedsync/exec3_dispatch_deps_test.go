@@ -206,10 +206,10 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 			require.True(t, s.be.selfLoopDispatched[2])
 		})
 	}
-	// A recipient with code runs it in the transfer frame, so the transfer still waits.
+	// A recipient with code runs it without the credit, so the transfer need not wait either.
 	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), d)
-	require.True(t, s.be.execTasks.isBlocked(2))
-	require.False(t, s.be.selfLoopDispatched[2])
+	require.False(t, s.be.execTasks.isBlocked(2))
+	require.True(t, s.be.selfLoopDispatched[2])
 	// The run executes the frame of a funded precompile, so a transfer to it still waits.
 	p := accounts.InternAddress(common.BytesToAddress([]byte{1}))
 	paid := valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p})
@@ -244,7 +244,7 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	}
 }
 
-func TestChargedValueTransferReadsRecipientOnlyAfterALowerTxTouchedIt(t *testing.T) {
+func TestChargedValueTransferDispatchReadsNoRecipient(t *testing.T) {
 	a := accounts.InternAddress(common.HexToAddress("0xa0"))
 	b := accounts.InternAddress(common.HexToAddress("0xb1"))
 	c := accounts.InternAddress(common.HexToAddress("0xc2"))
@@ -252,14 +252,15 @@ func TestChargedValueTransferReadsRecipientOnlyAfterALowerTxTouchedIt(t *testing
 	f := accounts.InternAddress(common.HexToAddress("0xf5"))
 	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}))
 	require.Zero(t, s.accountReads[f.Value()])
-	require.NotZero(t, s.accountReads[d.Value()], "tx 2 decides from d whether it waits for tx 1")
+	require.Zero(t, s.accountReads[d.Value()])
 	require.False(t, s.be.execTasks.isBlocked(1))
 	require.False(t, s.be.execTasks.isBlocked(2))
 }
 
-// The run peeks at the recipient's code at block start; validation credits only a recipient that
-// still has no code after the lower txs, else the tx reruns with the code executed.
-func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
+// A run without a frame peeked at block start: validation credits only a recipient that still has
+// no code after the lower txs, else the tx reruns with the code executed. A run that executed the
+// code leaves the credit to validation.
+func TestValidationCreditsRecipientTheRunLeftToIt(t *testing.T) {
 	sender := accounts.InternAddress(common.HexToAddress("0xa0"))
 	recipient := accounts.InternAddress(common.HexToAddress("0xd3"))
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -272,28 +273,58 @@ func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
 	funded := accounts.NewAccount()
 	funded.Balance = *uint256.NewInt(1_000_000)
 	reader.accounts[sender] = &funded
-	for name, codeHash := range map[string]accounts.CodeHash{"no_code": accounts.EmptyCodeHash, "code": accounts.InternCodeHash(common.Hash{1})} {
-		t.Run(name, func(t *testing.T) {
+	code := accounts.InternCodeHash(common.Hash{1})
+	for _, tc := range []struct {
+		name     string
+		codeHash accounts.CodeHash
+		credit   evmtypes.RecipientCredit
+		credited bool
+	}{
+		{"no_code", accounts.EmptyCodeHash, evmtypes.RecipientCreditNoFrame, true},
+		{"code_after_peek", code, evmtypes.RecipientCreditNoFrame, false},
+		{"code_ran", code, evmtypes.RecipientCreditAfterFrame, true},
+		{"credited_in_run", accounts.EmptyCodeHash, evmtypes.RecipientCreditedInRun, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			to := accounts.NewAccount()
-			to.CodeHash = codeHash
+			to.CodeHash = tc.codeHash
 			reader.accounts[recipient] = &to
-			result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+			result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}, ExecutionResult: evmtypes.ExecutionResult{RecipientCredit: tc.credit}}}
 			ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, state.NewVersionMap(nil), reader)
 			require.NoError(t, err)
-			if codeHash.IsEmpty() {
+			switch {
+			case tc.credited:
 				credit, ok := ws.GetBalance(recipient)
 				require.True(t, ok)
 				require.Equal(t, uint64(1), credit.Val.Uint64())
-			} else {
+			case tc.credit == evmtypes.RecipientCreditedInRun:
+				_, ok := ws.GetBalance(recipient)
+				require.False(t, ok, "the run credited the recipient, validation credited it again")
+			default:
 				require.Nil(t, ws, "a recipient with code was credited without running it")
 			}
 		})
 	}
+	t.Run("absent", func(t *testing.T) {
+		delete(reader.accounts, recipient)
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}, ExecutionResult: evmtypes.ExecutionResult{RecipientCredit: evmtypes.RecipientCreditNoFrame}}}
+		vm := state.NewVersionMap(nil)
+		ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, vm, reader)
+		require.NoError(t, err)
+		_, seeded := vm.LoadOriginAccount(recipient)
+		require.False(t, seeded, "a recipient absent at block start got a block-start origin")
+		created, ok := ws.GetAddress(recipient)
+		require.True(t, ok, "validation credited an absent recipient without creating it")
+		require.True(t, created.Val.CodeHash.IsEmpty())
+		credit, ok := ws.GetBalance(recipient)
+		require.True(t, ok)
+		require.Equal(t, uint64(1), credit.Val.Uint64())
+	})
 	t.Run("balance_overflow", func(t *testing.T) {
 		to := accounts.NewAccount()
 		to.Balance.SetAllOne()
 		reader.accounts[recipient] = &to
-		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}, ExecutionResult: evmtypes.ExecutionResult{RecipientCredit: evmtypes.RecipientCreditNoFrame}}}
 		ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, state.NewVersionMap(nil), reader)
 		require.NoError(t, err)
 		require.Nil(t, ws, "a credit that wraps the balance skipped the empty-account cleanup of a full run")

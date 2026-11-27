@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"sort"
@@ -4412,6 +4413,149 @@ func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+type creditTestTx struct {
+	sender int
+	to     *common.Address
+	value  uint64
+	data   []byte
+}
+
+// requireCreditTxsMatchSerial runs txs from funded senders in one block and checks that parallel
+// execution reaches the state root of serial execution.
+func requireCreditTxsMatchSerial(t *testing.T, alloc types.GenesisAlloc, keys []*ecdsa.PrivateKey, txs []creditTestTx) {
+	t.Helper()
+	for _, key := range keys {
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	genesis := &types.Genesis{Config: chain.TestChainOsakaConfig, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(keys[0]))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		nonces := make([]uint64, len(keys))
+		for _, tx := range txs {
+			var txn types.Transaction
+			if tx.to == nil {
+				txn = types.NewContractCreation(nonces[tx.sender], uint256.NewInt(tx.value), 300_000, uint256.NewInt(10*common.GWei), tx.data)
+			} else {
+				txn = types.NewTransaction(nonces[tx.sender], *tx.to, uint256.NewInt(tx.value), 300_000, uint256.NewInt(10*common.GWei), tx.data)
+			}
+			nonces[tx.sender]++
+			signed, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), keys[tx.sender])
+			require.NoError(t, err)
+			b.AddTx(signed)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+func generateKeys(t *testing.T, n int) []*ecdsa.PrivateKey {
+	keys := make([]*ecdsa.PrivateKey, n)
+	for i := range keys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+	}
+	return keys
+}
+
+var (
+	creditRecipient = common.Address{0xde}
+	creditHelper    = common.Address{0xdf}
+	creditSink      = common.Address{0xcc}
+)
+
+// requireTransfersToCodeMatchSerial sends value from four senders to a recipient that runs code.
+func requireTransfersToCodeMatchSerial(t *testing.T, code []byte, extra types.GenesisAlloc) {
+	t.Helper()
+	alloc := types.GenesisAlloc{creditRecipient: {Code: code}}
+	maps.Copy(alloc, extra)
+	keys := generateKeys(t, 4)
+	txs := make([]creditTestTx, len(keys))
+	for k := range keys {
+		txs[k] = creditTestTx{sender: k, to: &creditRecipient, value: uint64(k + 1)}
+	}
+	requireCreditTxsMatchSerial(t, alloc, keys, txs)
+}
+
+func push20(a common.Address) []byte { return append([]byte{byte(vm.PUSH20)}, a[:]...) }
+
+func callCode(op vm.OpCode, to common.Address, value byte) []byte {
+	code := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), value}
+	code = append(code, push20(to)...)
+	return append(code, byte(vm.GAS), byte(op), byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP))
+}
+
+func TestCreditAfterFrameFallsBackOnSelfBalance(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.SELFBALANCE), byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+}
+
+func TestCreditAfterFrameFallsBackOnBalanceOfRecipient(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.ADDRESS), byte(vm.BALANCE), byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+}
+
+func TestCreditAfterFrameFallsBackOnBalanceFromNestedFrame(t *testing.T) {
+	reader := append(push20(creditRecipient), byte(vm.BALANCE), byte(vm.ORIGIN), byte(vm.SSTORE), byte(vm.STOP))
+	requireTransfersToCodeMatchSerial(t, callCode(vm.CALL, creditHelper, 0), types.GenesisAlloc{creditHelper: {Code: reader}})
+}
+
+func TestCreditAfterFrameFallsBackOnCallWithValue(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, callCode(vm.CALL, creditSink, 1), nil)
+}
+
+func TestCreditAfterFrameFallsBackOnCallCodeWithValue(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, callCode(vm.CALLCODE, creditSink, 1), nil)
+}
+
+func TestCreditAfterFrameFallsBackOnCreateWithValue(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE),
+		byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+}
+
+func TestCreditAfterFrameFallsBackOnCreate2WithValue(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, []byte{byte(vm.CALLER), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE2),
+		byte(vm.CALLER), byte(vm.SSTORE), byte(vm.STOP)}, nil)
+}
+
+func TestCreditAfterFrameFallsBackOnSelfDestruct(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, append(push20(creditSink), byte(vm.SELFDESTRUCT)), nil)
+}
+
+// The helper's SELFDESTRUCT credits the recipient inside its frame.
+func TestCreditAfterFrameFallsBackOnBalanceWriteInFrame(t *testing.T) {
+	requireTransfersToCodeMatchSerial(t, callCode(vm.CALL, creditHelper, 0),
+		types.GenesisAlloc{creditHelper: {Balance: big.NewInt(1), Code: []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}}})
+}
+
+// A recipient absent at block start is created by its first credit. A lower tx may also create and destroy it, or deploy code to it.
+func TestCreditOfAbsentRecipientMatchesSerialExecution(t *testing.T) {
+	keys := generateKeys(t, 8)
+	recreated := types.CreateAddress(crypto.PubkeyToAddress(keys[0].PublicKey), 0)
+	codeLater := types.CreateAddress(crypto.PubkeyToAddress(keys[1].PublicKey), 0)
+	existence := common.Address{0xab}
+	alloc := types.GenesisAlloc{existence: {Code: []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.DUP1), byte(vm.EXTCODEHASH), byte(vm.SWAP1),
+		byte(vm.SSTORE), byte(vm.STOP)}}}
+	selfDestructInit := []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)}
+	storeCallValue := []byte{
+		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN),
+	}
+	query := func(a common.Address) []byte { h := common.BytesToHash(a[:]); return h[:] }
+	requireCreditTxsMatchSerial(t, alloc, keys, []creditTestTx{
+		{sender: 2, to: &creditRecipient, value: 1},
+		{sender: 3, to: &creditRecipient, value: 2},
+		{sender: 4, to: &existence, data: query(creditRecipient)},
+		{sender: 5, to: &creditRecipient, value: 3},
+		{sender: 2, to: &recreated, value: 4},
+		{sender: 0, data: selfDestructInit},
+		{sender: 3, to: &recreated, value: 5},
+		{sender: 4, to: &existence, data: query(recreated)},
+		{sender: 5, to: &codeLater, value: 6},
+		{sender: 1, data: storeCallValue},
+		{sender: 6, to: &codeLater, value: 7},
+		{sender: 7, to: &existence, data: query(codeLater)},
+	})
 }
 
 // A tx that serial execution rejects on its sender's nonce or balance must reject the

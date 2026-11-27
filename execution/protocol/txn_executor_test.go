@@ -1753,10 +1753,71 @@ func TestApplyMessage_ServiceTxDecisionNotKeptOnReusedMessage(t *testing.T) {
 type accountsReader struct {
 	*state.NoopReader
 	accounts map[accounts.Address]*accounts.Account
+	code     map[accounts.Address][]byte
 }
 
 func (r accountsReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	return r.accounts[addr], nil
+}
+
+func (r accountsReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	return r.code[addr], nil
+}
+
+func (r accountsReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	return len(r.code[addr]), nil
+}
+
+func chargedAtValidationTransfer(t *testing.T, reader accountsReader, recipient accounts.Address, full bool) (*state.IntraBlockState, *evmtypes.ExecutionResult) {
+	t.Helper()
+	const gasLimit = 100_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	ibs := state.New(reader)
+	t.Cleanup(ibs.Close)
+	require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified))
+	evm := vm.NewEVM(evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: gasLimit},
+		evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(5), gasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+	apply := ApplyMessageChargeSenderAtValidation
+	if full {
+		apply = func(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+			return ApplyMessageNoFeeBurnOrTip(evm, msg, gp, true, false, engine)
+		}
+	}
+	result, err := apply(evm, msg, NewGasPool(gasLimit, 0), nil)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	return ibs, result
+}
+
+// A recipient absent at block start runs no frame: validation creates it with the credit, and the gas is that of a full run.
+func TestRecipientCreditedAtValidationSkipsFrameForAbsentRecipient(t *testing.T) {
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	ibs, result := chargedAtValidationTransfer(t, accountsReader{}, recipient, false)
+	require.Equal(t, evmtypes.RecipientCreditNoFrame, result.RecipientCredit)
+	exists, err := ibs.Exist(recipient)
+	require.NoError(t, err)
+	require.False(t, exists, "the run created the recipient; validation must do it")
+	_, full := chargedAtValidationTransfer(t, accountsReader{}, recipient, true)
+	require.Equal(t, full.ReceiptGasUsed, result.ReceiptGasUsed)
+}
+
+// A recipient with code runs it, without the credit, which validation applies.
+func TestRecipientCreditedAtValidationRunsCodeWithoutCredit(t *testing.T) {
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	code := []byte{byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	reader := accountsReader{accounts: map[accounts.Address]*accounts.Account{recipient: &acc}, code: map[accounts.Address][]byte{recipient: code}}
+	ibs, result := chargedAtValidationTransfer(t, reader, recipient, false)
+	require.Equal(t, evmtypes.RecipientCreditAfterFrame, result.RecipientCredit)
+	stored, err := ibs.GetState(recipient, accounts.ZeroKey)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), stored.Uint64(), "the frame did not run")
+	balance, err := ibs.GetBalance(recipient)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "the run credited the recipient; validation must do it")
 }
 
 // A transfer to a code-less recipient that validation credits skips the frame, but a call tracer

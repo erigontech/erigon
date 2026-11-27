@@ -240,7 +240,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	}
 	result := wk.w.RunTxTask(tv)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
-		(result.Err != nil || touchedSenderAccount(txTask, result)) {
+		(result.Err != nil || touchedSenderAccount(txTask, result) || touchedRecipientBalance(txTask, result)) {
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Err != nil {

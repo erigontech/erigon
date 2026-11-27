@@ -507,6 +507,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		runtimeSnapshot = -1
 		createAddress   accounts.Address
 		createNonce     uint64
+		recipientCredit evmtypes.RecipientCredit
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if st.evm.Config().NoBAL {
@@ -556,15 +557,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
+		if !contractCreation {
+			recipientCredit = st.recipientCreditAtValidation(sender, coinbase)
+		}
 		switch {
 		case contractCreation && st.chargeSenderAtValidation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
 		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
-		case st.chargeSenderAtValidation && RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, vmConfig.Tracer, rules, st.state.StateReader()):
+		case recipientCredit == evmtypes.RecipientCreditNoFrame:
 			tracer := vmConfig.Tracer
 			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
 			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
+		case recipientCredit == evmtypes.RecipientCreditAfterFrame:
+			ret, st.gasRemaining, gasUsed.frame, vmerr = st.callWithoutRecipientCredit(sender, bailout)
 		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
@@ -658,13 +664,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			BlockStateGasUsed:     st.blockStateGasUsed,
 			GasRefund:             refund,
 		},
-		ReceiptGasUsed: st.txnGasUsed,
-		MaxGasUsed:     max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:            vmerr,
-		Reverted:       errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:     ret,
-		FeeTipped:      tipAmount,
-		FeeBurnt:       burnAmount,
+		ReceiptGasUsed:  st.txnGasUsed,
+		MaxGasUsed:      max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:             vmerr,
+		Reverted:        errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:      ret,
+		FeeTipped:       tipAmount,
+		FeeBurnt:        burnAmount,
+		RecipientCredit: recipientCredit,
 	}
 
 	result.BurntContractAddress = burntContractAddress
@@ -696,17 +703,40 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 	return gasRemaining, gasUsed, err
 }
 
-// RecipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
-// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
-// of the recipient would conflict with each lower credit, so the run peeks at block-start state and
-// validation re-checks the code. A tracer that follows balances or gas needs the frame.
-func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules, blockStart state.StateReader) bool {
-	if value.IsZero() || to == coinbase || to == from || tracer.HasGasChangeHook() || tracer != nil && tracer.OnBalanceChange != nil ||
-		slices.Contains(vm.ActivePrecompiles(rules), to) {
-		return false
+// RecipientCreditedAtValidation reports whether validation credits the recipient of a value transfer
+// after every lower tx. A tracer that follows balances or gas needs the credit in the run.
+func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules) bool {
+	return !value.IsZero() && to != coinbase && to != from && !tracer.HasGasChangeHook() && (tracer == nil || tracer.OnBalanceChange == nil) &&
+		!slices.Contains(vm.ActivePrecompiles(rules), to)
+}
+
+// recipientCreditAtValidation says how a run that charges its sender at validation leaves the credit of its
+// recipient. A recorded read of the recipient would conflict with each lower credit, so it peeks at block-start state.
+func (st *TxnExecutor) recipientCreditAtValidation(sender, coinbase accounts.Address) evmtypes.RecipientCredit {
+	if !st.chargeSenderAtValidation || !RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, st.evm.Config().Tracer, st.evm.ChainRules()) {
+		return evmtypes.RecipientCreditedInRun
 	}
-	acc, err := blockStart.ReadAccountData(to)
-	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+	acc, err := st.state.StateReader().ReadAccountData(st.to())
+	switch {
+	case err != nil:
+		return evmtypes.RecipientCreditedInRun
+	case acc == nil || acc.CodeHash.IsEmpty():
+		return evmtypes.RecipientCreditNoFrame
+	default:
+		return evmtypes.RecipientCreditAfterFrame
+	}
+}
+
+// callWithoutRecipientCredit runs the transfer frame without its top-level credit. A run that reads
+// or writes the recipient's balance is not valid this way.
+func (st *TxnExecutor) callWithoutRecipientCredit(sender accounts.Address, bailout bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+	transfer := st.evm.Context.Transfer
+	defer func() { st.evm.Context.Transfer = transfer }()
+	st.evm.Context.Transfer = func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+		st.evm.Context.Transfer = transfer
+		return nil
+	}
+	return st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 }
 
 // verifyAuthorities applies individual EIP-7702 authorizations after

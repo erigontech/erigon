@@ -82,7 +82,17 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+	RecipientCredit      RecipientCredit
 }
+
+// RecipientCredit says how a run that charges its sender at validation left the value credit of its recipient.
+type RecipientCredit uint8
+
+const (
+	RecipientCreditedInRun    RecipientCredit = iota
+	RecipientCreditNoFrame                    // no code at block start, so no frame ran
+	RecipientCreditAfterFrame                 // the recipient's code ran without the credit
+)
 
 // Unwrap returns the internal evm error which allows us for further
 // analysis outside.

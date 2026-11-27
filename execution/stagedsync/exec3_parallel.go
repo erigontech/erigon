@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -1248,7 +1249,6 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 
 func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
 	prevAccountTx := map[common.Address]int{}
-	var blockStart state.StateReader
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1318,16 +1318,9 @@ func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
 				to := *tx.GetTo()
-				// Crediting only decides whether this tx waits for the recipient's previous tx, so a
-				// recipient that no lower tx touched is scheduled alike either way and is not read.
-				_, recipientTouched := prevAccountTx[to]
-				checkCredit := chargedAtValidation && recipientTouched
-				if checkCredit && blockStart == nil {
-					blockStart = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
-				}
 				switch {
-				case checkCredit && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
-					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart):
+				case chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
+					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules()):
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
 				case ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)):
@@ -2337,6 +2330,17 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
+// touchedRecipientBalance reports whether a run that executed the recipient's code without its credit read or wrote the recipient's balance.
+func touchedRecipientBalance(txTask *exec.TxTask, result *exec.TxResult) bool {
+	if result.ExecutionResult.RecipientCredit != evmtypes.RecipientCreditAfterFrame {
+		return false
+	}
+	to := accounts.InternAddress(*txTask.Tx().GetTo())
+	_, read := result.TxIn.GetBalance(to)
+	_, wrote := result.TxOut.GetBalance(to)
+	return read || wrote
+}
+
 func precompileCallRunsOutOfGas(txTask *exec.TxTask, to accounts.Address) bool {
 	if _, ok := vm.Precompiles(txTask.Rules())[to]; !ok {
 		return false
@@ -2382,26 +2386,39 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version},
 		Val:         acc.Nonce + 1,
 	})
-	// A run that skipped the transfer frame left the recipient credit to validation.
-	if to := msg.To(); !to.IsNil() && to != sender && result.ExecutionResult.Err == nil && !msg.Value().IsZero() {
-		if _, credited := result.TxOut.GetBalance(to); !credited {
-			recipient, err := reader.ReadAccountData(to)
-			if err != nil {
-				return nil, nil, err
-			}
-			if recipient == nil || !recipient.CodeHash.IsEmpty() {
-				return nil, nil, nil
-			}
-			credit, overflow := u256.AddOverflow(recipient.Balance, *msg.Value())
-			if overflow {
+	if credit := result.ExecutionResult.RecipientCredit; credit != evmtypes.RecipientCreditedInRun && result.ExecutionResult.Err == nil {
+		to := msg.To()
+		recipient, err := reader.ReadAccountData(to)
+		if err != nil {
+			return nil, nil, err
+		}
+		ranCode := credit == evmtypes.RecipientCreditAfterFrame
+		// A run without a frame peeked at block start, so code that a lower tx deployed must run.
+		if recipient == nil && ranCode || recipient != nil && !recipient.CodeHash.IsEmpty() && !ranCode {
+			return nil, nil, nil
+		}
+		balance := *msg.Value()
+		if recipient != nil {
+			var overflow bool
+			if balance, overflow = u256.AddOverflow(recipient.Balance, balance); overflow {
 				return nil, nil, nil
 			}
 			state.SeedOrigin(vm, to, recipient)
-			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version},
-				Val:         credit,
+		} else {
+			created := accounts.NewAccount()
+			ws.SetAddress(to, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{Address: to, Path: state.AddressPath, Version: version},
+				Val:         &created,
+			})
+			ws.SetCodeHash(to, &state.VersionedWrite[accounts.CodeHash]{
+				WriteHeader: state.WriteHeader{Address: to, Path: state.CodeHashPath, Version: version},
+				Val:         created.CodeHash,
 			})
 		}
+		ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version},
+			Val:         balance,
+		})
 	}
 	return ws, acc, nil
 }
