@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/execfinality"
 )
 
-func TestCalculateWriteAmplificationReturnsDomainError(t *testing.T) {
+func corruptAccountsKV(t *testing.T) kv.TemporalRwDB {
+	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	agg, _ := fillAccountState(t, db, 64, 5)
@@ -43,7 +45,29 @@ func TestCalculateWriteAmplificationReturnsDomainError(t *testing.T) {
 	// the open aggregator keeps the original mapped; only a fresh open of the path fails
 	require.NoError(t, os.Rename(kvFiles[0], kvFiles[0]+".orig"))
 	require.NoError(t, os.WriteFile(kvFiles[0], []byte("broken"), 0o644))
+	return db
+}
 
-	err = calculateWriteAmplification(t.Context(), db, []kv.Domain{kv.AccountsDomain}, log.New())
+func TestCalculateWriteAmplificationReturnsDomainError(t *testing.T) {
+	db := corruptAccountsKV(t)
+	err := calculateWriteAmplification(t.Context(), db, []kv.Domain{kv.AccountsDomain}, log.New())
 	require.ErrorContains(t, err, "decompressor")
+}
+
+func TestCalculateWriteAmplificationKeepsDomainErrorOnCancel(t *testing.T) {
+	db := corruptAccountsKV(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		if r.Msg == "Processing domain" && len(r.Ctx) == 2 && r.Ctx[1] == kv.CommitmentDomain.String() {
+			cancel()
+		}
+		return false
+	}, log.DiscardHandler()))
+
+	err := calculateWriteAmplification(ctx, db, []kv.Domain{kv.AccountsDomain, kv.CommitmentDomain}, logger)
+	require.ErrorContains(t, err, "decompressor")
+	require.NotErrorIs(t, err, context.Canceled)
 }

@@ -160,11 +160,16 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 
 	results := make([]domainStats, 0, len(domains))
 	var errs []error
+	var canceled error
 
 	for _, domain := range domains {
 		logger.Info("Processing domain", "domain", domain.String())
 
 		stats, err := calculateDomainWriteAmplification(ctx, tx, aggTx, domain, logger)
+		if errors.Is(err, context.Canceled) {
+			canceled = err
+			break
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("domain %s: %w", domain, err))
 			continue
@@ -189,7 +194,10 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 		)
 	}
 
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return canceled
 }
 
 func calculateDomainWriteAmplification(
