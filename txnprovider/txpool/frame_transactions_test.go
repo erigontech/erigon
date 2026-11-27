@@ -895,6 +895,31 @@ func TestFramePoolOrdinaryReplacesSponsoredFrame(t *testing.T) {
 	}
 }
 
+// A sender whose state cannot be read fails only its own txns, not the whole batch.
+func TestFramePoolUnreadableSenderKeepsBatch(t *testing.T) {
+	ctx, pool, _ := keyedFramePoolEnv(t)
+	sponsored, healthy := common.Address{2}, common.Address{3}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, healthy)
+	change.ChangeBatch[0].BlockHeight = 1
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(sponsored),
+		Data:    []byte{0, 0, 0}, // a truncated account record
+	})
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// The payer's balance in the validation result cannot cover the frame.
+	frame := framePoolSlotWithNonce(t, sponsored, 0, 1, common.GWei)
+	payment := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	payment.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(frame, sponsored[:], true)
+	txns.Append(payment, healthy[:], true)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InsufficientFunds, txpoolcfg.Success}, reasons)
+}
+
 func TestFramePoolReservationExcludesReplacedOrdinary(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether

@@ -2052,10 +2052,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	installed := make([]*metaTxn, len(newTxns.Txns))
 	announcements := Announcements{}
-	prefixes, err := p.batchFundedPrefixes(cacheView, newTxns)
-	if err != nil {
-		return announcements, discardReasons, err
-	}
+	prefixes := p.batchFundedPrefixes(cacheView, newTxns)
 	for i, txn := range newTxns.Txns {
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
@@ -2120,10 +2117,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// be returned into the transaction pool.
 	sendersWithActivity := map[uint64]struct{}{}
 	announcements := Announcements{}
-	prefixes, err := p.batchFundedPrefixes(cacheView, newTxns)
-	if err != nil {
-		return announcements, err
-	}
+	prefixes := p.batchFundedPrefixes(cacheView, newTxns)
 	for i, txn := range newTxns.Txns {
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			continue
@@ -2291,7 +2285,11 @@ func (p *TxPool) addLocked(prefixes map[uint64]*fundedPrefix, mt *metaTxn, annou
 	if found != nil {
 		// Checked last: an accepted replacement is already counted in the sender's funded prefix, so no
 		// later check may reject it.
-		if !p.keepsSenderFunded(prefixes[mt.TxnSlot.SenderID], mt.TxnSlot, found) {
+		prefix, recorded := prefixes[mt.TxnSlot.SenderID]
+		if recorded && prefix == nil {
+			return txpoolcfg.ErrGetSenderInfo
+		}
+		if !p.keepsSenderFunded(prefix, mt.TxnSlot, found) {
 			return txpoolcfg.InsufficientFunds
 		}
 		p.removeFromSubPool(found, "add")

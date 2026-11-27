@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -26,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -266,4 +269,52 @@ func TestReplacementBatchProtectsFundsAtItsStart(t *testing.T) {
 			require.Equal(t, []int{2, 0, 1}, []int{pending, baseFee, queued})
 		})
 	}
+}
+
+// unreadableStateView fails reads of the given accounts' state.
+type unreadableStateView struct {
+	kvcache.CacheView
+	accounts []common.Address
+}
+
+func (v unreadableStateView) Get(k []byte) ([]byte, error) {
+	if len(k) == len(common.Address{}) && slices.Contains(v.accounts, common.Address(k)) {
+		return nil, errors.New("unreadable account")
+	}
+	return v.CacheView.Get(k)
+}
+
+// A batch reads a sender's state only for a replacement that passes the price bump, and a failed read
+// rejects only that sender's replacements.
+func TestReplacementBatchKeepsStateErrorsLocal(t *testing.T) {
+	ctx, pool, _, _ := newTestPool(t)
+	senders := []common.Address{{2}, {3}, {4}}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, senders...), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	var batch TxnSlots
+	for i, feeCap := range []uint64{fundedTxnFeeCap, bumpedFeeCap, bumpedFeeCap} {
+		pooled := newTestTxnSlot(0, 0, 0, fundedTxnFeeCap, fundedTxnGas)
+		pooled.IDHash[0] = byte(i + 1)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, addTestTxns(t, pool, senders[i], true, pooled))
+		replacement := newTestTxnSlot(0, 0, 0, feeCap, fundedTxnGas)
+		replacement.IDHash[0] = byte(i + 4)
+		batch.Append(replacement, senders[i][:], true)
+	}
+
+	var prefixes map[uint64]*fundedPrefix
+	var reasons []txpoolcfg.DiscardReason
+	require.NoError(t, pool.withLockedState(ctx, &batch, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		view := unreadableStateView{cacheView, senders[:2]}
+		prefixes = pool.batchFundedPrefixes(view, batch)
+		var err error
+		_, reasons, err = pool.addTxns(pool.lastSeenBlock.Load(), view, batch, make(blobCells),
+			pool.pendingBaseFee.Load(), pool.pendingBlobFee.Load(), true)
+		return err
+	}))
+	// The first replacement misses the price bump, so its sender's state is not read.
+	require.NotContains(t, prefixes, batch.Txns[0].SenderID)
+	unread, recorded := prefixes[batch.Txns[1].SenderID]
+	require.True(t, recorded)
+	require.Nil(t, unread)
+	require.NotNil(t, prefixes[batch.Txns[2].SenderID])
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotReplaced, txpoolcfg.ErrGetSenderInfo, txpoolcfg.Success}, reasons)
 }

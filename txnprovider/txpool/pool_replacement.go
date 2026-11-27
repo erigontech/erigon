@@ -96,19 +96,27 @@ func (f *fundedPrefix) covers(mt *metaTxn) bool {
 	return !mt.keyedNonce && mt.TxnSlot.Nonce >= f.start && mt.TxnSlot.Nonce < f.end
 }
 
-// batchFundedPrefixes records the funded prefix of each sender in a batch of additions before the batch
-// changes any transaction or reservation, so each prefix is what the balance covers when the batch starts.
-// A transaction that the batch adds, or funds with a cheaper replacement or a released reservation, is not
-// covered; none of them can be pending before the batch ends.
-func (p *TxPool) batchFundedPrefixes(cacheView kvcache.CacheView, txns TxnSlots) (map[uint64]*fundedPrefix, error) {
+// batchFundedPrefixes records, before a batch of additions changes anything, the funded prefix of each
+// sender that may replace one of its pooled transactions: a transaction of the batch takes the account
+// nonce of a pooled one and passes the price bump against it. So each prefix is what the balance covers
+// when the batch starts. A transaction that the batch adds, or funds with a cheaper replacement or a
+// released reservation, is not covered; none of them can be pending before the batch ends. A sender whose
+// state cannot be read gets a nil prefix, and addLocked rejects its replacements.
+func (p *TxPool) batchFundedPrefixes(cacheView kvcache.CacheView, txns TxnSlots) map[uint64]*fundedPrefix {
 	prefixes := make(map[uint64]*fundedPrefix)
-	for _, txn := range txns.Txns {
-		if prefixes[txn.SenderID] != nil {
+	for i, txn := range txns.Txns {
+		if _, ok := prefixes[txn.SenderID]; ok || txn.hasKeyedNonce() {
+			continue
+		}
+		pooled := p.all.get(txn.SenderID, txn.Nonce)
+		if pooled == nil || p.checkReplacement(newMetaTxn(txn, txns.IsLocal[i], 0), pooled).reason != txpoolcfg.NotSet {
 			continue
 		}
 		senderNonce, balance, _, err := p.senders.info(cacheView, txn.SenderID)
 		if err != nil {
-			return nil, err
+			p.logger.Warn("[txpool] batchFundedPrefixes: sender info", "err", err)
+			prefixes[txn.SenderID] = nil
+			continue
 		}
 		// As in onSenderStateChange, frame reservations come out of the balance first.
 		reserved := p.frameReservations[p.senders.senderID2Addr[txn.SenderID]].cost
@@ -116,15 +124,16 @@ func (p *TxPool) batchFundedPrefixes(cacheView kvcache.CacheView, txns TxnSlots)
 		prefix.balance = balance
 		prefixes[txn.SenderID] = prefix
 	}
-	return prefixes, nil
+	return prefixes
 }
 
 // keepsSenderFunded reports whether the sender's balance still covers its funded prefix once replacement
 // takes the place of previous. If so, it counts the replacement in the prefix, and the caller must make
 // the replacement. A replacement that does not raise the cost, or that replaces a transaction outside the
-// prefix, is always accepted. Updating the prefix lets a batch walk the sender's transactions only once.
+// prefix, is always accepted, as is one from a sender with no prefix. Updating the prefix lets a batch walk
+// the sender's transactions only once.
 func (p *TxPool) keepsSenderFunded(prefix *fundedPrefix, replacement *TxnSlot, previous *metaTxn) bool {
-	if !prefix.covers(previous) {
+	if prefix == nil || !prefix.covers(previous) {
 		return true
 	}
 	oldCost, newCost := requiredBalance(previous.TxnSlot), requiredBalance(replacement)
