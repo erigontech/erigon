@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"runtime/trace"
 	"slices"
 	"strings"
 	"time"
@@ -31,11 +32,17 @@ func npProfile(hash common.Hash, t0 time.Time) func() {
 	}
 	dir := filepath.Join(os.TempDir(), "npprof")
 	_ = os.MkdirAll(dir, 0o755)
-	f, err := os.Create(filepath.Join(dir, fmt.Sprintf("%s-%d.%s.pb.gz", h[:10], t0.UnixMicro(), npProfMode)))
+	f, err := os.Create(filepath.Join(dir, fmt.Sprintf("%s-%d.%s.out", h[:10], t0.UnixMicro(), npProfMode)))
 	if err != nil {
 		return func() {}
 	}
 	switch npProfMode {
+	case "trace":
+		if err := trace.Start(f); err != nil {
+			_ = f.Close()
+			return func() {}
+		}
+		return func() { trace.Stop(); _ = f.Close() }
 	case "fgprof":
 		stop := fgprof.Start(f, fgprof.FormatPprof)
 		return func() { _ = stop(); _ = f.Close() }
