@@ -23,6 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
@@ -61,4 +64,85 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
 	require.Equal(t, common.Hash(blockRoot), store.ProposerBoostRoot())
+}
+
+// epochStartBlock returns the anchor and a block of the epoch's first slot that advances the
+// unrealized justification.
+func epochStartBlock(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	blocks, anchor, _ := tests.GetCapellaRandom()
+	require.Zero(t, blocks[0].Block.Slot%anchor.BeaconConfig().SlotsPerEpoch)
+	return anchor, blocks[0]
+}
+
+func slotStartTimeMs(f *ForkChoiceStore, slot uint64) uint64 {
+	return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
+}
+
+func requireSameCheckpoints(t *testing.T, want, got *ForkChoiceStore) {
+	t.Helper()
+	require.Equal(t, want.justifiedCheckpoint.Load().(solid.Checkpoint), got.justifiedCheckpoint.Load().(solid.Checkpoint))
+	require.Equal(t, want.finalizedCheckpoint.Load().(solid.Checkpoint), got.finalizedCheckpoint.Load().(solid.Checkpoint))
+	require.Equal(t, want.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), got.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint))
+	require.Equal(t, want.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint), got.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+}
+
+// A tick advances the store time before it takes f.mu for the slot-start work. A block of the
+// epoch's first slot applied in between must leave the checkpoints as on_tick followed by on_block
+// does: the block's own advance stays unrealized.
+func TestBlockAppliedBeforeEpochStartWorkKeepsItsCheckpointsUnrealized(t *testing.T) {
+	anchor, block := epochStartBlock(t)
+
+	serial := newBlockTestStore(t, anchor)
+	tickMs := slotStartTimeMs(serial, block.Block.Slot) + 100
+	serial.OnTick(tickMs)
+	require.NoError(t, serial.OnBlock(t.Context(), block, false, true, false))
+	require.Greater(t, serial.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint).Epoch,
+		serial.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch, "the fixture block must advance unrealized justification")
+
+	f := newBlockTestStore(t, anchor)
+	f.timeMs.Store(tickMs)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	// The epoch tick's slot-start work takes f.mu only now.
+	f.timeMs.Store(tickMs - 200)
+	f.onTickPerSlot(tickMs)
+
+	requireSameCheckpoints(t, serial, f)
+}
+
+// Spec test fixtures can move the store time back to an earlier epoch, whose next epoch start must
+// still promote the unrealized checkpoints.
+func TestSpecTestTimeMovedBackKeepsEpochStartPromotion(t *testing.T) {
+	anchor, block := epochStartBlock(t)
+	nextEpochSlot := block.Block.Slot + anchor.BeaconConfig().SlotsPerEpoch
+
+	serial := newBlockTestStore(t, anchor)
+	serial.OnTick(slotStartTimeMs(serial, block.Block.Slot) + 100)
+	require.NoError(t, serial.OnBlock(t.Context(), block, false, true, false))
+	serial.OnTick(slotStartTimeMs(serial, nextEpochSlot) + 100)
+
+	f := newBlockTestStore(t, anchor)
+	f.OnTick(slotStartTimeMs(f, nextEpochSlot+anchor.BeaconConfig().SlotsPerEpoch) + 100)
+	f.SetTimeForSpecTest(slotStartTimeMs(f, block.Block.Slot) + 100)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	f.OnTick(slotStartTimeMs(f, nextEpochSlot) + 100)
+
+	requireSameCheckpoints(t, serial, f)
+}
+
+// The epoch-start promotion is skipped while the highest seen block lags more than two epochs
+// behind the epoch start.
+func TestEpochStartSkipsPromotionWhileHighestSeenLags(t *testing.T) {
+	anchor, block := epochStartBlock(t)
+	slotsPerEpoch := anchor.BeaconConfig().SlotsPerEpoch
+	f := newBlockTestStore(t, anchor)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	require.Greater(t, f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint).Epoch, justified.Epoch)
+
+	f.highestSeen.Store(block.Block.Slot - 2*slotsPerEpoch)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot+slotsPerEpoch) + 100)
+
+	require.Equal(t, justified, f.justifiedCheckpoint.Load().(solid.Checkpoint))
 }
