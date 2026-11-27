@@ -41,7 +41,9 @@ import (
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -147,6 +149,7 @@ func TestGetDutiesProposerHistoricalFuluAndGloasForkEpochUsesRecomputed(t *testi
 		require.NoError(t, validators.AddValidator(validator, uint64(index), 0))
 		return true
 	})
+	validators.SetSlot(slot)
 	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(cfg, nil, validators, preState, nil, handler.syncedData)
 	require.NoError(t, archivedState.UpgradeToFulu())
 	expected := firstEpochProposers(archivedState)
@@ -176,7 +179,7 @@ func TestGetDutiesProposerHistoricalFuluMissingEpochData(t *testing.T) {
 	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "epoch data not found")
 }
 
@@ -933,4 +936,53 @@ func getProposerDutiesForPath(t *testing.T, handler *ApiHandler, path string) pr
 	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
 	require.NotEmpty(t, body.Data)
 	return body
+}
+
+func TestHistoricalFuluLookaheadCoveredWithoutValidatorReplay(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	const slot = uint64(96)
+	fcu.FinalizedSlotVal = 127
+	var archivedState *state.CachingBeaconState
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		archivedState, err = handler.stateReader.ReadHistoricalState(t.Context(), tx, slot)
+		return err
+	}))
+	require.NotNil(t, archivedState)
+	cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 2, 2, 2, 2
+	cfg.InitializeForkSchedule()
+	archivedState.SetVersion(clparams.FuluVersion)
+	require.NoError(t, archivedState.UpgradeToFulu())
+	expected := firstEpochProposers(archivedState)
+	var encoded bytes.Buffer
+	require.NoError(t, state_accessors.EpochDataFromBeaconState(archivedState).Serialize(&encoded))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(slot), encoded.Bytes()); err != nil {
+			return err
+		}
+		for _, rootSlot := range []uint64{63, 95} {
+			if err := beacon_indicies.MarkRootCanonical(tx, rootSlot, common.Hash{1}); err != nil {
+				return err
+			}
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, cfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.EpochData: types.KeyValueGetters[kv.EpochData]}
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, log.New())
+	handler.caplinStateSnapshots = snapshots
+	view := snapshots.View()
+	_, covered := view.VisibleSegment(slot, kv.EpochData)
+	view.Close()
+	require.True(t, covered)
+	table := state_accessors.NewStaticValidatorTable()
+	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(cfg, nil, table, preState, snapshots, handler.syncedData)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			response := getProposerDutiesForPath(t, handler, "/eth/"+version+"/validator/duties/proposer/3")
+			requireProposerDuties(t, response.Data, archivedState, slot, expected)
+		})
+	}
 }

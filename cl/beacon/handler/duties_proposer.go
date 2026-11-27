@@ -80,8 +80,11 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		view := a.caplinStateSnapshots.View()
 		defer view.Close()
 		table := kv.SlotData
+		usesLookahead := expectedSlot != a.beaconChainCfg.GenesisSlot && targetVersion >= clparams.FuluVersion && epoch > a.beaconChainCfg.FuluForkEpoch
 		if expectedSlot == a.beaconChainCfg.GenesisSlot {
 			table = kv.BlockRoot
+		} else if usesLookahead {
+			table = kv.EpochData
 		}
 		readiness, err := newHistoricalReadiness(tx, view)
 		if err != nil {
@@ -93,7 +96,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			if err != nil {
 				return nil, err
 			}
-			if expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot) {
+			if expectedSlot != a.beaconChainCfg.GenesisSlot && !usesLookahead && !a.stateReader.ValidatorTableCovers(expectedSlot) {
 				return nil, validatorReplayPending(expectedSlot)
 			}
 		}
@@ -107,7 +110,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			if a.caplinStateSnapshots != nil {
 				progress = max(progress, a.caplinStateSnapshots.BlocksAvailable())
 			}
-			if expectedSlot > progress || (expectedSlot != a.beaconChainCfg.GenesisSlot && !a.stateReader.ValidatorTableCovers(expectedSlot)) {
+			if expectedSlot > progress || (expectedSlot != a.beaconChainCfg.GenesisSlot && !usesLookahead && !a.stateReader.ValidatorTableCovers(expectedSlot)) {
 				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
 			}
 		}
@@ -334,7 +337,11 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 			return nil, err
 		}
 		if epochData == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
+			status := http.StatusInternalServerError
+			if !a.stateReader.ArchiveStates() {
+				status = http.StatusBadRequest
+			}
+			return nil, beaconhttp.NewEndpointError(status, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := range duties {

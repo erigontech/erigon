@@ -942,7 +942,7 @@ func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) 
 	h.beaconChainCfg.CapellaForkEpoch = 0
 	h.beaconChainCfg.DenebForkEpoch = 0
 	h.beaconChainCfg.ElectraForkEpoch = 0
-	h.beaconChainCfg.FuluForkEpoch = 0
+	h.beaconChainCfg.FuluForkEpoch = 3
 	fcu.FinalizedSlotVal = 127
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		for slot := uint64(0); slot <= 63; slot++ {
@@ -1056,6 +1056,53 @@ func TestHistoricalProposerTruncatedTableWithoutReplay(t *testing.T) {
 			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
 			require.Equal(t, http.StatusInternalServerError, status, body)
 			require.Contains(t, body, state_accessors.ErrValidatorTableTruncated.Error())
+		})
+	}
+}
+
+func TestHistoricalFuluMissingEpochDataStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		progress uint64
+		archive  bool
+		want     int
+	}{
+		{"pending", 95, true, http.StatusServiceUnavailable},
+		{"completed", 96, true, http.StatusInternalServerError},
+		{"without archive", 96, false, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.FinalizedSlotVal = 127
+			cfg := h.beaconChainCfg
+			cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 2, 2, 2, 2
+			cfg.InitializeForkSchedule()
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Delete(kv.EpochData, base_encoding.Encode64ToBytes4(96)); err != nil {
+					return err
+				}
+				for _, slot := range []uint64{63, 95} {
+					if err := beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{1}); err != nil {
+						return err
+					}
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
+			}))
+			if !tc.archive {
+				table := state_accessors.NewStaticValidatorTable()
+				table.SetReplayEnabled(false)
+				table.SetSlot(96)
+				h.stateReader = historical_states_reader.NewHistoricalStatesReader(cfg, nil, table, preState, nil, h.syncedData)
+			}
+			for _, version := range []string{"v1", "v2"} {
+				t.Run(version, func(t *testing.T) {
+					status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+					require.Equal(t, tc.want, status, body)
+					if tc.progress == 96 {
+						require.Contains(t, body, "epoch data not found")
+					}
+				})
+			}
 		})
 	}
 }
