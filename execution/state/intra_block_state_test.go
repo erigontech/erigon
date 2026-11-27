@@ -1258,6 +1258,30 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
 }
 
+func TestDropTxMapsReleasesWhatATransactionGrew(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	for i := range 64 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	vm.FlushWrites(ibs.Writes(), true)
+	ibs.readSelfDestructMemo(addr)
+	_, err := ibs.committedAccount(addr)
+	require.NoError(t, err)
+	ibs.Reset()
+	require.NotZero(t, ibs.accessList.entries(), "Reset keeps the access list's peak")
+
+	ibs.DropTxMaps()
+
+	require.Zero(t, ibs.accessList.entries())
+	require.Nil(t, ibs.sdProbe)
+	require.Nil(t, ibs.committedBase)
+	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(1))))
+	require.True(t, ibs.AddressInAccessList(addr))
+}
+
 // sync.Pool may drop any one entry, so the reuse shows over a few round trips.
 // slotPool keeps exactly what it was handed, so the release path can be checked
 // without sync.Pool's freedom to discard.

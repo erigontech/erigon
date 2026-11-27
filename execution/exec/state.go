@@ -212,6 +212,7 @@ func (rw *WorkerContext) Park() {
 	_ = rw.bindTx(nil)
 	rw.flushCollector()
 	rw.ibs.ResetReader(nil)
+	rw.ibs.DropTxMaps()
 	rw.rs, rw.stateReader, rw.historyMode, rw.prevBlockReg, rw.chain = nil, nil, false, nil, nil
 }
 

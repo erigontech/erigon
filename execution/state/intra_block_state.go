@@ -360,6 +360,14 @@ func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 }
 
+// DropTxMaps replaces the maps that clear keeps at their largest size, so a state
+// kept across blocks does not pay its largest transaction's clear cost on every later one.
+func (ibs *IntraBlockState) DropTxMaps() {
+	ibs.accessList = accessList{addresses: make(map[accounts.Address]int)}
+	ibs.sdProbe = nil
+	ibs.committedBase = nil
+}
+
 // statePool is sync.Pool's surface, so a test can substitute one that keeps
 // what it is given: sync.Pool may discard any item.
 type statePool interface {
