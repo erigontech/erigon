@@ -1101,9 +1101,10 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 		if !s.HasType(f.Type) || s.isInProgress(f.Type.Enum(), f.From, f.To) {
 			continue
 		}
-		if snaptype.IsCaplinType(f.Type.Enum()) && !f.Version.IsZero() && !f.Type.Versions().Supports(f.Version) {
+		listedSegment := f.Ext == ".seg"
+		if snaptype.IsCaplinType(f.Type.Enum()) && (listedSegment || !f.Version.IsZero()) && !f.Type.Versions().Supports(f.Version) {
 			segmentName := filepath.Base(fName)
-			if f.Ext == ".idx" {
+			if !listedSegment {
 				segmentName = f.Type.FileName(f.Version, f.From, f.To)
 			}
 			if info, err := os.Stat(filepath.Join(s.dir, segmentName)); err == nil && info.Mode().IsRegular() {

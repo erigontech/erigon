@@ -41,17 +41,18 @@ func recoverPanic(f func()) (p any) {
 	return nil
 }
 
+var caplinOpeners = []struct {
+	name string
+	open func(*CaplinSnapshots, string) error
+}{
+	{name: "folder", open: func(s *CaplinSnapshots, _ string) error { return s.OpenFolder() }},
+	{name: "list", open: func(s *CaplinSnapshots, name string) error { return s.OpenList([]string{name}, false) }},
+}
+
 func TestCaplinSnapshotOpenRejectsUnsupportedVersions(t *testing.T) {
-	openers := []struct {
-		name string
-		open func(*CaplinSnapshots, string) error
-	}{
-		{name: "folder", open: func(s *CaplinSnapshots, _ string) error { return s.OpenFolder() }},
-		{name: "list", open: func(s *CaplinSnapshots, name string) error { return s.OpenList([]string{name}, false) }},
-	}
 	for _, typ := range []snaptype.Type{snaptype.BeaconBlocks, snaptype.BlobSidecars} {
 		for _, ver := range []version.Version{{Major: 0, Minor: 1}, version.V2_0} {
-			for _, opener := range openers {
+			for _, opener := range caplinOpeners {
 				t.Run(typ.Name()+"/"+ver.String()+"/"+opener.name, func(t *testing.T) {
 					dirs := datadir.New(t.TempDir())
 					name := typ.FileName(ver, 0, 2)
@@ -266,4 +267,47 @@ func TestOpenListRejectsUnsupportedVersionWhenOptimistic(t *testing.T) {
 	t.Cleanup(s.Close)
 	panicValue := recoverPanic(func() { _ = s.OpenList([]string{name}, true) })
 	require.Contains(t, fmt.Sprint(panicValue), name)
+}
+
+func TestCaplinSnapshotOpenRejectsZeroVersionSegmentFile(t *testing.T) {
+	for _, typ := range []snaptype.Type{snaptype.BeaconBlocks, snaptype.BlobSidecars} {
+		for _, opener := range caplinOpeners {
+			t.Run(typ.Name()+"/"+opener.name, func(t *testing.T) {
+				dirs := datadir.New(t.TempDir())
+				writeCaplinSegment(t, dirs, typ, 0, 2, typ.Versions().Current, true, func(uint64) []byte { return []byte{1} })
+				name := snaptype.SegmentFileName(version.ZeroVersion, 0, 2, typ.Enum())
+				require.NoError(t, os.Rename(filepath.Join(dirs.Snap, typ.FileName(typ.Versions().Current, 0, 2)), filepath.Join(dirs.Snap, name)))
+				s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+				t.Cleanup(s.Close)
+
+				panicValue := recoverPanic(func() { _ = opener.open(s, name) })
+				require.Contains(t, fmt.Sprint(panicValue), "file="+name+",")
+				require.Contains(t, fmt.Sprint(panicValue), "too old")
+			})
+		}
+	}
+}
+
+func TestOpenListIgnoresTorrentOfMissingUnsupportedSegment(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		optimistic bool
+	}{
+		{name: "strict"},
+		{name: "optimistic", optimistic: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			torrent := snaptype.BeaconBlocks.FileName(version.V2_0, 0, 2) + ".torrent"
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, torrent), []byte("torrent"), 0o644))
+			s := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(s.Close)
+
+			var err error
+			panicValue := recoverPanic(func() { err = s.OpenList([]string{torrent}, tc.optimistic) })
+			require.Nil(t, panicValue)
+			require.NoError(t, err)
+			require.Empty(t, s.Files())
+		})
+	}
 }
