@@ -884,7 +884,7 @@ func (c *Composer) audit(p Posted[*Held]) {
 	requeue := func(event, msg string, args ...any) {
 		c.logger.Error(msg, append([]any{"event", event, "to", p.Height, "post", p.Post, "held", len(p.Txs)}, args...)...)
 		if c.pool != nil {
-			c.pool.PushFront(p.Txs)
+			c.pool.Requeue(p.Txs)
 		}
 	}
 	if p.Landed {
@@ -917,7 +917,7 @@ func (c *Composer) audit(p Posted[*Held]) {
 	if len(rest) > 0 {
 		c.logger.Warn("[eez] finalized height left transactions out, requeued", "event", "eez.composer.finality_audit.requeued",
 			"to", p.Height, "post", p.Post, "requeued", len(rest))
-		c.pool.PushFront(rest)
+		c.pool.Requeue(rest)
 	}
 	c.pool.Forget(ran)
 }

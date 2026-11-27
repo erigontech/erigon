@@ -1870,6 +1870,9 @@ func TestComposerAuditsASettlementReplaced(t *testing.T) {
 		back bool
 		// unread leaves the final block unreadable.
 		unread bool
+		// resent has omitted sent again and drained by a later batch before
+		// finality, settled when settledAgain: that copy keeps its hold.
+		resent, settledAgain bool
 		// requeued lists the transactions back in the pool, kept and
 		// omitted.
 		requeued func(kept, omitted *Held) []*Held
@@ -1878,6 +1881,8 @@ func TestComposerAuditsASettlementReplaced(t *testing.T) {
 		{name: "the posting back without the settlement", landed: true, back: true, requeued: func(_, o *Held) []*Held { return []*Held{o} }},
 		{name: "a second rival", requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
 		{name: "the final block unreadable", landed: true, unread: true, requeued: func(k, o *Held) []*Held { return []*Held{k, o} }},
+		{name: "a later copy in flight", landed: true, resent: true, requeued: func(*Held, *Held) []*Held { return nil }},
+		{name: "a later copy settled", landed: true, resent: true, settledAgain: true, requeued: func(*Held, *Held) []*Held { return nil }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			chain := newTestChain(t, 8, 8)
@@ -1921,11 +1926,24 @@ func TestComposerAuditsASettlementReplaced(t *testing.T) {
 			if c.unread {
 				h.chain.head = 7
 			}
+			if c.resent {
+				again := held(addr(0xb), 0, Outbound, 2)
+				require.NoError(t, pool.Push(again, 0))
+				require.Equal(t, []*Held{again}, pool.PopN(1))
+				if c.settledAgain {
+					pool.Release([]*Held{again})
+				}
+			}
 			h.final.Store(8)
 			h.c.RecoverFailed(t.Context())
 			h.c.Close()
 			want := c.requeued(kept, omitted)
 			require.ElementsMatch(t, want, pool.PopN(math.MaxInt))
+			if c.resent {
+				require.True(t, pool.Holds(omitted.Hash), "the later copy keeps its hold")
+				pool.Drop([]*Held{omitted})
+				require.True(t, pool.Holds(omitted.Hash), "dropping the old copy leaves the later one's hold")
+			}
 			if !slices.Contains(want, kept) {
 				require.False(t, pool.Holds(kept.Hash), "final in the rival's block")
 			}
@@ -2203,7 +2221,7 @@ func TestComposerEjectsARefusedCulpritL1Settled(t *testing.T) {
 			require.Zero(t, innocent.Attempts)
 			pool.mu.Lock()
 			defer pool.mu.Unlock()
-			require.Equal(t, ran, pool.settled[culprit.Hash], "a culprit that ran stays held until final")
+			require.Equal(t, ran, pool.settled[culprit.Hash] != nil, "a culprit that ran stays held until final")
 			_, tombed := pool.discarded[culprit.Hash]
 			require.Equal(t, !ran, tombed)
 			_, tombed = pool.discarded[behind.Hash]

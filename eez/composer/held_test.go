@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -635,7 +636,7 @@ func TestHeldPoolKeepsComposedOutbound(t *testing.T) {
 	p.mu.Lock()
 	_, tombed := p.discarded[x.Hash]
 	require.True(t, tombed, "tombstoned")
-	require.False(t, p.settled[x.Hash], "no ledger entry is left to forget it")
+	require.Nil(t, p.settled[x.Hash], "no ledger entry is left to forget it")
 	p.mu.Unlock()
 
 	stale := held(addr(0xb), 0, Outbound, 3)
@@ -647,4 +648,121 @@ func TestHeldPoolKeepsComposedOutbound(t *testing.T) {
 	require.NoError(t, p.Push(in, 0))
 	p.Release(p.PopN(1))
 	require.False(t, p.Holds(in.Hash))
+}
+
+// TestHeldPoolRequeue: a transaction of a settlement the final chain left
+// out returns to the front unless a copy sent again since owns its hash,
+// in flight or settled; its own reservation, still in flight, is released;
+// a queued copy takes what it counted.
+func TestHeldPoolRequeue(t *testing.T) {
+	a := addr(0xa)
+	for _, c := range []struct {
+		name string
+		// later puts a copy of old's hash in the state it names.
+		later  func(p *HeldPool, copy *Held)
+		queued func(old, copy *Held) []*Held
+		holder func(old, copy *Held) *Held // the owner of the hold after
+	}{
+		{name: "released", queued: func(old, _ *Held) []*Held { return []*Held{old} }},
+		{name: "a later copy in flight", later: func(p *HeldPool, copy *Held) {
+			require.NoError(t, p.Push(copy, 0))
+			p.PopN(1)
+		}, holder: func(_, copy *Held) *Held { return copy }},
+		{name: "a later copy settled", later: func(p *HeldPool, copy *Held) {
+			require.NoError(t, p.Push(copy, 0))
+			p.Release(p.PopN(1))
+		}, holder: func(_, copy *Held) *Held { return copy }},
+		{
+			name: "a later copy queued", later: func(p *HeldPool, copy *Held) { require.NoError(t, p.Push(copy, 0)) },
+			queued: func(_, copy *Held) []*Held { return []*Held{copy} },
+		},
+		{name: "its own reservation", later: func(p *HeldPool, _ *Held) {}, queued: func(old, _ *Held) []*Held { return []*Held{old} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := NewHeldPool()
+			old := held(a, 0, Outbound, 1)
+			old.Attempts, old.sync = 2, 7
+			require.NoError(t, p.Push(old, 0))
+			p.PopN(1)
+			if c.name != "its own reservation" {
+				p.Release([]*Held{old})
+			}
+			copy := held(a, 0, Outbound, 1)
+			if c.later != nil {
+				c.later(p, copy)
+			}
+			p.Requeue([]*Held{old})
+			var want []*Held
+			if c.queued != nil {
+				want = c.queued(old, copy)
+			}
+			got := p.PopN(math.MaxInt)
+			if len(want) == 0 {
+				require.Empty(t, got)
+			} else {
+				require.Equal(t, want, got)
+			}
+			if c.name == "a later copy queued" {
+				require.Equal(t, uint32(2), copy.Attempts, "the queued copy takes the attempts counted")
+				require.Equal(t, uint64(7), copy.sync)
+			}
+			if c.holder != nil {
+				p.mu.Lock()
+				r, inFlight := p.inFlight[old.Hash]
+				s := p.settled[old.Hash]
+				p.mu.Unlock()
+				require.True(t, (inFlight && r.owner == c.holder(old, copy)) || s == c.holder(old, copy), "the later copy keeps its hold")
+				p.Drop([]*Held{old})
+				require.True(t, p.Holds(old.Hash), "dropping the old copy leaves the later one's")
+			}
+		})
+	}
+}
+
+// TestHeldPoolReserveLeavesALaterCopy: an L1 reorg that rolls out a
+// settlement takes back its reservations, but not one a copy sent again
+// since holds; releasing the old copy keeps the later one's hold.
+func TestHeldPoolReserveLeavesALaterCopy(t *testing.T) {
+	p := NewHeldPool()
+	old := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, p.Push(old, 0))
+	p.Release(p.PopN(1))
+	later := held(addr(0xa), 0, Outbound, 1)
+	require.NoError(t, p.Push(later, 0))
+	p.PopN(1)
+	p.Reserve([]*Held{old})
+	p.mu.Lock()
+	require.Same(t, later, p.inFlight[old.Hash].owner)
+	p.mu.Unlock()
+	p.Release([]*Held{later})
+	p.Release([]*Held{old})
+	p.mu.Lock()
+	require.Same(t, later, p.settled[old.Hash])
+	p.mu.Unlock()
+	p.Forget([]*Held{old})
+	require.True(t, p.Holds(old.Hash), "the later copy is held until its own finality")
+	p.Forget([]*Held{later})
+	require.False(t, p.Holds(old.Hash))
+}
+
+// TestHeldPoolPushesConcurrently: the fronts push at once; each admitted
+// copy gets its own place in the pool's order.
+func TestHeldPoolPushesConcurrently(t *testing.T) {
+	p := NewHeldPool()
+	var wg sync.WaitGroup
+	txs, errs := make([]*Held, 8), make([]error, 8)
+	for i := range txs {
+		txs[i] = held(addr(byte(0x10+i)), 0, Outbound, byte(0x10+i))
+		wg.Go(func() { errs[i] = p.Push(txs[i], 0) })
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	seen := map[uint64]bool{}
+	for _, tx := range txs {
+		require.NotZero(t, tx.seq)
+		require.False(t, seen[tx.seq], "seq %d twice", tx.seq)
+		seen[tx.seq] = true
+	}
 }
