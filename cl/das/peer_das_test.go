@@ -3588,6 +3588,15 @@ func (g *gossipRecovery) storeColumnsUpTo(t *testing.T, count int, afterEach fun
 	}
 }
 
+func (g *gossipRecovery) awaitClaim(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		g.d.recoveringMutex.Lock()
+		defer g.d.recoveringMutex.Unlock()
+		return g.d.isRecovering[g.root]
+	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+}
+
 func (g *gossipRecovery) awaitFirstRead(t *testing.T) time.Time {
 	t.Helper()
 	select {
@@ -3643,11 +3652,7 @@ func TestBlobRecoveryWaitIsNotRestartedByAColumnStoredAfterTheClaim(t *testing.T
 		g := startGossipRecovery(t, true)
 
 		first := g.schedule(t)
-		require.Eventually(t, func() bool {
-			g.d.recoveringMutex.Lock()
-			defer g.d.recoveringMutex.Unlock()
-			return g.d.isRecovering[g.root]
-		}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+		g.awaitClaim(t)
 		time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
 		second := g.schedule(t)
 		g.releaseClock()
@@ -3785,11 +3790,7 @@ func TestBlobRecoveryWithMetadataDoesNotWait(t *testing.T) {
 func TestBlobRecoveryWithMetadataArrivingBeforeTheDecisionIsRecovered(t *testing.T) {
 	g := startGossipRecovery(t, true)
 	g.schedule(t)
-	require.Eventually(t, func() bool {
-		g.d.recoveringMutex.Lock()
-		defer g.d.recoveringMutex.Unlock()
-		return g.d.isRecovering[g.root]
-	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+	g.awaitClaim(t)
 
 	require.NoError(t, g.d.tryScheduleRecover(recoveryTestSlot, g.root, g.metadata))
 	g.releaseClock()

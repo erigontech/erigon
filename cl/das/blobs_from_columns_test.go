@@ -18,10 +18,12 @@ package das
 
 import (
 	"context"
+	"maps"
 	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -136,10 +138,11 @@ func TestBlobsFromColumnsServesASupernodeOutsideLazyMode(t *testing.T) {
 }
 
 // Outside lazy mode the count row is no proof that the blob files exist: a column that a blob request needs is rebuilt
-// when a file is missing, and the file is written again.
+// when a file is missing, and the file is written again. While one recovery owns the root, a repeated request that finds the
+// column still missing neither queues a second recovery nor changes the stored columns.
 func TestBlobsFromColumnsRepairsAColumnOutsideLazyModeWhenABlobFileIsMissing(t *testing.T) {
 	var removeFile func(index uint64) error
-	g := startGossipRecovery(t, false, atFuluFromGenesis, func(r *recoveryRun) {
+	g := startGossipRecovery(t, true, atFuluFromGenesis, func(r *recoveryRun) {
 		r.d.caplinConfig = &clparams.CaplinConfig{BlobPruningDisabled: true}
 		removeFile = useBlobFiles(t, r)
 	})
@@ -150,15 +153,47 @@ func TestBlobsFromColumnsRepairsAColumnOutsideLazyModeWhenABlobFileIsMissing(t *
 	g.requireAllColumnsStored(t)
 	receiveRecoveredColumnsPublish(t, g.published)
 	require.NoError(t, removeFile(1))
-	require.NoError(t, g.d.columnStorage.RemoveColumnSidecars(t.Context(), recoveryTestSlot, g.root, 5))
+	var kept []uint64
+	var removed []int64
+	for column := range g.d.beaconConfig.NumberOfColumns {
+		if column == 63 || column > 64 {
+			removed = append(removed, int64(column))
+		} else {
+			kept = append(kept, column)
+		}
+	}
+	require.NoError(t, g.d.columnStorage.RemoveColumnSidecars(t.Context(), recoveryTestSlot, g.root, removed...))
 	g.requireNoBlobSidecars(t)
 	count, err := g.d.blobStorage.KzgCommitmentsCount(t.Context(), g.root)
 	require.NoError(t, err)
 	require.Positive(t, count)
+	saved, err := g.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, g.root)
+	require.NoError(t, err)
+	require.ElementsMatch(t, kept, saved)
+	require.True(t, g.d.IsColumnOverHalf(recoveryTestSlot, g.root))
 
 	_, _, err = g.blobsFromColumns([]uint64{0, 1}, false)
 
 	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	owned := g.ownedRequest()
+	require.Equal(t, g.root, owned.blockRoot, "the recovery that owns the root")
+	g.awaitClaim(t)
+
+	_, _, err = g.blobsFromColumns([]uint64{0, 1}, false)
+
+	require.ErrorIs(t, err, ErrBlobsUnavailable)
+	require.Equal(t, owned, g.ownedRequest())
+	g.d.recoveringMutex.Lock()
+	recovering := maps.Clone(g.d.isRecovering)
+	g.d.recoveringMutex.Unlock()
+	require.Equal(t, map[common.Hash]bool{g.root: true}, recovering)
+	require.Empty(t, g.d.recoverBlobsQueue)
+	saved, err = g.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, g.root)
+	require.NoError(t, err)
+	require.ElementsMatch(t, kept, saved)
+
+	g.releaseClock()
+
 	requireBlobRecoveryReleased(t, g.d, g.root)
 	g.requireAllColumnsStored(t)
 	g.requireBlobsRecovered(t)
@@ -930,14 +965,25 @@ func TestBlobsFromColumnsFinishesTheSharedBuildWhenTheStarterIsCancelled(t *test
 	s.awaitJoined(t, 1)
 
 	cancelStarter()
+	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
 	release()
 
-	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
 	got := awaitBlobs(t, waiter)
 	require.NoError(t, got.err)
 	require.Len(t, got.sidecars, 2)
 	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
 	s.requireCacheHit(t, s.root, got.sidecars)
+	s.awaitNoBuildLeft(t, 0)
+}
+
+func (s *sharedBuilds) awaitNoBuildLeft(t *testing.T, heldPermits int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		s.d.blobBuildsMu.Lock()
+		defer s.d.blobBuildsMu.Unlock()
+		return len(s.d.blobBuilds) == 0
+	}, 30*time.Second, time.Millisecond)
+	s.requireNoBuildLeft(t, heldPermits)
 }
 
 func TestBlobsFromColumnsFreesTheWaiterPlaceOfACancelledWaiter(t *testing.T) {
@@ -974,10 +1020,11 @@ func TestBlobsFromColumnsCompletesAndCachesTheBuildWhenEveryRequestIsCancelled(t
 	for _, waiter := range waiters {
 		require.ErrorIs(t, awaitBlobs(t, waiter).err, context.Canceled)
 	}
+	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
 	s.awaitJoined(t, 0)
 	release()
 
-	require.ErrorIs(t, awaitBlobs(t, starter).err, context.Canceled)
+	s.awaitNoBuildLeft(t, 0)
 	require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
 	cached, ok := s.d.builtBlobSidecars.Peek(s.root)
 	require.True(t, ok, "the build is cached")
@@ -1001,7 +1048,7 @@ func TestBlobsFromColumnsEndsABuildThatIsBlockedPastTheOwnerDeadline(t *testing.
 
 	require.ErrorIs(t, got.err, ErrReconstructionBusy)
 	require.Nil(t, got.sidecars)
-	s.requireNoBuildLeft(t, 0)
+	s.awaitNoBuildLeft(t, 0)
 	s.requireNothingCached(t)
 	blocked.Store(false)
 	_, sidecars, err := s.blobsFromColumns(nil, true)
@@ -1017,8 +1064,139 @@ func TestBlobsFromColumnsEndsABuildThatWaitsForAPermitPastTheOwnerDeadline(t *te
 
 	require.ErrorIs(t, got.err, ErrReconstructionBusy)
 	require.Nil(t, got.sidecars)
-	s.requireNoBuildLeft(t, 1)
+	s.awaitNoBuildLeft(t, 1)
 	s.requireNothingCached(t)
+}
+
+func TestBlobsFromColumnsAnswersARequestBusyWhenTheBuildItWaitsForPassesItsDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := startSharedBuilds(t, 2, 2, withSlotSeconds(1))
+		release := s.holdColumn(t, 1)
+		starter := s.startFullRequest(t.Context())
+		s.awaitRead(t, 1)
+		joiner := s.startFullRequest(t.Context())
+		s.awaitJoined(t, 1)
+
+		got := awaitBlobs(t, joiner)
+
+		require.ErrorIs(t, got.err, ErrReconstructionBusy)
+		require.Nil(t, got.sidecars)
+		require.ErrorIs(t, awaitBlobs(t, starter).err, ErrReconstructionBusy)
+		late := awaitBlobs(t, s.startFullRequest(t.Context()))
+		require.ErrorIs(t, late.err, ErrReconstructionBusy)
+		require.Nil(t, late.sidecars)
+		require.Equal(t, 1, s.seams.indexLookups(), "saved-index lookups")
+		require.Equal(t, 1, s.seams.reads(s.root, 1), "reads of column 1")
+		s.d.blobBuildsMu.Lock()
+		_, inFlight := s.d.blobBuilds[s.root]
+		s.d.blobBuildsMu.Unlock()
+		require.True(t, inFlight, "the build is no longer in flight")
+
+		synctest.Wait()
+		release()
+		synctest.Wait()
+
+		s.requireNoBuildLeft(t, 0)
+		s.requireNothingCached(t)
+		_, sidecars, err := s.blobsFromColumns(nil, true)
+		require.NoError(t, err)
+		require.Len(t, sidecars, 2)
+	})
+}
+
+func TestBlobsFromColumnsGivesTheJoinerPlacesBackWhenTheBuildPassesItsDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const permits = 1
+		s := startSharedBuilds(t, 2, permits, withSlotSeconds(1))
+		for range 2 {
+			s.seams.reset()
+			release := s.holdColumn(t, 1)
+			starter := s.startFullRequest(t.Context())
+			s.awaitRead(t, 1)
+			joiners := make([]<-chan blobsResult, 2*permits)
+			for i := range joiners {
+				joiners[i] = s.startFullRequest(t.Context())
+			}
+			s.awaitJoined(t, 2*permits)
+
+			for _, joiner := range joiners {
+				require.ErrorIs(t, awaitBlobs(t, joiner).err, ErrReconstructionBusy)
+			}
+			require.Zero(t, s.d.reconstructions.joined.Load(), "joined requests")
+			require.ErrorIs(t, awaitBlobs(t, s.startFullRequest(t.Context())).err, ErrReconstructionBusy)
+			require.Zero(t, s.d.reconstructions.joined.Load(), "joined requests")
+
+			require.ErrorIs(t, awaitBlobs(t, starter).err, ErrReconstructionBusy)
+			synctest.Wait()
+			release()
+			synctest.Wait()
+			s.requireNoBuildLeft(t, 0)
+		}
+	})
+}
+
+func TestBlobsFromColumnsRunsTheBuildUntilTheDeadlineOfItsEntry(t *testing.T) {
+	s := startSharedBuilds(t, 2, 2)
+	var ownerDeadline, entryDeadline time.Time
+	s.seams.setBeforeRead(func(ctx context.Context, column int64) error {
+		if column == 1 {
+			ownerDeadline, _ = ctx.Deadline()
+			s.d.blobBuildsMu.Lock()
+			defer s.d.blobBuildsMu.Unlock()
+			entryDeadline = s.d.blobBuilds[s.root].deadline
+		}
+		return nil
+	})
+	before := time.Now()
+
+	_, sidecars, err := s.blobsFromColumns(nil, true)
+
+	after := time.Now()
+	require.NoError(t, err)
+	require.Len(t, sidecars, 2)
+	require.True(t, ownerDeadline.Equal(entryDeadline), "the deadline of the build context %v and of its entry %v", ownerDeadline, entryDeadline)
+	require.WithinRange(t, entryDeadline, before.Add(s.d.slotDuration()), after.Add(s.d.slotDuration()))
+}
+
+func TestBlobsFromColumnsAnswersAJoinerBusyWhenTheDeadlineOfTheBuildComes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining time.Duration
+	}{
+		{"deadline ahead", 7 * time.Second},
+		{"deadline passed", -3 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				d := &peerdas{beaconConfig: &clparams.BeaconChainConfig{SecondsPerSlot: 12}}
+				d.initBlobBuilds()
+				build := &blobBuild{done: make(chan struct{}), deadline: time.Now().Add(tc.remaining)}
+				start := time.Now()
+
+				_, err := d.joinBlobBuild(t.Context(), build)
+
+				require.ErrorIs(t, err, ErrReconstructionBusy)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, max(tc.remaining, 0), time.Since(start))
+			})
+		})
+	}
+}
+
+func TestBlobsFromColumnsGivesAFinishedBuildToAJoinerAfterTheBuildDeadline(t *testing.T) {
+	d := &peerdas{}
+	d.initBlobBuilds()
+	built := []*cltypes.BlobSidecar{{Index: 7}}
+	build := &blobBuild{done: make(chan struct{}), deadline: time.Now().Add(-time.Hour), sidecars: built}
+	close(build.done)
+
+	// With the build done and the deadline passed, select picks either ready case at random.
+	for range 100 {
+		got, err := d.joinBlobBuild(t.Context(), build)
+
+		require.NoError(t, err)
+		require.Equal(t, built, got)
+	}
 }
 
 func TestBlobsFromColumnsRefusesAJoinerWhenTheJoinerPlacesAreFull(t *testing.T) {
@@ -1201,7 +1379,7 @@ func TestBlobsFromColumnsSharesAFailedBuildAndDoesNotCacheIt(t *testing.T) {
 	s.requireCacheHit(t, s.root, built)
 }
 
-func TestBlobsFromColumnsKeepsAPanicWithTheStartingRequest(t *testing.T) {
+func TestBlobsFromColumnsAnswersEveryRequestWithAnInternalErrorWhenABuildPanics(t *testing.T) {
 	s := startSharedBuilds(t, 2, 2)
 	wait, release := newGate(t)
 	var failing atomic.Bool
@@ -1220,12 +1398,15 @@ func TestBlobsFromColumnsKeepsAPanicWithTheStartingRequest(t *testing.T) {
 
 	release()
 
-	require.Equal(t, "column storage failed", awaitBlobs(t, starter).panicked)
-	got := awaitBlobs(t, joiner)
-	require.Nil(t, got.panicked)
-	require.Error(t, got.err)
-	require.Nil(t, got.sidecars)
-	s.requireNoBuildLeft(t, 0)
+	for _, pending := range []<-chan blobsResult{starter, joiner} {
+		got := awaitBlobs(t, pending)
+		require.Nil(t, got.panicked)
+		require.Error(t, got.err)
+		require.NotErrorIs(t, got.err, ErrReconstructionBusy)
+		require.NotErrorIs(t, got.err, ErrBlobsUnavailable)
+		require.Nil(t, got.sidecars)
+	}
+	s.awaitNoBuildLeft(t, 0)
 	s.requireNothingCached(t)
 	failing.Store(false)
 	_, sidecars, err := s.blobsFromColumns(nil, true)

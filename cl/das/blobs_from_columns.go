@@ -23,12 +23,14 @@ import (
 	"os"
 	"runtime"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -37,7 +39,7 @@ var (
 	ErrColumnsNotKept = errors.New("the node does not keep the columns of the slot")
 	// ErrBlobsUnavailable means a column that the blobs need is missing or malformed. Recovery is asked to rebuild it.
 	ErrBlobsUnavailable = errors.New("blob data not available")
-	// ErrReconstructionBusy means too many reconstructions are running or waiting.
+	// ErrReconstructionBusy means too many reconstructions are running or waiting, or a reconstruction did not finish before its deadline.
 	ErrReconstructionBusy = errors.New("blob reconstruction busy")
 )
 
@@ -81,6 +83,7 @@ func (a *reconstructionAdmission) join() (leave func(), err error) {
 
 type blobBuild struct {
 	done     chan struct{}
+	deadline time.Time
 	sidecars []*cltypes.BlobSidecar
 	err      error
 }
@@ -153,14 +156,15 @@ func (d *peerdas) sharedBlobSidecars(ctx context.Context, slot uint64, blockRoot
 	}
 	build, running := d.blobBuilds[blockRoot]
 	if !running {
-		build = &blobBuild{done: make(chan struct{})}
+		build = &blobBuild{done: make(chan struct{}), deadline: time.Now().Add(d.slotDuration())}
 		d.blobBuilds[blockRoot] = build
 	}
 	d.blobBuildsMu.Unlock()
 	if running {
 		return d.joinBlobBuild(ctx, build)
 	}
-	return d.runBlobBuild(ctx, slot, blockRoot, build)
+	go d.runBlobBuild(ctx, slot, blockRoot, build)
+	return d.waitBlobBuild(ctx, build)
 }
 
 func (d *peerdas) joinBlobBuild(ctx context.Context, build *blobBuild) ([]*cltypes.BlobSidecar, error) {
@@ -169,29 +173,44 @@ func (d *peerdas) joinBlobBuild(ctx context.Context, build *blobBuild) ([]*cltyp
 		return nil, err
 	}
 	defer leave()
+	return d.waitBlobBuild(ctx, build)
+}
+
+func (d *peerdas) waitBlobBuild(ctx context.Context, build *blobBuild) ([]*cltypes.BlobSidecar, error) {
+	timer := time.NewTimer(time.Until(build.deadline))
+	defer timer.Stop()
 	select {
 	case <-build.done:
 		return build.sidecars, build.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-timer.C:
+		select {
+		case <-build.done:
+			return build.sidecars, build.err
+		default:
+			return nil, fmt.Errorf("%w: %w", ErrReconstructionBusy, context.DeadlineExceeded)
+		}
 	}
 }
 
-func (d *peerdas) runBlobBuild(ctx context.Context, slot uint64, blockRoot common.Hash, build *blobBuild) ([]*cltypes.BlobSidecar, error) {
-	// The starting request's cancellation must not end the build: joined requests wait for its result.
-	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.slotDuration())
+func (d *peerdas) runBlobBuild(ctx context.Context, slot uint64, blockRoot common.Hash, build *blobBuild) {
+	// The starting request's cancellation must not end the build: other requests wait for its result.
+	buildCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), build.deadline)
 	defer cancel()
 	var sidecars []*cltypes.BlobSidecar
 	err := errors.New("blob reconstruction aborted")
 	defer func() { d.publishBlobBuild(blockRoot, build, sidecars, err) }()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[peerdas] panic in a blob reconstruction", "slot", slot, "blockRoot", blockRoot, "err", r, "stack", dbg.Stack())
+			sidecars, err = nil, fmt.Errorf("blob reconstruction panicked: %v", r)
+		}
+	}()
 	_, sidecars, err = d.buildBlobs(buildCtx, slot, blockRoot, nil, true, false)
 	if buildErr := buildCtx.Err(); buildErr != nil && errors.Is(err, buildErr) {
 		err = fmt.Errorf("%w: %w", ErrReconstructionBusy, err)
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	return sidecars, err
 }
 
 func (d *peerdas) publishBlobBuild(blockRoot common.Hash, build *blobBuild, sidecars []*cltypes.BlobSidecar, err error) {
