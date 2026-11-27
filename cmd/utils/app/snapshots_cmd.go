@@ -443,7 +443,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s, plus %s", integrity.FastChecks, integrity.TorrentPieces)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after the 1st problem, or WARN and keep checking (a torrent piece-hash mismatch still fails the run)"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
-				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
+				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (disabled when TorrentPieces is skipped; speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; the run fails if it ends before every check has finished. 0 (default) means no limit"},
@@ -1570,6 +1570,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	var cache *integrity.IntegrityCache
 	// A torrent-verification failure must survive whatever the checks below return,
@@ -1581,24 +1582,21 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
-		var err error
-		cache, err = integrity.LoadIntegrityCache(cachePath)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if err := cache.Save(); err != nil {
-				logger.Warn("[integrity] failed to save cache", "err", err)
+		if _, skip := skipSet[integrity.TorrentPieces]; skip {
+			logger.Info("[integrity] cache disabled", "reason", "TorrentPieces skipped")
+		} else {
+			var err error
+			// When using cache, verify torrent piece hashes first.
+			cache, err = integrity.PrepareIntegrityCache(ctx, cachePath, dirs.Snap, failFast, logger)
+			if cache != nil {
+				defer func() {
+					if err := cache.Save(); err != nil {
+						logger.Warn("[integrity] failed to save cache", "err", err)
+					}
+				}()
 			}
-		}()
-
-		// When using cache, verify torrent piece hashes first (unless skipped)
-		if _, skip := skipSet[integrity.TorrentPieces]; !skip {
-			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
-			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				err = fmt.Errorf("torrent verification failed: %w", err)
-				if failFast {
+			if err != nil {
+				if cache == nil || failFast {
 					return err
 				}
 				// failFast=false means "warn and keep checking", so the run still has to
@@ -1626,7 +1624,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	logger.Info("[integrity] starting", "seed", sc.Seed, "sampleRatio", sc.SampleRatio, "checks", requestedChecks)
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 

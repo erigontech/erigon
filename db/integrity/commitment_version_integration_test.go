@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"math/rand"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -36,8 +38,116 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestCheckKvisUsesOnlyVerifiedCacheEntries(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	dirs, db, files := buildCacheCheckDB(t, false)
+	buildTorrents(t, dirs.Snap, files)
+	logger := log.New()
+	var logBuffer bytes.Buffer
+	logger.SetHandler(log.SyncHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat())))
+
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
+	require.NoError(t, err)
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, logger))
+	require.NoError(t, cache.Save())
+
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, cache, true, logger))
+	require.Contains(t, logBuffer.String(), "skipping (cache hit)")
+
+	coldCache, err := integrity.LoadIntegrityCache(cachePath)
+	require.NoError(t, err)
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvi(t.Context(), integrity.SamplerCfg{}, db, coldCache, true, logger))
+	require.NotContains(t, logBuffer.String(), "skipping (cache hit)")
+}
+
+func TestCheckCommitmentKvDerefUsesOnlyVerifiedCacheEntries(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	dirs, db, files := buildCacheCheckDB(t, true)
+	buildTorrents(t, dirs.Snap, files)
+	logger := log.New()
+	var logBuffer bytes.Buffer
+	logger.SetHandler(log.SyncHandler(log.StreamHandler(&logBuffer, log.LogfmtFormat())))
+
+	cachePath := filepath.Join(t.TempDir(), "integrity.cache")
+	cache, err := integrity.PrepareIntegrityCache(t.Context(), cachePath, dirs.Snap, true, logger)
+	require.NoError(t, err)
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, logger))
+	require.NoError(t, cache.Save())
+
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, cache, true, logger))
+	require.Contains(t, logBuffer.String(), "skipping (cache hit)")
+
+	coldCache, err := integrity.LoadIntegrityCache(cachePath)
+	require.NoError(t, err)
+	logBuffer.Reset()
+	require.NoError(t, integrity.CheckCommitmentKvDeref(t.Context(), db, coldCache, true, logger))
+	require.NotContains(t, logBuffer.String(), "skipping (cache hit)")
+}
+
+func buildCacheCheckDB(t *testing.T, referencesInCommitmentBranches bool) (datadir.Dirs, kv.TemporalRoDB, []string) {
+	t.Helper()
+	const stepSize = uint64(10)
+	const txs = 80
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, referencesInCommitmentBranches)
+	writeAndBuild(t, t.Context(), db, agg, txs)
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	db = reopenAgg(t, db, agg, dirs, stepSize, log.New())
+
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	aggTx := state.AggTx(tx)
+	defer aggTx.Close()
+	files := make([]string, 0)
+	for _, file := range aggTx.Files(kv.CommitmentDomain) {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		files = append(files, file.Fullpath())
+		if !referencesInCommitmentBranches {
+			kviPath, err := version.ReplaceVersionWithMask(file.Fullpath())
+			require.NoError(t, err)
+			kviPath = strings.TrimSuffix(kviPath, ".kv") + ".kvi"
+			kviPath, _, ok, err := version.FindFilesWithVersionsByPattern(kviPath)
+			require.NoError(t, err)
+			require.True(t, ok)
+			files = append(files, kviPath)
+		}
+		if referencesInCommitmentBranches {
+			for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+				pattern, err := version.ReplaceVersionWithMask(file.Fullpath())
+				require.NoError(t, err)
+				pattern = strings.Replace(pattern, kv.CommitmentDomain.String(), domain.String(), 1)
+				other, _, ok, err := version.FindFilesWithVersionsByPattern(pattern)
+				require.NoError(t, err)
+				require.True(t, ok)
+				files = append(files, other)
+			}
+		}
+	}
+	require.NotEmpty(t, files)
+	return dirs, db, files
+}
+
+func buildTorrents(t *testing.T, root string, files []string) {
+	t.Helper()
+	fs := downloader.NewAtomicTorrentFS(root)
+	for _, file := range files {
+		_, err := downloader.BuildTorrentIfNeed(t.Context(), file, root, fs)
+		require.NoError(t, err)
+	}
+}
 
 // TestCheckStateVerify_VersionRegimes builds two single-regime datadirs — one referenced and one
 // plain, each with a merged commitment file whose range exceeds the referencing threshold — and
