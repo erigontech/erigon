@@ -16,12 +16,7 @@
 
 package rlp
 
-import (
-	"io"
-	"math/bits"
-
-	"github.com/erigontech/erigon/common"
-)
+import "io"
 
 // RLP-related utilities necessary for computing commitments for state root hash
 
@@ -66,10 +61,6 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 	//
 	// see package rlp/decode.go:887
 	return byte(LongStringCode + l)
-}
-
-func generateByteArrayLen(buffer []byte, pos int, l int) int {
-	return pos + encodePrefixToBuf(l, buffer[pos:], EmptyStringCode, LongStringCode)
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
@@ -161,16 +152,6 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 	return pos
 }
 
-func generateRlpPrefixLen(l int) int {
-	if l < 2 {
-		return 0
-	}
-	if l < 56 {
-		return 1
-	}
-	return 1 + common.BitLenToByteLen(bits.Len64(uint64(l)))
-}
-
 // RlpSerializable is a value that can be double-RLP coded.
 type RlpSerializable interface {
 	ToDoubleRLP(io.Writer, []byte) error
@@ -198,7 +179,7 @@ func (b RlpSerializableBytes) DoubleRLPLen() int {
 type RlpEncodedBytes []byte
 
 func (b RlpEncodedBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
-	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLen, prefixBuf)
+	return EncodeString(b, w, prefixBuf)
 }
 
 func (b RlpEncodedBytes) RawBytes() []byte {
@@ -206,7 +187,7 @@ func (b RlpEncodedBytes) RawBytes() []byte {
 }
 
 func (b RlpEncodedBytes) DoubleRLPLen() int {
-	return generateRlpPrefixLen(len(b)) + len(b)
+	return StringLen(b)
 }
 
 func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte) error {
