@@ -207,7 +207,7 @@ type cachedAccountReader struct {
 	fill     bool
 }
 
-// newMemoAccountReader reads each account from base at most once.
+// newMemoAccountReader caches every successful read from base, including an absent account.
 func newMemoAccountReader(base state.StateReader) *cachedAccountReader {
 	return &cachedAccountReader{StateReader: base, accounts: map[accounts.Address]*accounts.Account{}, fill: true}
 }
