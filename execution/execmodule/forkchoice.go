@@ -774,7 +774,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			checkpointStateChanges()
 			restoreRecentReceipts = nil
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
-			// Prune and collate after the commit, so a reorg staged in this cycle is never pruned on the old chain.
+			// Prune after the commit, so changesets a staged unwind needs are never deleted.
 			if _, _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}

@@ -319,8 +319,8 @@ func TestCatchupCommitObservations(t *testing.T) {
 	}, observed)
 }
 
-// A catch-up forkchoice prunes and collates only the state it has committed, so a reorg staged in
-// the same cycle is never pruned or collated on the old chain.
+// A catch-up forkchoice prunes only after its cycle commits, so changesets that a staged unwind
+// needs are never deleted.
 func TestCatchupPruneSeesTheCommittedCycle(t *testing.T) {
 	m := execmoduletester.New(t)
 	m.ExecModule.Drain()
