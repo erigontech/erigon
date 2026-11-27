@@ -157,6 +157,19 @@ func TestTryOpenAggSelectsLegacyCommitmentFromDatadir(t *testing.T) {
 	require.NoError(t, cmd.Run(t.Context(), []string{"accessor", "--datadir", dirs.DataDir}))
 }
 
+func TestSqueezeCodeSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
+	}
+	mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen().Close()
+	require.NotPanics(t, func() { _ = squeezeCode(t.Context(), dirs, log.New()) })
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+}
+
 func TestSegDUMissingDatadirDoesNotCreate(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "missing")
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
