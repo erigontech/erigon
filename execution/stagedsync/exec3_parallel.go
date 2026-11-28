@@ -3405,7 +3405,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// Per-tx contribution for progress / uncommittedGas tracking.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
-				applyResult.receipt = result.Receipt.Copy()
+				// Block end sets only the original's own fields, so the copy may share its logs.
+				applyResult.receipt = result.Receipt.CopySharingLogs()
 				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}

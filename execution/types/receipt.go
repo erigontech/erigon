@@ -417,17 +417,26 @@ func (r *Receipt) LogsBloom() *Bloom {
 
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
-	if r == nil {
+	c := r.CopySharingLogs()
+	if c == nil {
 		return nil
 	}
-	frames := slices.Clone(r.FrameReceipts)
 	var logs Logs
-	for i := range frames {
-		frames[i].Logs = frames[i].Logs.Copy()
-		logs = append(logs, frames[i].Logs...)
+	for i := range c.FrameReceipts {
+		c.FrameReceipts[i].Logs = c.FrameReceipts[i].Logs.Copy()
+		logs = append(logs, c.FrameReceipts[i].Logs...)
 	}
-	if r.Type != FrameTxType {
-		logs = r.Logs.Copy()
+	if c.Type != FrameTxType {
+		logs = c.Logs.Copy()
+	}
+	c.Logs = logs
+	return c
+}
+
+// CopySharingLogs is Copy without copying the logs, for a receipt whose logs nobody mutates.
+func (r *Receipt) CopySharingLogs() *Receipt {
+	if r == nil {
+		return nil
 	}
 	var payer *common.Address
 	if r.Payer != nil {
@@ -440,9 +449,9 @@ func (r *Receipt) Copy() *Receipt {
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		Bloom:             r.Bloom,
-		Logs:              logs,
+		Logs:              r.Logs,
 		Payer:             payer,
-		FrameReceipts:     frames,
+		FrameReceipts:     slices.Clone(r.FrameReceipts),
 		TxHash:            r.TxHash,
 		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,

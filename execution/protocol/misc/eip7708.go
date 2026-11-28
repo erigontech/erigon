@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -34,19 +33,14 @@ import (
 // keccak256('Transfer(address,address,uint256)')
 var EthTransferLogEvent = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 
-// EthTransferLog creates and ETH transfer log according to EIP-7708.
+// AddEthTransferLog adds an ETH transfer log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
-func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
+func AddEthTransferLog(db evmtypes.IntraBlockState, from, to common.Address, amount uint256.Int) {
+	lp := db.AllocLog(params.SystemAddress.Value(), 3, 32)
+	lp.Topics[0], lp.Topics[1], lp.Topics[2] = EthTransferLogEvent, from.Hash(), to.Hash()
 	amount32 := amount.Bytes32()
-	return &types.Log{
-		Address: params.SystemAddress.Value(),
-		Topics: []common.Hash{
-			EthTransferLogEvent,
-			from.Hash(),
-			to.Hash(),
-		},
-		Data: amount32[:],
-	}
+	copy(lp.Data, amount32[:])
+	db.NotifyLog(lp)
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
@@ -62,7 +56,7 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, a
 		return err
 	}
 	if rules.IsEIPEnabled(7708) && !amount.IsZero() && sender != recipient { // EIP-7708
-		db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
+		AddEthTransferLog(db, sender.Value(), recipient.Value(), amount)
 	}
 	return nil
 }
