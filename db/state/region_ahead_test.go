@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -38,7 +37,7 @@ func regionSlotKey(addr byte, slot int) []byte {
 
 func storageDomainTxWithContracts(t *testing.T, contracts byte, slots int) *DomainRoTx {
 	t.Helper()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
