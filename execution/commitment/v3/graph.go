@@ -202,7 +202,7 @@ func (g graph) materialize(runCtx context.Context, ctx commitment.PatriciaContex
 	if err != nil {
 		return [32]byte{}, err
 	}
-	key := nodeKey(g.plane, g.addrHash, path, nil)
+	key := NodeKey(g.plane, g.addrHash, path, nil)
 	prev := n.raw
 	if !n.loaded {
 		if err := runCtx.Err(); err != nil {
@@ -223,7 +223,7 @@ func (g graph) materialize(runCtx context.Context, ctx commitment.PatriciaContex
 func (g graph) dropDead(holder *node, dead []*node, acc *deltaParts) {
 	for _, d := range dead {
 		if len(d.raw) != 0 && !hasNodeAt(holder, d.path) {
-			acc.add(recordDelta{Key: nodeKey(g.plane, g.addrHash, d.path, nil), Data: []byte{}, Prev: d.raw})
+			acc.add(recordDelta{Key: NodeKey(g.plane, g.addrHash, d.path, nil), Data: []byte{}, Prev: d.raw})
 		}
 		g.dropDead(holder, d.dead, acc)
 	}

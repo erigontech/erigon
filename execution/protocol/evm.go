@@ -109,6 +109,15 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
+func GetHashFnFromChain(header *types.Header, reader rules.ChainHeaderReader) func(uint64) (common.Hash, error) {
+	if reader == nil {
+		return GetHashFn(header, nil)
+	}
+	return GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		return reader.GetHeader(hash, number), nil
+	})
+}
+
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
 	blockNumber := ref.Number.Uint64()
@@ -139,6 +148,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		if hash, ok := hashLookupCache.Get(n); ok {
 			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
+		}
+
+		if getHeader == nil {
+			return common.Hash{}, fmt.Errorf("header reader unavailable for block %d", n)
 		}
 
 		if n > lastKnownNumber {

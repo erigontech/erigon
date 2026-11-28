@@ -155,8 +155,8 @@ func findKeyUpdate(t *testing.T, ut *Updates, plainKey string) *Update {
 	t.Helper()
 	entry, ok := ut.treeIdx[plainKey]
 	require.True(t, ok, "key %x should be present", plainKey)
-	require.NotNil(t, entry.update)
-	return entry.update
+	require.NotNil(t, entry.Update)
+	return entry.Update
 }
 
 func TestTouchPlainKeyDirect_Storage(t *testing.T) {

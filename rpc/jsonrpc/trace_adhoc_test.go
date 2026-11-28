@@ -580,6 +580,96 @@ func TestReplayTransaction(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+// The code in a replayed transaction's vmTrace and stateDiff stays the code after later writes to the db.
+func TestReplayTransactionKeepsCodeAfterLaterWrites(t *testing.T) {
+	replay := func(t *testing.T, m *execmoduletester.ExecModuleTester, txnHash common.Hash, traceType string) *TraceCallResult {
+		t.Helper()
+		api := NewTraceAPI(newBaseApiReadingCodeFromTx(m), m.DB, &rpccfg.TraceApiConfig{})
+		res, err := api.ReplayTransaction(m.Ctx, txnHash, []string{traceType}, nil)
+		require.NoError(t, err)
+		return res
+	}
+	bankKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	// singleTxChain inserts one block with the transaction newTx signs, and returns its hash.
+	singleTxChain := func(t *testing.T, cfg *chain.Config, alloc types.GenesisAlloc, newTx func(cfg *chain.Config) types.Transaction) (*execmoduletester.ExecModuleTester, common.Hash) {
+		t.Helper()
+		alloc[bank] = types.GenesisAccount{Balance: funds}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc}), execmoduletester.WithKey(bankKey))
+		txn, err := types.SignTx(newTx(cfg), *types.LatestSignerForChainID(cfg.ChainID), bankKey)
+		require.NoError(t, err)
+		pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(pack))
+		return m, txn.Hash()
+	}
+
+	t.Run("vmTrace of a call", func(t *testing.T) {
+		m, _, contractAddr, _ := chainWithDeployedContract(t)
+		var want []byte
+		var txnHash common.Hash
+		require.NoError(t, m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+			code, _, err := tx.GetLatest(kv.CodeDomain, contractAddr[:], kv.GetLatestOptions{})
+			want = bytes.Clone(code)
+			b, err2 := m.BlockReader.BlockByNumber(m.Ctx, tx, 2)
+			txnHash = b.Transactions()[0].Hash()
+			return errors.Join(err, err2)
+		}))
+		res := replay(t, m, txnHash, TraceTypeVmTrace)
+		overwriteFreedCodePages(t, m)
+		require.Equal(t, want, []byte(res.VmTrace.Code))
+	})
+
+	t.Run("stateDiff of a delegation change", func(t *testing.T) {
+		markerA, markerB := common.HexToAddress("0x1002"), common.HexToAddress("0x1003")
+		authorityKey, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+		fromCode := types.AddressToDelegation(accounts.InternAddress(markerA))
+		m, txnHash := singleTxChain(t, chain.TestChainOsakaConfig.Copy(), types.GenesisAlloc{
+			markerA:   {Code: []byte{0x00}},
+			markerB:   {Code: []byte{0x00}},
+			authority: {Balance: big.NewInt(1), Code: fromCode},
+		}, func(cfg *chain.Config) types.Transaction {
+			auth, err := types.SignAuthorization(authorityKey, *cfg.ChainID, markerB, 0)
+			require.NoError(t, err)
+			return &types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{To: &bank, GasLimit: 100_000},
+					ChainID:  *cfg.ChainID,
+					FeeCap:   *uint256.NewInt(100e9),
+				},
+				Authorizations: []types.Authorization{auth},
+			}
+		})
+		res := replay(t, m, txnHash, TraceTypeStateDiff)
+		overwriteFreedCodePages(t, m)
+		codes, ok := res.StateDiff[accounts.InternAddress(authority)].Code.(map[string]*StateDiffCode)
+		require.True(t, ok, "the delegation changes the code")
+		code := codes["*"]
+		require.NotNil(t, code)
+		require.Equal(t, fromCode, []byte(code.From))
+		require.Equal(t, types.AddressToDelegation(accounts.InternAddress(markerB)), []byte(code.To))
+	})
+
+	t.Run("stateDiff of a self-destructed contract", func(t *testing.T) {
+		victim := common.HexToAddress("0x1002")
+		victimCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.SELFDESTRUCT)}
+		m, txnHash := singleTxChain(t, chain.TestChainBerlinConfig.Copy(), types.GenesisAlloc{
+			victim: {Balance: big.NewInt(1), Code: victimCode},
+		}, func(*chain.Config) types.Transaction {
+			return types.NewTransaction(0, victim, new(uint256.Int), 100_000, uint256.NewInt(1_000_000_000), nil)
+		})
+		res := replay(t, m, txnHash, TraceTypeStateDiff)
+		overwriteFreedCodePages(t, m)
+		codes, ok := res.StateDiff[accounts.InternAddress(victim)].Code.(map[string]hexutil.Bytes)
+		require.True(t, ok, "the self-destruct removes the code")
+		require.Equal(t, hexutil.Bytes(victimCode), codes["-"])
+	})
+}
+
 func TestReplayBlockTransactions(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)

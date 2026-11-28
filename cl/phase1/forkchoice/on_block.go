@@ -211,6 +211,22 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 	return root, blockVersion, nil
 }
 
+// admitBlockLocked runs the admission checks of a block under the write lock. A tick that advanced
+// the time into an epoch start can still wait for f.mu, and on_tick runs before on_block, so its
+// promotion of the unrealized checkpoints comes first: it can move the finalized checkpoint the
+// block has to descend from. A tick can also advance the time during the checks and admit a block
+// of its epoch, so the checks run again after that epoch's promotion.
+func (f *ForkChoiceStore) admitBlockLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
+	for {
+		epoch := f.computeEpochAtSlot(f.Slot())
+		f.promoteUnrealizedCheckpoints(epoch)
+		root, version, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, requireEngineAcceptance)
+		if f.computeEpochAtSlot(f.Slot()) == epoch {
+			return root, version, err
+		}
+	}
+}
+
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
 	if block != nil && block.Block != nil {
 		finishImport := f.BeginPayloadImport(block.Block.Slot)
@@ -255,7 +271,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			return nil
 		}
 	}
-	blockRoot, blockVersion, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
+	blockRoot, blockVersion, err := f.admitBlockLocked(block, rejectEquivocation, newPayload)
 	if errors.Is(err, errBlockAtFinalizedHorizon) {
 		return nil
 	}
@@ -267,7 +283,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// Validate parent payload status path early (before expensive operations)
 	isGloas := blockVersion >= clparams.GloasVersion
-	headBeforeBlock := common.Hash{}
+	gloasHeadBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointStateLocked)
@@ -278,7 +294,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return err
 		}
-		headBeforeBlock = head.Root
+		gloasHeadBeforeBlock = head.Root
 	}
 
 	// Pre-GLOAS execution payload processing.
@@ -350,6 +366,16 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			var join func()
 			if overlap != nil {
 				join = overlap.join
+			}
+			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot); warm {
+				// Build the justified state for the head before the block while f.mu is released.
+				joinOverlap := join
+				join = func() {
+					_, _ = f.getCheckpointState(justifiedCheckpoint)
+					if joinOverlap != nil {
+						joinOverlap()
+					}
+				}
 			}
 			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
@@ -433,7 +459,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			// f.mu was released for the EL call, so every admission condition checked on
 			// entry can have gone stale: another caller may have inserted an equivocating
 			// header, and finality may have moved past this block.
-			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+			if _, _, recheckErr := f.admitBlockLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
 				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
 					return nil
 				}
@@ -498,7 +524,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 		if waited {
 			f.invalidateCachedHead()
-			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+			if _, _, recheckErr := f.admitBlockLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
 				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
 					return nil
 				}
@@ -546,7 +572,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	pendingEnvelopeFound, err := f.applyBlockImportLocked(
 		importedBlock,
 		blockRoot,
-		headBeforeBlock,
+		gloasHeadBeforeBlock,
 		storeTimeMs,
 		lastProcessedState,
 		prepared,

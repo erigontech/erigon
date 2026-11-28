@@ -511,7 +511,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 				ot.lastVmOp.Cost += int(gas.Execution)
 			}
 		} else {
-			vmTrace.Code = code
+			// The code may reference transaction-scoped mmap memory, so detach before rollback.
+			vmTrace.Code = bytes.Clone(code)
 		}
 	}
 	ot.builtin = precompile
@@ -1013,7 +1014,9 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Code = "="
 				} else {
 					m := make(map[string]*StateDiffCode)
-					m["*"] = &StateDiffCode{From: fromCode, To: toCode}
+					// The pre-state code may reference transaction-scoped mmap memory, so detach before rollback. The
+					// changed code was written by this transaction.
+					m["*"] = &StateDiffCode{From: bytes.Clone(fromCode), To: toCode}
 					accountDiff.Code = m
 					allEqual = false
 				}
@@ -1052,7 +1055,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 						return err
 					}
 					m := make(map[string]hexutil.Bytes)
-					m["-"] = code
+					// The code may reference transaction-scoped mmap memory, so detach before rollback.
+					m["-"] = bytes.Clone(code)
 					accountDiff.Code = m
 				}
 				{

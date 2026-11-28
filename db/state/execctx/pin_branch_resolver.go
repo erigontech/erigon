@@ -20,7 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 )
 
 // pinBranchResolver resolves trunk-preload branch reads for the adaptive pin
@@ -31,7 +31,7 @@ import (
 // Empty values (deletion tombstones) resolve to nil like absent keys: the branch
 // cache never stores tombstones, and unpinned prefixes fall through to the
 // authoritative read anyway.
-func pinBranchResolver(ttx kv.TemporalGetter) commitment.BatchBranchResolver {
+func pinBranchResolver(ttx kv.TemporalGetter) branchcache.BatchBranchResolver {
 	return func(keys [][]byte) ([][]byte, error) {
 		vals := make([][]byte, len(keys))
 		for i, k := range keys {

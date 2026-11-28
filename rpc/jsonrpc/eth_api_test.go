@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -557,6 +559,55 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
 	a.NoError(err)
 	a.Equal(svLatest, svNil)
+}
+
+// newBaseApiReadingCodeFromTx returns a BaseAPI whose state cache has no execution module, so it reads code from
+// the db tx, as on any cache miss.
+func newBaseApiReadingCodeFromTx(m *execmoduletester.ExecModuleTester) *BaseAPI {
+	return NewBaseApi(nil, &execmodule.Cache{}, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+}
+
+// overwriteFreedCodePages removes the code rows, then writes enough for the freed db pages to be reused.
+func overwriteFreedCodePages(t *testing.T, m *execmoduletester.ExecModuleTester) {
+	t.Helper()
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := tx.ClearTable(kv.TblCodeVals); err != nil {
+			return err
+		}
+		return tx.ClearTable(kv.TblCodeHistoryVals)
+	}))
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		filler := bytes.Repeat([]byte{0xff}, 600) // any size works: the writes only have to fill the freed pages
+		for i := range 1000 {
+			if err := tx.Put(kv.TblCodeVals, binary.BigEndian.AppendUint64(nil, uint64(i)), filler); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
+func TestGetCodeKeepsBytesAfterLaterWrites(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiReadingCodeFromTx(m), m.DB, nil, nil)
+
+	var want []byte
+	require.NoError(t, m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+		code, _, err := tx.GetLatest(kv.CodeDomain, contractAddr[:], kv.GetLatestOptions{})
+		want = bytes.Clone(code)
+		return err
+	}))
+	require.NotEmpty(t, want)
+
+	latest, deployBlock := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), rpc.BlockNumberOrHashWithNumber(1)
+	latestCode, err := api.GetCode(m.Ctx, contractAddr, &latest)
+	require.NoError(t, err)
+	deployBlockCode, err := api.GetCode(m.Ctx, contractAddr, &deployBlock)
+	require.NoError(t, err)
+
+	overwriteFreedCodePages(t, m)
+	require.Equal(t, want, []byte(latestCode), "latest")
+	require.Equal(t, want, []byte(deployBlockCode), "deploy block")
 }
 
 func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {

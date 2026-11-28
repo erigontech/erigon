@@ -114,6 +114,7 @@ type ForkChoiceStore struct {
 	finalizedCheckpoint           atomic.Value
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
+	checkpointPromotionEpoch      uint64 // latest epoch whose start-of-epoch promotion was handled, guarded by mu
 
 	proposerBoostRoot              atomic.Value
 	headHash                       common.Hash

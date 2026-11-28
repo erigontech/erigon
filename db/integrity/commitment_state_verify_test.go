@@ -35,7 +35,8 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -343,10 +344,10 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 			continue
 		}
 
-		bd := commitment.BranchData(v)
-		t.Logf("Branch key=%x data=%s", k, bd.String())
+		bd := branch.BranchData(v)
+		t.Logf("Branch key=%x data=%s", k, v2.BranchDataString(bd))
 
-		err = commitment.VerifyBranchHashes(k, bd, accountValues, storageValues)
+		err = v2.VerifyBranchHashes(k, bd, accountValues, storageValues)
 		checked++
 		if err != nil {
 			t.Errorf("VerifyBranchHashes FAILED for key=%x: %v", k, err)
