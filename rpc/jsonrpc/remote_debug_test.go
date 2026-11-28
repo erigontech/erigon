@@ -224,7 +224,7 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 					config := &tracersConfig.TraceConfig{Tracer: new("callTracer"), TxIndex: new(hexutil.Uint(0))}
 					return streamedResult(func(stream *jsonstream.Stream) error {
 						if endpoint == "traceCall" {
-							return api.TraceCall(ctx, args, &block, config, stream)
+							return api.TraceCall(ctx, args, &block, (*DebugTraceCallConfig)(config), stream)
 						}
 						return api.TraceCallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
 					})
@@ -328,7 +328,7 @@ func TestIndexedTraceBlockHashUsesPinnedView(t *testing.T) {
 			if endpoint == "traceCall" {
 				var trace struct{ Output string }
 				readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
-					return api.TraceCall(ctx, args, &block, config, stream)
+					return api.TraceCall(ctx, args, &block, (*DebugTraceCallConfig)(config), stream)
 				})
 				require.Equal(t, parent.Hash().Hex(), trace.Output)
 			} else {
@@ -515,7 +515,7 @@ func TestTraceBlockHashDoesNotRenewStateView(t *testing.T) {
 				if endpoint == "traceCall" {
 					var trace struct{ Output string }
 					readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
-						return api.TraceCall(ctx, args, &block, config, stream)
+						return api.TraceCall(ctx, args, &block, (*DebugTraceCallConfig)(config), stream)
 					})
 					require.Equal(t, hexutil.Encode(want), trace.Output)
 				} else {
@@ -564,7 +564,7 @@ func TestIndexedTraceRevalidatesAfterRemoteRenewal(t *testing.T) {
 				bundles, simulate := pruneGatingBundle(ref.num)
 				config := &tracersConfig.TraceConfig{Tracer: new("callTracer"), TxIndex: new(hexutil.Uint(1))}
 				if endpoint == "traceCall" {
-					return apis.debug.TraceCall(t.Context(), bundles[0].Transactions[0], &simulate.BlockNumber, config, stream)
+					return apis.debug.TraceCall(t.Context(), bundles[0].Transactions[0], &simulate.BlockNumber, (*DebugTraceCallConfig)(config), stream)
 				}
 				simulate.TransactionIndex = new(1)
 				return apis.debug.TraceCallMany(t.Context(), bundles, simulate, config, stream)
@@ -629,7 +629,7 @@ func TestIndexedStateReadFollowsRemoteRenewal(t *testing.T) {
 					simulate.TransactionIndex = new(0)
 					return streamedResult(func(stream *jsonstream.Stream) error {
 						if endpoint == "traceCall" {
-							return apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &simulate.BlockNumber, &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(0))}, stream)
+							return apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &simulate.BlockNumber, &DebugTraceCallConfig{TxIndex: new(hexutil.Uint(0))}, stream)
 						}
 						return apis.debug.TraceCallMany(ctx, bundles, simulate, nil, stream)
 					})

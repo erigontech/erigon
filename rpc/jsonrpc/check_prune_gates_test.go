@@ -410,7 +410,7 @@ func TestIndexedStateReadRequiresTransactionBounds(t *testing.T) {
 				}},
 				{"debug_traceCall", func() (any, error) {
 					return streamedResult(func(stream *jsonstream.Stream) error {
-						return api.TraceCall(ctx, pruneGatingCallArgs(), &block, &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint)}, stream)
+						return api.TraceCall(ctx, pruneGatingCallArgs(), &block, &DebugTraceCallConfig{TxIndex: new(hexutil.Uint)}, stream)
 					})
 				}},
 				{"debug_traceCallMany", func() (any, error) {
@@ -519,7 +519,7 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
 			txIndex := hexutil.Uint(index)
 			return streamedResult(func(stream *jsonstream.Stream) error {
-				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &tracersConfig.TraceConfig{TxIndex: &txIndex}, stream)
+				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &DebugTraceCallConfig{TxIndex: &txIndex}, stream)
 			})
 		}},
 		{"traceCallMany", math.MaxInt, func(api *DebugAPIImpl, index uint64) (any, error) {

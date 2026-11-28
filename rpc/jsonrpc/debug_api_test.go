@@ -343,7 +343,7 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 		callConfig.TxIndex = new(hexutil.Uint(i))
 		var callTrace traceGasUsage
 		readGasTrace(t, &callTrace, func(stream *jsonstream.Stream) error {
-			return api.TraceCall(m.Ctx, call, &block, &callConfig, stream)
+			return api.TraceCall(m.Ctx, call, &block, (*DebugTraceCallConfig)(&callConfig), stream)
 		})
 		require.Equal(t, txnTrace, callTrace, "call %d", i)
 		require.Equal(t, txnTrace, manyTraces[0][i], "call-many %d", i)
@@ -813,7 +813,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 			}
 			buf, s := newStream()
 			blockNr := rpc.BlockNumberOrHashWithNumber(1)
-			err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, cfg, s)
+			err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, (*DebugTraceCallConfig)(cfg), s)
 			require.Error(t, err)
 			require.NoError(t, s.Flush())
 			require.Empty(t, buf.Bytes(), "stream must be empty on execution error so handler omits result field")
@@ -835,7 +835,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	t.Run("TraceCall_bad_timeout", func(t *testing.T) {
 		buf, s := newStream()
 		blockNr := rpc.BlockNumberOrHashWithNumber(1)
-		err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, badTimeoutCfg, s)
+		err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, (*DebugTraceCallConfig)(badTimeoutCfg), s)
 		require.Error(t, err)
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
@@ -853,7 +853,7 @@ func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, o
 
 	var buf bytes.Buffer
 	s := jsonstream.New(&buf)
-	err := api.TraceCall(context.Background(), args, nil, &tracersConfig.TraceConfig{
+	err := api.TraceCall(context.Background(), args, nil, &DebugTraceCallConfig{
 		BlockOverrides: overrides,
 	}, s)
 	require.NoError(t, err)
@@ -954,7 +954,7 @@ func TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride(t *testing.T) {
 
 	t.Run("fee cap below the override", func(t *testing.T) {
 		var buf bytes.Buffer
-		err := c.debugAPI().TraceCall(context.Background(), argsWithFeeCap(10), nil, &tracersConfig.TraceConfig{
+		err := c.debugAPI().TraceCall(context.Background(), argsWithFeeCap(10), nil, &DebugTraceCallConfig{
 			BlockOverrides: blobBaseFee(11),
 		}, jsonstream.New(&buf))
 		require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
@@ -2328,7 +2328,7 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 		}
 		t.Run(fmt.Sprintf("debug_traceCall/%d", txIndex), func(t *testing.T) {
 			config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txIndex))}
-			err := debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{}))
+			err := debugApi.TraceCall(m.Ctx, calls[0], &block, (*DebugTraceCallConfig)(config), jsonstream.New(&bytes.Buffer{}))
 			require.ErrorAs(t, err, &invalidParams)
 		})
 	}
@@ -2339,7 +2339,7 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
-	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, (*DebugTraceCallConfig)(config), jsonstream.New(&bytes.Buffer{})))
 
 	t.Run("debug_traceCallMany/negative_index_without_bounds", func(t *testing.T) {
 		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
@@ -2437,7 +2437,7 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 		require.ErrorAs(t, err, &invalidParams, "debug_traceCallMany %d", txIndex)
 	}
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
-	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
+	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, (*DebugTraceCallConfig)(config), jsonstream.New(&bytes.Buffer{}))
 	require.ErrorAs(t, err, &invalidParams)
 }
 
@@ -2491,7 +2491,7 @@ func TestTraceCallTxIndexSelectsPreStateAtHead(t *testing.T) {
 		}
 		var trace struct{ Output string }
 		readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
-			return debugApi.TraceCall(m.Ctx, read, &block, config, stream)
+			return debugApi.TraceCall(m.Ctx, read, &block, (*DebugTraceCallConfig)(config), stream)
 		})
 		return trace.Output
 	}
@@ -2562,7 +2562,7 @@ func TestIndexedTraceRejectsPrunedHistoryAtForkchoiceHead(t *testing.T) {
 				stream := jsonstream.New(&output)
 				var err error
 				if endpoint == "traceCall" {
-					err = apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &selector.block, config, stream)
+					err = apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &selector.block, (*DebugTraceCallConfig)(config), stream)
 				} else {
 					err = apis.debug.TraceCallMany(ctx, bundles, simulate, config, stream)
 				}

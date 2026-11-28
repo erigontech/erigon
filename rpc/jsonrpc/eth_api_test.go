@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -829,7 +828,7 @@ func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
 		data := hexutil.Bytes(slot[:])
 		var out bytes.Buffer
 		stream := jsonstream.New(&out)
-		require.NoError(t, debugAPI.TraceCall(context.Background(), ethapi.CallArgs{To: &historyAddr, Data: &data}, at, &tracersConfig.TraceConfig{}, stream))
+		require.NoError(t, debugAPI.TraceCall(context.Background(), ethapi.CallArgs{To: &historyAddr, Data: &data}, at, &DebugTraceCallConfig{}, stream))
 		require.NoError(t, stream.Flush())
 		var traced struct {
 			ReturnValue string `json:"returnValue"`
