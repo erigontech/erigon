@@ -611,10 +611,10 @@ Phase 1 restarts from scratch. --continue is mutually exclusive with
 For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
 
 Examples:
-  integration commitment convert --datadir /path/to/datadir --chain mainnet
-  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
-  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
-  integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  ERIGON_COMMITMENT_V3=false integration commitment convert --datadir /path/to/datadir --chain mainnet
+  ERIGON_COMMITMENT_V3=false integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
+  ERIGON_COMMITMENT_V3=false integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  ERIGON_COMMITMENT_V3=false integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --restore --datadir /path/to/datadir --chain mainnet
   integration commitment convert --v3 --datadir /path/to/datadir --chain mainnet`,
 	SilenceUsage: true,
@@ -636,7 +636,7 @@ Examples:
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if statecfg.ExperimentalCommitmentV3 && !convertV3 && !convertRestore { // --v3 opens the files at their on-disk version; --restore opens none
-			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
+			return errors.New("commitment convert opens legacy commitment files; set ERIGON_COMMITMENT_V3=false")
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)

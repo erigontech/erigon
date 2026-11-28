@@ -330,6 +330,21 @@ func EmbeddedServices(ctx context.Context,
 	return
 }
 
+func checkDatadirCompatibility(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+	// using salt files as proxy for empty directory or not
+	ok, err := dbstate.CheckSaltFilesExist(dirs)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return dbstate.ErrCannotStartWithoutSaltFiles
+	}
+	if _, _, err := utils.SetCommitmentV3FromDatadir(ctx, dirs, logger); err != nil {
+		return err
+	}
+	return dbstate.CheckSnapshotsCompatibility(dirs)
+}
+
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
@@ -375,13 +390,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    at first start RpcDaemon may start earlier than Erigon
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 
-		// using salt files as proxy for empty directory or not
-		ok, err := dbstate.CheckSaltFilesExist(cfg.Dirs)
-		if err != nil {
+		if err := checkDatadirCompatibility(ctx, cfg.Dirs, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, err
-		}
-		if !ok {
-			return nil, nil, nil, nil, nil, nil, nil, ff, dbstate.ErrCannotStartWithoutSaltFiles
 		}
 
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
@@ -413,10 +423,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		blockReader = freezeblocks.NewBlockReader(allSnapshots)
 		txNumsReader := blockReader.TxnumReader()
-
-		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
 
 		erigonDBSettings, err := dbstate.ResolveErigonDBSettings(cfg.Dirs, logger, false)
 		if err != nil {

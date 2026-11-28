@@ -413,6 +413,9 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 		key, existed := getKey()
 
 		r := rnd.IntN(101)
+		if (r <= 33 || r > 80) && len(key) > length.Addr {
+			key = key[:length.Addr]
+		}
 		switch {
 		case r <= 33:
 			acc := accounts3.Account{

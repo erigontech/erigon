@@ -128,6 +128,56 @@ func TestIndexAggOptsOpenADatadirWithAGap(t *testing.T) {
 	agg.Close()
 }
 
+func TestTryOpenAggSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
+	}
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := tryOpenAgg(t.Context(), dirs, chainDB, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+}
+
+func TestSqueezeCodeSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
+	}
+	mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen().Close()
+	require.NotPanics(t, func() { _ = squeezeCode(t.Context(), dirs, log.New()) })
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+}
+
+func TestPublishableSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen().Close()
+	err := doPublishable(t.Context(), dirs, nil)
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+	if err != nil {
+		require.NotContains(t, err.Error(), "less than supported version")
+	}
+}
+
+func TestSegDUMissingDatadirDoesNotCreate(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "missing")
+	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
+	err := app.Run(t.Context(), []string{"erigon", "seg", "du", "--log.dir.disable", "--datadir", dataDir})
+	require.ErrorContains(t, err, "datadir does not exist")
+	require.NoDirExists(t, dataDir)
+}
+
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))

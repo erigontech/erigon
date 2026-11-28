@@ -64,6 +64,9 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.Comma
 		// Must run here, not in Action: urfave/cli/v3 skips a parent command's
 		// Action once it dispatches to a subcommand, but Before runs for every
 		// command in the chain, including the root.
+		if err := utils.CheckCommitmentV3Env(); err != nil {
+			return ctx, err
+		}
 		configFilePath := cmd.String(utils.ConfigFlag.Name)
 		if configFilePath != "" {
 			if err := cli2.SetFlagsFromConfigFile(cmd, configFilePath); err != nil {

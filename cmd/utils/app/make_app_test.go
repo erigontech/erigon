@@ -53,3 +53,24 @@ func TestMakeApp_ConfigFileAppliesToSubcommands(t *testing.T) {
 	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--config", cfgFile, "import"}))
 	require.Equal(t, "/tmp/from-config", sawDatadir, "config.toml settings must apply even when a subcommand like import is invoked")
 }
+
+func TestMakeApp_RejectsInvalidCommitmentV3Env(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "0")
+	ran := false
+	app := MakeApp("erigon", func(ctx context.Context, cmd *cli.Command) error {
+		return nil
+	}, nil)
+	app.ExitErrHandler = func(context.Context, *cli.Command, error) {}
+	app.Commands = []*cli.Command{
+		{
+			Name: "ls",
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				ran = true
+				return nil
+			},
+		},
+	}
+	err := app.Run(context.Background(), []string{"erigon", "ls"})
+	require.ErrorContains(t, err, "accepted values are true or false")
+	require.False(t, ran)
+}

@@ -22,8 +22,10 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -50,6 +53,26 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
+
+func datadirWith(t *testing.T, files ...string) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	for _, file := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
+	}
+	return dirs
+}
+
+func datadirWithState(t *testing.T, key []byte) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.TblCommitmentVals, key, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
+	}))
+	return dirs
+}
 
 func Test_SplitTagsFlag(t *testing.T) {
 	tests := []struct {
@@ -509,13 +532,60 @@ func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
 	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "SetEthConfig must enable v3 commitment records")
 }
 
-func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, args ...string) bool {
+func TestSetEthConfigLegacyDatadirWarningsRespectSnapshotDownloads(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		downloadsOn bool
+	}{
+		{name: "downloads enabled", downloadsOn: true},
+		{name: "no downloader", args: []string{"--no-downloader"}},
+		{name: "state snapshot download disabled", args: []string{"--snap.skip-state-snapshot-download"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(filepath.Join(t.TempDir(), "legacy datadir"))
+			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+			commitmentV3Flag := ExperimentalCommitmentV3Flag
+			chainFlag := ChainFlag
+			noDownloaderFlag := NoDownloaderFlag
+			skipStateSnapshotDownloadFlag := SnapSkipStateSnapshotDownloadFlag
+			var cfg ethconfig.Config
+			nodeConfig := nodecfg.Config{Dirs: dirs}
+			var logs strings.Builder
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
+			app := &cli.Command{
+				Flags: []cli.Flag{&commitmentV3Flag, &chainFlag, &noDownloaderFlag, &skipStateSnapshotDownloadFlag},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					SetEthConfig(ctx, cmd, &nodeConfig, &cfg, logger)
+					return nil
+				},
+			}
+
+			statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
+			require.NoError(t, app.Run(context.Background(), append([]string{"test", "--chain=sepolia"}, tc.args...)))
+			require.False(t, statecfg.ExperimentalCommitmentV3)
+			require.Contains(t, logs.String(), "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+			if tc.downloadsOn {
+				require.Contains(t, logs.String(), "seg reset")
+			} else {
+				require.NotContains(t, logs.String(), "seg reset")
+			}
+		})
+	}
+}
+
+func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, chain string, logger log.Logger, args ...string) bool {
 	t.Helper()
 	flag := ExperimentalCommitmentV3Flag
+	chainTomlURL := SnapChainTomlURLFlag
 	app := &cli.Command{
-		Flags: []cli.Flag{&flag},
+		Flags: []cli.Flag{&flag, &chainTomlURL},
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			setCommitmentV3(context.Background(), cmd, dirs, log.Root())
+			setCommitmentV3(context.Background(), cmd, dirs, chain, logger, true)
 			return nil
 		},
 	}
@@ -527,7 +597,9 @@ func runSetCommitmentV3(t *testing.T, dirs datadir.Dirs, args ...string) bool {
 func TestSetCommitmentV3Flag(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	run := func(args ...string) bool { return runSetCommitmentV3(t, datadir.New(t.TempDir()), args...) }
+	run := func(args ...string) bool {
+		return runSetCommitmentV3(t, datadir.New(t.TempDir()), "mainnet", log.Root(), args...)
+	}
 
 	require.False(t, run(), "unset flag must leave COMMITMENT_V3 in charge")
 	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"))
@@ -537,15 +609,10 @@ func TestSetCommitmentV3Flag(t *testing.T) {
 func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
-	datadirWith := func(file string) datadir.Dirs {
-		dirs := datadir.New(t.TempDir())
-		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, file), nil, 0o644))
-		return dirs
-	}
-	legacyDirs, v3Dirs := datadirWith("v2.0-commitment.0-1.kv"), datadirWith("v3.0-commitment.0-1.kv")
+	legacyDirs, v3Dirs := datadirWith(t, "v2.0-commitment.0-1.kv"), datadirWith(t, "v3.0-commitment.0-1.kv")
 	run := func(dirs datadir.Dirs, args ...string) bool {
 		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
-		return runSetCommitmentV3(t, dirs, args...)
+		return runSetCommitmentV3(t, dirs, "mainnet", log.Root(), args...)
 	}
 
 	require.Equal(t, statecfg.DefaultCommitmentV3, run(datadir.New(t.TempDir())), "a fresh datadir must take the default")
@@ -556,31 +623,113 @@ func TestSetCommitmentV3FollowsDatadir(t *testing.T) {
 
 	t.Setenv("ERIGON_COMMITMENT_V3", "true")
 	statecfg.SetCommitmentV3(true)
-	require.True(t, runSetCommitmentV3(t, legacyDirs), "ERIGON_COMMITMENT_V3 must not be switched by the datadir")
+	require.True(t, runSetCommitmentV3(t, legacyDirs, "mainnet", log.Root()), "ERIGON_COMMITMENT_V3 must not be switched by the datadir")
 	t.Setenv("ERIGON_COMMITMENT_V3", "false")
 	statecfg.SetCommitmentV3(false)
-	require.False(t, runSetCommitmentV3(t, v3Dirs), "ERIGON_COMMITMENT_V3=false must not be switched by the datadir")
+	require.False(t, runSetCommitmentV3(t, v3Dirs, "mainnet", log.Root()), "ERIGON_COMMITMENT_V3=false must not be switched by the datadir")
+}
+
+func TestSetCommitmentV3WarnsOnLegacyDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	legacyDirs := datadirWith(t, "v2.0-commitment.0-1.kv")
+	run := func(dirs datadir.Dirs, chain string, args ...string) (bool, string) {
+		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
+		var logs strings.Builder
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
+		v3 := runSetCommitmentV3(t, dirs, chain, logger, args...)
+		return v3, logs.String()
+	}
+	const warning = "keeps the legacy commitment trie"
+
+	v3, logs := run(legacyDirs, "sepolia")
+	require.False(t, v3)
+	require.Contains(t, logs, warning)
+	command := "erigon seg reset --datadir=\"" + legacyDirs.DataDir + "\" --chain=sepolia"
+	require.Contains(t, logs, "[commitment] to move this node to the v3 trie: stop erigon, run the command at the end of this line, then start erigon with the same flags; it downloads the v3 snapshots and executes from them: "+command)
+
+	v3, logs = run(legacyDirs, "dev")
+	require.False(t, v3)
+	require.Contains(t, logs, "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+	require.NotContains(t, logs, "seg reset", "a chain without published snapshots has no seg reset path")
+
+	chaindataOnly := datadirWithState(t, commitment.KeyCommitmentState)
+	v3, logs = run(chaindataOnly, "dev")
+	require.False(t, v3, "a datadir with legacy commitment in chaindata only is not fresh")
+	require.Contains(t, logs, warning)
+
+	_, logs = run(legacyDirs, "sepolia", "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+	require.NotContains(t, logs, warning, "an explicit legacy choice must not warn")
+
+	for _, tc := range []struct {
+		name string
+		env  string
+		args []string
+	}{
+		{name: "snapshot branch", env: "SNAPS_GIT_BRANCH"},
+		{name: "erigon snapshot branch", env: "ERIGON_SNAPS_GIT_BRANCH"},
+		{name: "remote preverified", env: snapcfg.RemotePreverifiedEnvKey},
+		{name: "chain toml url", args: []string{"--" + SnapChainTomlURLFlag.Name + "=https://example.com/chain.toml"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv(tc.env, "override")
+			}
+			_, logs := run(legacyDirs, "sepolia", tc.args...)
+			require.NotContains(t, logs, "seg reset")
+			require.Contains(t, logs, "snapshot list override must be removed")
+		})
+	}
+
+	for _, dirs := range []datadir.Dirs{datadirWith(t), datadirWith(t, "v3.0-commitment.0-1.kv")} {
+		v3, logs = run(dirs, "sepolia")
+		require.True(t, v3, "a fresh or v3 datadir must use commitment v3")
+		require.NotContains(t, logs, warning, dirs.DataDir)
+	}
 }
 
 func TestSetCommitmentV3FollowsChaindata(t *testing.T) {
 	t.Setenv("ERIGON_COMMITMENT_V3", "")
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
-	datadirWithState := func(key []byte) datadir.Dirs {
-		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).MustOpen()
-		defer db.Close()
-		require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Put(kv.TblCommitmentVals, key, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 1})
-		}))
-		return dirs
-	}
 	run := func(dirs datadir.Dirs) bool {
 		statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3)
-		return runSetCommitmentV3(t, dirs)
+		return runSetCommitmentV3(t, dirs, "mainnet", log.Root())
 	}
 
-	require.False(t, run(datadirWithState(commitment.KeyCommitmentState)), "a datadir with legacy commitment in chaindata only must use the legacy trie")
-	require.True(t, run(datadirWithState(commitment.KeyCommitmentV3State)), "a datadir with v3 commitment in chaindata only must use the v3 trie")
+	require.False(t, run(datadirWithState(t, commitment.KeyCommitmentState)), "a datadir with legacy commitment in chaindata only must use the legacy trie")
+	require.True(t, run(datadirWithState(t, commitment.KeyCommitmentV3State)), "a datadir with v3 commitment in chaindata only must use the v3 trie")
+}
+
+func TestSetCommitmentV3RejectsInvalidEnv(t *testing.T) {
+	if os.Getenv("ERIGON_INVALID_COMMITMENT_TEST") == "1" {
+		dirs := datadirWith(t, "v2.0-commitment.0-1.kv")
+		if os.Getenv("ERIGON_INVALID_COMMITMENT_FLAG") == "1" {
+			runSetCommitmentV3(t, dirs, "mainnet", log.Root(), "--"+ExperimentalCommitmentV3Flag.Name+"=false")
+		} else {
+			runSetCommitmentV3(t, dirs, "mainnet", log.Root())
+		}
+		return
+	}
+
+	for _, withFlag := range []bool{false, true} {
+		t.Run(fmt.Sprintf("with flag=%t", withFlag), func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestSetCommitmentV3RejectsInvalidEnv$")
+			cmd.Env = append(os.Environ(), "ERIGON_INVALID_COMMITMENT_TEST=1", "ERIGON_COMMITMENT_V3=0")
+			if withFlag {
+				cmd.Env = append(cmd.Env, "ERIGON_INVALID_COMMITMENT_FLAG=1")
+			}
+			output, err := cmd.CombinedOutput()
+			require.Error(t, err)
+			require.Contains(t, string(output), "ERIGON_COMMITMENT_V3=\"0\" is invalid; accepted values are true or false")
+		})
+	}
+}
+
+func TestCheckCommitmentV3EnvNamesTheVariableRead(t *testing.T) {
+	t.Setenv("COMMITMENT_V3", "0")
+	require.ErrorContains(t, CheckCommitmentV3Env(), `COMMITMENT_V3="0" is invalid`)
+	require.NotContains(t, CheckCommitmentV3Env().Error(), "ERIGON_COMMITMENT_V3")
 }
 
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
