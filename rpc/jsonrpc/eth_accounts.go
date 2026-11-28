@@ -132,10 +132,16 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
-	if acc == nil || err != nil || acc.IsEmptyCodeHash() {
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil || acc.IsEmptyCodeHash() {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(addr)
+	res, err := reader.ReadAccountCode(addr)
+	if err != nil {
+		return nil, err
+	}
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}

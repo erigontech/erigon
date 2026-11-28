@@ -667,6 +667,73 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 	}
 }
 
+var errDomainRead = errors.New("domain read failed")
+
+// domainReadFailingDB fails every latest and historical read of one domain, as a lost remote KV link does.
+type domainReadFailingDB struct {
+	kv.TemporalRoDB
+	domain kv.Domain
+}
+
+func (d domainReadFailingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := d.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // The caller owns the returned tx.
+	if err != nil {
+		return nil, err
+	}
+	return domainReadFailingTx{TemporalTx: tx, domain: d.domain}, nil
+}
+
+type domainReadFailingTx struct {
+	kv.TemporalTx
+	domain kv.Domain
+}
+
+func (tx domainReadFailingTx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == tx.domain {
+		return nil, 0, errDomainRead
+	}
+	return tx.TemporalTx.GetLatest(name, k, opts)
+}
+
+func (tx domainReadFailingTx) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	if name == tx.domain {
+		return nil, false, errDomainRead
+	}
+	return tx.TemporalTx.GetAsOf(name, k, ts)
+}
+
+// TestGetCodeReturnsReadErrors checks that eth_getCode and the GraphQL account code return a failed account or
+// code read as an error, not as "no code".
+func TestGetCodeReturnsReadErrors(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	// No execution module, so every read goes to the db tx, as on any cache miss.
+	base := NewBaseApi(nil, &execmodule.Cache{}, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	code := func(db kv.TemporalRoDB, block rpc.BlockNumber) (hexutil.Bytes, string, error, error) {
+		blockNrOrHash := rpc.BlockNumberOrHashWithNumber(block)
+		rpcCode, rpcErr := newEthApiForTest(base, db, nil, nil).GetCode(m.Ctx, contractAddr, &blockNrOrHash)
+		_, _, gqlCode, gqlErr := NewGraphQLAPI(base, db, nil, nil, &rpccfg.GraphQLApiConfig{}).GetAccountInfo(m.Ctx, contractAddr, block)
+		return rpcCode, gqlCode, rpcErr, gqlErr
+	}
+	// The contract is deployed in block 1.
+	for _, block := range []rpc.BlockNumber{rpc.LatestBlockNumber, 1} {
+		want, wantGql, err, gqlErr := code(m.DB, block)
+		require.NoError(t, err)
+		require.NoError(t, gqlErr)
+		require.NotEmpty(t, want)
+		require.Equal(t, hexutil.Encode(want), wantGql)
+
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+			t.Run(fmt.Sprintf("%s/%s", block, domain), func(t *testing.T) {
+				got, gotGql, err, gqlErr := code(domainReadFailingDB{TemporalRoDB: m.DB, domain: domain}, block)
+				require.ErrorIs(t, err, errDomainRead)
+				require.Nil(t, got)
+				require.ErrorIs(t, gqlErr, errDomainRead)
+				require.Empty(t, gotGql)
+			})
+		}
+	}
+}
+
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)
