@@ -249,7 +249,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
 	pool.frameRejections = nil
-	require.Panics(t, func() { pool.prepareFrames(ctx, txns) })
+	require.Panics(t, func() { pool.prepareFrames(ctx, newAdmissionBatch(txns, nil).txns) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
 		pool.lock.Unlock()
@@ -1280,6 +1280,98 @@ func TestFramePoolValidationBatchDeadline(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	require.Len(t, backend.deadlines, 2)
 	require.Equal(t, backend.deadlines[0], backend.deadlines[1], "one slow batch must not get a new timeout for every frame")
+}
+
+func TestFramePoolBatchKeepsFirstValidationForRepeatedSlot(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	secondPayer := common.Address{2}
+	backend.onValidate = func() {
+		if len(backend.calls) == 1 {
+			backend.payer = secondPayer
+		}
+	}
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.DuplicateHash}, reasons)
+	require.Equal(t, sender, frame.frameValidation.Payer)
+	require.Contains(t, pool.frameReservations, sender)
+	require.NotContains(t, pool.frameReservations, secondPayer)
+}
+
+func TestFramePoolUnavailableWithNewSenderConflict(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var restored TxnSlots
+	restored.Append(blocker, sender[:], true)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.err = status.Error(codes.Unavailable, "backend unavailable")
+	backend.onValidate = func() {
+		backend.onValidate = nil
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		require.Len(t, pool.restoreFramesLocked(pool.lastSeenBlock.Load(), restored), 1)
+	}
+
+	staleLegacy := framePoolSlot(t, sender, 1, 2)
+	currentLegacy := framePoolSlotWithNonce(t, sender, 1, 1, 2)
+	keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	var txns TxnSlots
+	txns.Append(staleLegacy, sender[:], true)
+	txns.Append(currentLegacy, sender[:], true)
+	txns.Append(keyed, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow, txpoolcfg.InvalidFrame, txpoolcfg.InvalidFrame}, reasons)
+
+	rejection, ok := pool.frameRejections.Peek(string(staleLegacy.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, frameRejection{generation: pool.stateGeneration, reason: txpoolcfg.NonceTooLow}, rejection)
+	for _, candidate := range []*TxnSlot{currentLegacy, keyed} {
+		rejection, ok := pool.frameRejections.Peek(string(candidate.IDHash[:]))
+		require.True(t, ok)
+		require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	}
+}
+
+func TestAdmissionPreparesDeferredBlobAndSetCodeAfterStateChange(t *testing.T) {
+	ctx, pool, blob, txns := newPoolWithBlobTxn(t, "Bogota")
+	sender := txns.Senders.AddressAt(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{3}, 7)
+	require.NoError(t, err)
+	setCode := newTestSetCodeTxnSlot(blob.Nonce+1, 0, 1, 2, 100_000)
+	setCode.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	setCode.IDHash = setCode.Txn.Hash()
+	txns.Append(setCode, sender[:], true)
+
+	frameSender := common.Address{2}
+	txns.Append(framePoolSlot(t, frameSender, 1, 2, uint256.Int{1}), frameSender[:], true)
+	backend := &frameValidationBackend{payer: frameSender, balance: common.Ether, valid: true}
+	pool.ethBackend = backend
+	// A reorg during frame simulation can make a previously spent nonce usable again.
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, setCode.Nonce+1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	backend.onValidate = func() {
+		backend.onValidate = nil
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, blob.Nonce, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	owner := pool.auths[AuthAndNonce{crypto.PubkeyToAddress(key.PublicKey), auth.Nonce}]
+	require.NotNil(t, owner, "the recovered signer and nonce must be reserved")
+	require.Same(t, setCode, owner.TxnSlot)
+	for _, hash := range blob.GetBlobHashes() {
+		cells, _ := pool.blobs.cells.Peek(hash)
+		require.NotNil(t, cells, "missing verified cells for blob %s", hash)
+	}
 }
 
 func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {

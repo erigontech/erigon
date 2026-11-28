@@ -112,9 +112,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer})
+		reasons, err := prepareTxnReasons(ctx, pool, slots, []remoteSource{peer, peer})
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -126,9 +126,9 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
 		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.SkippedAfterKZGFailure}, reasons,
 			"txn[1] should not have been verified")
 	})
 
@@ -140,7 +140,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], true)
 		slots.Append(&s1, a1[:], true)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, err := prepareTxnReasons(ctx, pool, slots, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	})
@@ -256,6 +256,21 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
 }
 
+func TestRemotePooledBlobCopyRequiresItsOwnSidecar(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	sender := common.Address{1}
+	blob := makeBlobSlot(0x65, false)
+	reasons := submitRemoteTxns(t, pool, sender, &blob)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	withoutSidecar := blob
+	withoutSidecar.BlobBundles = nil
+	reasons = submitRemoteTxns(t, pool, sender, &withoutSidecar)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnequalBlobTxExt}, reasons)
+}
+
 func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -342,10 +357,9 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, false)
-		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
-		assert.Len(t, goodTxns.Txns, 1)
+		batch := newAdmissionBatch(slots, nil)
+		require.NoError(t, pool.validateTxns(batch.txns, cacheView, nil))
+		assert.Equal(t, txpoolcfg.NotSet, batch.txns[0].reason)
 	})
 
 	t.Run("bad proof is still rejected", func(t *testing.T) {
