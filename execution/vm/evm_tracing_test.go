@@ -461,6 +461,52 @@ func TestGasChangeV2Precompile(t *testing.T) {
 	}
 }
 
+func TestGasChangeV2Ecrecover(t *testing.T) {
+	tests, err := loadJson("ecRecover")
+	require.NoError(t, err)
+	for _, test := range tests {
+		if test.Expected == "" {
+			continue
+		}
+		t.Run(test.Name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			recorder := &gasTraceRecorder{t: t}
+			config := chain.AllProtocolChanges.Copy()
+			config.BogotaTime = new(uint64)
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, config, Config{Tracer: recorder.hooks()})
+			input, expected := common.FromHex(test.Input), common.FromHex(test.Expected)
+			signer := accounts.InternAddress(common.BytesToAddress(expected))
+			precompile := accounts.InternAddress(common.HexToAddress("0x01"))
+			initial := mdgas.MdGas{Execution: 10_000, State: 50_000}
+			for _, tc := range []struct {
+				code    []byte
+				output  []byte
+				gasUsed uint64
+			}{
+				{output: expected, gasUsed: 6100},
+				{code: []byte{byte(STOP)}, gasUsed: 3200},
+				{code: types.AddressToDelegation(accounts.ZeroAddress), output: expected, gasUsed: 3200},
+			} {
+				require.NoError(t, ibs.SetCode(signer, tc.code, tracing.CodeChangeUnspecified))
+				recorder.changes = nil
+				output, remaining, used, err := evm.StaticCall(accounts.ZeroAddress, precompile, input, initial)
+				require.NoError(t, err)
+				require.Equal(t, tc.output, output)
+				require.Equal(t, mdgas.MdGas{Execution: initial.Execution - tc.gasUsed, State: initial.State}, remaining)
+				require.Equal(t, mdgas.MdGasUsage{Execution: tc.gasUsed}, used)
+				var tracedGas uint64
+				for _, change := range recorder.changes {
+					if change.reason == tracing.GasChangeCallPrecompiledContract {
+						tracedGas += change.old.Execution - change.new.Execution
+					}
+				}
+				require.Equal(t, tc.gasUsed, tracedGas)
+			}
+		})
+	}
+}
+
 func TestGasChangeV2CodeDeposit(t *testing.T) {
 	for _, frame := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary", true: "frame"}[frame], func(t *testing.T) {

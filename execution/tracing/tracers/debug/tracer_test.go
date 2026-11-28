@@ -18,6 +18,7 @@ package debug
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,6 +31,61 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+func TestAccountRecording(t *testing.T) {
+	address := accounts.InternAddress([20]byte{1})
+	for _, tc := range []struct {
+		name    string
+		hook    func(*tracing.Hooks) func(accounts.Address)
+		disable RecordOptions
+	}{
+		{
+			name:    "onAccountAccess",
+			hook:    func(hooks *tracing.Hooks) func(accounts.Address) { return hooks.OnAccountAccess },
+			disable: RecordOptions{DisableOnAccountAccessRecording: true},
+		},
+		{
+			name:    "onAccountRead",
+			hook:    func(hooks *tracing.Hooks) func(accounts.Address) { return hooks.OnAccountRead },
+			disable: RecordOptions{DisableOnAccountReadRecording: true},
+		},
+	} {
+		for _, disabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/disabled=%t", tc.name, disabled), func(t *testing.T) {
+				var forwarded []string
+				recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+					OnAccountAccess: func(addr accounts.Address) {
+						require.Equal(t, address, addr)
+						forwarded = append(forwarded, "onAccountAccess")
+					},
+					OnAccountRead: func(addr accounts.Address) {
+						require.Equal(t, address, addr)
+						forwarded = append(forwarded, "onAccountRead")
+					},
+				}}}
+				if disabled {
+					recorder.recordOptions = tc.disable
+				}
+				hook := tc.hook(recorder.Hooks())
+				require.NotNil(t, hook)
+				hook(address)
+				if disabled {
+					require.Empty(t, recorder.traces.Traces)
+					require.Empty(t, forwarded)
+					return
+				}
+				require.Equal(t, []string{tc.name}, forwarded)
+				encoded, err := json.Marshal(recorder.traces)
+				require.NoError(t, err)
+				require.JSONEq(t, fmt.Sprintf(`{"traces":[{%q:{"address":%q}}]}`, tc.name, address), string(encoded))
+
+				recorder.wrapped.Hooks = nil
+				hook(address)
+				require.Len(t, recorder.traces.Traces, 2)
+			})
+		}
+	}
+}
 
 func TestTxEndV2Recording(t *testing.T) {
 	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}

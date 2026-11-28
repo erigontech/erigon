@@ -30,6 +30,39 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func TestMuxForwardsAccountHooks(t *testing.T) {
+	address := accounts.InternAddress([20]byte{1})
+	for _, tc := range []struct {
+		name string
+		hook func(*tracing.Hooks) func(accounts.Address)
+	}{
+		{name: "onAccountAccess", hook: func(hooks *tracing.Hooks) func(accounts.Address) { return hooks.OnAccountAccess }},
+		{name: "onAccountRead", hook: func(hooks *tracing.Hooks) func(accounts.Address) { return hooks.OnAccountRead }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var forwarded []string
+			mux := newTestMuxTracer([]string{"account", "nil", "empty"}, []*tracers.Tracer{
+				{Hooks: &tracing.Hooks{
+					OnAccountAccess: func(addr accounts.Address) {
+						require.Equal(t, address, addr)
+						forwarded = append(forwarded, "onAccountAccess")
+					},
+					OnAccountRead: func(addr accounts.Address) {
+						require.Equal(t, address, addr)
+						forwarded = append(forwarded, "onAccountRead")
+					},
+				}},
+				{},
+				{Hooks: &tracing.Hooks{}},
+			})
+			hook := tc.hook(mux.Hooks)
+			require.NotNil(t, hook)
+			hook(address)
+			require.Equal(t, []string{tc.name}, forwarded)
+		})
+	}
+}
+
 func TestMuxForwardsTxEndV2(t *testing.T) {
 	receipt := &types.Receipt{GasUsed: 100}
 	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}

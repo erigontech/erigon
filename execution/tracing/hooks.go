@@ -172,6 +172,15 @@ type (
 		- State events -
 	*/
 
+	// AccountAccessHook reports an intended precompile account access before its
+	// gas charge, including attempts where that charge fails. Handlers must not
+	// read or warm the account in execution state.
+	AccountAccessHook = func(addr accounts.Address)
+
+	// AccountReadHook is called before a precompile reads an account, after the
+	// account access gas charge succeeds.
+	AccountReadHook = func(addr accounts.Address)
+
 	// BalanceChangeHook is called when the balance of an account changes.
 	BalanceChangeHook = func(addr accounts.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
@@ -219,6 +228,8 @@ type Hooks struct {
 	OnSystemCallStartV2 OnSystemCallStartHookV2
 	OnSystemCallEnd     OnSystemCallEndHook
 	// State events
+	OnAccountAccess AccountAccessHook
+	OnAccountRead   AccountReadHook
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
 	OnNonceChangeV2 NonceChangeHookV2

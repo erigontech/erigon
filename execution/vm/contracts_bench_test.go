@@ -167,7 +167,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, mdgas.MdGas{Execution: reqGas}, nil)
+			res, _, err = RunPrecompiledContract(p, data, mdgas.MdGas{Execution: reqGas}, nil, nil)
 		}
 		bench.StopTimer()
 		elapsed := max(uint64(time.Since(start)), 1)

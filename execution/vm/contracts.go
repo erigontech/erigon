@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"maps"
 	"math/big"
 	"math/bits"
@@ -48,20 +49,29 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
 
-// PrecompiledContract is the basic interface for native Go contracts. The implementation
-// requires a deterministic gas count based on the input size of the Run method of the
-// contract.
+// PrecompiledContract is the input-dependent part of a native Go contract.
+// RequiredGas is charged before Run. State-dependent work belongs to
+// StatefulPrecompiledContract and is performed by RunPrecompiledContract.
 type PrecompiledContract interface {
-	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
-	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+	RequiredGas(input []byte) uint64
+	Run(input []byte) ([]byte, error)
 	Name() string
+}
+
+// StatefulPrecompiledContract adds a state-dependent step after a successful Run.
+// RunState receives Run's output and remaining gas. This step also runs on cache
+// hits; its result must not be cached because the state can change between calls.
+type StatefulPrecompiledContract interface {
+	RunState(ibs *state.IntraBlockState, output []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error)
 }
 
 // PrecompiledContracts contains the precompiled contracts supported at the given fork.
@@ -84,6 +94,7 @@ const (
 	forkCancun
 	forkPrague
 	forkOsaka
+	forkBogota
 	forkTierCount
 )
 
@@ -96,6 +107,8 @@ var forkSets [forkTierCount]mergedPrecompileSet
 
 func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
+	case chainRules.IsBogota:
+		return forkBogota
 	case chainRules.IsOsaka:
 		return forkOsaka
 	case chainRules.IsPrague:
@@ -222,6 +235,12 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+var PrecompiledContractsBogota = func() PrecompiledContracts {
+	contracts := maps.Clone(PrecompiledContractsOsaka)
+	contracts[accounts.InternAddress(common.BytesToAddress([]byte{0x01}))] = &ecrecoverAccountCode{}
+	return contracts
+}()
+
 var (
 	PrecompiledAddressesHomestead []accounts.Address
 	PrecompiledAddressesByzantium []accounts.Address
@@ -244,12 +263,15 @@ func init() {
 		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
 		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
 		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+		forkBogota:    {PrecompiledContractsBogota, nil},
 	} {
 		for address, p := range tierSet.contracts {
 			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
 		}
 		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
-		*tierSet.addresses = forkSets[tier].addresses
+		if tierSet.addresses != nil {
+			*tierSet.addresses = forkSets[tier].addresses
+		}
 	}
 }
 
@@ -259,12 +281,10 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	return forkSets[forkTierFor(rules)].addresses
 }
 
-// RunPrecompiledContract runs and evaluates the output of a precompiled contract.
-// It returns
-// - the returned bytes,
-// - the _remaining_ gas,
-// - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+// RunPrecompiledContract charges the input-dependent gas, runs the precompile,
+// then performs its optional state-dependent step. That step requires a non-nil ibs.
+// It returns the output, remaining gas, and any error.
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, ibs *state.IntraBlockState, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas.Execution < gasCost {
 		return nil, suppliedGas, ErrOutOfGas
@@ -276,7 +296,13 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdg
 		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
 	output, err := p.Run(input)
-	return output, remaining, err
+	if err != nil {
+		return output, remaining, err
+	}
+	if stateful, ok := p.(StatefulPrecompiledContract); ok {
+		return stateful.RunState(ibs, output, remaining, tracer)
+	}
+	return output, remaining, nil
 }
 
 // ECRECOVER implemented as a native contract.
@@ -319,6 +345,43 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 func (c *ecrecover) Name() string {
 	return "ECREC"
+}
+
+type ecrecoverAccountCode struct {
+	ecrecover
+}
+
+func (*ecrecoverAccountCode) RunState(ibs *state.IntraBlockState, output []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if len(output) == 0 {
+		return nil, gas, nil
+	}
+	signer := accounts.InternAddress(common.BytesToAddress(output))
+	if tracer != nil && tracer.OnAccountAccess != nil {
+		tracer.OnAccountAccess(signer)
+	}
+	accessGas := params.ExtCodeWarmAccessGasEIP8038
+	if !ibs.AddressInAccessList(signer) {
+		accessGas += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
+	}
+	remaining, _, ok := useMdGas(gas, accessGas, mdgas.ExecutionGas, tracer, tracing.GasChangeCallPrecompiledContract)
+	if !ok {
+		return nil, gas, ErrOutOfGas
+	}
+	ibs.AddAddressToAccessList(signer)
+	// Paid reads remain in the block access list when execution reverts.
+	// Account warmth rolls back separately.
+	ibs.MarkAddressAccess(signer, false)
+	if tracer != nil && tracer.OnAccountRead != nil {
+		tracer.OnAccountRead(signer)
+	}
+	code, err := ibs.GetCode(signer)
+	if err != nil {
+		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if _, delegated := types.ParseDelegation(code); len(code) != 0 && !delegated {
+		return nil, remaining, nil
+	}
+	return output, remaining, nil
 }
 
 // SHA256 implemented as a native contract.

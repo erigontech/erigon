@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -901,6 +902,51 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, reader, (*res.Accesslist)[0].Address)
 	})
+}
+
+func TestCreateAccessListEcrecoverWarmGas(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = new(uint64)
+	m, _, bank := fundedBankGenesis(t, config)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	owner := crypto.PubkeyToAddress(key.PublicKey)
+	hash := crypto.Keccak256Hash([]byte("access list"))
+	signature, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+	input := make([]byte, 128)
+	copy(input, hash[:])
+	input[63] = signature[64] + 27
+	copy(input[64:], signature[:64])
+	contract := common.HexToAddress("0x1000")
+	precompile := common.HexToAddress("0x01")
+	for _, forwardedGas := range []uint64{3_200, 6_099} {
+		t.Run(fmt.Sprint(forwardedGas), func(t *testing.T) {
+			code := hexutil.Bytes(program.New().Mstore(input, 0).
+				StaticCall(uint256.NewInt(forwardedGas), precompile, 0, 128, 32, 32).
+				Push0().Op(vm.MSTORE).Return(0, 64).Bytes())
+			overrides := &ethapi.StateOverrides{accounts.InternAddress(contract): {Code: &code}}
+			gas := hexutil.Uint64(100_000)
+			args := ethapi.CallArgs{From: &bank, To: &contract, Gas: &gas}
+			output, err := api.Call(context.Background(), args, nil, overrides, nil)
+			require.NoError(t, err)
+			require.Len(t, output, 64)
+			require.Equal(t, make([]byte, 32), []byte(output[:32]))
+
+			result, err := api.CreateAccessList(context.Background(), args, nil, overrides, nil)
+			require.NoError(t, err)
+			require.Empty(t, result.Error)
+			require.Len(t, *result.Accesslist, 1)
+			require.Equal(t, owner, (*result.Accesslist)[0].Address)
+			require.Empty(t, (*result.Accesslist)[0].StorageKeys)
+			args.AccessList = result.Accesslist
+			output, err = api.Call(context.Background(), args, nil, overrides, nil)
+			require.NoError(t, err)
+			expected := append(common.LeftPadBytes([]byte{1}, 32), common.LeftPadBytes(owner[:], 32)...)
+			require.Equal(t, expected, []byte(output))
+		})
+	}
 }
 
 func TestCreateAccessListTimeoutCoversEveryRun(t *testing.T) {
