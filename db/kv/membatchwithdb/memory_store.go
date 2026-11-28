@@ -42,9 +42,44 @@ type memEntry struct {
 	v []byte
 }
 
+// Slabs start at arenaMinSlabSize and double up to arenaSlabSize, so small
+// batches stay small. Keys/values larger than arenaMaxEntrySize get their own
+// allocation, which bounds the slab tail abandoned on rollover.
+const (
+	arenaMinSlabSize  = 4 << 10
+	arenaSlabSize     = 1 << 20
+	arenaMaxEntrySize = arenaSlabSize / 8
+)
+
+// arena is a bump allocator that packs the per-Put key/value copies into a few
+// large slabs instead of one heap object each. Slabs are freed only with the whole
+// table, so bytes of deleted entries stay pinned until then; Put clones overwrites
+// outside the arena so repeated overwrites do not grow it. put always duplicates
+// its input, so a stored entry never aliases the caller's buffer (which may point
+// into an MDBX mmap page that can change under us).
+type arena struct {
+	cur []byte
+}
+
+// put copies b into arena-owned memory and returns a slice that aliases neither b
+// nor any other entry.
+func (a *arena) put(b []byte) []byte {
+	n := len(b)
+	if n == 0 || n > arenaMaxEntrySize {
+		return bytes.Clone(b)
+	}
+	if cap(a.cur)-len(a.cur) < n {
+		a.cur = make([]byte, 0, min(max(2*cap(a.cur), arenaMinSlabSize, n), arenaSlabSize))
+	}
+	off := len(a.cur)
+	a.cur = append(a.cur, b...)
+	return a.cur[off:len(a.cur):len(a.cur)]
+}
+
 // memTable is a single table backed by a btree.
 type memTable struct {
 	tree    *btree2.BTreeG[memEntry]
+	arena   arena
 	dupSort bool
 }
 
@@ -204,7 +239,19 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.getOrCreateTable(table)
-	t.tree.Set(memEntry{k: bytes.Clone(k), v: bytes.Clone(v)})
+	var hint btree2.PathHint
+	if old, ok := t.tree.GetHint(memEntry{k: k, v: v}, &hint); ok {
+		// the comparator treats nil and empty as equal, so a match may differ in nil status
+		if len(k) == 0 {
+			old.k = bytes.Clone(k)
+		}
+		if !t.dupSort || len(v) == 0 {
+			old.v = bytes.Clone(v)
+		}
+		t.tree.SetHint(old, &hint)
+	} else {
+		t.tree.SetHint(memEntry{k: t.arena.put(k), v: t.arena.put(v)}, &hint)
+	}
 	// Keep sequences map in sync when writing to the Sequence table.
 	if table == kv.Sequence && len(v) >= 8 {
 		s.sequences[string(k)] = binary.BigEndian.Uint64(v)
@@ -324,6 +371,7 @@ func (s *memStore) ClearTable(table string) error {
 	defer s.mu.Unlock()
 	if t, ok := s.tables[table]; ok {
 		t.tree.Clear()
+		t.arena = arena{}
 	}
 	return nil
 }
