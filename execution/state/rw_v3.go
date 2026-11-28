@@ -380,8 +380,20 @@ func (rs *StateV3) ApplyTxIndexes(
 	return nil
 }
 
+var (
+	stubNoTraceIdx = dbg.EnvBool("STUB_NO_TRACEIDX", false)
+	stubNoLogIdx   = dbg.EnvBool("STUB_NO_LOGIDX", false)
+	stubNoRCache   = dbg.EnvBool("STUB_NO_RCACHE", false)
+)
+
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
+	if stubNoTraceIdx {
+		traceFroms, traceTos = nil, nil
+	}
+	if stubNoLogIdx {
+		logs = nil
+	}
 	for addr := range traceFroms {
 		rs.traceAddr = addr.Value()
 		if err := domains.IndexAdd(kv.TracesFromIdx, rs.traceAddr[:], txNum); err != nil {
@@ -422,7 +434,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	if rs.persistReceiptsCacheV2 && !skipReceiptCache {
+	if rs.persistReceiptsCacheV2 && !skipReceiptCache && !stubNoRCache {
 		if putter == nil {
 			putter = domains.AsPutDel(tx)
 		}
