@@ -605,3 +605,53 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 
 	assert.Equal(t, expectedAmount, *txCount)
 }
+
+// eth_getBlockByNumber and eth_getBlockByHash return the hash of every txn, with and without full
+// transactions.
+func TestGetBlockByNumberAndHashTxnHashes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := t.Context()
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	head, err := m.BlockReader.CurrentBlock(tx)
+	require.NoError(t, err)
+
+	txnHashes := func(b *ethapi.RPCBlock) []common.Hash {
+		enc, err := json.Marshal(b)
+		require.NoError(t, err)
+		var res struct{ Transactions json.RawMessage }
+		require.NoError(t, json.Unmarshal(enc, &res))
+		var hashes []common.Hash
+		if json.Unmarshal(res.Transactions, &hashes) == nil {
+			return hashes
+		}
+		var full []struct{ Hash common.Hash }
+		require.NoError(t, json.Unmarshal(res.Transactions, &full))
+		hashes = hashes[:0]
+		for _, txn := range full {
+			hashes = append(hashes, txn.Hash)
+		}
+		return hashes
+	}
+	maxTxns := 0
+	for num := uint64(1); num <= head.NumberU64(); num++ {
+		block, err := m.BlockReader.BlockByNumber(ctx, tx, num)
+		require.NoError(t, err)
+		want := []common.Hash{}
+		for _, txn := range block.Transactions() {
+			want = append(want, txn.Hash())
+		}
+		maxTxns = max(maxTxns, len(want))
+		for _, fullTx := range []bool{false, true} {
+			byNumber, err := api.GetBlockByNumber(ctx, rpc.BlockNumber(num), fullTx)
+			require.NoError(t, err)
+			require.Equal(t, want, txnHashes(byNumber), "block %d by number, fullTx %t", num, fullTx)
+			byHash, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(block.Hash(), false), fullTx)
+			require.NoError(t, err)
+			require.Equal(t, want, txnHashes(byHash), "block %d by hash, fullTx %t", num, fullTx)
+		}
+	}
+	require.GreaterOrEqual(t, maxTxns, 4, "no block hashes its txns four at a time")
+}

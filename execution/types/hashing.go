@@ -23,6 +23,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
+	"sync"
+
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -172,6 +176,61 @@ func TransactionHashFromEncoding(enc []byte) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	return crypto.Keccak256Hash(binary), nil
+}
+
+// TxnEncodings collects the stored encodings of a block's transactions, so their hashes are
+// computed in one batch instead of by a re-encode per Hash() call.
+type TxnEncodings struct {
+	buf    []byte
+	ends   []int
+	msgs   [][]byte
+	hashes [][32]byte
+}
+
+// maxPooledTxnEncodings bounds the buffer a TxnEncodings keeps for reuse, so one block of huge
+// transactions does not pin its memory.
+const maxPooledTxnEncodings = 4 << 20
+
+var txnEncodingsPool = sync.Pool{New: func() any { return new(TxnEncodings) }}
+
+// NewTxnEncodings returns an empty TxnEncodings; Release hands its buffers to the next one.
+func NewTxnEncodings() *TxnEncodings { return txnEncodingsPool.Get().(*TxnEncodings) }
+
+// Release ends the use of e.
+func (e *TxnEncodings) Release() {
+	if cap(e.buf) > maxPooledTxnEncodings {
+		return
+	}
+	e.buf, e.ends = e.buf[:0], e.ends[:0]
+	txnEncodingsPool.Put(e)
+}
+
+// Add copies the hashed part of stored, the encoding of the next transaction.
+func (e *TxnEncodings) Add(stored []byte) error {
+	binary, err := BinaryFromStoredTxn(stored)
+	if err != nil {
+		return err
+	}
+	e.buf = append(e.buf, binary...)
+	e.ends = append(e.ends, len(e.buf))
+	return nil
+}
+
+// CacheHashes sets the cached hash of txs[i] to the hash of the i-th added encoding.
+func (e *TxnEncodings) CacheHashes(txs []Transaction) {
+	msgs := slices.Grow(e.msgs[:0], len(e.ends))[:len(e.ends)]
+	start := 0
+	for i, end := range e.ends {
+		msgs[i], start = e.buf[start:end], end
+	}
+	hashes := slices.Grow(e.hashes[:0], len(msgs))[:len(msgs)]
+	e.msgs, e.hashes = msgs, hashes
+	keccak.SumMany256(msgs, hashes)
+	for i, txn := range txs[:len(hashes)] {
+		if c, ok := txn.(interface{ setCachedHash(common.Hash) }); ok {
+			c.setCachedHash(hashes[i])
+		}
+	}
 }
 
 func RlpHash(x any) common.Hash {
