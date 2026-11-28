@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
@@ -97,7 +98,7 @@ func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version
 // by looking them up in the account and storage domain files. It guards the call to
 // ExpandShortenedKeysInBranch with the read-path preconditions (empty branch, KeyCommitmentState
 // carve-out, files-not-empty) and the per-file version gate (referenced iff version < v2.2 and range >= threshold).
-func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
+func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch v2branch.BranchData, fStartTxNum uint64, fEndTxNum uint64) (v2branch.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
 
@@ -471,7 +472,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
+		branchData, err := v2branch.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {
 			return nil, err
 		}

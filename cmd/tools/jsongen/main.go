@@ -171,7 +171,7 @@ func (x *%[2]s) %[5]s(s *jsonstream.Stream) error {
 // error does, and stops the run rather than generating from types that will not build.
 func load() (*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
-		packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}
+		packages.NeedTypesInfo}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
@@ -180,15 +180,33 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if missingWhatThisWrites(e.Msg) {
-			continue
-		}
-		content, err := os.ReadFile(positionFile(e.Pos))
-		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
+		// Imports come from export data, so go list also compiles this package and reports the
+		// compiler's errors as one, a "pos: msg" line each. An indented line continues the error
+		// above it.
+		if compiled, ok := strings.CutPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n"); ok && e.Kind == packages.ListError {
+			for line := range strings.Lines(compiled) {
+				if strings.HasPrefix(line, "\t") {
+					continue
+				}
+				pos, msg, _ := strings.Cut(strings.TrimSpace(line), ": ")
+				if !skippable(pos, msg) {
+					return nil, e
+				}
+			}
+		} else if !skippable(e.Pos, e.Msg) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// skippable reports an error that only the output of a past run causes.
+func skippable(pos, msg string) bool {
+	if missingWhatThisWrites(msg) {
+		return true
+	}
+	content, err := os.ReadFile(positionFile(pos))
+	return err == nil && bytes.HasPrefix(content, []byte(marker))
 }
 
 // missingWhatThisWrites reports the compiler's two wordings for the absence of a method this run

@@ -413,3 +413,35 @@ func TestDirectServerStreamSendAfterCancelQueuesNothing(t *testing.T) {
 	require.ErrorIs(t, (&SentinelSubscribeGossipS{ctx: ctx, ch: ch}).Send(&sentinelproto.GossipData{}), context.Canceled)
 	require.Empty(t, ch)
 }
+
+// With a cancelled context and room in the reply channel, both select cases are ready; Send and Err must still not queue.
+func TestServerStreamsQueueNothingAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	errBoom := errors.New("boom")
+	const tries = 1000
+	t.Run("logs", func(t *testing.T) {
+		s := &SubscribeLogsStreamS{chSend: make(chan *subscribeLogsReply, 1), ctx: ctx}
+		for range tries {
+			require.ErrorIs(t, s.Send(&remoteproto.SubscribeLogsReply{}), context.Canceled)
+			s.Err(errBoom)
+			require.Empty(t, s.chSend)
+		}
+	})
+	t.Run("receipts", func(t *testing.T) {
+		s := &SubscribeReceiptsStreamS{chSend: make(chan *subscribeReceiptsReply, 1), ctx: ctx}
+		for range tries {
+			require.ErrorIs(t, s.Send(&remoteproto.SubscribeReceiptsReply{}), context.Canceled)
+			s.Err(errBoom)
+			require.Empty(t, s.chSend)
+		}
+	})
+	t.Run("state diff", func(t *testing.T) {
+		s := &StateDiffStreamS{ch: make(chan *stateDiffReply, 1), ctx: ctx}
+		for range tries {
+			require.ErrorIs(t, s.Send(&remoteproto.StateChangeBatch{}), context.Canceled)
+			s.Err(errBoom)
+			require.Empty(t, s.ch)
+		}
+	})
+}

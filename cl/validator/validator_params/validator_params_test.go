@@ -17,7 +17,9 @@
 package validator_params
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -44,4 +46,80 @@ func TestAttachedValidatorsAreIndependentFromFeeRecipients(t *testing.T) {
 		require.True(t, params.HasAttachedValidator(index))
 	}
 	require.False(t, params.HasAttachedValidator(10))
+}
+
+func newTestValidatorParams() (*ValidatorParams, *time.Time) {
+	params := NewValidatorParams()
+	now := time.Unix(1_700_000_000, 0)
+	params.now = func() time.Time { return now }
+	return params, &now
+}
+
+func TestAttachedValidatorExpiresWithoutRefresh(t *testing.T) {
+	params, now := newTestValidatorParams()
+	params.AddAttachedValidator(7)
+	params.SetFeeRecipient(8, common.Address{0x12})
+
+	*now = now.Add(attachmentTTL - time.Nanosecond)
+	require.True(t, params.HasAttachedValidator(7))
+	require.ElementsMatch(t, []uint64{7, 8}, params.GetValidators())
+
+	*now = now.Add(time.Nanosecond)
+	require.False(t, params.HasAttachedValidator(7))
+	require.False(t, params.HasAttachedValidator(8))
+	require.Empty(t, params.GetValidators())
+	_, kept := params.attachedValidators.Load(uint64(7))
+	require.False(t, kept, "GetValidators drops expired entries")
+	feeRecipient, found := params.GetFeeRecipient(8)
+	require.True(t, found, "fee recipients do not expire")
+	require.Equal(t, common.Address{0x12}, feeRecipient)
+}
+
+func TestRefreshedValidatorStaysAttached(t *testing.T) {
+	params, now := newTestValidatorParams()
+	params.AddAttachedValidator(7)
+	params.SetFeeRecipient(8, common.Address{0x12})
+
+	*now = now.Add(attachmentTTL - time.Minute)
+	params.AddAttachedValidator(7)
+	params.SetFeeRecipient(8, common.Address{0x12})
+	*now = now.Add(attachmentTTL - time.Minute)
+
+	require.True(t, params.HasAttachedValidator(7))
+	require.True(t, params.HasAttachedValidator(8))
+	require.ElementsMatch(t, []uint64{7, 8}, params.GetValidators())
+}
+
+func TestExpiredValidatorIsAttachedAgain(t *testing.T) {
+	params, now := newTestValidatorParams()
+	params.AddAttachedValidator(7)
+	*now = now.Add(attachmentTTL)
+	require.Empty(t, params.GetValidators())
+
+	params.AddAttachedValidator(7)
+
+	require.True(t, params.HasAttachedValidator(7))
+	require.ElementsMatch(t, []uint64{7}, params.GetValidators())
+}
+
+func TestRefreshDuringCleanupKeepsValidatorAttached(t *testing.T) {
+	const validators = 2000
+	for range 200 {
+		params, now := newTestValidatorParams()
+		for index := range uint64(validators) {
+			params.AddAttachedValidator(index)
+		}
+		*now = now.Add(attachmentTTL)
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for index := range uint64(validators) {
+				params.AddAttachedValidator(index)
+			}
+		})
+		wg.Go(func() { params.GetValidators() })
+		wg.Wait()
+
+		require.Equal(t, validators, len(params.GetValidators()))
+	}
 }

@@ -64,13 +64,13 @@ func buildReferenceTrie(cases []touchEntry) *prefixTrie {
 	return tr
 }
 
-func collectAll(pu *parallelUpdate, cases []touchEntry) {
+func collectAll(pu *ParallelUpdate, cases []touchEntry) {
 	for _, c := range cases {
 		pu.Collect(c.hashedKey, c.plainKey, c.update)
 	}
 }
 
-func buildChunked(cases []touchEntry) (*parallelUpdate, bool) {
+func buildChunked(cases []touchEntry) (*ParallelUpdate, bool) {
 	pu := newParallelUpdate()
 	collectAll(pu, cases)
 	backgrounded := pu.spare != nil
@@ -88,7 +88,7 @@ func TestChunkBuild_WalkOrderIsSortedWhateverTheArrivalOrder(t *testing.T) {
 
 	pu, backgrounded := buildChunked(shuffled)
 	require.True(t, backgrounded, "the batch must cross a chunk boundary")
-	walk := collectWalk(pu.trie)
+	walk := collectWalk(pu.Trie)
 	require.True(t, slices.IsSortedFunc(walk, func(a, b walkEntry) int { return bytes.Compare(a.prefix, b.prefix) }),
 		"the walk must emit nodes in hashed-key order")
 
@@ -116,7 +116,7 @@ func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
 		pu, backgrounded := buildChunked(cases)
 		require.Equal(t, n >= touchChunkKeys, backgrounded,
 			"n=%d: hand-off must trigger exactly when the batch fills a chunk", n)
-		require.Equal(t, want, collectWalk(pu.trie),
+		require.Equal(t, want, collectWalk(pu.Trie),
 			"chunked build must match insertion-order build for n=%d", n)
 	}
 }
@@ -134,7 +134,7 @@ func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 		pu.Reset()
 		collectAll(pu, cases)
 		pu.Build()
-		require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
+		require.EqualValues(t, len(cases), pu.Trie.Root.SubtreeCount)
 		if batch == 1 {
 			first = buffers()
 		}
@@ -158,7 +158,7 @@ func TestChunkBuild_KeyTouchedInSeveralChunksKeepsArrivalOrder(t *testing.T) {
 
 	pu, backgrounded := buildChunked(cases)
 	require.True(t, backgrounded)
-	require.Equal(t, want, collectWalk(pu.trie), "a key touched in several chunks must keep its last update")
+	require.Equal(t, want, collectWalk(pu.Trie), "a key touched in several chunks must keep its last update")
 }
 
 func TestChunkBuild_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
@@ -176,10 +176,10 @@ func TestChunkBuild_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
 	}
 
 	require.Equal(t, uint64(2), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount,
+	ut.Parallel.Build()
+	require.EqualValues(t, 2, ut.Parallel.Trie.Root.SubtreeCount,
 		"a reused caller buffer must not collapse two keys into one")
-	require.Len(t, ut.parallel.trie.root.children, 2)
+	require.Len(t, ut.Parallel.Trie.Root.Children, 2)
 }
 
 func TestChunkBuild_AbandonedCollectionLeavesNoGoroutine(t *testing.T) {

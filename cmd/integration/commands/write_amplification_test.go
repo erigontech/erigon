@@ -19,6 +19,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,9 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/execution/execfinality"
 )
 
 func corruptAccountsKV(t *testing.T) kv.TemporalRwDB {
@@ -38,7 +37,7 @@ func corruptAccountsKV(t *testing.T) kv.TemporalRwDB {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	agg, _ := fillAccountState(t, db, 64, 5)
-	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	require.NoError(t, agg.BuildFiles(db, 48, math.MaxUint64))
 
 	kvFiles, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*accounts*.kv"))
 	require.NoError(t, err)

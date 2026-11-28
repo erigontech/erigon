@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
@@ -420,6 +421,14 @@ func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, eng
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainreader.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		for _, header := range headers {
+			if header != nil && header.Number.Uint64() == number && header.Hash() == hash {
+				return header
+			}
+		}
+		return rawdb.ReadHeader(tx, hash, number)
+	}
 	logger := log.New("generate-chain", config.ChainName)
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -516,7 +525,7 @@ func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, eng
 			ibs.StartAccessRecording()
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
+				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{}, protocol.GetHashFnFromChain(b.header, chainreader))
 			}
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
 			if err != nil {
@@ -618,8 +627,9 @@ func makeHeader(chain rules.ChainReader, parent *types.Header, engine rules.Engi
 }
 
 type FakeChainReader struct {
-	Cfg     *chain.Config
-	current *types.Block
+	Cfg       *chain.Config
+	current   *types.Block
+	getHeader func(common.Hash, uint64) *types.Header
 }
 
 // Config returns the chain configuration.
@@ -640,6 +650,9 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header { ret
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.current != nil && cr.current.NumberU64() == number && cr.current.Hash() == hash {
 		return cr.current.Header()
+	}
+	if cr.getHeader != nil {
+		return cr.getHeader(hash, number)
 	}
 	return nil
 }

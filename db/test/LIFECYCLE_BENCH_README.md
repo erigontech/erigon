@@ -78,6 +78,6 @@ execution throughput).
 | Package | Benchmarks | Focus |
 |---------|-----------|-------|
 | `db/state/` | `BenchmarkAggregator_Processing`, `BenchmarkInvertedIndexMergeFiles` | Aggregator throughput, merge cost |
-| `execution/commitment/` | `Benchmark_HexPatriciaHashed_Process`, `BenchmarkBranchData_ReplacePlainKeys` | Trie hashing, branch encoding |
+| `execution/commitment/v2/` | `Benchmark_HexPatriciaHashed_Process`, `BenchmarkBranchData_ReplacePlainKeys` | Trie hashing, branch encoding |
 | `execution/vm/runtime/` | `BenchmarkSimpleLoop`, `BenchmarkEVM_CREATE2` | EVM opcode execution (in-memory state) |
 | `cmd/scripts/exec_bench/` | `exec_bench.sh` | Integration: serial vs parallel block replay |

@@ -122,7 +122,10 @@ func New(datadir string) Dirs {
 // The subdirectory in the datadir for snapshots. This isn't encoded anywhere else because it's not
 // an MDBX name, but also a bunch of other datadir subdirs aren't encoded in Dirs, and Dirs does
 // absolute path stuff I don't want.
-const SnapDir = "snapshots"
+const (
+	SnapDir       = "snapshots"
+	SnapCaplinDir = "caplin"
+)
 
 // Open new Dirs instance without forcing all the directories to exist.
 func Open(datadir string) Dirs {
@@ -146,7 +149,7 @@ func Open(datadir string) Dirs {
 		SnapHistory:      filepath.Join(datadir, SnapDir, "history"),
 		SnapDomain:       filepath.Join(datadir, SnapDir, "domain"),
 		SnapAccessors:    filepath.Join(datadir, SnapDir, "accessor"),
-		SnapCaplin:       filepath.Join(datadir, SnapDir, "caplin"),
+		SnapCaplin:       filepath.Join(datadir, SnapDir, SnapCaplinDir),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),

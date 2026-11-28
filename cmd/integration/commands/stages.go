@@ -861,17 +861,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
+		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (uint64, error) {
+			retireToBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
-			pruneStage.FinalityCtx = finalityCtx
-			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.RetireToBlock = retireToBlock
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return 0, err
+			}
+			return execfinality.CollateToTxNum(ctx, tx, br.TxnumReader(), retireToBlock)
 		})
 		return err
 	}
@@ -1392,7 +1395,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader(), nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }

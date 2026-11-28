@@ -78,6 +78,7 @@ func TestAttesterSlashingConfiguredLimits(t *testing.T) {
 						a := configuredSlashing(version, tc.cfg, count)
 						if count > limit {
 							a.Attestation_1.AttestingIndices.Clear()
+							a.Attestation_2.AttestingIndices.SetCap(count)
 						} // Verify the second nested list is also checked.
 						encoded, err := a.EncodeSSZ(nil)
 						require.NoError(t, err)

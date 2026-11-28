@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -559,6 +561,55 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	a.Equal(svLatest, svNil)
 }
 
+// newBaseApiReadingCodeFromTx returns a BaseAPI whose state cache has no execution module, so it reads code from
+// the db tx, as on any cache miss.
+func newBaseApiReadingCodeFromTx(m *execmoduletester.ExecModuleTester) *BaseAPI {
+	return NewBaseApi(nil, &execmodule.Cache{}, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+}
+
+// overwriteFreedCodePages removes the code rows, then writes enough for the freed db pages to be reused.
+func overwriteFreedCodePages(t *testing.T, m *execmoduletester.ExecModuleTester) {
+	t.Helper()
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := tx.ClearTable(kv.TblCodeVals); err != nil {
+			return err
+		}
+		return tx.ClearTable(kv.TblCodeHistoryVals)
+	}))
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		filler := bytes.Repeat([]byte{0xff}, 600) // any size works: the writes only have to fill the freed pages
+		for i := range 1000 {
+			if err := tx.Put(kv.TblCodeVals, binary.BigEndian.AppendUint64(nil, uint64(i)), filler); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
+func TestGetCodeKeepsBytesAfterLaterWrites(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiReadingCodeFromTx(m), m.DB, nil, nil)
+
+	var want []byte
+	require.NoError(t, m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+		code, _, err := tx.GetLatest(kv.CodeDomain, contractAddr[:], kv.GetLatestOptions{})
+		want = bytes.Clone(code)
+		return err
+	}))
+	require.NotEmpty(t, want)
+
+	latest, deployBlock := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), rpc.BlockNumberOrHashWithNumber(1)
+	latestCode, err := api.GetCode(m.Ctx, contractAddr, &latest)
+	require.NoError(t, err)
+	deployBlockCode, err := api.GetCode(m.Ctx, contractAddr, &deployBlock)
+	require.NoError(t, err)
+
+	overwriteFreedCodePages(t, m)
+	require.Equal(t, want, []byte(latestCode), "latest")
+	require.Equal(t, want, []byte(deployBlockCode), "deploy block")
+}
+
 func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -613,6 +664,73 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got["block"])
 		require.NotContains(t, got, "receipts")
+	}
+}
+
+var errDomainRead = errors.New("domain read failed")
+
+// domainReadFailingDB fails every latest and historical read of one domain, as a lost remote KV link does.
+type domainReadFailingDB struct {
+	kv.TemporalRoDB
+	domain kv.Domain
+}
+
+func (d domainReadFailingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := d.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // The caller owns the returned tx.
+	if err != nil {
+		return nil, err
+	}
+	return domainReadFailingTx{TemporalTx: tx, domain: d.domain}, nil
+}
+
+type domainReadFailingTx struct {
+	kv.TemporalTx
+	domain kv.Domain
+}
+
+func (tx domainReadFailingTx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == tx.domain {
+		return nil, 0, errDomainRead
+	}
+	return tx.TemporalTx.GetLatest(name, k, opts)
+}
+
+func (tx domainReadFailingTx) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	if name == tx.domain {
+		return nil, false, errDomainRead
+	}
+	return tx.TemporalTx.GetAsOf(name, k, ts)
+}
+
+// TestGetCodeReturnsReadErrors checks that eth_getCode and the GraphQL account code return a failed account or
+// code read as an error, not as "no code".
+func TestGetCodeReturnsReadErrors(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	// No execution module, so every read goes to the db tx, as on any cache miss.
+	base := NewBaseApi(nil, &execmodule.Cache{}, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	code := func(db kv.TemporalRoDB, block rpc.BlockNumber) (hexutil.Bytes, string, error, error) {
+		blockNrOrHash := rpc.BlockNumberOrHashWithNumber(block)
+		rpcCode, rpcErr := newEthApiForTest(base, db, nil, nil).GetCode(m.Ctx, contractAddr, &blockNrOrHash)
+		_, _, gqlCode, gqlErr := NewGraphQLAPI(base, db, nil, nil, &rpccfg.GraphQLApiConfig{}).GetAccountInfo(m.Ctx, contractAddr, block)
+		return rpcCode, gqlCode, rpcErr, gqlErr
+	}
+	// The contract is deployed in block 1.
+	for _, block := range []rpc.BlockNumber{rpc.LatestBlockNumber, 1} {
+		want, wantGql, err, gqlErr := code(m.DB, block)
+		require.NoError(t, err)
+		require.NoError(t, gqlErr)
+		require.NotEmpty(t, want)
+		require.Equal(t, hexutil.Encode(want), wantGql)
+
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+			t.Run(fmt.Sprintf("%s/%s", block, domain), func(t *testing.T) {
+				got, gotGql, err, gqlErr := code(domainReadFailingDB{TemporalRoDB: m.DB, domain: domain}, block)
+				require.ErrorIs(t, err, errDomainRead)
+				require.Nil(t, got)
+				require.ErrorIs(t, gqlErr, errDomainRead)
+				require.Empty(t, gotGql)
+			})
+		}
 	}
 }
 

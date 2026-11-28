@@ -42,31 +42,7 @@ import (
 
 const testMergeLimit = snaptype.Erigon2MergeLimit
 
-type blockFinalityContextStub struct {
-	retireTo uint64
-}
-
-func (c blockFinalityContextStub) PruneToBlockNum() uint64 {
-	return 0
-}
-
-func (c blockFinalityContextStub) RetireToBlockNum() uint64 {
-	return c.retireTo
-}
-
-func (c blockFinalityContextStub) CollateToBlockNum() uint64 {
-	return 0
-}
-
-func (c blockFinalityContextStub) MaxReorgDepth() uint64 {
-	return 0
-}
-
-func (c blockFinalityContextStub) ReadyForCollation(_ context.Context, _ kv.TemporalRoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
-	return 0, 0, 0, 0, false, nil
-}
-
-func TestBlockRetireUsesFinalityContext(t *testing.T) {
+func TestBlockRetireUsesRetireToBlock(t *testing.T) {
 	ctx := context.Background()
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := ethconfig.Defaults
@@ -85,11 +61,11 @@ func TestBlockRetireUsesFinalityContext(t *testing.T) {
 		log.New(),
 	)
 	defer br.Close()
-	blockFrom, blockTo, can := br.canRetire(8_000, blockFinalityContextStub{retireTo: 9_904}, snaptype.Unknown)
-	require.True(t, can)
+	blockFrom, blockTo, can := br.canRetire(8_000, 8_999, snaptype.Unknown)
+	require.True(t, can, "retireToBlock itself is retired")
 	require.Equal(t, uint64(8_000), blockFrom)
 	require.Equal(t, uint64(9_000), blockTo)
-	_, _, can = br.canRetire(8_000, blockFinalityContextStub{retireTo: 1_000}, snaptype.Unknown)
+	_, _, can = br.canRetire(8_000, 8_998, snaptype.Unknown)
 	require.False(t, can)
 }
 

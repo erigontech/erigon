@@ -156,7 +156,6 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		chainDb: chainDb,
 
 		logger: logger,
-		ctx:    ctx,
 
 		background:  background,
 		blockReader: blockReader,
@@ -173,8 +172,40 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
-	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
+	w.watchCtx(ctx)
 	return w
+}
+
+func (rw *WorkerContext) watchCtx(ctx context.Context) {
+	rw.ctx = ctx
+	// Bound to this run's EVM: Park replaces it, so a late cancel cannot reach the next run.
+	rw.stopCancel = context.AfterFunc(ctx, rw.evm.Cancel)
+}
+
+// Rebind prepares a parked worker for an executor run under ctx.
+func (rw *WorkerContext) Rebind(ctx context.Context, metrics *WorkerMetrics) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.metrics = metrics
+	rw.watchCtx(ctx)
+}
+
+// Park drops what an executor run bound to the worker; the IntraBlockState
+// keeps its capacity for the next run.
+func (rw *WorkerContext) Park() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	if rw.stopCancel != nil {
+		rw.stopCancel()
+		rw.stopCancel = nil
+	}
+	_ = rw.bindTx(nil)
+	rw.flushCollector()
+	rw.ibs.ResetReader(nil)
+	// A new worker's EVM: no tracer, contexts or call-output buffers of the run.
+	rw.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, rw.chainConfig, vm.Config{})
+	rw.rs, rw.stateReader, rw.historyMode, rw.prevBlockReg, rw.chain = nil, nil, false, nil, nil
+	rw.ctx, rw.metrics = nil, nil
 }
 
 func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader) error {
@@ -199,9 +230,16 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stopCancel()
+	if rw.stopCancel != nil {
+		rw.stopCancel()
+		rw.stopCancel = nil
+	}
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
+	rw.flushCollector()
+}
+
+func (rw *WorkerContext) flushCollector() {
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
 			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
@@ -334,11 +372,10 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
-	rw.ibs.Close()
 	if rw.prevBlockReg != nil {
-		rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
+		rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, rw.prevBlockReg))
 	} else {
-		rw.ibs = state.New(rw.stateReader)
+		rw.ibs.ResetReader(rw.stateReader)
 	}
 
 	switch reader.(type) {
@@ -358,8 +395,7 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.prevBlockReg = reg
-	rw.ibs.Close()
-	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
+	rw.ibs.ResetReader(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
 func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
@@ -396,6 +432,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		return &TxResult{
 			Task: txTask,
 			Err:  err,
+			Dep:  state.UnknownDep,
 		}
 	}
 	// Task reset may clear EVM cancellation, so check the worker context afterward.
@@ -423,49 +460,4 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	return result
-}
-
-func NewWorkersPool(ctx context.Context, background bool, chainDb kv.TemporalRoDB,
-	rs *state.StateV3Buffered, stateReader state.StateReader, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger,
-) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), err error) {
-	reconWorkers = make([]*WorkerContext, workerCount)
-
-	// Worker contexts are driven per-task by the dispatcher (goroutine-per-task,
-	// joined via pe.runWG on shutdown), so the pool owns no goroutines of its own.
-	gctx := ctx
-
-	// Assigned before the fallible ResetState loop so every early return hands
-	// back a callable closure — the teardown path invokes it unconditionally.
-	var clearDone bool
-	clear = func() {
-		if clearDone {
-			return
-		}
-		clearDone = true
-		for _, w := range reconWorkers {
-			if w != nil {
-				w.Close()
-			}
-		}
-	}
-
-	for i := range workerCount {
-		reconWorkers[i] = NewWorkerContext(gctx, background, metrics, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
-
-		if rs != nil {
-			reader := stateReader
-
-			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, reconWorkers[i].readMetrics))
-			}
-
-			if err = reconWorkers[i].ResetState(rs, nil, reader); err != nil {
-				return
-			}
-		}
-	}
-	applyWorker = NewWorkerContext(ctx, false, nil, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
-
-	return reconWorkers, applyWorker, clear, err
 }

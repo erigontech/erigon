@@ -44,8 +44,9 @@ when empty.
 
 The set of RLP-encoded trie nodes proving every account and storage slot the block reads or writes, drawn from
 the account trie and from the storage tries of touched accounts. It is produced by an on-the-fly fold over the
-accessed hashed keys (`HexPatriciaHashed.WitnessesByHash` captures the node set indexed by hash, read-only, so
-off-path cells keep their stored hashes; `WitnessNodes` prunes it to the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
+accessed hashed keys. `v3.Trie.WitnessNodes` walks the v3 records and returns the lean node set; the frozen HPH
+path captures the node set indexed by hash and prunes it with `trie.WitnessNodesForKeysByHash`. Each key contributes
+the nodes on its root→leaf path together with the branch sibling hashes
 required to recompute every node hash up to the root.
 The accessed-key set is first augmented by a collapse-detection pass (`detectCollapseSiblings`, run against a
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
@@ -55,7 +56,7 @@ transaction transiently collapsed; the witness is then assembled against the par
   represented by their 32-byte hash (a `HashNode`).
 - **Untouched storage roots** — for a witnessed account whose storage was not touched in this block, the
   storage root is emitted as a bare `HashNode` (the 32-byte root) and is **never** expanded into its sub-trie
-  nodes. This holds in both modes.
+  nodes, except along a collapse-sibling path (*Legacy additions*, item 2). This holds in both modes.
 - **Ordering** — the array is sorted ascending by node bytes after self-verification, so the root is not
   positionally first. A consumer identifies the root as the node whose Keccak-256 equals the parent block's
   `stateRoot`; a decoder that assumes `state[0]` is the root (as erigon's own `RLPDecode` does on the pre-sort
@@ -99,10 +100,14 @@ reached by a `BLOCKHASH` opcode during execution. Used to answer `BLOCKHASH` und
    `EmptyRoot`) is appended once to `state` when any emitted node's bytes contain the 32-byte `EmptyRoot` — in
    practice an account leaf's empty storage-root field. It is appended *after* stateless verification: the bare
    node is unreachable from the root, so re-execution would reject it.
-2. **Collapse siblings retained.** During replay a branch can transiently collapse toward a single child;
-   `detectCollapseSiblings` traces the affected siblings. Canonical drops a traced sibling when its post-state
-   branch still has ≥2 children (the collapse was transient, so the sibling is not structurally required);
-   legacy keeps every traced collapse-sibling — legacy is thus the superset.
+2. **Collapse siblings retained.** During replay a branch can transiently collapse toward a single child. With
+   commitment v3, `detectCollapseSiblings` walks the block's deletes over the pre-state trie, ignores inserts, and
+   reports one sibling for every branch that has at least two children and keeps at most one after the deletes: the
+   surviving child, or, when no child survives, the last child in nibble order (the child a sorted delete pass sees
+   alone). With HPH it reports the collapses the HPH fold observes. For an account sibling, the reported path
+   continues through a single-path pre-state storage trie. Canonical drops candidates whose post-state branch keeps
+   two or more children; legacy keeps every candidate and is thus the superset.
+   `eth_getWitness` carries these legacy siblings and encodes them from the lean node list.
 
 The account and storage proofs are otherwise built identically in the two modes; these two points are the only
 structural differences.
@@ -168,8 +173,14 @@ Serving semantics in head-capture mode:
   `collectAccessedState` (codes/keys), `collectAccessedHeaders`, `detectCollapseSiblings`, `buildWitnessTrie`,
   `verifyWitnessStateless`, the `{0x80}` append.
 - **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
-  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` (read-only fold, untouched storage root emitted
-  as a bare `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysByHash`.
+  `execution/commitment/v3.Trie.WitnessNodes` on v3; the frozen HPH fallback uses
+  `execution/commitment/v2/hex_patricia_hashed.go` `WitnessesByHash` and
+  `trie.WitnessNodesForKeysByHash`.
+- **Collapse** — `execution/commitment/v3/collapse.go` walks pre-state records and reports deletes-only siblings: the
+  survivor, or the last child of a branch that keeps none; account sibling paths continue through a single-path
+  storage trie.
+- **Op-stream** — `execution/commitment/witness/opstream.Encode` encodes the lean node list and code reads.
+- **Proof** — `execution/commitment/witness.ProofFromNodes` extracts account and storage proofs from RLP nodes.
 - **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
   `rpc/jsonrpc/witness_cache_builder.go` (`WitnessCacheMode`, rolling-pin lifecycle, `buildAndCacheHeadCapture`),
   `rpc/jsonrpc/debug_execution_witness.go` (`headCaptureSource`, `buildWitnessResultHeadCapture`,
