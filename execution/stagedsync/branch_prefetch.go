@@ -23,13 +23,15 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
+var branchPrefetchWorkers = dbg.EnvInt("BRANCH_PREFETCH_WORKERS", 8) // probe knob
+
 const (
-	branchPrefetchWorkers  = 8
 	branchPrefetchQueue    = 1 << 16
 	branchPrefetchPerTx    = 256
 	branchPrefetchShards   = 64
