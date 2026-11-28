@@ -438,11 +438,20 @@ func RedactURLError(err error) error {
 		ue.Err = context.Canceled
 	case errors.Is(ue.Err, context.DeadlineExceeded):
 		ue.Err = context.DeadlineExceeded
-	case errors.As(ue.Err, new(*net.OpError)), errors.As(ue.Err, new(*net.DNSError)):
 	default:
-		ue.Err = errors.New("HTTP request failed")
+		ue.Err = networkCause(ue.Err)
 	}
 	return ue
+}
+
+func networkCause(err error) error {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok {
+		return opErr
+	}
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
+		return dnsErr
+	}
+	return errors.New("HTTP request failed")
 }
 
 // ValidEndpoint reports whether endpoint is an http or https URL with a host. Callers do not echo a rejected value:

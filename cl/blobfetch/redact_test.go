@@ -18,7 +18,9 @@ package blobfetch
 
 import (
 	"bufio"
+	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -51,4 +53,34 @@ func TestGetBeaconDataHidesKeyEchoedInStatusLine(t *testing.T) {
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), secret)
 	require.NotContains(t, err.Error(), "/eth/v1/beacon/blobs/0x00")
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestRedactURLErrorDropsTextAroundNetworkCause(t *testing.T) {
+	const secret = "SECRET-DUMMY-KEY"
+	causes := map[string]error{
+		"dial": &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")},
+		"dns":  &net.DNSError{Err: "no such host", Name: "beacon.example", IsNotFound: true},
+	}
+	for name, cause := range causes {
+		t.Run(name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return nil, fmt.Errorf("request %s failed: %w", req.URL, cause)
+			})}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://beacon.example/eth/v1/node?apikey="+secret, nil)
+			require.NoError(t, err)
+			resp, err := client.Do(req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			require.Error(t, err)
+			err = RedactURLError(err)
+			require.NotContains(t, err.Error(), secret)
+			require.NotContains(t, err.Error(), "/eth/v1/node")
+			require.ErrorIs(t, err, cause)
+		})
+	}
 }
