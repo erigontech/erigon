@@ -586,6 +586,48 @@ func LegacyRetention(cfg CaplinConfig, beaconCfg *BeaconChainConfig) (CaplinRete
 	return retention, caplinRetentionReadersEqual(cfg, mapped, beaconCfg), nil
 }
 
+func LegacyRetentionFlags(retention CaplinRetention, beaconCfg *BeaconChainConfig) ([]string, bool, error) {
+	normalized, err := retention.Normalize(beaconCfg)
+	if err != nil {
+		return nil, false, err
+	}
+	var cfg CaplinConfig
+	if err := ApplyRetention(normalized, beaconCfg, &cfg); err != nil {
+		return nil, false, nil
+	}
+	mapped, exact, err := LegacyRetention(cfg, beaconCfg)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exact || mapped != normalized {
+		return nil, false, nil
+	}
+	if normalized.Mode == CaplinPruneModeSpec {
+		return nil, true, nil
+	}
+	flags := make([]string, 0, 3)
+	if normalized.Sidecars.Kind == CaplinFloorAll {
+		flags = append(flags, "--caplin.blobs-archive")
+	} else {
+		if normalized.Blocks.Kind == CaplinFloorAll {
+			flags = append(flags, "--caplin.blocks-archive")
+		}
+		sidecarMin := caplinSidecarRetentionMinimum(beaconCfg)
+		switch normalized.Sidecars.Kind {
+		case CaplinFloorSlot:
+			flags = append(flags, "--caplin.blobs-archive-from-slot="+strconv.FormatUint(normalized.Sidecars.Value, 10))
+		case CaplinFloorDistance:
+			if normalized.Sidecars.Value > sidecarMin {
+				flags = append(flags, "--caplin.columns-keep-slots="+strconv.FormatUint(normalized.Sidecars.Value*beaconCfg.SlotsPerEpoch, 10))
+			}
+		}
+	}
+	if normalized.States.Kind == CaplinFloorAll {
+		flags = append(flags, "--caplin.states-archive")
+	}
+	return flags, true, nil
+}
+
 func caplinRetentionReadersEqual(a, b CaplinConfig, _ *BeaconChainConfig) bool {
 	if a.ArchiveBlocks != b.ArchiveBlocks || a.ArchiveBlobs != b.ArchiveBlobs || a.ArchiveStates != b.ArchiveStates {
 		return false

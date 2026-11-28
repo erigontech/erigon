@@ -26,6 +26,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -71,6 +73,56 @@ func TestSegDuCommand(t *testing.T) {
 	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
 	require.NoError(t, app.Run(t.Context(), []string{"capcli", "seg", "du", "--datadir", dirs.DataDir, "--chain", "mainnet"}))
 	require.Contains(t, output.String(), "chain mainnet")
+}
+
+func TestCaplinRegimeCommandIsRegistered(t *testing.T) {
+	var seg *cli.Command
+	for _, command := range commands() {
+		if command.Name == "seg" {
+			seg = command
+			break
+		}
+	}
+	require.NotNil(t, seg)
+	var regime *cli.Command
+	for _, command := range seg.Commands {
+		if command.Name == "regime" {
+			regime = command
+			break
+		}
+	}
+	require.NotNil(t, regime)
+	require.Len(t, regime.Commands, 2)
+}
+
+func TestSegResetCommand(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	block := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)
+	replacement := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 200)
+	blob := snaptype.BlobSidecars.FileName(version.V1_1, 200, 300)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, block), []byte(block), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, blob), []byte(blob), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'"+replacement+"' = 'replacement'\n"), 0o600))
+
+	var dryOutput bytes.Buffer
+	dryApp := &cli.Command{Name: "capcli", Commands: commands(), Writer: &dryOutput, ErrWriter: &dryOutput}
+	require.NoError(t, dryApp.Run(t.Context(), []string{"capcli", "seg", "reset", "--datadir", dirs.DataDir, "--chain", "mainnet", "--dry-run"}))
+	require.Contains(t, dryOutput.String(), "delete blocks "+block)
+	require.Contains(t, dryOutput.String(), "only copy sidecars "+blob)
+	require.FileExists(t, filepath.Join(dirs.Snap, block))
+	require.FileExists(t, filepath.Join(dirs.Snap, blob))
+
+	var output bytes.Buffer
+	app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output, ErrWriter: &output}
+	err := app.Run(t.Context(), []string{"capcli", "seg", "reset", "--datadir", dirs.DataDir, "--chain", "mainnet"})
+	require.ErrorContains(t, err, "only copy")
+	require.FileExists(t, filepath.Join(dirs.Snap, block))
+	require.FileExists(t, filepath.Join(dirs.Snap, blob))
+
+	require.NoError(t, app.Run(t.Context(), []string{"capcli", "seg", "reset", "--datadir", dirs.DataDir, "--chain", "mainnet", "--force"}))
+	require.NoFileExists(t, filepath.Join(dirs.Snap, block))
+	require.NoFileExists(t, filepath.Join(dirs.Snap, blob))
+	require.Contains(t, output.String(), "deleted blocks "+block)
 }
 
 func TestSegDuCommandManifest(t *testing.T) {
@@ -1281,4 +1333,84 @@ func preserveResetManifest(t *testing.T) {
 	raw := append([]byte{}, snapcfg.GetToml("mainnet")...)
 	local := cfg.Local
 	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml("mainnet", raw, local)) })
+}
+
+func TestRegimeShowOlderSchema(t *testing.T) {
+	for _, store := range []string{"index", "blobs"} {
+		t.Run(store, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			path := dirs.CaplinIndexing
+			if store == "blobs" {
+				path = filepath.Join(dirs.CaplinBlobs, "chaindata")
+			}
+			db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(path).
+				WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+					tables := maps.Clone(kv.ChaindataTablesCfg)
+					delete(tables, kv.PtcWindowEpochTable)
+					return tables
+				}).MustOpen()
+			db.Close()
+			output, err := runRegime(t, dirs, "show")
+			if err != nil {
+				t.Fatalf("show with older %s DB: %v", store, err)
+			}
+			require.Contains(t, output, "stored regime none stored")
+			require.Contains(t, output, "oldest states none")
+		})
+	}
+}
+
+func writeRegimeExecutionChain(t *testing.T, dirs datadir.Dirs) {
+	t.Helper()
+	el := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer el.Close()
+	require.NoError(t, el.Update(t.Context(), func(tx kv.RwTx) error {
+		hash := chainspec.Mainnet.GenesisHash
+		if err := rawdb.WriteCanonicalHash(tx, hash, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, hash, chainspec.Mainnet.Config)
+	}))
+}
+
+func TestRegimeShowBlobFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := openCaplinBlobDB(t, dirs)
+	store := blob_storage.NewBlobStore(db, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 10_000_000}}
+	sidecar := cltypes.NewBlobSidecar(0, &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	require.NoError(t, store.WriteBlobSidecars(t.Context(), common.Hash{1}, []*cltypes.BlobSidecar{sidecar}))
+	db.Close()
+	want := "oldest sidecars 10000000"
+	out, err := runRegime(t, dirs, "show")
+	require.NoError(t, err)
+	require.Contains(t, out, want+"\n")
+
+	check := func(t *testing.T, out string, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		_, rest, ok := strings.Cut(out, "oldest sidecars ")
+		require.True(t, ok)
+		slot, _, _ := strings.Cut(rest, "\n")
+		if slot != "10000000" {
+			t.Fatalf("oldest sidecars %s, want 10000000", slot)
+		}
+	}
+
+	t.Run("empty index with known chain", func(t *testing.T) {
+		index, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+		require.NoError(t, err)
+		index.Close()
+		writeRegimeExecutionChain(t, dirs)
+		var output bytes.Buffer
+		app := &cli.Command{Name: "capcli", Commands: commands(), Writer: &output}
+		err = app.Run(t.Context(), []string{"capcli", "seg", "regime", "show", "--datadir", dirs.DataDir})
+		check(t, output.String(), err)
+	})
+
+	t.Run("missing blob metadata", func(t *testing.T) {
+		require.NoError(t, dir.RemoveAll(filepath.Join(dirs.CaplinBlobs, "chaindata")))
+		out, err := runRegime(t, dirs, "show")
+		check(t, out, err)
+	})
 }
