@@ -160,10 +160,13 @@ type AddressEntry struct {
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete).
-	// Marks take Lock once a SelfDestruct cell was true or the map carries write
-	// stamps: readers combine several cells' flags only through a destruct.
+	// A mark that falls back to the lock takes Lock once a SelfDestruct cell was true or
+	// the map carries write stamps: readers combine several cells' flags only through a destruct.
 	mu         sync.RWMutex
 	destructed atomic.Bool
+	// lifecycle latches before the first lifecycle cell (see hasLifecycleCells) is visible,
+	// so a lock-free mark can tell after its CAS whether the promotion must stamp.
+	lifecycle atomic.Bool
 }
 
 // putCell sets/updates a typed cell at txIdx; caller holds e.mu.Lock(). Returns the (possibly new) map to assign back and the cell.
@@ -345,7 +348,13 @@ func (vm *VersionMap) mutEnd(txIdx int) {
 			}
 		}
 	}
-	for k := slot + 1; k <= st.n; k += k & -k {
+	vm.mutAbort(txIdx)
+}
+
+// mutAbort ends a mutBegin that changed no verdict, so it leaves the write stamps as they were.
+func (vm *VersionMap) mutAbort(txIdx int) {
+	st := vm.stamps
+	for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
 		st.inflight[k].Add(-1)
 	}
 }
@@ -665,6 +674,7 @@ func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value 
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.lifecycle.Store(true)
 	e.SelfDestruct, _ = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
 	if value {
 		e.destructed.Store(true)
@@ -695,6 +705,7 @@ func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value u
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.lifecycle.Store(true)
 	e.Incarnation, _ = putCell(vm, e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
 }
 
@@ -731,6 +742,7 @@ func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, valu
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.lifecycle.Store(true)
 	e.CreateContract, _ = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
 }
 
@@ -1611,6 +1623,7 @@ func (vm *VersionMap) FlushWrites(writes *WriteSet, complete bool) {
 			e.Address = flushCell(vm, e, e.Address, addr, AddressPath, vw, flag, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
+			e.lifecycle.Store(true)
 			e.SelfDestruct = flushCell(vm, e, e.SelfDestruct, addr, SelfDestructPath, vw, flag, eqBool, !reseeded)
 			if vw.Val {
 				e.destructed.Store(true)
@@ -1623,6 +1636,7 @@ func (vm *VersionMap) FlushWrites(writes *WriteSet, complete bool) {
 			e.Nonce = flushCell(vm, e, e.Nonce, addr, NoncePath, vw, flag, eqUint64, destructed)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
+			e.lifecycle.Store(true)
 			cells, cell := putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			e.Incarnation = cells
 			vw.bind(e, cell)
@@ -1637,6 +1651,7 @@ func (vm *VersionMap) FlushWrites(writes *WriteSet, complete bool) {
 			e.CodeSize = flushCell(vm, e, e.CodeSize, addr, CodeSizePath, vw, flag, eqInt, destructed)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
+			e.lifecycle.Store(true)
 			cells, cell := putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			e.CreateContract = cells
 			vw.bind(e, cell)
@@ -1714,13 +1729,17 @@ type cellMarks struct {
 	flag   statusFlag
 	fee    func(accounts.Address) bool
 	locked map[accounts.Address]struct{}
+	// A lock-free mark on a stamped map runs inside one mutBegin of the write set's tx, which
+	// ends with a stamp only if a marked entry has lifecycle cells.
+	stampTx   int
+	lifecycle bool
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
-	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient}
+	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient, stampTx: UnknownDep}
 	for addr, vw := range writes.address {
 		markCell(&m, addr, vw)
 	}
@@ -1761,6 +1780,13 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 	for addr := range m.locked {
 		vm.markAccountLocked(addr, writes, flag)
 	}
+	if m.stampTx != UnknownDep {
+		if m.lifecycle {
+			vm.mutEnd(m.stampTx)
+		} else {
+			vm.mutAbort(m.stampTx)
+		}
+	}
 }
 
 func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T]) {
@@ -1768,9 +1794,13 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T])
 		return
 	}
 	c, e := vw.cell, vw.entry
-	if c == nil || e.destructed.Load() || m.vm.stamps != nil || (m.flag == FlagDone && dbg.AssertEnabled) {
+	if c == nil || e.destructed.Load() || (m.flag == FlagDone && dbg.AssertEnabled) {
 		m.lock(addr)
 		return
+	}
+	if m.vm.stamps != nil && m.stampTx == UnknownDep {
+		m.vm.mutBegin(vw.Version.TxIndex)
+		m.stampTx = vw.Version.TxIndex
 	}
 	want := vw.Version.Incarnation
 	if m.flag == FlagDone {
@@ -1782,6 +1812,7 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T])
 	case markDeleted:
 		m.lock(addr)
 	}
+	m.lifecycle = m.lifecycle || e.lifecycle.Load()
 }
 
 func (m *cellMarks) lock(addr accounts.Address) {
@@ -1803,6 +1834,9 @@ func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet,
 		defer e.mu.Unlock()
 	} else {
 		defer e.mu.RUnlock()
+	}
+	if dbg.AssertEnabled && hasLifecycleCells(e) && !e.lifecycle.Load() {
+		panic(fmt.Sprintf("mark: lifecycle cells without the latch addr=%x", addr.Value()))
 	}
 	if vm.stamps != nil && hasLifecycleCells(e) {
 		wtx := writes.txIndex()
@@ -2157,6 +2191,11 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 			return VersionValid
 		}
+	}
+	// Origin publication writes no stamp, so a published origin must not change this read's
+	// verdict; otherwise the arrival skip would miss the change. Only a lower write may.
+	if path == StoragePath && source == StorageRead && version == UnknownVersion && rr.DepIdx() == originIndex {
+		rr = ReadResult{depIdx: UnknownDep}
 	}
 	valid := VersionValid
 	switch rr.Status() {
