@@ -259,3 +259,49 @@ func BenchmarkWitness(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkV3SmallBlock(b *testing.B) {
+	const contracts, slots = 50000, 4
+	seed := make([]commitmenttest.Op, 0, contracts*(slots+1))
+	for i := range contracts {
+		addr := benchAddr(i)
+		seed = append(seed, parityAccount(addr, i))
+		for j := range slots {
+			seed = append(seed, commitmenttest.StorageAt(append(bytes.Clone(addr), benchSlot(i*slots+j)...), i+j))
+		}
+	}
+	base := newShardedContext()
+	tr := newFactoryTrie(0, base, base.factory)
+	if _, err := tr.ProcessFeed(context.Background(), feedOf(seed), nil); err != nil {
+		b.Fatal(err)
+	}
+	tr.Release()
+	block := func(keys, bump int) []commitmenttest.Op {
+		ops := make([]commitmenttest.Op, 0, keys)
+		for i := 0; len(ops) < keys; i++ {
+			c := (i * 7919) % contracts
+			addr := benchAddr(c)
+			ops = append(ops, parityAccount(addr, c+bump))
+			for j := 0; j < 2 && len(ops) < keys; j++ {
+				ops = append(ops, commitmenttest.StorageAt(append(bytes.Clone(addr), benchSlot(c*slots+j)...), c+bump+j))
+			}
+		}
+		return ops
+	}
+	for _, keys := range []int{1, 4, 8, 12, 16, 24, 32, 48, 64, 128, 512, 2048} {
+		rounds := [2]*commitment.Feed{feedOf(block(keys, 1)), feedOf(block(keys, 2))}
+		for _, w := range []int{1, 0} {
+			b.Run(fmt.Sprintf("keys=%d/workers=%d", keys, w), func(b *testing.B) {
+				tr := newFactoryTrie(w, base, base.factory)
+				defer tr.Release()
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := range b.N {
+					if _, err := tr.ProcessFeed(context.Background(), rounds[i&1], nil); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
