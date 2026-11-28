@@ -116,7 +116,7 @@ type WorkerContext struct {
 	chainConfig  *chain.Config
 
 	ctx        context.Context
-	stopCancel func()
+	stopCancel func() bool
 	engine     rules.Engine
 	genesis    *types.Genesis
 	chain      rules.ChainReader
@@ -178,18 +178,8 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 
 func (rw *WorkerContext) watchCtx(ctx context.Context) {
 	rw.ctx = ctx
-	cancelled := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		rw.evm.Cancel()
-		close(cancelled)
-	})
-	rw.stopCancel = func() {
-		// A cancel already started must land before the EVM is reused.
-		if !stop() {
-			<-cancelled
-		}
-		rw.stopCancel = func() {}
-	}
+	// Bound to this run's EVM: Park replaces it, so a late cancel cannot reach the next run.
+	rw.stopCancel = context.AfterFunc(ctx, rw.evm.Cancel)
 }
 
 // Rebind prepares a parked worker for an executor run under ctx.
@@ -205,7 +195,10 @@ func (rw *WorkerContext) Rebind(ctx context.Context, metrics *WorkerMetrics) {
 func (rw *WorkerContext) Park() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stopCancel()
+	if rw.stopCancel != nil {
+		rw.stopCancel()
+		rw.stopCancel = nil
+	}
 	_ = rw.bindTx(nil)
 	rw.flushCollector()
 	rw.ibs.ResetReader(nil)
@@ -237,7 +230,10 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stopCancel()
+	if rw.stopCancel != nil {
+		rw.stopCancel()
+		rw.stopCancel = nil
+	}
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
 	rw.flushCollector()

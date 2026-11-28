@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -167,4 +168,25 @@ func TestParkReleasesTheRunEVM(t *testing.T) {
 	runEVM := w.evm
 	w.Park()
 	require.NotSame(t, runEVM, w.evm, "a parked worker keeps the run's EVM and its call-output buffers")
+}
+
+func TestACancelReachesOnlyItsOwnRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		first, cancelFirst := context.WithCancel(t.Context())
+		defer cancelFirst()
+		w := NewWorkerContext(first, false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+		defer w.Close()
+		cancelFirst()
+		w.Park()
+
+		second, cancelSecond := context.WithCancel(t.Context())
+		defer cancelSecond()
+		w.Rebind(second, nil)
+		synctest.Wait()
+		require.False(t, w.evm.Cancelled(), "the finished run's cancel reached the next run")
+
+		cancelSecond()
+		synctest.Wait()
+		require.True(t, w.evm.Cancelled(), "the run's own cancel did not reach its EVM")
+	})
 }

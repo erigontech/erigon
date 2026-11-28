@@ -7,7 +7,7 @@ import (
 )
 
 // execWorkerCache keeps the parallel executor's worker contexts between ExecV3 calls,
-// so a call reuses their EVMs and IntraBlockStates instead of building new ones.
+// so a call reuses their IntraBlockStates instead of building new ones.
 type execWorkerCache struct {
 	mu   sync.Mutex
 	idle []*exec.WorkerContext
