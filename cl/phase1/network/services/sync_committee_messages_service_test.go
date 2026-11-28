@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"encoding/hex"
 	"runtime"
 	"slices"
 	"strings"
@@ -30,13 +31,18 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/require"
+	blst "github.com/supranational/blst/bindings/go"
 	"go.uber.org/mock/gomock"
 )
 
@@ -334,6 +340,149 @@ func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 
 	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), msg), ErrInvalidBlsSignature)
+}
+
+// The pool does not group-check signatures, so a message signed correctly plus a component outside G2 must be rejected
+// before it reaches the pool, also when it is verified in a batch with a valid message, which must still be accepted.
+func TestSyncCommitteesRejectsSignatureOutsideG2BeforeThePool(t *testing.T) {
+	t.Run("immediate", func(t *testing.T) {
+		f := newOutsideG2SyncCommitteeFixture(t)
+		f.forged.ImmediateVerification = true
+
+		// A rejected message is not recorded, so each submission is verified again.
+		for range 200 {
+			require.ErrorIs(t, f.service.ProcessMessage(t.Context(), new(uint64), f.forged), ErrInvalidBlsSignature)
+		}
+		require.Zero(t, utils.BitsOnCount(f.contribution().AggregationBits))
+	})
+
+	t.Run("batched", func(t *testing.T) {
+		f := newOutsideG2SyncCommitteeFixture(t)
+		saveSignatureGlobals(t)
+		realVerify := blsVerifyMultipleSignatures
+		firstBatch := make(chan [][]byte, 1)
+		var recordFirstBatch sync.Once
+		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			recordFirstBatch.Do(func() { firstBatch <- slices.Clone(signatures) })
+			return realVerify(signatures, signRoots, pks)
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		forgedResult, validResult := make(chan error, 1), make(chan error, 1)
+		go func() { forgedResult <- f.service.ProcessMessage(ctx, new(uint64), f.forged) }()
+		go func() { validResult <- f.service.ProcessMessage(ctx, new(uint64), f.valid) }()
+		waitForQueuedVerification(t, f.verifier.syncCommitteeMessage, 2)
+		batch := []*AggregateVerificationData{<-f.verifier.syncCommitteeMessage, <-f.verifier.syncCommitteeMessage}
+		callbacks, _ := f.verifier.processSignatureVerification(batch)
+		for _, callback := range callbacks {
+			callback()
+		}
+
+		require.ErrorIs(t, <-forgedResult, ErrInvalidBlsSignature)
+		require.NoError(t, <-validResult)
+		require.ElementsMatch(t, [][]byte{f.forged.SyncCommitteeMessage.Signature[:], f.valid.SyncCommitteeMessage.Signature[:]}, <-firstBatch)
+
+		contribution := f.contribution()
+		wantBits := make([]byte, len(contribution.AggregationBits))
+		for _, position := range f.validPositions {
+			utils.FlipBitOn(wantBits, position)
+		}
+		validSignature := f.valid.SyncCommitteeMessage.Signature[:]
+		wantSignature, err := bls.AggregateSignatures(slices.Repeat([][]byte{validSignature}, len(f.validPositions)))
+		require.NoError(t, err)
+		require.Equal(t, wantBits, []byte(contribution.AggregationBits))
+		require.Equal(t, wantSignature, contribution.Signature[:])
+	})
+}
+
+// outsideG2SyncCommitteeFixture has two members of subcommittee 0 whose keys the test knows. Both sign the same block
+// root; the signature of forged is its own valid signature plus a point of order 13.
+type outsideG2SyncCommitteeFixture struct {
+	service        SyncCommitteeMessagesService
+	verifier       *BatchSignatureVerifier
+	pool           sync_contribution_pool.SyncContributionPool
+	forged, valid  *SyncCommitteeMessageForGossip
+	validPositions []int
+}
+
+func (f *outsideG2SyncCommitteeFixture) contribution() *cltypes.Contribution {
+	msg := f.valid.SyncCommitteeMessage
+	return f.pool.GetSyncContribution(msg.Slot, 0, msg.BeaconBlockRoot)
+}
+
+func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixture {
+	t.Helper()
+	head, _ := getObjectsForSyncCommitteesServiceTest()
+	cfg := head.BeaconConfig()
+	slot := head.Slot()
+	blockRoot, err := head.BlockRoot()
+	require.NoError(t, err)
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, slot), head.GenesisValidatorsRoot())
+	require.NoError(t, err)
+	signingRoot := crypto.Sha256(blockRoot[:], domain)
+
+	committee := head.CurrentSyncCommittee().Copy()
+	committeeKeys := committee.GetCommittee()
+	positions := [][]int{{0}, {1, 2}}
+	messages := make([]*SyncCommitteeMessageForGossip, len(positions))
+	for index, memberPositions := range positions {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		publicKey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+		validator, err := head.ValidatorForValidatorIndex(index)
+		require.NoError(t, err)
+		validator.SetPublicKey(publicKey)
+		head.SetValidatorAtIndex(index, validator)
+		for _, position := range memberPositions {
+			committeeKeys[position] = publicKey
+		}
+		messages[index] = &SyncCommitteeMessageForGossip{SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot,
+			BeaconBlockRoot: blockRoot,
+			ValidatorIndex:  uint64(index),
+			Signature:       common.Bytes96(key.Sign(signingRoot[:]).Bytes()),
+		}}
+	}
+	valid, err := bls.Verify(messages[0].SyncCommitteeMessage.Signature[:], signingRoot[:], committeeKeys[positions[0][0]][:])
+	require.NoError(t, err)
+	require.True(t, valid, "the signature of validator 0 is not valid before the forgery")
+	committee.SetCommittee(committeeKeys)
+	require.NoError(t, head.SetCurrentSyncCommittee(committee))
+	forged := messages[0]
+	forged.SyncCommitteeMessage.Signature = common.Bytes96(addOrder13Point(t, forged.SyncCommitteeMessage.Signature[:]))
+
+	ctrl := gomock.NewController(t)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	synced := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, synced.OnHeadState(head))
+	pool := sync_contribution_pool.NewSyncContributionPool(cfg)
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+	return &outsideG2SyncCommitteeFixture{
+		service:        NewSyncCommitteeMessagesService(cfg, ethClock, synced, pool, verifier, false),
+		verifier:       verifier,
+		pool:           pool,
+		forged:         forged,
+		valid:          messages[1],
+		validPositions: positions[1],
+	}
+}
+
+// order13PointHex is a point of order 13 on the G2 curve, so it is not in G2. Batch verification cancels it whenever
+// 13 divides the random weight, so without a group check a forged signature passes about once in 13 verifications.
+const order13PointHex = "816921c9b317c92cea639a5169a77dd05a86c582075c929f84d5a4364b10fa5e85d9c32cb918bb410a3f7b1779fe4d1b18cde05d1a0c83bf062e4c9b9c820bb89ee64874860ff8eedd7c1323ca86c1f449ba4845097301eaea81f0d992a06be6"
+
+func addOrder13Point(t *testing.T, signature []byte) []byte {
+	t.Helper()
+	raw, err := hex.DecodeString(order13PointHex)
+	require.NoError(t, err)
+	var point, sum blst.P2
+	point.FromAffine(new(blst.P2Affine).Uncompress(raw))
+	require.NotEqual(t, bls.InfiniteSignature[:], point.Compress())
+	require.Equal(t, bls.InfiniteSignature[:], point.Mult([]byte{13}).Compress())
+	sum.FromAffine(new(blst.P2Affine).Uncompress(signature))
+	return sum.AddAssign(&point).Compress()
 }
 
 // Waiting for the signature verdict holds no service or head-state lock, so a head-state publication is not blocked.
