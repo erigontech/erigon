@@ -69,7 +69,7 @@ func setFlag(t *testing.T, get func() bool, set func(bool), v bool) {
 	t.Cleanup(func() { set(prev) })
 }
 
-// holdStateFilePublication finalizes the block after the first step's last block, so the step is irreversible, and
+// holdStateFilePublication finalizes the block after the first step's last block, so no unwind can reach the step, and
 // starts a prune. The step is built, and its publication waits until the returned func runs.
 func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTester, chainPack *blockgen.ChainPack, lastFileBlock uint64, publish func()) {
 	t.Helper()
@@ -102,7 +102,7 @@ func holdStateFilePublication(t *testing.T) (m *execmoduletester.ExecModuleTeste
 		select {
 		case <-built:
 		default:
-			t.Fatal("the irreversible step was not built")
+			t.Fatal("the collatable step was not built")
 		}
 	}
 	return m, chainPack, lastFileBlock, func() {

@@ -304,14 +304,15 @@ func TestRecordBlockTimeliness_LateKnownBlockRecordsFalseVector(t *testing.T) {
 }
 
 func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {
-	// Timely block (0s into slot) should get boost if no lookahead (pre-GLOAS fallback)
+	// Timely block (0s into slot) on the head's chain gets the boost
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+	f.forkGraph = &getFinalizedExecutionHashForkGraph{}
 
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x10}
 
 	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
-	f.updateProposerBoostRoot(common.Hash{}, blockRoot, f.Slot())
+	f.updateProposerBoostRoot(blockRoot, blockRoot, f.Slot())
 	require.Equal(t, blockRoot, f.proposerBoostRoot.Load().(common.Hash))
 }
 
@@ -330,6 +331,7 @@ func TestUpdateProposerBoostRoot_LateBlock(t *testing.T) {
 func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
 	// If proposer boost root is already set, a second timely block should not overwrite it
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
+	f.forkGraph = &getFinalizedExecutionHashForkGraph{}
 
 	firstRoot := common.Hash{0x10}
 	secondRoot := common.Hash{0x20}
@@ -338,17 +340,95 @@ func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
 	block2 := &cltypes.BeaconBlock{Slot: 0}
 
 	f.recordBlockTimeliness(block1, firstRoot, f.timeMs.Load())
-	f.updateProposerBoostRoot(common.Hash{}, firstRoot, f.Slot())
+	f.updateProposerBoostRoot(firstRoot, firstRoot, f.Slot())
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash))
 
 	f.recordBlockTimeliness(block2, secondRoot, f.timeMs.Load())
-	f.updateProposerBoostRoot(common.Hash{}, secondRoot, f.Slot())
+	f.updateProposerBoostRoot(firstRoot, secondRoot, f.Slot())
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash), "boost root should not be overwritten")
 
 	// But the second block's timeliness should still be recorded
 	timeliness, ok := f.getBlockTimeliness(secondRoot)
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
+}
+
+// update_proposer_boost_root boosts only a block whose shuffling dependent root is the head's, on every fork.
+func TestUpdateProposerBoostRootRequiresTheHeadDependentRoot(t *testing.T) {
+	const blockSlot = 100 // epoch 3, dependent slot 63
+	forkPoint, onHeadBranch, otherBranch := common.Hash{0xc0}, common.Hash{0xa0}, common.Hash{0xb0}
+	head, sameBranchBlock, otherBranchBlock := common.Hash{0xa1}, common.Hash{0xa2}, common.Hash{0xb2}
+	for _, test := range []struct {
+		name      string
+		block     common.Hash
+		wantBoost bool
+	}{
+		{name: "same dependent root", block: sameBranchBlock, wantBoost: true},
+		{name: "other dependent root", block: otherBranchBlock},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, blockSlot*12*1000)
+			f.beaconCfg.MinSeedLookahead = 1
+			cfg := f.beaconCfg
+			graph := &getFinalizedExecutionHashForkGraph{
+				blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+					onHeadBranch:     testSignedBeaconBlock(cfg, 63, forkPoint),
+					otherBranch:      testSignedBeaconBlock(cfg, 63, forkPoint),
+					head:             testSignedBeaconBlock(cfg, 99, onHeadBranch),
+					sameBranchBlock:  testSignedBeaconBlock(cfg, blockSlot, head),
+					otherBranchBlock: testSignedBeaconBlock(cfg, blockSlot, otherBranch),
+				},
+				headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+					forkPoint:        {Slot: 62},
+					onHeadBranch:     {Slot: 63},
+					otherBranch:      {Slot: 63},
+					head:             {Slot: 99},
+					sameBranchBlock:  {Slot: blockSlot},
+					otherBranchBlock: {Slot: blockSlot},
+				},
+			}
+			linkHeadersToBlocks(graph)
+			f.forkGraph = graph
+
+			f.recordBlockTimeliness(&cltypes.BeaconBlock{Slot: blockSlot}, test.block, f.timeMs.Load())
+			f.updateProposerBoostRoot(head, test.block, blockSlot)
+
+			if test.wantBoost {
+				require.Equal(t, test.block, f.ProposerBoostRoot())
+			} else {
+				require.Zero(t, f.ProposerBoostRoot())
+			}
+		})
+	}
+}
+
+func TestHeadBeforeBlockPreGloasStandsInWithoutCountingVotes(t *testing.T) {
+	const blockSlot = 100 // epoch 3, dependent slot 63
+	justified, anchorRoot := common.Hash{0x01}, common.Hash{0x02}
+	for _, test := range []struct {
+		name          string
+		justifiedSlot *uint64
+		want          common.Hash
+	}{
+		{name: "justified block at the dependent slot", justifiedSlot: new(uint64(63)), want: justified},
+		{name: "justified block not stored", want: anchorRoot},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, blockSlot*12*1000)
+			f.beaconCfg.MinSeedLookahead = 1
+			graph := &getFinalizedExecutionHashForkGraph{headers: map[common.Hash]*cltypes.BeaconBlockHeader{}, anchorRoot: anchorRoot}
+			if test.justifiedSlot != nil {
+				graph.headers[justified] = &cltypes.BeaconBlockHeader{Slot: *test.justifiedSlot}
+			}
+			f.forkGraph = graph
+			f.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: justified})
+
+			head, err := f.headBeforeBlockPreGloasLocked(blockSlot)
+
+			require.NoError(t, err)
+			require.Equal(t, test.want, head)
+		})
+	}
 }
 
 // --- isHeadWeak tests ---

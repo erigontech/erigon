@@ -77,6 +77,15 @@ func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
 	}
 }
 
+func TestGetSpecHoodiGlamsterdam(t *testing.T) {
+	network, config := clparams.GetConfigsByNetwork(chainspec.HoodiChainID)
+	spec := specData(t, config, network)
+
+	require.JSONEq(t, `"143616"`, string(spec["GLOAS_FORK_EPOCH"]))
+	require.JSONEq(t, `"0x80000910"`, string(spec["GLOAS_FORK_VERSION"]))
+	require.JSONEq(t, `[{"EPOCH":"143616","GAS_LIMIT":"200000000"}]`, string(spec["GAS_LIMIT_SCHEDULE"]))
+}
+
 func TestGetSpecIncludesMissingKeys(t *testing.T) {
 	network, config := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	spec := specData(t, config, network)
