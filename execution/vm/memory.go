@@ -54,11 +54,12 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
-		if size > memmoveChunk {
-			copyChunked(m.store[offset:offset+size], value)
+		// Small copies go first: the compiler lays out the then-branch as the fall-through.
+		if size <= memmoveChunk {
+			copy(m.store[offset:offset+size], value)
 			return
 		}
-		copy(m.store[offset:offset+size], value)
+		copyChunked(m.store[offset:offset+size], value)
 	}
 }
 
@@ -189,15 +190,14 @@ func (m *Memory) Copy(dst, src, len uint64) {
 		return
 	}
 	// Forward chunks would overwrite the source of an overlapping copy to a higher address.
-	if len > memmoveChunk && (dst <= src || dst-src >= len) {
-		copyChunked(m.store[dst:dst+len], m.store[src:src+len])
+	if len <= memmoveChunk || (dst > src && dst-src < len) {
+		copy(m.store[dst:], m.store[src:src+len])
 		return
 	}
-	copy(m.store[dst:], m.store[src:src+len])
+	copyChunked(m.store[dst:dst+len], m.store[src:src+len])
 }
 
-// memmoveChunk keeps each copy below 1 MiB: from there Go's amd64 memmove uses
-// non-temporal stores on AMD CPUs, which bypass the cache and send every byte to DRAM.
+// shortcut: works around https://github.com/golang/go/issues/49058 (Go's amd64 memmove uses non-temporal stores from 1 MiB on AMD); drop when Go fixes it.
 const memmoveChunk = 512 * 1024
 
 // copyChunked is copy for non-overlapping or downward-overlapping slices.
