@@ -71,26 +71,12 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 }
 
 func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
-	const targetIndex = 84 // advances unrealized justification in the fixture
-	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
-		blocks, anchor, _ := tests.GetBellatrixRandom()
-		f := newBlockTestStore(t, anchor)
-		for _, block := range blocks[:targetIndex] {
-			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
-			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
-		}
-		block := blocks[targetIndex]
-		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
-		nextEpochMs := slotStartTimeMs(f, (block.Block.Slot/f.beaconCfg.SlotsPerEpoch+1)*f.beaconCfg.SlotsPerEpoch) + 100
-		return f, block, nextEpochMs
-	}
-
-	serial, serialBlock, nextEpochMs := importUpTo(t)
+	serial, serialBlock, nextEpochMs := importBeforeJustifyingBlockAndNextEpoch(t)
 	justifiedBefore := serial.JustifiedCheckpoint()
 	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
 	serial.OnTick(nextEpochMs)
 
-	f, block, _ := importUpTo(t)
+	f, block, _ := importBeforeJustifyingBlockAndNextEpoch(t)
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	f.engine = engine
 	onBlockDone := make(chan error, 1)
@@ -250,6 +236,63 @@ func TestBlockWarmsTheJustifiedStateOnlyWhenItCanGetTheBoost(t *testing.T) {
 	require.False(t, warm, "a block applied in a later slot gets no boost")
 }
 
+// onJustifiedHeaderForkGraph runs onJustifiedHeader once, when the head computation looks up the justified block.
+type onJustifiedHeaderForkGraph struct {
+	productionTestForkGraph
+	justifiedRoot     common.Hash
+	onJustifiedHeader func()
+}
+
+func (g *onJustifiedHeaderForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if root == g.justifiedRoot && g.onJustifiedHeader != nil {
+		g.onJustifiedHeader()
+		g.onJustifiedHeader = nil
+	}
+	return g.productionTestForkGraph.GetHeader(root)
+}
+
+// A tick can advance the store time to the next slot while the head before a block is computed under f.mu.
+// The block must not get the boost then: the tick resets it once it takes f.mu, and a head computed before
+// that must not count it.
+func TestTimeReachingNextSlotDuringHeadBeforeBlockSetsNoBoost(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		reachNextSlot bool
+	}{
+		{name: "same slot"},
+		{name: "next slot", reachNextSlot: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, block := importUntilHeadCountsVotes(t)
+			blockRoot := mustRoot(t, block)
+			graph := &onJustifiedHeaderForkGraph{
+				productionTestForkGraph: f.forkGraph.(productionTestForkGraph),
+				justifiedRoot:           f.JustifiedCheckpoint().Root,
+			}
+			if test.reachNextSlot {
+				graph.onJustifiedHeader = func() { f.timeMs.Store(slotStartTimeMs(f, block.Block.Slot+1) + 100) }
+			}
+			func() {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				postState, status, err := f.forkGraph.AddChainSegment(block, true)
+				require.NoError(t, err)
+				require.Equal(t, fork_graph.Success, status)
+				prepared := preparePostState(postState, block.Block)
+				f.forkGraph = graph
+				_, err = f.applyBlockImportLocked(block.Block, blockRoot, common.Hash{}, f.timeMs.Load(), postState, prepared)
+				require.NoError(t, err)
+			}()
+			require.Nil(t, graph.onJustifiedHeader, "the head before the block must look up the justified block")
+			if test.reachNextSlot {
+				require.Zero(t, f.ProposerBoostRoot())
+			} else {
+				require.Equal(t, blockRoot, f.ProposerBoostRoot())
+			}
+		})
+	}
+}
+
 // epochStartBlock returns the anchor and a block of the epoch's first slot that advances the
 // unrealized justification.
 func epochStartBlock(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
@@ -347,26 +390,28 @@ func importBellatrixBeforeJustifyingBlock(t *testing.T) (*ForkChoiceStore, *stat
 	return f, anchor, block
 }
 
+// importBeforeJustifyingBlockAndNextEpoch returns the store of importBellatrixBeforeJustifyingBlock, its block,
+// and a time in the next epoch.
+func importBeforeJustifyingBlockAndNextEpoch(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
+	t.Helper()
+	f, _, block := importBellatrixBeforeJustifyingBlock(t)
+	slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
+	require.NotZero(t, block.Block.Slot%slotsPerEpoch)
+	return f, block, slotStartTimeMs(f, (block.Block.Slot/slotsPerEpoch+1)*slotsPerEpoch) + 100
+}
+
 // The epoch tick can advance the store time after the import captured it and before the block is
 // applied. The block must leave the checkpoints as on_block at the captured time followed by that
 // tick does: the tick promotes the block's advance.
 func TestEpochTickBetweenTimeCaptureAndApplyPromotesTheBlock(t *testing.T) {
-	importUpTo := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, uint64) {
-		f, _, block := importBellatrixBeforeJustifyingBlock(t)
-		slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
-		require.NotZero(t, block.Block.Slot%slotsPerEpoch)
-		nextEpochMs := slotStartTimeMs(f, (block.Block.Slot/slotsPerEpoch+1)*slotsPerEpoch) + 100
-		return f, block, nextEpochMs
-	}
-
-	serial, serialBlock, nextEpochMs := importUpTo(t)
+	serial, serialBlock, nextEpochMs := importBeforeJustifyingBlockAndNextEpoch(t)
 	justifiedBefore := serial.justifiedCheckpoint.Load().(solid.Checkpoint)
 	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
 	serial.OnTick(nextEpochMs)
 	require.Greater(t, serial.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch, justifiedBefore.Epoch,
 		"the fixture block must advance justification")
 
-	f, block, _ := importUpTo(t)
+	f, block, _ := importBeforeJustifyingBlockAndNextEpoch(t)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	func() {

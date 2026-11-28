@@ -115,9 +115,6 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
 	currentSlot := f.recordBlockTimeliness(block, blockRoot, storeTimeMs)
-	// A block applied after the store time has reached a later slot gets no boost. Otherwise onBlock has already
-	// run the boost reset of this slot at admission.
-	canGetBoost := f.Slot() == currentSlot
 	// update_proposer_boost_root takes the head right before the block is added. Gloas holds f.mu for the whole
 	// import, so onBlock takes it before the state transition, where a failure still rejects the block. Before
 	// Gloas the import releases f.mu during the EL call, so the head is taken here, before the block enters the
@@ -125,7 +122,7 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// imports it without the boost.
 	headBeforeBlock := gloasHeadBeforeBlock
 	timeliness, _ := f.getBlockTimeliness(blockRoot)
-	if canGetBoost && blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
+	if f.Slot() == currentSlot && blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
 		f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		head, err := f.headBeforeBlockPreGloasLocked(block.Slot)
 		if err != nil {
@@ -148,8 +145,10 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// Remove the parent from the head set
 	delete(f.headSet, block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// update_proposer_boost_root: conditionally set proposer boost root.
-	if canGetBoost {
+	// update_proposer_boost_root: conditionally set proposer boost root. A block applied after the store time has
+	// reached a later slot gets no boost; otherwise onBlock has already run the boost reset of this slot at
+	// admission. A tick can advance the time while the head is computed, so the slot is checked again here.
+	if f.Slot() == currentSlot {
 		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
 	}
 
