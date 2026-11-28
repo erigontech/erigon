@@ -542,6 +542,9 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	if expectFailure {
 		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
 	}
+	if err := payload.checkInclusionListSatisfied(enginePayloadStatus.InclusionListSatisfied); err != nil {
+		return err
+	}
 	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion, testName, hook)
 }
 
@@ -642,6 +645,18 @@ type EngineXTestNewPayload struct {
 	// the same as ValidationError: any non-Valid status or RPC-level error
 	// counts as success.
 	ErrorCode string `json:"errorCode,omitempty"`
+	// InclusionListSatisfied is the expected verdict of a VALID payload on a fork with inclusion lists.
+	InclusionListSatisfied *bool `json:"inclusionListSatisfied,omitempty"`
+}
+
+func (p EngineXTestNewPayload) checkInclusionListSatisfied(got *bool) error {
+	if p.InclusionListSatisfied == nil || (got != nil && *got == *p.InclusionListSatisfied) {
+		return nil
+	}
+	if got == nil {
+		return fmt.Errorf("inclusionListSatisfied is missing, expected %t", *p.InclusionListSatisfied)
+	}
+	return fmt.Errorf("inclusionListSatisfied is %t, expected %t", *got, *p.InclusionListSatisfied)
 }
 
 type PreAllocHash string
