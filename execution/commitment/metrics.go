@@ -55,7 +55,7 @@ func (m *Metrics) AsValues() MetricValues {
 	}
 }
 
-func (m *Metrics) logMetrics() []any {
+func (m *Metrics) LogMetrics() []any {
 	return []any{
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
@@ -90,6 +90,14 @@ func (m *Metrics) Updates(plainKey []byte) {
 func (m *Metrics) AddBranchRead(n int) { m.branchReadBytes.Add(uint64(n)) }
 
 func (m *Metrics) AddBranchLoad(n uint64) { m.loadBranch.Add(n) }
+
+func (m *Metrics) AddAccountLoad(n uint64) { m.loadAccount.Add(n) }
+
+func (m *Metrics) AddStorageLoad(n uint64) { m.loadStorage.Add(n) }
+
+func (m *Metrics) AddFolds(n uint64) { m.folds.Add(n) }
+
+func (m *Metrics) AddUnfolds(n uint64) { m.unfolds.Add(n) }
 
 // AddBranchWrite records one branch write of n bytes.
 func (m *Metrics) AddBranchWrite(n int) { m.branchWriteBytes.Add(uint64(n)) }

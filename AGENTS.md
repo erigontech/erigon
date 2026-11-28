@@ -46,7 +46,7 @@ Run affected long tests without `-short`.
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
 | `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
-| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
+| `execution/commitment/v2/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
 | `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
 | `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
 | `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |

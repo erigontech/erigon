@@ -44,7 +44,7 @@ func (f fakeVisibleFile) EndRootNum() uint64       { return f.endTxNum }
 func (f fakeVisibleFile) Version() version.Version { return f.version }
 
 // accountBranch builds a single-cell BranchData carrying one account-addr key: touchMap=afterMap=1,
-// fieldBits=fieldAccountAddr(2), then uvarint(len)+addr. A 20-byte addr is plain; a shorter one is a
+// fieldBits=FieldAccountAddr(2), then uvarint(len)+addr. A 20-byte addr is plain; a shorter one is a
 // shortened (offset) reference.
 func accountBranch(addr []byte) []byte {
 	b := []byte{0, 1, 0, 1, 0x02}

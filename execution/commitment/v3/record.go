@@ -60,7 +60,7 @@ func (r Record) SelfExt() []byte {
 	if len(r.data) == 0 || r.data[0]&hdrHasSelfExt == 0 || r.isLeafRoot() || len(r.data) < 2 {
 		return nil
 	}
-	n := packedLen(int(r.data[1]))
+	n := PackedLen(int(r.data[1]))
 	if len(r.data) < 2+n {
 		return nil
 	}
@@ -87,7 +87,7 @@ func (r Record) leafAt(l layout, nib int) (suffix, value []byte) {
 	if !ok {
 		return nil, nil
 	}
-	suffixLen := packedLen(64 - r.depth - 1)
+	suffixLen := PackedLen(64 - r.depth - 1)
 	for m := l.leaf; m != 0; m &= m - 1 {
 		i := bits.TrailingZeros16(m)
 		suffixEnd := off + suffixLen
@@ -114,7 +114,7 @@ func (r Record) extAt(l layout, nib int) []byte {
 	if !ok || off >= len(r.data) {
 		return nil
 	}
-	end := off + 1 + packedLen(int(r.data[off]))
+	end := off + 1 + PackedLen(int(r.data[off]))
 	if end > len(r.data) {
 		return nil
 	}
@@ -130,7 +130,7 @@ func (r Record) skipExt(l layout, upto int) (int, bool) {
 		if len(r.data) <= off {
 			return 0, false
 		}
-		off += 1 + packedLen(int(r.data[off]))
+		off += 1 + PackedLen(int(r.data[off]))
 		if off > len(r.data) {
 			return 0, false
 		}
@@ -167,7 +167,7 @@ func Validate(data []byte, depth int) error {
 			return ErrRecordTruncated
 		}
 		extLen := int(data[1])
-		end := 2 + packedLen(extLen)
+		end := 2 + PackedLen(extLen)
 		if extLen == 0 || extLen > 63 {
 			return fmt.Errorf("%w: self extension length %d", ErrRecordRoot, extLen)
 		}
@@ -202,7 +202,7 @@ func Validate(data []byte, depth int) error {
 		if extLen == 0 || extLen >= suffixCount {
 			return fmt.Errorf("%w: extension length %d", ErrRecordTrailer, extLen)
 		}
-		end := off + 1 + packedLen(extLen)
+		end := off + 1 + PackedLen(extLen)
 		if end > len(data) {
 			return ErrRecordTruncated
 		}
@@ -211,7 +211,7 @@ func Validate(data []byte, depth int) error {
 		}
 		off = end
 	}
-	suffixLen := packedLen(suffixCount)
+	suffixLen := PackedLen(suffixCount)
 	for range bits.OnesCount16(leaf) {
 		if off+suffixLen >= len(data) {
 			return ErrRecordTruncated
@@ -245,7 +245,7 @@ func (r Record) layout() (l layout) {
 			return layout{}
 		}
 		l.selfExtLen = int(r.data[off])
-		off += 1 + packedLen(l.selfExtLen)
+		off += 1 + PackedLen(l.selfExtLen)
 	}
 	if len(r.data) < off+4 {
 		return layout{}
@@ -298,8 +298,8 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		out[0] |= hdrHasSelfExt
 		out = append(out, byte(len(n.path)))
 		at := len(out)
-		out = append(out, make([]byte, packedLen(len(n.path)))...)
-		packPath(n.path, out[at:])
+		out = append(out, make([]byte, PackedLen(len(n.path)))...)
+		PackPath(n.path, out[at:])
 	}
 	out = binary.BigEndian.AppendUint16(out, n.childMask)
 	out = binary.BigEndian.AppendUint16(out, n.leafMask)
@@ -328,7 +328,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 	}
 
 	suffixCount := 64 - depth - 1
-	suffixLen := packedLen(suffixCount)
+	suffixLen := PackedLen(suffixCount)
 	for m := n.leafMask; m != 0; m &= m - 1 {
 		nib := bits.TrailingZeros16(m)
 		suffix, value := n.leafAt(nib)
@@ -348,7 +348,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 func encodeLeafRoot(n *node, dst []byte) []byte {
 	nib := bits.TrailingZeros16(n.childMask)
 	suffix, value := n.leafAt(nib)
-	if len(n.path) != 0 || len(suffix) != packedLen(63) {
+	if len(n.path) != 0 || len(suffix) != PackedLen(63) {
 		panic("commitment v3: invalid leaf root path")
 	}
 	if len(value) > 255 {
@@ -359,7 +359,7 @@ func encodeLeafRoot(n *node, dst []byte) []byte {
 	fullPath[0] = byte(nib)
 	unpackPath(suffix, 63, fullPath[1:64:64])
 	var keyScratch [32]byte
-	key := packPath(fullPath, keyScratch[:0])
+	key := PackPath(fullPath, keyScratch[:0])
 	out := dst[:0]
 	out = append(out, hdrIsLeafRoot)
 	out = append(out, key...)
