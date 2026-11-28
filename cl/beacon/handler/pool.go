@@ -156,8 +156,8 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
-	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[solid.Attestation](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -240,8 +240,8 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
-	req := []*solid.SingleAttestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[solid.SingleAttestation](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -251,6 +251,10 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		if a.syncedData.Syncing() {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
 			return
+		}
+		if attestation.Data == nil {
+			failures = append(failures, poolingFailure{Index: i, Message: "attestation is missing data"})
+			continue
 		}
 		var (
 			slot                      = attestation.AttestationData().Slot
@@ -494,8 +498,8 @@ func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []pool
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
-	req := []*cltypes.SignedBLSToExecutionChange{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[cltypes.SignedBLSToExecutionChange](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -533,8 +537,8 @@ func (a *ApiHandler) decodeSignedAggregatesAndProofs(w http.ResponseWriter, r *h
 		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
 	}
 	if contentType != "application/octet-stream" {
-		req := []*cltypes.SignedAggregateAndProof{}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req, err := decodeJSONList[cltypes.SignedAggregateAndProof](r.Body)
+		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		return req, nil
@@ -564,7 +568,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 
 	failures := []poolingFailure{}
 	for idx, v := range req {
-		if v == nil || v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
+		if v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: "invalid aggregate and proof"})
 			continue
 		}
@@ -628,12 +632,11 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 // PostEthV1BeaconPoolSyncCommittees is a handler for POST /eth/v1/beacon/pool/sync_committees.
 // it receives a list of sync committee messages and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
-	msgs := []*cltypes.SyncCommitteeMessage{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	msgs, err := decodeJSONList[cltypes.SyncCommitteeMessage](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	var err error
 
 	failures := []poolingFailure{}
 	var admissionErr error
@@ -731,13 +734,17 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 // PostEthV1ValidatorContributionsAndProofs is a handler for POST /eth/v1/validator/contributions_and_proofs.
 // it receives a list of signed contributions and proofs and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
-	msgs := []*cltypes.SignedContributionAndProof{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	msgs, err := decodeJSONList[cltypes.SignedContributionAndProof](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
+		if v.Message == nil || v.Message.Contribution == nil {
+			failures = append(failures, poolingFailure{Index: idx, Message: "invalid contribution and proof"})
+			continue
+		}
 		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
 			continue // skip empty contributions
 		}

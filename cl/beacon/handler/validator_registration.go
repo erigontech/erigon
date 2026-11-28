@@ -17,7 +17,9 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -29,10 +31,23 @@ type ValidatorPreparationPayload struct {
 	FeeRecipient   common.Address `json:"fee_recipient"`
 }
 
+func (p *ValidatorPreparationPayload) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"validator_index", "fee_recipient"} {
+		if raw, ok := fields[name]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("missing %s", name)
+		}
+	}
+	type payload ValidatorPreparationPayload
+	return json.Unmarshal(data, (*payload)(p))
+}
+
 func (a *ApiHandler) PostEthV1ValidatorPrepareBeaconProposal(w http.ResponseWriter, r *http.Request) {
-	req := []ValidatorPreparationPayload{}
-	// decode request with json
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeJSONList[ValidatorPreparationPayload](r.Body)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

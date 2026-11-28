@@ -1141,7 +1141,7 @@ func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
 			},
 			Signature: common.Bytes96{2},
 		},
-		nil,
+		{},
 	}
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
@@ -2204,4 +2204,72 @@ func TestPoolSyncCommitteesPublishesTheLastSlotOfAPeriodOnTheNextCommitteeSubnet
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, []string{clgossip.TopicNameSyncCommittee(1)}, topics)
+}
+
+func TestPostRejectsNullListElement(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, version string
+	}{
+		{name: "attestations v1", path: "/eth/v1/beacon/pool/attestations"},
+		{name: "attestations v2", path: "/eth/v2/beacon/pool/attestations", version: clparams.ElectraVersion.String()},
+		{name: "bls to execution changes", path: "/eth/v1/beacon/pool/bls_to_execution_changes"},
+		{name: "sync committees", path: "/eth/v1/beacon/pool/sync_committees"},
+		{name: "contributions and proofs", path: "/eth/v1/validator/contribution_and_proofs"},
+		{name: "beacon committee subscriptions", path: "/eth/v1/validator/beacon_committee_subscriptions"},
+		{name: "aggregates and proofs", path: "/eth/v1/validator/aggregate_and_proofs"},
+		{name: "payload attestations", path: "/eth/v1/beacon/pool/payload_attestations", version: clparams.GloasVersion.String()},
+		{name: "pool proposer preferences", path: "/eth/v1/beacon/pool/proposer_preferences"},
+		{name: "validator proposer preferences", path: "/eth/v1/validator/proposer_preferences", version: clparams.GloasVersion.String()},
+		{name: "prepare beacon proposer", path: "/eth/v1/validator/prepare_beacon_proposer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			require.NoError(t, sd.OnHeadState(s))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader("[null]"))
+			request.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				request.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+
+			require.NotPanics(t, func() { handler.mux.ServeHTTP(recorder, request) })
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "element at index 0 is null")
+		})
+	}
+}
+
+func TestPostRejectsListElementWithMissingFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, version, body, message string
+	}{
+		{name: "attestations v2 without data", path: "/eth/v2/beacon/pool/attestations", version: clparams.ElectraVersion.String(), body: `[{}]`, message: "attestation is missing data"},
+		{name: "attestations v2 with null data", path: "/eth/v2/beacon/pool/attestations", version: clparams.ElectraVersion.String(), body: `[{"data":null}]`, message: "attestation is missing data"},
+		{name: "contribution without message", path: "/eth/v1/validator/contribution_and_proofs", body: `[{}]`, message: "invalid contribution and proof"},
+		{name: "contribution without contribution", path: "/eth/v1/validator/contribution_and_proofs", body: `[{"message":{}}]`, message: "invalid contribution and proof"},
+		{name: "proposer preparation without fields", path: "/eth/v1/validator/prepare_beacon_proposer", body: `[{}]`, message: "missing validator_index"},
+		{name: "proposer preparation without fee recipient", path: "/eth/v1/validator/prepare_beacon_proposer", body: `[{"validator_index":"1"}]`, message: "missing fee_recipient"},
+		{name: "proposer preparation with null fee recipient", path: "/eth/v1/validator/prepare_beacon_proposer", body: `[{"validator_index":"1","fee_recipient":null}]`, message: "missing fee_recipient"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, s, _, handler, _, sd, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			require.NoError(t, sd.OnHeadState(s))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				request.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+
+			require.NotPanics(t, func() { handler.mux.ServeHTTP(recorder, request) })
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), tc.message)
+			_, found := validatorParams.GetFeeRecipient(0)
+			require.False(t, found)
+			_, found = validatorParams.GetFeeRecipient(1)
+			require.False(t, found)
+		})
+	}
 }

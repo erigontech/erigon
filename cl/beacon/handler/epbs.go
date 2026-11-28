@@ -584,6 +584,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
 			return
 		}
+		if err := checkNoNullElements(req); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 		if uint64(len(req)) > a.beaconChainCfg.PtcSize {
 			beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("payload attestation count %d exceeds %d", len(req), a.beaconChainCfg.PtcSize)).WriteTo(w)
@@ -597,7 +601,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 
 	failures := []poolingFailure{}
 	for i, msg := range req {
-		if msg == nil || msg.Data == nil {
+		if msg.Data == nil {
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: "missing payload attestation message data",
@@ -743,6 +747,10 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, ca
 		}
 		var reqs []*cltypes.SignedProposerPreferences
 		if err := json.Unmarshal(body, &reqs); err == nil {
+			if err := checkNoNullElements(reqs); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return nil, false
+			}
 			if len(reqs) > maxProposerPreferencesRequestItems {
 				beaconhttp.NewEndpointError(http.StatusBadRequest,
 					fmt.Errorf("proposer preferences count %d exceeds %d", len(reqs), maxProposerPreferencesRequestItems)).WriteTo(w)
@@ -775,7 +783,7 @@ func (a *ApiHandler) recordPreferredFeeRecipients(reqs []*cltypes.SignedProposer
 		return
 	}
 	for _, req := range reqs {
-		if req == nil || req.Message == nil {
+		if req.Message == nil {
 			continue
 		}
 		var pubkey common.Bytes48
@@ -799,7 +807,7 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 	}
 	failures := make([]poolingFailure, 0)
 	for i, req := range reqs {
-		if req == nil || req.Message == nil {
+		if req.Message == nil {
 			failures = append(failures, poolingFailure{Index: i, Message: "missing message in signed proposer preferences"})
 			continue
 		}

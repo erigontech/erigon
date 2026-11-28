@@ -344,8 +344,8 @@ func (a *ApiHandler) memoizedExpectedWithdrawals(requestedRoot *common.Hash) (*b
 }
 
 func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	registerReq := []*cltypes.ValidatorRegistration{}
-	if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
+	registerReq, err := decodeJSONList[cltypes.ValidatorRegistration](r.Body)
+	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if len(registerReq) == 0 {
