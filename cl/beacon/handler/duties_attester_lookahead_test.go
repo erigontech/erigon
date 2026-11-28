@@ -28,9 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
@@ -60,8 +62,6 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 		{"clock_2_request_2", 2, 2, validators, http.StatusOK},
 		{"clock_2_request_3", 2, 3, validators, http.StatusServiceUnavailable},
 		{"clock_2_request_4", 2, 4, validators, http.StatusBadRequest},
-		{"empty_beyond_seed", 2, 3, `[]`, http.StatusServiceUnavailable},
-		{"empty_at_seed_boundary", 2, 2, `[]`, http.StatusOK},
 		{"beyond_old_head_cap", 32, 33, `["0"]`, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,17 +74,42 @@ func TestGetAttesterDutiesHeadSeedBounds(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			h.mux.ServeHTTP(recorder, req)
 			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
-			if tc.body == "[]" && tc.code == http.StatusOK {
-				var response struct {
-					Data          json.RawMessage `json:"data"`
-					DependentRoot common.Hash     `json:"dependent_root"`
-				}
-				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
-				require.JSONEq(t, `[]`, string(response.Data))
-				require.Equal(t, common.Hash(headRoot), response.DependentRoot)
-			}
 		})
 	}
+}
+
+func TestGetAttesterDutiesUsesCurrentEpochAtCheckpointFloor(t *testing.T) {
+	db, _, _, _, anchor, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, 0)
+	}))
+
+	const epoch = 2
+	cfg := h.beaconChainCfg
+	epochSlot := uint64(epoch) * cfg.SlotsPerEpoch
+	floor := epochSlot + 1
+	fcu.LowestAvailableSlotVal = &floor
+	require.NoError(t, anchor.SetSlot(floor))
+	dependentRoot := common.Hash{0x42}
+	require.NoError(t, anchor.SetBlockRootAt(int(cfg.SlotsPerEpoch-1), dependentRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(anchor, common.Hash{0x43}))
+	setDutiesClockEpoch(h, epoch)
+
+	path := "/eth/v1/validator/duties/attester/" + strconv.FormatUint(epoch, 10)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(`["0"]`))
+	recorder := httptest.NewRecorder()
+	h.mux.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		Data          []attesterDutyResponse `json:"data"`
+		DependentRoot common.Hash            `json:"dependent_root"`
+	}
+	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
+	require.Equal(t, dependentRoot, response.DependentRoot)
+	require.Len(t, response.Data, 1)
+	require.Zero(t, response.Data[0].ValidatorIndex)
+	require.GreaterOrEqual(t, response.Data[0].Slot, epochSlot)
+	require.Less(t, response.Data[0].Slot, epochSlot+cfg.SlotsPerEpoch)
 }
 
 func setDutiesClockEpoch(h *ApiHandler, epoch uint64) {

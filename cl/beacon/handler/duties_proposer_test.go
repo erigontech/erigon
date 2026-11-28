@@ -25,10 +25,12 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
@@ -38,6 +40,7 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -360,6 +363,53 @@ func TestGetDutiesProposerRecentFuluUsesEpochLookahead(t *testing.T) {
 	require.False(t, response.Finalized)
 	require.Equal(t, clparams.FuluVersion.String(), response.Version)
 	requireProposerDuties(t, response.Data, epochState, slot, expected)
+
+	newEpochState, err := epochState.Copy()
+	require.NoError(t, err)
+	lookahead := solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch))
+	for i := range int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch) {
+		lookahead.Set(i, epochState.GetProposerLookahead().Get(i))
+	}
+	active := epochState.GetActiveValidatorsIndices(epoch)
+	require.Greater(t, len(active), 1)
+	replacementIndex := active[0]
+	if replacementIndex == lookahead.Get(0) {
+		replacementIndex = active[1]
+	}
+	lookahead.Set(0, replacementIndex)
+	newEpochState.SetProposerLookahead(lookahead)
+
+	oldHead, err := head.Copy()
+	require.NoError(t, err)
+	newHead, err := head.Copy()
+	require.NoError(t, err)
+	oldRoot, newRoot := common.Hash{0x51}, common.Hash{0x52}
+	newEpochRoot := common.Hash{0x53}
+	oldDependentRoot, newDependentRoot := common.Hash{0x54}, common.Hash{0x55}
+	require.NoError(t, oldHead.SetBlockRootAt(int((slot-1)%cfg.SlotsPerHistoricalRoot), oldDependentRoot))
+	require.NoError(t, newHead.SetBlockRootAt(int((slot-1)%cfg.SlotsPerHistoricalRoot), newDependentRoot))
+	require.NoError(t, newHead.SetBlockRootAt(int((slot+cfg.SlotsPerEpoch-1)%cfg.SlotsPerHistoricalRoot), newEpochRoot))
+	fcu.StateAtBlockRootVal[newEpochRoot] = newEpochState
+	handler.forkchoiceStore = dutyOptimisticStore{ForkChoiceStorage: fcu, head: manager, optimisticRoot: oldRoot}
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, oldRoot))
+	before := getProposerDutiesForEpoch(t, handler, epoch)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(newHead, newRoot))
+	after := getProposerDutiesForEpoch(t, handler, epoch)
+	require.NotEqual(t, before.Data, after.Data)
+	require.Equal(t, oldDependentRoot.String(), before.DependentRoot)
+	require.Equal(t, newDependentRoot.String(), after.DependentRoot)
+	require.NotNil(t, before.Optimistic)
+	require.True(t, *before.Optimistic)
+	require.NotNil(t, after.Optimistic)
+	require.False(t, *after.Optimistic)
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, oldRoot))
+	handler.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(newHead, newRoot))
+	}}
+	during := getProposerDutiesForEpoch(t, handler, epoch)
+	require.Equal(t, before, during)
 }
 
 func TestGetDutiesProposerRecentPreFuluUsesEpochState(t *testing.T) {
@@ -474,10 +524,17 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 		return nil
 	}))
 	requireProposerDuties(t, response.Data, expectedState, expectedSlot, expected)
-	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
-	recorder := httptest.NewRecorder()
-	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	farEpoch := headEpoch + 3
+	farSlot := farEpoch * cfg.SlotsPerEpoch
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, farSlot))
+	farProposers := firstEpochProposers(expectedState)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(farEpoch, 10)
+			response := getProposerDutiesForPath(t, handler, path)
+			requireProposerDuties(t, response.Data, expectedState, farSlot, farProposers)
+		})
+	}
 }
 
 func TestGetDutiesProposerAdvancesFuluHeadCopyAcrossTargetFork(t *testing.T) {
@@ -531,10 +588,17 @@ func TestGetDutiesProposerAdvancesFuluHeadCopyAcrossTargetFork(t *testing.T) {
 		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
 		require.Equal(t, expectedProposers[i], duty.ValidatorIndex)
 	}
-	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+3, 10)
-	recorder := httptest.NewRecorder()
-	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	farEpoch := headEpoch + 3
+	farSlot := farEpoch * handler.beaconChainCfg.SlotsPerEpoch
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, farSlot))
+	farProposers := firstEpochProposers(expectedState)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(farEpoch, 10)
+			response := getProposerDutiesForPath(t, handler, path)
+			requireProposerDuties(t, response.Data, expectedState, farSlot, farProposers)
+		})
+	}
 }
 
 func increaseProposerTestBalance(t *testing.T, s *state.CachingBeaconState) uint64 {
@@ -791,21 +855,209 @@ func TestGetDutiesProposerFutureEpochBounds(t *testing.T) {
 	}
 }
 
-// Processing the empty slots after the head would carry the head root into their block roots.
+type dutyViewHooks struct {
+	synced_data.SyncedData
+	beforeView, afterView func()
+}
+
+func (s *dutyViewHooks) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	return s.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+		return fn(head)
+	})
+}
+
+func (s *dutyViewHooks) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	if beforeView := s.beforeView; beforeView != nil {
+		s.beforeView = nil
+		beforeView()
+	}
+	if err := s.SyncedData.ViewHeadStateWithIdentity(fn); err != nil {
+		return err
+	}
+	if afterView := s.afterView; afterView != nil {
+		s.afterView = nil
+		afterView()
+	}
+	return nil
+}
+
+type dutyOptimisticStore struct {
+	forkchoice.ForkChoiceStorage
+	head           synced_data.SyncedData
+	optimisticRoot common.Hash
+}
+
+func (f dutyOptimisticStore) IsRootOptimistic(root common.Hash) bool {
+	return root == f.optimisticRoot
+}
+
+func (f dutyOptimisticStore) IsHeadOptimistic() bool {
+	return f.IsRootOptimistic(f.head.HeadRoot())
+}
+
+func TestDutiesUseSameHeadAsDependentRoot(t *testing.T) {
+	_, _, _, _, head, h, _, manager, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	epoch := state.Epoch(head) + 2
+	setDutiesClockEpoch(h, epoch-1)
+	newHead, err := head.Copy()
+	require.NoError(t, err)
+	cfg := head.BeaconConfig()
+	mixIndex := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
+	require.NoError(t, newHead.SetRandaoMixAt(int(mixIndex), common.Hash{1}))
+	oldRoot, newRoot := common.Hash{2}, common.Hash{3}
+	h.forkchoiceStore = dutyOptimisticStore{ForkChoiceStorage: h.forkchoiceStore, head: manager, optimisticRoot: oldRoot}
+
+	for _, tc := range []struct{ name, method, body string }{
+		{"attester", http.MethodPost, `["0","1","2"]`},
+		{"proposer", http.MethodGet, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			type response struct {
+				Data          json.RawMessage `json:"data"`
+				DependentRoot common.Hash     `json:"dependent_root"`
+				Optimistic    *bool           `json:"execution_optimistic"`
+			}
+			getDuties := func() response {
+				path := "/eth/v1/validator/duties/" + tc.name + "/" + strconv.FormatUint(epoch, 10)
+				req := httptest.NewRequestWithContext(t.Context(), tc.method, path, strings.NewReader(tc.body))
+				recorder := httptest.NewRecorder()
+				h.mux.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				var body response
+				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
+				return body
+			}
+
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, oldRoot))
+			before := getDuties()
+			require.Equal(t, oldRoot, before.DependentRoot)
+			h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(newHead, newRoot))
+			}}
+			during := getDuties()
+			h.syncedData = manager
+			after := getDuties()
+			require.Equal(t, newRoot, after.DependentRoot)
+			require.NotEqual(t, before.Data, after.Data)
+			require.NotNil(t, before.Optimistic)
+			require.True(t, *before.Optimistic)
+			require.NotNil(t, after.Optimistic)
+			require.False(t, *after.Optimistic)
+			require.Equal(t, oldRoot, during.DependentRoot)
+			require.Equal(t, string(before.Data), string(during.Data), "duties must match the head that supplied dependent_root")
+			require.NotNil(t, during.Optimistic)
+			require.True(t, *during.Optimistic, "execution_optimistic must match the pinned head")
+		})
+	}
+}
+
+func TestGetDutiesProposerUsesReplacementHeadBeforeView(t *testing.T) {
+	db, _, _, _, replacement, h, _, manager, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, 0)
+	}))
+
+	cfg := h.beaconChainCfg
+	epoch := state.Epoch(replacement)
+	epochSlot := epoch * cfg.SlotsPerEpoch
+	oldHead, err := replacement.Copy()
+	require.NoError(t, err)
+	require.NoError(t, oldHead.SetSlot(epochSlot+cfg.SlotsPerEpoch))
+	recentState, err := replacement.Copy()
+	require.NoError(t, err)
+	require.NoError(t, recentState.SetSlot(oldHead.Slot()-1))
+	recentRoot := common.Hash{0x45}
+	require.NoError(t, oldHead.SetBlockRootAt(int((oldHead.Slot()-1)%cfg.SlotsPerHistoricalRoot), recentRoot))
+	fcu.StateAtBlockRootVal[recentRoot] = recentState
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, common.Hash{0x44}))
+	oldDuties := getProposerDutiesForEpoch(t, h, epoch)
+	lowestAvailableSlot := oldHead.Slot()
+	fcu.LowestAvailableSlotVal = &lowestAvailableSlot
+
+	require.NoError(t, replacement.SetSlot(oldHead.Slot()-1))
+	mixIndex := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
+	require.NoError(t, replacement.SetRandaoMixAt(int(mixIndex), common.Hash{0x41}))
+	dependentRoot := common.Hash{0x42}
+	require.NoError(t, replacement.SetBlockRootAt(int((epochSlot-1)%cfg.SlotsPerHistoricalRoot), dependentRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(replacement, common.Hash{0x43}))
+	expected := getProposerDutiesForEpoch(t, h, epoch)
+	require.Equal(t, dependentRoot.String(), expected.DependentRoot)
+	require.NotEqual(t, oldDuties.Data, expected.Data)
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(oldHead, common.Hash{0x44}))
+	h.syncedData = &dutyViewHooks{SyncedData: manager, beforeView: func() {
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(replacement, common.Hash{0x43}))
+	}}
+	actual := getProposerDutiesForEpoch(t, h, epoch)
+	require.Equal(t, expected.DependentRoot, actual.DependentRoot)
+	require.Equal(t, expected.Data, actual.Data)
+}
+
+func TestGetDutiesProposerLogsAdvanceFailureAfterView(t *testing.T) {
+	_, _, _, _, head, h, _, manager, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	epoch := state.Epoch(head)
+	h.beaconChainCfg.FuluForkEpoch = epoch
+	h.beaconChainCfg.InitializeForkSchedule()
+
+	var released, warned, warnedAfterView atomic.Bool
+	h.syncedData = &dutyViewHooks{SyncedData: manager, afterView: func() {
+		released.Store(true)
+	}}
+	logger := log.Root()
+	previous := logger.GetHandler()
+	t.Cleanup(func() { logger.SetHandler(previous) })
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		if r.Msg == "getDutiesProposer: failed to advance state" {
+			warnedAfterView.Store(released.Load())
+			warned.Store(true)
+		}
+		return true
+	}, previous))
+
+	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
+	recorder := httptest.NewRecorder()
+	h.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "not greater than current slot")
+	require.True(t, warned.Load())
+	require.True(t, warnedAfterView.Load(), "the slot advance warning must follow the head view")
+}
+
 func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
-	for _, attester := range []bool{false, true} {
-		root, err := handler.getDependentRoot(headEpoch+2, attester)
-		require.NoError(t, err)
-		require.Equal(t, syncedData.HeadRoot(), root)
-	}
+	require.NoError(t, syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		headEpoch := headSlot / handler.beaconChainCfg.SlotsPerEpoch
+		for _, attester := range []bool{false, true} {
+			root, err := handler.getDependentRoot(head.GetBlockRootAtSlot, headRoot, headSlot, headEpoch+2, attester)
+			require.NoError(t, err)
+			require.Equal(t, headRoot, root)
+		}
+		return nil
+	}))
+}
+
+func TestGetDependentRootChecksOutOfWindowSlotOnce(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	h := &ApiHandler{beaconChainCfg: &cfg}
+	slot := cfg.SlotsPerEpoch - 1
+	headSlot := slot + cfg.SlotsPerHistoricalRoot + 1
+	head := state.New(&cfg)
+	require.NoError(t, head.SetSlot(headSlot))
+
+	var rootLookups []uint64
+	_, err := h.getDependentRoot(func(slot uint64) (common.Hash, error) {
+		rootLookups = append(rootLookups, slot)
+		return head.GetBlockRootAtSlot(slot)
+	}, common.Hash{}, headSlot, 2, true)
+	require.Equal(t, http.StatusInternalServerError, beaconhttp.WrapEndpointError(err).Code)
+	require.Equal(t, []uint64{slot}, rootLookups)
 }
 
 type proposerDutiesResponse struct {
 	Data          []proposerDuties `json:"data"`
 	Finalized     bool             `json:"finalized"`
+	Optimistic    *bool            `json:"execution_optimistic"`
 	DependentRoot string           `json:"dependent_root"`
 	Version       string           `json:"version"`
 }
