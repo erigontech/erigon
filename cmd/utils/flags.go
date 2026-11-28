@@ -2030,6 +2030,11 @@ func setCommitmentV3(nodeCtx context.Context, ctx *cli.Command, dirs datadir.Dir
 	}
 }
 
+func CheckCommitmentV3Env() error {
+	_, _, err := commitmentV3Env()
+	return err
+}
+
 func commitmentV3Env() (v3, set bool, err error) {
 	value, set := os.LookupEnv("COMMITMENT_V3")
 	if !set {

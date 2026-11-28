@@ -78,6 +78,9 @@ func keepLocalSnapshots(cliCtx *cli.Command) (bool, error) {
 func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
+	if err := utils.CheckCommitmentV3Env(); err != nil {
+		return err
+	}
 	keepLocal, err := keepLocalSnapshots(cliCtx)
 	if err != nil {
 		return err

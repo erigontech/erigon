@@ -198,6 +198,21 @@ func TestResetKeepLocalSnapshotsFlag(t *testing.T) {
 	}
 }
 
+func TestResetRejectsInvalidCommitmentV3Env(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "0")
+	t.Setenv(snapcfg.RemotePreverifiedEnvKey, "")
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), nil, 0o644))
+	dataDir, chainFlag, dryRun, keepLocal, local, mixed, preverified := utils.DataDirFlag, utils.ChainFlag, dryRunFlag, keepLocalSnapshotsFlag, removeLocalFlag, allowMixedStateFlag, PreverifiedFlag
+	cmd := &cli.Command{
+		Name:   "reset",
+		Flags:  []cli.Flag{&dataDir, &chainFlag, &dryRun, &keepLocal, &local, &mixed, &preverified},
+		Action: resetCliAction,
+	}
+	err := cmd.Run(t.Context(), []string{"reset", "--datadir", dirs.DataDir, "--chain", "mainnet", "--dry-run", "--preverified", "local"})
+	require.ErrorContains(t, err, "accepted values are true or false")
+}
+
 func TestResetOnLegacyDatadirLoadsTheDefaultTrie(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
 	t.Setenv(snapcfg.RemotePreverifiedEnvKey, "")
