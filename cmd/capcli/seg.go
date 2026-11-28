@@ -39,8 +39,10 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	cliutils "github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	datadirreset "github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -59,8 +61,75 @@ func segCommand() *cli.Command {
 		Name:        "seg",
 		Usage:       "inspect and manage snapshot segments",
 		Description: "Read and manage Caplin snapshot files and retention metadata. Read-only commands do not take the datadir lock; commands that write segments, the index, or the stored regime take it.",
-		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand()},
+		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand(), caplinResetCommand()},
 	}
+}
+
+func caplinResetCommand() *cli.Command {
+	chainFlag := cli.StringFlag{Name: cliutils.ChainFlag.Name, Usage: cliutils.ChainFlag.Usage}
+	return &cli.Command{
+		Name:        "reset",
+		Usage:       "reset Caplin snapshot segments; reads and writes files and the index with the datadir lock",
+		Description: "Prints or applies a Caplin reset plan. Both dry runs and writes take the datadir lock; only a write changes files or index rows.",
+		Flags: []cli.Flag{
+			&chainFlag,
+			&cliutils.DataDirFlag,
+			&cli.BoolFlag{Name: "dry-run", Usage: "print the Caplin reset plan without changing the datadir"},
+			&cli.BoolFlag{Name: "force", Usage: "delete Caplin files that have no preverified replacement"},
+		},
+		Action: runCaplinReset,
+	}
+}
+
+func runCaplinReset(ctx context.Context, cmd *cli.Command) error {
+	folder := outputFolder{}
+	if err := folder.fromCmd(cmd); err != nil {
+		return err
+	}
+	dirs, unlock, err := lockCaplinDirs(folder.Datadir, false)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	chainName, _, err := caplinDuChainConfig(ctx, cmd, dirs)
+	if err != nil {
+		return err
+	}
+	items, err := caplinResetManifest(ctx, dirs, chainName)
+	if err != nil {
+		return err
+	}
+	db, err := datadirreset.OpenCaplinDB(ctx, dirs.CaplinIndexing, log.Root(), cmd.Bool("dry-run"))
+	if err != nil {
+		return err
+	}
+	if db != nil {
+		defer db.Close()
+	}
+	plan, err := datadirreset.BuildCaplinResetPlan(ctx, dirs, items, db, true, log.Root())
+	if err != nil {
+		return err
+	}
+	writer := cmd.Writer
+	if cmd.Bool("dry-run") {
+		plan.Format(writer)
+		return nil
+	}
+	if err := plan.Apply(ctx, db, dir.RemoveFile, cmd.Bool("force")); err != nil {
+		return err
+	}
+	for _, file := range plan.Files {
+		fmt.Fprintf(writer, "deleted %s %s\n", file.Family, file.ReportName())
+	}
+	for _, rows := range plan.DBRows {
+		fmt.Fprintf(writer, "deleted db rows %s %d..%d %d\n", rows.Table, rows.From, rows.To, rows.Rows)
+	}
+	if plan.Progress != plan.ProgressAfter {
+		fmt.Fprintf(writer, "progress %d -> %d\n", plan.Progress, plan.ProgressAfter)
+	}
+	fmt.Fprintln(writer, "stored regime kept")
+	return nil
 }
 
 func caplinRetireCommand() *cli.Command {
@@ -692,4 +761,41 @@ func lockCaplinDirs(path string, create bool) (datadir.Dirs, func(), error) {
 		dirs = datadir.New(path)
 	}
 	return dirs, unlock, nil
+}
+
+func caplinResetManifest(ctx context.Context, dirs datadir.Dirs, chainName string) (snapcfg.PreverifiedItems, error) {
+	items, err := snapcfg.PreverifiedItemsForDatadir(&dirs, chainName)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) != 0 {
+		return items, nil
+	}
+	if _, err := os.Stat(dirs.PreverifiedPath()); err == nil {
+		return items, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if !caplinResetHasFiles(dirs) {
+		return items, nil
+	}
+	if err := snapcfg.LoadRemotePreverified(ctx, chainName, ""); err != nil {
+		return nil, err
+	}
+	return snapcfg.PreverifiedItemsForDatadir(&dirs, chainName)
+}
+
+func caplinResetHasFiles(dirs datadir.Dirs) bool {
+	for _, root := range []string{dirs.Snap, dirs.SnapCaplin} {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
 }

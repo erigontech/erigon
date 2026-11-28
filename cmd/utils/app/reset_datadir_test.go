@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,11 +28,22 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datadir/reset"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // writeChainMetadata is a test helper that writes a genesis canonical hash and chain config
@@ -191,4 +203,162 @@ func TestResetKeepLocalSnapshotsFlag(t *testing.T) {
 		require.NoError(t, err, "%v", tc.args)
 		require.Equal(t, tc.keep, keep, "%v", tc.args)
 	}
+}
+
+func TestResetCaplinDryRun(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	block := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)
+	replacement := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 200)
+	blob := snaptype.BlobSidecars.FileName(version.V1_1, 200, 300)
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, block), []byte(block), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, blob), []byte(blob), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'"+replacement+"' = 'replacement'\n"), 0o600))
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).WithTableCfg(ChaindataSchemaForGenesis).MustOpen()
+	writeChainMetadata(t, t.Context(), chainDB, "mainnet", 1)
+	chainDB.Close()
+
+	report, err := os.CreateTemp(t.TempDir(), "reset-report")
+	require.NoError(t, err)
+	report.Close()
+	stdout := os.Stdout
+	os.Stdout, err = os.OpenFile(report.Name(), os.O_WRONLY|os.O_TRUNC, 0o600)
+	require.NoError(t, err)
+	defer func() {
+		os.Stdout.Close()
+		os.Stdout = stdout
+	}()
+
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin", "--dry-run"))
+	data, err := os.ReadFile(report.Name())
+	require.NoError(t, err)
+	require.Contains(t, string(data), "caplin reset plan")
+	require.Contains(t, string(data), "delete blocks "+block)
+	require.Contains(t, string(data), "only copy sidecars "+blob)
+	require.FileExists(t, filepath.Join(dirs.Snap, block))
+	require.FileExists(t, dirs.PreverifiedPath())
+}
+
+func TestResetWithoutCaplinKeepsExistingRemoval(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	block := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 100)
+	replacement := snaptype.BeaconBlocks.FileName(version.V1_1, 0, 200)
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, block), []byte(block), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'"+replacement+"' = 'replacement'\n"), 0o600))
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).WithTableCfg(ChaindataSchemaForGenesis).MustOpen()
+	writeChainMetadata(t, t.Context(), chainDB, "mainnet", 1)
+	chainDB.Close()
+
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--preverified", "local"))
+	require.NoFileExists(t, filepath.Join(dirs.Snap, block))
+	require.NoFileExists(t, dirs.PreverifiedPath())
+}
+
+func runSnapshotsReset(t *testing.T, args ...string) error {
+	t.Helper()
+	for _, command := range snapshotCommand.Commands {
+		if command.Name == "reset" {
+			app := &cli.Command{Name: "erigon", Commands: []*cli.Command{{Name: "reset", Action: command.Action, Flags: command.Flags}}}
+			return app.Run(t.Context(), append([]string{"erigon", "reset"}, args...))
+		}
+	}
+	t.Fatal("snapshots reset command not found")
+	return nil
+}
+
+func resetReviewDatadir(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).WithTableCfg(ChaindataSchemaForGenesis).MustOpen()
+	writeChainMetadata(t, t.Context(), db, "mainnet", 1)
+	db.Close()
+	return dirs
+}
+
+type resetDownloadCounter struct {
+	dbservices.NoopSeederClient
+	files int
+}
+
+func (d *resetDownloadCounter) Download(_ context.Context, req *downloaderproto.DownloadRequest) error {
+	d.files += len(req.Items)
+	return nil
+}
+
+func TestResetCaplinRefreshesLockOnRestart(t *testing.T) {
+	preserveResetManifest(t)
+	dirs := resetReviewDatadir(t)
+	local := []byte("'erigondb.toml' = '0000000000000000000000000000000000000001'\n")
+	remote := []byte("'erigondb.toml' = '0000000000000000000000000000000000000002'\n")
+	source := filepath.Join(t.TempDir(), "remote.toml")
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), local, 0o600))
+	require.NoError(t, os.WriteFile(source, remote, 0o600))
+	t.Setenv(snapcfg.RemotePreverifiedEnvKey, source)
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin"))
+	restart := func(d datadir.Dirs) (bool, string, int) {
+		require.NoError(t, downloadercfg.LoadSnapshotsHashes(t.Context(), d, "mainnet", ""))
+		cfg, ok := snapcfg.KnownCfg("mainnet")
+		require.True(t, ok)
+		item, found := cfg.Preverified.Items.Get("erigondb.toml")
+		require.True(t, found)
+		var requests resetDownloadCounter
+		require.NoError(t, snapshotsync.SyncSnapshots(t.Context(), "test", "headers", true, false, false, snapshotsync.BlobRetention{}, prune.ArchiveMode, snapshotsync.NoCaplin, nil, duFakeBlockReader{}, &chain.Config{ChainName: "mainnet"}, &requests, ethconfig.Sync{}, 16, d))
+		return cfg.Local, item.Hash, requests.files
+	}
+	_, remoteHash, files := restart(datadir.New(t.TempDir()))
+	require.Equal(t, 1, files)
+	fromLock, hash, files := restart(dirs)
+	if fromLock || hash != remoteHash || files != 1 {
+		t.Fatalf("restart loaded local=%t hash=%s requested files=%d, want remote hash ending in 2 and 1 file", fromLock, hash, files)
+	}
+}
+
+func TestResetCaplinUsesELManifest(t *testing.T) {
+	preserveResetManifest(t)
+	for _, lock := range []string{"stale-lock", "no-lock"} {
+		t.Run(lock, func(t *testing.T) {
+			dirs := resetReviewDatadir(t)
+			if lock == "stale-lock" {
+				require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'salt-state.txt' = '0000000000000000000000000000000000000001'\n"), 0o600))
+			}
+			source := filepath.Join(t.TempDir(), "remote.toml")
+			require.NoError(t, os.WriteFile(source, []byte("'erigondb.toml' = '0000000000000000000000000000000000000002'\n"), 0o600))
+			t.Setenv(snapcfg.RemotePreverifiedEnvKey, source)
+			require.NoError(t, snapcfg.SetToml("mainnet", []byte{}, false))
+			path := filepath.Join(dirs.Snap, "erigondb.toml")
+			require.NoError(t, os.WriteFile(path, []byte("step_size = 32\n"), 0o600))
+			require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin", "--preverified", "remote"))
+			_, err := os.Stat(path)
+			if os.IsNotExist(err) {
+				t.Fatal("remote-listed EL file erigondb.toml was deleted")
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestResetSkipsUnplannedCaplinStateFile(t *testing.T) {
+	dirs := resetReviewDatadir(t)
+	name := "v1.1-000000-000100-BlockProposers.seg"
+	path := filepath.Join(dirs.SnapCaplin, name)
+	require.NoError(t, os.WriteFile(path, []byte(name), 0o600))
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("'erigondb.toml' = '0000000000000000000000000000000000000001'\n"), 0o600))
+	plan, err := reset.BuildCaplinResetPlan(t.Context(), dirs, nil, nil, true, log.New())
+	require.NoError(t, err)
+	require.Empty(t, plan.Files)
+	require.NoError(t, runSnapshotsReset(t, "--caplin", "--datadir", dirs.DataDir))
+	_, err = os.Stat(path)
+	if os.IsNotExist(err) {
+		t.Fatal("Caplin plan listed 0 files, EL pass deleted caplin/" + name)
+	}
+	require.NoError(t, err)
+}
+
+func preserveResetManifest(t *testing.T) {
+	t.Helper()
+	cfg, _ := snapcfg.KnownCfg("mainnet")
+	raw := append([]byte{}, snapcfg.GetToml("mainnet")...)
+	local := cfg.Local
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml("mainnet", raw, local)) })
 }

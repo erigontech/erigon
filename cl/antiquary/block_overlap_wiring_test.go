@@ -38,10 +38,12 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -588,4 +590,87 @@ func TestNodeMergeWarnsOnOverlapFailure(t *testing.T) {
 	err := a.mergeBlocks()
 	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
 	require.NoError(t, err, "the merge is committed and the node only warns on overlap cleanup failure")
+}
+
+func TestResetRebuildsGloasExecutionLookup(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	const end = snaptype.CaplinMergeLimit
+	var roots []common.Hash
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var parent common.Hash
+		for slot := uint64(0); slot < end; slot += 1000 {
+			block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			block.Block.Slot, block.Block.ParentRoot = slot, parent
+			block.Block.StateRoot = common.Hash{byte(slot/1000 + 1)}
+			envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+			envelope.Payload.BlockNumber = 42 + slot
+			binary.BigEndian.PutUint64(envelope.Payload.BlockHash[24:], 42+slot)
+			block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = envelope.Payload.BlockHash
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true))
+			require.NoError(t, beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, root, envelope))
+			roots = append(roots, root)
+			parent = root
+		}
+		return nil
+	}))
+	logger := log.New()
+	require.NoError(t, freezeblocks.DumpBeaconBlocks(t.Context(), db, 0, end, 1, dirs, 1, log.LvlDebug, logger))
+	reindex := func() {
+		sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+		defer sn.Close()
+		require.NoError(t, sn.OpenFolder())
+		tip, err := rebuildBeaconSnapshotIndex(t.Context(), db, sn.BlocksAvailable, sn.ReadHeader, antiquaryIndexBatchSlots, nil, logger)
+		require.NoError(t, err)
+		require.Equal(t, uint64(end-1), tip)
+	}
+	reindex()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		number, err := beacon_indicies.ReadExecutionBlockNumber(tx, roots[0])
+		require.NoError(t, err)
+		require.NotNil(t, number)
+		require.Equal(t, uint64(42), *number)
+		hash, err := beacon_indicies.ReadExecutionBlockHash(tx, roots[0])
+		require.NoError(t, err)
+		require.Equal(t, common.HexToHash("0x2a"), hash)
+		return nil
+	}))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.PruneBlocks(tx, end) }))
+	name := snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, end)
+	local := snaptype.BeaconBlocks.FileName(version.Version{Major: 1}, 0, end)
+	require.NoError(t, os.Rename(filepath.Join(dirs.Snap, name), filepath.Join(dirs.Snap, local)))
+	staged := filepath.Join(t.TempDir(), name)
+	require.NoError(t, datadir.CopyFile(filepath.Join(dirs.Snap, local), staged))
+	items := preverified.SortedItems{{Name: name}, {Name: snaptype.BeaconBlocks.IdxFileName(version.V1_1, 0, end)}}
+	items.Sort()
+	plan, err := reset.BuildCaplinResetPlan(t.Context(), dirs, items, db, true, logger)
+	require.NoError(t, err)
+	require.NoError(t, plan.Apply(t.Context(), db, os.Remove, false))
+	require.NoError(t, datadir.CopyFile(staged, filepath.Join(dirs.Snap, name)))
+	reindex()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for i, want := range roots {
+			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, uint64(i)*1000)
+			require.NoError(t, err)
+			require.Equal(t, want, root)
+			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+			require.NoError(t, err)
+			require.NotNil(t, slot)
+			require.Equal(t, uint64(i)*1000, *slot)
+		}
+		number, err := beacon_indicies.ReadExecutionBlockNumber(tx, roots[0])
+		require.NoError(t, err)
+		require.NotNil(t, number)
+		hash, err := beacon_indicies.ReadExecutionBlockHash(tx, roots[0])
+		require.NoError(t, err)
+		if *number != 42 || hash != common.HexToHash("0x2a") {
+			t.Fatalf("reindexed Gloas block: EL number = %d, hash = %x, want 42 and 0x2a", *number, hash[:])
+		}
+		return nil
+	}))
 }

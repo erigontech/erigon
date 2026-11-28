@@ -17,6 +17,9 @@
 package snapshotsync
 
 import (
+	"cmp"
+	"slices"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -69,6 +72,57 @@ type CaplinFile struct {
 	From        uint64
 	To          uint64
 	StateEvents bool
+}
+
+type CaplinRange struct {
+	From uint64
+	To   uint64
+}
+
+type CaplinRangeScan struct {
+	Covered  []CaplinRange
+	Gaps     []CaplinRange
+	Overlaps []CaplinRange
+}
+
+func ScanCaplinRanges(ranges []CaplinRange) CaplinRangeScan {
+	valid := make([]CaplinRange, 0, len(ranges))
+	for _, item := range ranges {
+		if item.From < item.To {
+			valid = append(valid, item)
+		}
+	}
+	slices.SortFunc(valid, func(a, b CaplinRange) int {
+		if result := cmp.Compare(a.From, b.From); result != 0 {
+			return result
+		}
+		return cmp.Compare(a.To, b.To)
+	})
+	scan := CaplinRangeScan{
+		Covered:  make([]CaplinRange, 0, len(valid)),
+		Gaps:     make([]CaplinRange, 0),
+		Overlaps: make([]CaplinRange, 0),
+	}
+	for _, current := range valid {
+		if len(scan.Covered) == 0 {
+			scan.Covered = append(scan.Covered, current)
+			continue
+		}
+		last := &scan.Covered[len(scan.Covered)-1]
+		switch {
+		case current.From > last.To:
+			scan.Gaps = append(scan.Gaps, CaplinRange{From: last.To, To: current.From})
+			scan.Covered = append(scan.Covered, current)
+		case current.From < last.To:
+			scan.Overlaps = append(scan.Overlaps, CaplinRange{From: current.From, To: min(current.To, last.To)})
+			if current.To > last.To {
+				last.To = current.To
+			}
+		default:
+			last.To = current.To
+		}
+	}
+	return scan
 }
 
 func filterCaplinFiles(items snapcfg.PreverifiedItems, floors clparams.CaplinRetentionFloors, keep func(CaplinFile, clparams.CaplinRetentionFloors) bool) snapcfg.PreverifiedItems {
