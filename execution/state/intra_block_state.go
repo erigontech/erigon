@@ -353,17 +353,13 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// ResetReader is Reset over another committed-base reader; the maps keep their capacity.
+// ResetReader is Reset over another committed-base reader. It also replaces the maps
+// that clear keeps at their largest size and drops an oversized journal and output
+// buffer, so a state kept across blocks does not keep its largest transaction's memory.
 func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
 	ibs.Reset()
 	ibs.stateReader = stateReader
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
-}
-
-// DropTxMaps replaces the maps that clear keeps at their largest size, so a state
-// kept across blocks does not pay its largest transaction's clear cost on every later one.
-// It also drops an oversized journal and output buffer, which Reset keeps at their peak.
-func (ibs *IntraBlockState) DropTxMaps() {
 	ibs.accessList = accessList{addresses: make(map[accounts.Address]int)}
 	ibs.sdProbe = nil
 	ibs.committedBase = nil

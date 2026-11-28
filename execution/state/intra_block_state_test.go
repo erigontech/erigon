@@ -1258,7 +1258,7 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
 }
 
-func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
+func TestResetReaderReleasesAnOversizedJournal(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	startNoMaterializeTx(ibs, vm, 0)
@@ -1269,7 +1269,7 @@ func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
 	ibs.Reset()
 	require.Greater(t, cap(ibs.journal.entries), maxKeptJournalEntries, "Reset keeps the journal's peak")
 
-	ibs.DropTxMaps()
+	ibs.ResetReader(nil)
 
 	require.Zero(t, cap(ibs.journal.entries))
 	k := TransientKey(*uint256.NewInt(1))
@@ -1277,17 +1277,17 @@ func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
 	require.Equal(t, 1, ibs.journal.length())
 }
 
-func TestDropTxMapsReleasesAnOversizedTxOutput(t *testing.T) {
+func TestResetReaderReleasesAnOversizedTxOutput(t *testing.T) {
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	startNoMaterializeTx(ibs, vm, 0)
 	ibs.txOutput = make([]byte, 0, maxKeptTxOutput+1)
 
-	ibs.DropTxMaps()
+	ibs.ResetReader(nil)
 
 	require.Zero(t, cap(ibs.txOutput))
 }
 
-func TestDropTxMapsReleasesWhatATransactionGrew(t *testing.T) {
+func TestResetReaderReleasesWhatATransactionGrew(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	startNoMaterializeTx(ibs, vm, 0)
@@ -1302,7 +1302,7 @@ func TestDropTxMapsReleasesWhatATransactionGrew(t *testing.T) {
 	ibs.Reset()
 	require.NotZero(t, ibs.accessList.entries(), "Reset keeps the access list's peak")
 
-	ibs.DropTxMaps()
+	ibs.ResetReader(nil)
 
 	require.Zero(t, ibs.accessList.entries())
 	require.Nil(t, ibs.sdProbe)

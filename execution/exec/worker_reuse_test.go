@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -115,4 +116,35 @@ func TestParkDropsTheRunBindings(t *testing.T) {
 	require.Nil(t, w.evm.Config().Tracer, "a parked worker keeps the last tx's tracer")
 	require.Nil(t, w.evm.Context.GetHash, "a parked worker keeps the run's block hash lookup")
 	require.Equal(t, evmtypes.TxContext{}, w.evm.TxContext)
+}
+
+func TestParkRacingACancelLeavesTheEVMUncancelled(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	for range 500 {
+		ctx, cancel := context.WithCancel(t.Context())
+		w.Rebind(ctx, nil)
+		go cancel()
+		w.Park()
+		require.False(t, w.evm.Cancelled(), "a cancel that raced Park reached the parked EVM")
+		cancel()
+	}
+}
+
+func TestRebindUnderACancelledContextCancelsTheEVM(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.Park()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	w.Rebind(ctx, nil)
+	require.Eventually(t, w.evm.Cancelled, time.Second, time.Millisecond)
+}
+
+func TestParkAndCloseTwice(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	w.Park()
+	w.Park()
+	w.Close()
+	w.Close()
 }

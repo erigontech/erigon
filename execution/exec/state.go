@@ -197,8 +197,6 @@ func (rw *WorkerContext) watchCtx(ctx context.Context) {
 func (rw *WorkerContext) Rebind(ctx context.Context, metrics *WorkerMetrics) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stopCancel()
-	rw.evm.Reset(evmtypes.TxContext{}, rw.ibs)
 	rw.metrics = metrics
 	rw.watchCtx(ctx)
 }
@@ -212,7 +210,6 @@ func (rw *WorkerContext) Park() {
 	_ = rw.bindTx(nil)
 	rw.flushCollector()
 	rw.ibs.ResetReader(nil)
-	rw.ibs.DropTxMaps()
 	// Back to a new worker's EVM: no tracer, block context, tx context or return data.
 	var blockCtx evmtypes.BlockContext
 	rw.evm.ResetBetweenBlocks(blockCtx, evmtypes.TxContext{}, rw.ibs, vm.Config{}, blockCtx.Rules(rw.chainConfig))
