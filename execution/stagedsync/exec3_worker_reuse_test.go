@@ -217,3 +217,20 @@ func TestWorkerCacheNeverGivesOneWorkerToTwoCalls(t *testing.T) {
 	wg.Wait()
 	closeWorkers(takeWorkers(cache, n))
 }
+
+func TestExecV3ReusesWorkersAcrossExecutionModes(t *testing.T) {
+	r, fx := newReuseReplay(t)
+	require.NoError(t, runOnParent(t, r, fx))
+	workers := idleWorkers(r)
+	require.NotEmpty(t, workers)
+
+	tx, doms, ws := r.newDomains(t, fx)
+	defer tx.Rollback()
+	defer doms.Close()
+	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent}
+	out, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeForkValidation, false, "replay", r.rng, src, r.logger)
+	require.NoError(t, err)
+	require.Nil(t, out.verdict)
+	require.NoError(t, r.verify(tx, doms, ws, fx.Outputs))
+	require.True(t, slices.Equal(workers, idleWorkers(r)), "the fork-validation call did not reuse the workers of the applying-blocks call")
+}

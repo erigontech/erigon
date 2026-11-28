@@ -97,9 +97,7 @@ type ExecuteBlockCfg struct {
 	// reference instead of the header.
 	balSink func(blockNum uint64, bal types.BlockAccessList)
 
-	// workers keeps the idle exec workers between calls. A worker keeps the db, block
-	// reader and engine it was built with, so only configs built over the same ones
-	// may share it.
+	// workers keeps the idle exec workers between calls; see ShareWorkers.
 	workers *atomic.Pointer[[]*exec.WorkerContext]
 }
 
@@ -109,7 +107,9 @@ func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.Bloc
 	cfg.balSink = sink
 }
 
-// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own.
+// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own. A worker
+// keeps the db, block reader, engine, chain config, genesis, dirs and logger it was
+// built with, so configs that share c must have the same ones.
 func (cfg ExecuteBlockCfg) ShareWorkers(c *atomic.Pointer[[]*exec.WorkerContext]) ExecuteBlockCfg {
 	if c != nil {
 		cfg.workers = c
