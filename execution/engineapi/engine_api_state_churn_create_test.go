@@ -54,7 +54,7 @@ func TestEngineApiReorgAcrossContractCreationAtSameAddress(t *testing.T) {
 	sidePayloads, sideAddr, sideRef := buildRecordedChurnChain(
 		ctx, t, logger, sharedGenesis, coinbaseKey, tweak, 6,
 		func(k int) int64 { return int64(k) + 1_000_000 },
-		func(opts *bind.TransactOpts) { opts.GasPrice = big.NewInt(2_000_000_000) },
+		func(opts *bind.TransactOpts) { opts.GasPrice.Add(opts.GasPrice, big.NewInt(1)) },
 	)
 
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{

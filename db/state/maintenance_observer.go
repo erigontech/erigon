@@ -39,6 +39,15 @@ const (
 	// MaintenancePruneCommitted follows that pass's commit, before it tries to
 	// start file building. Other jobs may already be building or merging.
 	MaintenancePruneCommitted
+	// MaintenanceMergeFilesBuilt follows creation of merge outputs on disk,
+	// before they replace input files in new read views.
+	MaintenanceMergeFilesBuilt
+	// MaintenanceMergeFilesPublished follows publication of the merged view,
+	// while the merging reader still pins the input files.
+	MaintenanceMergeFilesPublished
+	// MaintenanceMergeComplete follows release of the merging reader.
+	// Other readers may still retain retired input files.
+	MaintenanceMergeComplete
 )
 
 type MaintenanceEvent struct {

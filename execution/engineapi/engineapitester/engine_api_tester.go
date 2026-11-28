@@ -461,6 +461,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		StateAgg:             stateAgg,
 		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
 		ExecutionModule:      ethBackend.ExecutionModule(),
+		StateChangesClient:   ethBackend.StateDiffClient(),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -501,6 +502,7 @@ type EngineApiTester struct {
 	StateAgg             *state.Aggregator
 	ChainDB              kv.TemporalRoDB
 	ExecutionModule      *execmodule.ExecModule
+	StateChangesClient   direct.StateDiffClient
 	cleanup              *cleanupHandle
 }
 

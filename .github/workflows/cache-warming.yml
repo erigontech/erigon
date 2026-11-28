@@ -36,6 +36,11 @@ jobs:
   tests:
     uses: ./.github/workflows/test-all-erigon.yml
 
+  unwind:
+    uses: ./.github/workflows/test-unwind.yml
+    with:
+      cache-warming-only: true
+
   race-tests:
     uses: ./.github/workflows/test-all-erigon-race.yml
 

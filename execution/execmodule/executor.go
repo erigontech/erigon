@@ -50,6 +50,7 @@ type PipelineExecutor struct {
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
 	validationNotifications *shards.Notifications
+	stateTransitionObserver StateTransitionObserver
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 }
@@ -300,10 +301,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return err
 			}
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
-			if err := sd.Commit(ctx, tx, resolve); err != nil {
+			if err := sd.Commit(ctx, tx, resolve, func(kv.RwTx) error {
+				pe.observeStateTransition(ctx, StateTransitionStartupCommitReady)
+				return nil
+			}); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			restoreStateChanges = hook.CheckpointStateChanges()
+			pe.observeStateTransition(ctx, StateTransitionStartupCommitComplete)
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			pe.db.BuildFilesInBackground(collateToTxNum)
