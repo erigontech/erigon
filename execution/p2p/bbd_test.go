@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -316,9 +317,6 @@ func TestBackwardBlockDownloader_PartialConfigUsesDefaults(t *testing.T) {
 		)
 		want := p2pcfg.DefaultBlockDownload
 		want.BlocksBatchSize = 10
-		want.InitialHeaderFetchRetries = 0
-		want.HeaderChainBatchFetchRetries = 0
-		want.BodiesBatchFetchRetries = 0
 		require.Equal(t, want, bbd.blockDownload)
 		feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
 		require.NoError(t, err)
@@ -335,9 +333,7 @@ func TestBackwardBlockDownloader_PartialConfigUsesDefaults(t *testing.T) {
 			t.TempDir(),
 			WithBlockDownloadConfig(p2pcfg.BlockDownload{}),
 		)
-		require.Equal(t, p2pcfg.DefaultBlockDownload.InitialHeaderFetchRetries, bbd.blockDownload.InitialHeaderFetchRetries)
-		require.Equal(t, p2pcfg.DefaultBlockDownload.HeaderChainBatchFetchRetries, bbd.blockDownload.HeaderChainBatchFetchRetries)
-		require.Equal(t, p2pcfg.DefaultBlockDownload.BodiesBatchFetchRetries, bbd.blockDownload.BodiesBatchFetchRetries)
+		require.Equal(t, p2pcfg.DefaultBlockDownload, bbd.blockDownload)
 	})
 }
 
@@ -366,6 +362,47 @@ func TestBackwardBlockDownloader_InvalidMaxParallelBodyDownloadsUseDefault(t *te
 			require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
 		})
 	}
+}
+
+func TestBackwardBlockDownloader_InvalidTimeoutsUseDefault(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		set  func(*p2pcfg.BlockDownload)
+	}{
+		{name: "initial header fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.InitialHeaderFetchTimeout = -time.Second }},
+		{name: "header chain batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.HeaderChainBatchFetchTimeout = -time.Second }},
+		{name: "bodies batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.BodiesBatchFetchTimeout = -time.Second }},
+		{name: "bals batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.BALsBatchFetchTimeout = -time.Second }},
+		{name: "bals request", set: func(cfg *p2pcfg.BlockDownload) { cfg.BALsRequestTimeout = -time.Second }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := p2pcfg.BlockDownload{BlocksBatchSize: 10}
+			test.set(&cfg)
+			logger := testlog.Logger(t, log.LvlCrit)
+			peerTracker := NewPeerTracker(logger, nil)
+			bbd := NewBackwardBlockDownloader(logger, &stubBbdFetcher{}, peerTracker, t.TempDir(), WithBlockDownloadConfig(cfg))
+			want := p2pcfg.DefaultBlockDownload
+			want.BlocksBatchSize = 10
+			require.Equal(t, want, bbd.blockDownload)
+		})
+	}
+}
+
+func TestBackwardBlockDownloader_LargeBlocksBatchSizeDoesNotPanic(t *testing.T) {
+	headers := newTestHeaderChain(31, nil)
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	peerTracker.PeerConnected(PeerIdFromUint64(1))
+	bbd := NewBackwardBlockDownloader(
+		logger,
+		&chainServingBbdFetcher{headers: headers},
+		peerTracker,
+		t.TempDir(),
+		WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: math.MaxUint64}),
+	)
+	feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
 }
 
 // A persistent full BAL deficit must not fail the download: the blocks are

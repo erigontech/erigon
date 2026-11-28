@@ -468,7 +468,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 ) error {
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
-	headers := make([]*types.Header, 0, config.BlocksBatchSize)
+	headers := make([]*types.Header, 0, min(config.BlocksBatchSize, eth.MaxHeadersServe))
 	headerCollectorLoadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		var header types.Header
 		err := rlp.DecodeBytes(v, &header)

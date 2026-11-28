@@ -300,8 +300,9 @@ func (c *Config) CommitmentRefsFirstStart() *bool {
 
 type Sync struct {
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle    time.Duration
-	ExecWorkerCount int
+	LoopThrottle     time.Duration
+	ExecWorkerCount  int
+	ReconWorkerCount int
 
 	BodyCacheLimit        datasize.ByteSize
 	BreakAfterStage       string

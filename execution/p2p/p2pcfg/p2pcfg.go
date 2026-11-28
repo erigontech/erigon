@@ -16,7 +16,10 @@
 
 package p2pcfg
 
-import "time"
+import (
+	"cmp"
+	"time"
+)
 
 type BlockDownload struct {
 	BlocksBatchSize              uint64
@@ -47,36 +50,17 @@ var DefaultBlockDownload = BlockDownload{
 }
 
 func (b BlockDownload) WithDefaults() BlockDownload {
-	if b == (BlockDownload{}) {
-		return DefaultBlockDownload
-	}
-	defaults := DefaultBlockDownload
-	if b.BlocksBatchSize != 0 {
-		defaults.BlocksBatchSize = b.BlocksBatchSize
-	}
-	if b.MaxParallelBodyDownloads > 0 {
-		defaults.MaxParallelBodyDownloads = b.MaxParallelBodyDownloads
-	}
-	if b.MaxParallelHeaderDownloads > 0 {
-		defaults.MaxParallelHeaderDownloads = b.MaxParallelHeaderDownloads
-	}
-	if b.InitialHeaderFetchTimeout != 0 {
-		defaults.InitialHeaderFetchTimeout = b.InitialHeaderFetchTimeout
-	}
-	if b.HeaderChainBatchFetchTimeout != 0 {
-		defaults.HeaderChainBatchFetchTimeout = b.HeaderChainBatchFetchTimeout
-	}
-	if b.BodiesBatchFetchTimeout != 0 {
-		defaults.BodiesBatchFetchTimeout = b.BodiesBatchFetchTimeout
-	}
-	if b.BALsBatchFetchTimeout != 0 {
-		defaults.BALsBatchFetchTimeout = b.BALsBatchFetchTimeout
-	}
-	if b.BALsRequestTimeout != 0 {
-		defaults.BALsRequestTimeout = b.BALsRequestTimeout
-	}
-	defaults.InitialHeaderFetchRetries = b.InitialHeaderFetchRetries
-	defaults.HeaderChainBatchFetchRetries = b.HeaderChainBatchFetchRetries
-	defaults.BodiesBatchFetchRetries = b.BodiesBatchFetchRetries
-	return defaults
+	d := DefaultBlockDownload
+	d.BlocksBatchSize = cmp.Or(b.BlocksBatchSize, d.BlocksBatchSize)
+	d.MaxParallelBodyDownloads = cmp.Or(max(b.MaxParallelBodyDownloads, 0), d.MaxParallelBodyDownloads)
+	d.MaxParallelHeaderDownloads = cmp.Or(max(b.MaxParallelHeaderDownloads, 0), d.MaxParallelHeaderDownloads)
+	d.InitialHeaderFetchTimeout = cmp.Or(max(b.InitialHeaderFetchTimeout, 0), d.InitialHeaderFetchTimeout)
+	d.InitialHeaderFetchRetries = cmp.Or(b.InitialHeaderFetchRetries, d.InitialHeaderFetchRetries)
+	d.HeaderChainBatchFetchTimeout = cmp.Or(max(b.HeaderChainBatchFetchTimeout, 0), d.HeaderChainBatchFetchTimeout)
+	d.HeaderChainBatchFetchRetries = cmp.Or(b.HeaderChainBatchFetchRetries, d.HeaderChainBatchFetchRetries)
+	d.BodiesBatchFetchTimeout = cmp.Or(max(b.BodiesBatchFetchTimeout, 0), d.BodiesBatchFetchTimeout)
+	d.BodiesBatchFetchRetries = cmp.Or(b.BodiesBatchFetchRetries, d.BodiesBatchFetchRetries)
+	d.BALsBatchFetchTimeout = cmp.Or(max(b.BALsBatchFetchTimeout, 0), d.BALsBatchFetchTimeout)
+	d.BALsRequestTimeout = cmp.Or(max(b.BALsRequestTimeout, 0), d.BALsRequestTimeout)
+	return d
 }
