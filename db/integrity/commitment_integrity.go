@@ -52,6 +52,8 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -228,7 +230,7 @@ func extractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64,
 		blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(value)
 		return root, blockNum, txNum, err
 	}
-	return commitment.HexTrieExtractStateRoot(value)
+	return v2.HexTrieExtractStateRoot(value)
 }
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
@@ -442,8 +444,8 @@ func checkDerefBranch(
 	fileName string,
 	trace bool,
 	logger log.Logger,
-) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
-	branchData := commitment.BranchData(branchValue)
+) (dc derefCounts, newBranchData branch.BranchData, retErr error) {
+	branchData := branch.BranchData(branchValue)
 	var integrityErr error
 
 	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
@@ -537,7 +539,7 @@ func checkDerefBranch(
 		}
 		return plainKey, nil
 	})
-	if err := newBranchData.Validate(branchKey); err != nil {
+	if err := v2.ValidateBranchData(newBranchData, branchKey); err != nil {
 		err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
 		logger.Warn(err.Error())
 		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
@@ -597,7 +599,7 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			continue
 		}
 		counts.branchKeys++
-		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
+		plainAccounts, plainStorages, shortened, err := branch.BranchData(v).CountPlainKeys()
 		if err != nil || shortened > 0 {
 			return commitmentFileScan{referenced: true}
 		}
@@ -1001,7 +1003,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			return 0, err
 		}
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+			rootHashBytes, blockNum, txNum, err := v2.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
@@ -1035,8 +1037,8 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			}
 		} else {
-			branchData := commitment.BranchData(v)
-			err = branchData.Validate(k)
+			branchData := branch.BranchData(v)
+			err = v2.ValidateBranchData(branchData, k)
 			if err != nil {
 				err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", k, fileName, err)
 				if failFast {
@@ -1425,7 +1427,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, f
 		}
 		branchKeys++
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 
 		if branchData.IsTombstone() {
 			continue // tombstones kept across merges, not corruption
@@ -1639,7 +1641,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		}
 		branchKeys++
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 		if branchData.IsTombstone() {
 			continue
 		}
@@ -2017,7 +2019,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		branchData := commitment.BranchData(branchValue)
+		branchData := branch.BranchData(branchValue)
 		if !branchData.IsComplete() {
 			continue
 		}
@@ -2207,7 +2209,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, failFast
 				continue
 			}
 
-			branchData := commitment.BranchData(branchValue)
+			branchData := branch.BranchData(branchValue)
 			if !branchData.IsComplete() {
 				continue
 			}
@@ -2268,7 +2270,7 @@ func verifyHashItem(
 		valMapPool.Put(storageValues)
 	}()
 
-	branchData := commitment.BranchData(item.branchValue)
+	branchData := branch.BranchData(item.branchValue)
 	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			plainKey := key
@@ -2334,7 +2336,7 @@ func verifyHashItem(
 		return nil
 	}
 
-	err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
+	err = v2.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
 	if err != nil {
 		hashMismatches.Add(1)
 		if failFast {

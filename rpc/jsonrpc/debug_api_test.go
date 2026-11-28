@@ -1670,6 +1670,24 @@ func TestAccountAt(t *testing.T) {
 	})
 }
 
+func TestAccountAtKeepsCodeAfterLaterWrites(t *testing.T) {
+	m, _, contractAddr, _ := chainWithDeployedContract(t)
+	api := NewPrivateDebugAPI(newBaseApiReadingCodeFromTx(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	var blockHash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		blockHash, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		return err
+	}))
+
+	result, err := api.AccountAt(m.Ctx, blockHash, 0, contractAddr)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Code)
+
+	overwriteFreedCodePages(t, m)
+	require.Equal(t, result.CodeHash, crypto.Keccak256Hash(result.Code))
+}
+
 func TestGetBadBlocks(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})

@@ -670,7 +670,8 @@ func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockH
 	if err != nil {
 		return nil, err
 	}
-	result.Code = code
+	// The code may reference transaction-scoped mmap memory, so detach before rollback.
+	result.Code = bytes.Clone(code)
 	return result, nil
 }
 

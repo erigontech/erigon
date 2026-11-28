@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/commitment/witness/opstream"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -74,7 +75,7 @@ func newWitnessBed(t testing.TB, ops []commitmenttest.Op) *witnessBed {
 	}
 
 	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	hu := testUpdates(t, commitment.ModeUpdate, ops)
 	hphRoot, err := hph.Process(ctx, hu, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
@@ -100,7 +101,7 @@ func (b *witnessBed) hphWitness(t testing.TB, keys witnessKeys, exclusion bool) 
 	t.Helper()
 	ctx := context.Background()
 	reader, _ := b.hphMem.Open(ctx)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	require.NoError(t, hph.SetState(b.hphState))
 	u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
 	defer u.Close()
@@ -339,12 +340,12 @@ var commonWitnessShapes = []witnessShape{
 func TestWitnessRejectsCorruptRecords(t *testing.T) {
 	for _, corruption := range []string{"missing_root", "stale_root", "stale_child"} {
 		t.Run(corruption, func(t *testing.T) {
-			child := newNode(planeAccount, 1)
+			child := newNode(PlaneAccount, 1)
 			child.setStoredChild(2, bytes.Repeat([]byte{2}, 32), nil)
 			child.setStoredChild(3, bytes.Repeat([]byte{3}, 32), nil)
 			childHash, err := fold(child, 1)
 			require.NoError(t, err)
-			root := newNode(planeAccount)
+			root := newNode(PlaneAccount)
 			root.setStoredChild(1, childHash[:], nil)
 			root.setStoredChild(8, bytes.Repeat([]byte{8}, 32), nil)
 			rootHash, err := fold(root, 0)

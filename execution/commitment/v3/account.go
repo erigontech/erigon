@@ -45,7 +45,7 @@ var (
 
 const accountLeafScratch = 1 + binary.MaxVarintLen64 + 3*length.Hash
 
-func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
+func EncodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
 	flags := byte(0)
 	if u.Nonce != 0 {
 		flags |= accountHasNonce

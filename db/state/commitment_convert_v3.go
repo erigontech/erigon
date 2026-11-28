@@ -45,7 +45,9 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/convert"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
@@ -69,7 +71,7 @@ type convertedBatch struct {
 	ents [][3]int
 }
 
-func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) {
+func (b *convertedBatch) emit(k, v []byte, kind convert.LegacyKind) {
 	k0 := len(b.buf)
 	b.buf = append(b.buf, k...)
 	v0 := len(b.buf)
@@ -102,7 +104,7 @@ func (s *convertedSink) send() error {
 	}
 }
 
-func (s *convertedSink) emit(k, v []byte, kind v3.LegacyKind) error {
+func (s *convertedSink) emit(k, v []byte, kind convert.LegacyKind) error {
 	if len(s.res.ents) != 0 && len(s.res.buf)+len(k)+1+len(v) > commitmentV3BatchBytes {
 		if err := s.send(); err != nil {
 			return err
@@ -129,9 +131,9 @@ func newV3Collectors(name, tmpDir string, workers int, logger log.Logger) ([]*et
 	}
 }
 
-func mergeLoadGroups(ctx context.Context, name string, collectors []*etl.Collector, flush func(key []byte, group []v3.LegacyEntry) error) error {
+func mergeLoadGroups(ctx context.Context, name string, collectors []*etl.Collector, flush func(key []byte, group []convert.LegacyEntry) error) error {
 	var groupKey, groupVals []byte
-	var group []v3.LegacyEntry
+	var group []convert.LegacyEntry
 	flushGroup := func() error {
 		if len(group) == 0 {
 			return nil
@@ -147,7 +149,7 @@ func mergeLoadGroups(ctx context.Context, name string, collectors []*etl.Collect
 		}
 		start := len(groupVals)
 		groupVals = append(groupVals, v[1:]...)
-		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
+		group = append(group, convert.LegacyEntry{Kind: convert.LegacyKind(v[0]), Value: groupVals[start:]})
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
@@ -332,7 +334,7 @@ func convertCommitmentFileV3(
 		wat := pin.BeginFilesRo()
 		defer wat.Close()
 		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
-		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
+		conv := convert.NewLegacyConverter(vals, st.keysV2, incremental)
 		expand := func(value []byte, fromTxNum, toTxNum uint64) ([]byte, error) {
 			return expandSqueezedCommitmentBranch(wat, value, fromTxNum, toTxNum)
 		}
@@ -382,8 +384,8 @@ func convertCommitmentFileV3(
 	}()
 	writer := seg.NewWriter(valuesComp, srcCompression)
 	var written uint64
-	err = mergeLoadGroups(ctx, "commitment_convert_v3", collectors, func(groupKey []byte, group []v3.LegacyEntry) error {
-		value, write, resolveErr := v3.ResolveLegacy(groupKey, group)
+	err = mergeLoadGroups(ctx, "commitment_convert_v3", collectors, func(groupKey []byte, group []convert.LegacyEntry) error {
+		value, write, resolveErr := convert.ResolveLegacy(groupKey, group)
 		if resolveErr != nil || !write {
 			return resolveErr
 		}
@@ -434,12 +436,12 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, conv *convert.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit convert.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
 		}
-		state, err := v3.ConvertLegacyState(v)
+		state, err := convert.ConvertLegacyState(v)
 		if err != nil {
 			return err
 		}
@@ -449,7 +451,7 @@ func convertLegacyPairV3(k, v []byte, incremental bool, conv *v3.LegacyConverter
 				return err
 			}
 		}
-		if err := emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect); err != nil {
+		if err := emit(commitment.KeyCommitmentV3State, state, convert.LegacyDirect); err != nil {
 			return err
 		}
 		return conv.EmitRootExtension(v, prev, emit)
@@ -522,7 +524,7 @@ func (w *legacyDelta) read(key []byte, step kv.Step) ([]byte, error) {
 	return w.expand(v, fromTxNum, toTxNum)
 }
 
-func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *convert.LegacyConverter, reach *legacyReach, emit convert.LegacyEmitFunc) error {
 	prefix, err := decodeLegacyPrefix(k, w.keysV2)
 	if err != nil {
 		return err
@@ -591,7 +593,7 @@ func (w *legacyDelta) walk(path []byte, visit func(key, value, old []byte) (desc
 	return nil
 }
 
-func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+func (w *legacyDelta) reemit(path []byte, conv *convert.LegacyConverter, emit convert.LegacyEmitFunc) error {
 	return w.walk(path, func(key, value, old []byte) (bool, error) {
 		if err := conv.Convert(key, value, old, emit); err != nil {
 			return false, err
@@ -601,7 +603,7 @@ func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.Lega
 	})
 }
 
-func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+func (w *legacyDelta) drop(path []byte, conv *convert.LegacyConverter, reach *legacyReach, emit convert.LegacyEmitFunc) error {
 	return w.walk(path, func(key, value, _ []byte) (bool, error) {
 		live, err := reach.reachable(key, value)
 		if err != nil || live {
@@ -630,7 +632,7 @@ type legacyReachNode struct {
 }
 
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
-	if commitment.BranchData(value).ChildCount() == 0 {
+	if v2branch.BranchData(value).ChildCount() == 0 {
 		return true, nil
 	}
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
@@ -654,12 +656,12 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 		}
 		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
 		r.rootExt = nil
-		if commitment.BranchData(root).ChildCount() == 0 {
+		if v2branch.BranchData(root).ChildCount() == 0 {
 			state, err := r.read(commitment.KeyCommitmentState)
 			if err != nil || len(state) == 0 {
 				return false, err
 			}
-			if r.rootExt, _, err = v3.LegacyRootExtension(state); err != nil {
+			if r.rootExt, _, err = convert.LegacyRootExtension(state); err != nil {
 				return false, err
 			}
 		}
@@ -685,7 +687,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			return true, nil
 		}
 		child, err := r.read(encodeLegacyPrefix(path[:next], r.keysV2))
-		if err != nil || commitment.BranchData(child).ChildCount() == 0 {
+		if err != nil || v2branch.BranchData(child).ChildCount() == 0 {
 			return false, err
 		}
 		r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(child)})
@@ -697,7 +699,7 @@ func (r *legacyReach) childDepth(branch, path []byte, depth int) (next int, ok b
 		return 0, false, nil
 	}
 	nib := int(path[depth])
-	err = commitment.BranchData(branch).ForEachCell(func(i int, cell commitment.BranchCell) error {
+	err = v2branch.BranchData(branch).ForEachCell(func(i int, cell v2branch.BranchCell) error {
 		if i != nib {
 			return nil
 		}

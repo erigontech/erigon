@@ -41,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -326,8 +328,8 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			}
 			require.NotEmpty(t, v)
 
-			expanded := commitment.BranchData(v)
-			require.NoError(t, expanded.Validate(k),
+			expanded := branch.BranchData(v)
+			require.NoError(t, v2.ValidateBranchData(expanded, k),
 				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
 
 			// Walk embedded plain-key fields and assert each is full-length.

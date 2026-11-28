@@ -65,8 +65,8 @@ func BenchmarkTouchDirect(b *testing.B) {
 							Balance: *uint256.NewInt(uint64(i)),
 						})
 					}
-					if ut.parallel != nil {
-						ut.parallel.Build()
+					if ut.Parallel != nil {
+						ut.Parallel.Build()
 					}
 					b.StopTimer()
 					ut.Reset()
