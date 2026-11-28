@@ -29,6 +29,9 @@ import (
 
 var errTrieContext = errors.New("commitment v3: missing Patricia context")
 
+// serialFoldMaxKeys is the round size below which the fold costs less on the caller's goroutine than fanned out.
+const serialFoldMaxKeys = 32
+
 type Trie struct {
 	ctx               commitment.PatriciaContext
 	ctxFactory        commitment.TrieContextFactory
@@ -135,8 +138,9 @@ func (t *Trie) Process(
 		}
 		sorted = func(items []feedEntry) error { return traceCollapsesDeletes(t.ctx, items, t.collapseTracer) }
 	}
-	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
+	workers := t.workersFor(int(updates.Size()))
+	return t.round(ctx, onProgress, workers, func() ([]storageTask, []accountEntry, int, error) {
+		return partitionUpdates(ctx, updates, workers, sorted)
 	})
 }
 
@@ -151,7 +155,7 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 	t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
 	inner, rootBefore, deferredBefore, deferUpdatesBefore := t.ctx, bytes.Clone(t.root), t.deferred, t.deferUpdates
 	t.ctx, t.deferred, t.deferUpdates = cache, nil, true
-	root, err := t.round(ctx, nil, func() ([]storageTask, []accountEntry, int, error) {
+	root, err := t.round(ctx, nil, t.scheduleWorkers, func() ([]storageTask, []accountEntry, int, error) {
 		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapsesDeletes(cache, items, tracer) })
 	})
 	t.ctx, t.root, t.deferred, t.deferUpdates = inner, rootBefore, deferredBefore, deferUpdatesBefore
@@ -159,13 +163,21 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 }
 
 func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
-	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
-		storage, accounts := partitionAccounts(feed.Accounts, t.scheduleWorkers)
+	workers := t.workersFor(feed.Keys)
+	return t.round(ctx, onProgress, workers, func() ([]storageTask, []accountEntry, int, error) {
+		storage, accounts := partitionAccounts(feed.Accounts, workers)
 		return storage, accounts, feed.Keys, nil
 	})
 }
 
-func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProgress), partition func() ([]storageTask, []accountEntry, int, error)) ([]byte, error) {
+func (t *Trie) workersFor(keys int) int {
+	if t.scheduleWorkers == 0 && keys < serialFoldMaxKeys {
+		return 1
+	}
+	return t.scheduleWorkers
+}
+
+func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProgress), workers int, partition func() ([]storageTask, []accountEntry, int, error)) ([]byte, error) {
 	if t.ctx == nil {
 		return nil, errTrieContext
 	}
@@ -181,7 +193,7 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	if err != nil {
 		return nil, err
 	}
-	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.storageWorkersMax, t.fanOutMin)
+	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, workers, t.storageWorkersMax, t.fanOutMin)
 	if err != nil {
 		return nil, err
 	}
