@@ -105,6 +105,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 
 func newBogotaInstructionSet() JumpTable {
 	instructionSet := newAmsterdamInstructionSet()
+	instructionSet[SETCODEFROM] = operation{execute: opSetCodeFrom, dynamicGas: gasSetCodeFrom, numPop: 1, numPush: 1}
 	instructionSet[APPROVE] = operation{execute: opApprove, dynamicGas: gasReturn, memorySize: memoryReturn, numPop: 3}
 	instructionSet[TXPARAM] = operation{execute: opTxParam, constantGas: 2, numPop: 1, numPush: 1}
 	instructionSet[FRAMEDATALOAD] = operation{execute: opFrameDataLoad, constantGas: 3, numPop: 2, numPush: 1}

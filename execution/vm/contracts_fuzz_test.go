@@ -40,7 +40,7 @@ func FuzzPrecompiledContracts(f *testing.F) {
 		inWant := string(input)
 		// Fuzzed input is expected to fail; the assertion below is about
 		// the precompile not mutating the caller's buffer.
-		_, _, _ = RunPrecompiledContract(p, input, mdgas.MdGas{Execution: gas}, nil)
+		_, _, _ = RunPrecompiledContract(p, input, mdgas.MdGas{Execution: gas}, nil, nil)
 		if inHave := string(input); inWant != inHave {
 			t.Errorf("Precompiled %v modified input data", a)
 		}

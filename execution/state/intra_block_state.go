@@ -720,7 +720,7 @@ func (ibs *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	code, err := ibs.getCode(addr)
+	code, err := ibs.GetCodeWithHash(addr)
 	return code.Bytes, err
 }
 
@@ -745,7 +745,7 @@ func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64
 	return err
 }
 
-func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
+func (ibs *IntraBlockState) GetCodeWithHash(addr accounts.Address) (accounts.Code, error) {
 	code, source, _, err := readCode(ibs, addr)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value())) {
@@ -765,7 +765,7 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 	if ibs.codeAccess != nil {
-		code, err := ibs.getCode(addr)
+		code, err := ibs.GetCodeWithHash(addr)
 		return code.Len(), err
 	}
 	size, source, _, err := readCodeSize(ibs, addr)
@@ -844,10 +844,10 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 func (ibs *IntraBlockState) ResolveCode(addr accounts.Address, followDelegation bool) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
-	code, err := ibs.getCode(addr)
+	code, err := ibs.GetCodeWithHash(addr)
 	if followDelegation {
 		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-			return ibs.getCode(delegation)
+			return ibs.GetCodeWithHash(delegation)
 		}
 	}
 	if err != nil {
@@ -1365,6 +1365,14 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		canonical = accounts.NewCode(code)
 		ibs.lastCode = canonical
 	}
+	return ibs.setCode(addr, canonical, reason)
+}
+
+func (ibs *IntraBlockState) AdoptCode(addr accounts.Address, code accounts.Code) error {
+	return ibs.setCode(addr, code, tracing.CodeChangeAdoption)
+}
+
+func (ibs *IntraBlockState) setCode(addr accounts.Address, canonical accounts.Code, reason tracing.CodeChangeReason) error {
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
 	if !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
@@ -1374,14 +1382,14 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 
 // writeCodeCells records code as this tx's Code, CodeHash and CodeSize writes, or
 // drops those writes when the code is unchanged.
-func (ibs *IntraBlockState) writeCodeCells(addr accounts.Address, code accounts.Code, unchanged bool) {
+func (ibs *IntraBlockState) writeCodeCells(addr accounts.Address, code accounts.Code, unchanged bool, reason tracing.CodeChangeReason) {
 	if unchanged {
 		ibs.writes.DelCode(addr)
 		ibs.writes.DelCodeHash(addr)
 		ibs.writes.DelCodeSize(addr)
 		return
 	}
-	ibs.recordWriteCode(addr, code)
+	ibs.recordWriteCode(addr, code, reason)
 	ibs.recordWriteCodeHash(addr, code.Hash)
 	ibs.recordWriteCodeSize(addr, code.Len())
 }
@@ -1389,6 +1397,9 @@ func (ibs *IntraBlockState) writeCodeCells(addr accounts.Address, code accounts.
 // journalCodeChange journals a code change and calls the tracing hooks.
 func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
 	entry := ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	if prev, ok := ibs.writes.GetCode(addr); ok {
+		entry.aux = uint64(prev.CodeReason)
+	}
 	if ibs.codeAccess != nil {
 		if undo := ibs.codeAccess.OnCodeChange(code.Hash); undo != nil {
 			if entry.extra == nil {
@@ -1429,7 +1440,7 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 		return nil
 	}
 	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
-	ibs.writeCodeCells(addr, code, code.Hash == prev.Hash)
+	ibs.writeCodeCells(addr, code, code.Hash == prev.Hash, reason)
 	return nil
 }
 
@@ -1499,7 +1510,7 @@ func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code,
 				ibs.blockNum, ibs.txIndex, ibs.version, addr, code.Hash, baseCodeHash, len(code.Bytes))
 		}
 	}
-	ibs.writeCodeCells(addr, code, unchanged)
+	ibs.writeCodeCells(addr, code, unchanged, reason)
 	return nil
 }
 
@@ -1573,12 +1584,12 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 	}
 	// An incarnation cell wipes storage and code for later transactions: a slot
 	// or code without a newer cell reads as empty, so the code is written again.
-	code, err := ibs.getCode(addr)
+	code, err := ibs.GetCodeWithHash(addr)
 	if err != nil {
 		return err
 	}
 	if code.Len() > 0 {
-		ibs.writeCodeCells(addr, code, false)
+		ibs.writeCodeCells(addr, code, false, tracing.CodeChangeUnspecified)
 	}
 	ibs.recordWriteIncarnation(addr, incarnation)
 	// The incarnation cell does not hide a slot cell of an earlier transaction.
@@ -2566,16 +2577,17 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
+func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code, reason tracing.CodeChangeReason) {
 	ibs.MarkAddressAccess(addr, true)
 	if vw, ok := ibs.writes.GetCode(addr); ok {
+		vw.CodeReason = reason
 		vw.Version = ibs.Version()
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
 	vw := ibs.writes.newVWCode()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
+	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version(), CodeReason: reason}
 	vw.Val = val
 	ibs.writes.SetCode(addr, vw)
 	traceWrite(ibs, vw)

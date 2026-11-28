@@ -28,8 +28,10 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -293,6 +295,8 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 			case remoteproto.Action_STORAGE:
 				// skip, will check later
 			case remoteproto.Action_CODE:
+				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
+				c.evictKey(addr[:], r)
 				k := crypto.Keccak256Hash(sc.Changes[i].Code)
 				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			default:
@@ -400,7 +404,18 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 }
 
 func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	it, r, err := c.getFromCache(k, id, kv.CodeDomain)
+	cacheKey := k
+	if len(k) == length.Addr {
+		account, err := c.Get(k, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		cacheKey = accounts.DeserialiseV3CodeHash(account)
+		if cacheKey == nil {
+			return nil, nil
+		}
+	}
+	it, r, err := c.getFromCache(cacheKey, id, kv.CodeDomain)
 	if err != nil {
 		return nil, err
 	}
@@ -416,11 +431,20 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	if err != nil {
 		return nil, err
 	}
+	if len(cacheKey) == length.Hash {
+		if len(v) == 0 {
+			return nil, nil
+		}
+		hash := crypto.Keccak256Hash(v)
+		if !bytes.Equal(hash[:], cacheKey) {
+			return nil, fmt.Errorf("code at %x does not match account code hash %x", k, cacheKey)
+		}
+	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
+	v = c.addCode(bytes.Clone(cacheKey), bytes.Clone(v), r, id).V
 	return v, nil
 }
 
@@ -540,13 +564,19 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 				break
 			}
 
-			// check the db
-			inDb, _, err := tx.GetLatest(domainOf(val.K), val.K, kv.GetLatestOptions{})
-			if err != nil {
-				return false, keys, err
+			domain := domainOf(val.K)
+			var matches bool
+			if domain == kv.CodeDomain && len(val.K) == length.Hash {
+				hash := crypto.Keccak256Hash(val.V)
+				matches = bytes.Equal(val.K, hash[:])
+			} else {
+				inDb, _, err := tx.GetLatest(domain, val.K, kv.GetLatestOptions{})
+				if err != nil {
+					return false, keys, err
+				}
+				matches = bytes.Equal(inDb, val.V)
 			}
-
-			if !bytes.Equal(inDb, val.V) {
+			if !matches {
 				keys = append(keys, val.K)
 				clearCache = true
 			}

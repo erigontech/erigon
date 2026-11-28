@@ -243,9 +243,14 @@ var accessListOpcodes = tracing.NewOpcodeMask(
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnOpcodeV2:   a.OnOpcodeV2,
-		OnOpcodeMask: accessListOpcodes,
+		OnOpcodeV2:      a.OnOpcodeV2,
+		OnOpcodeMask:    accessListOpcodes,
+		OnAccountAccess: a.OnAccountAccess,
 	}
+}
+
+func (a *AccessListTracer) OnAccountAccess(addr accounts.Address) {
+	a.addTouchedAddress(addr.Value())
 }
 
 func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {

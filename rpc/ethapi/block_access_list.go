@@ -45,8 +45,9 @@ type RPCNonceChange struct {
 }
 
 type RPCCodeChange struct {
-	Index hexutil.Uint64 `json:"index"`
-	Code  hexutil.Bytes  `json:"code"`
+	Index    hexutil.Uint64 `json:"index"`
+	Code     hexutil.Bytes  `json:"code"`
+	CodeHash *common.Hash   `json:"codeHash,omitempty"`
 }
 
 // RPCAccountAccess is the JSON-RPC response element for eth_getBlockAccessList (EIP-7928).
@@ -103,6 +104,10 @@ func MarshalBlockAccessList(bal types.BlockAccessList) []*RPCAccountAccess {
 			entry.CodeChanges[j] = &RPCCodeChange{
 				Index: hexutil.Uint64(cc.Index),
 				Code:  cc.Bytecode,
+			}
+			if !cc.CodeHash.IsNil() {
+				hash := cc.CodeHash.Value()
+				entry.CodeChanges[j].CodeHash = &hash
 			}
 		}
 		result[i] = entry

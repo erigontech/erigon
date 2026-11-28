@@ -110,6 +110,7 @@ func TestMarshalBlockAccessListWithCode(t *testing.T) {
 			NonceChanges:   nil,
 			CodeChanges: []*types.CodeChange{
 				{Index: 0, Bytecode: common.FromHex("0x6080604052")},
+				{Index: 1, CodeHash: accounts.InternCodeHash(common.Hash{31: 1})},
 			},
 		},
 	}
@@ -123,8 +124,10 @@ func TestMarshalBlockAccessListWithCode(t *testing.T) {
 	require.Len(t, parsed, 1)
 
 	cc := parsed[0]["codeChanges"].([]any)
-	require.Len(t, cc, 1)
+	require.Len(t, cc, 2)
 	cc0 := cc[0].(map[string]any)
 	require.Equal(t, "0x0", cc0["index"])
 	require.Equal(t, "0x6080604052", cc0["code"])
+	require.NotContains(t, cc0, "codeHash")
+	require.Equal(t, map[string]any{"index": "0x1", "code": "0x", "codeHash": common.Hash{31: 1}.Hex()}, cc[1])
 }

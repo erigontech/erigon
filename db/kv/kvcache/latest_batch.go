@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -33,12 +34,13 @@ import (
 // entries by state version so readers stay consistent with their own
 // snapshot). It does not track versions: the map remembers account data from
 // the latest OnNewBlock batch so that callers (e.g. the txpool) see the
-// announced nonce/balance even when their read-only DB transaction was opened
+// announced nonce, balance and code even when their read-only DB transaction was opened
 // before that data was committed. The map is replaced on every batch, so
 // memory stays proportional to one batch (~400 addresses per 60 M-gas block).
 type LatestBatchCache struct {
 	mu       sync.RWMutex
 	accounts map[common.Address][]byte // address → latest serialised account
+	code     map[common.Address][]byte
 }
 
 var (
@@ -61,8 +63,24 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	// By the time the next batch arrives, the DB commit for the
 	// previous batch should be visible to new RO transactions.
 	c.accounts = nil
+	c.code = nil
 	for _, change := range sc.ChangeBatch {
 		for _, account := range change.Changes {
+			if account.Action == remoteproto.Action_STORAGE {
+				continue
+			}
+			addr := gointerfaces.ConvertH160toAddress(account.Address)
+			switch account.Action {
+			case remoteproto.Action_UPSERT_CODE, remoteproto.Action_CODE, remoteproto.Action_REMOVE:
+				if c.code == nil {
+					c.code = make(map[common.Address][]byte)
+				}
+				var code []byte
+				if account.Action != remoteproto.Action_REMOVE {
+					code = bytes.Clone(account.Code)
+				}
+				c.code[addr] = code
+			}
 			var data []byte
 			switch account.Action {
 			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
@@ -75,7 +93,7 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 			if c.accounts == nil {
 				c.accounts = make(map[common.Address][]byte)
 			}
-			c.accounts[gointerfaces.ConvertH160toAddress(account.Address)] = data
+			c.accounts[addr] = data
 		}
 	}
 }
@@ -103,6 +121,14 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx) ([]byte, error) {
 }
 
 func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx) ([]byte, error) {
+	if len(k) == length.Addr {
+		c.mu.RLock()
+		code, ok := c.code[common.Address(k)]
+		c.mu.RUnlock()
+		if ok {
+			return bytes.Clone(code), nil
+		}
+	}
 	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }

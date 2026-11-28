@@ -172,6 +172,15 @@ type (
 		- State events -
 	*/
 
+	// AccountAccessHook reports an intended precompile account access before its
+	// gas charge, including attempts where that charge fails. Handlers must not
+	// read or warm the account in execution state.
+	AccountAccessHook = func(addr accounts.Address)
+
+	// AccountReadHook is called before a precompile reads an account, after the
+	// account access gas charge succeeds.
+	AccountReadHook = func(addr accounts.Address)
+
 	// BalanceChangeHook is called when the balance of an account changes.
 	BalanceChangeHook = func(addr accounts.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
@@ -219,6 +228,8 @@ type Hooks struct {
 	OnSystemCallStartV2 OnSystemCallStartHookV2
 	OnSystemCallEnd     OnSystemCallEndHook
 	// State events
+	OnAccountAccess AccountAccessHook
+	OnAccountRead   AccountReadHook
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
 	OnNonceChangeV2 NonceChangeHookV2
@@ -524,6 +535,8 @@ const (
 	// CodeChangeRevert is emitted when the code is reverted back to a previous value due to call failure.
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	CodeChangeRevert CodeChangeReason = 6
+
+	CodeChangeAdoption CodeChangeReason = 7
 )
 
 // OpcodeMask is the set of opcodes a tracer asks to see, one bit per opcode so the

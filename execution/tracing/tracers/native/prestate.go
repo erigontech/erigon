@@ -154,6 +154,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxEndV2:           t.OnTxEndV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
 			OnExitV2:            t.OnExitV2,
+			OnAccountRead:       t.OnAccountRead,
 		},
 		GetResult:         t.GetResult,
 		MarshalFastJSONTo: t.MarshalFastJSONTo,
@@ -226,6 +227,12 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
+		t.lookupAccount(addr)
+	}
+}
+
+func (t *prestateTracer) OnAccountRead(addr accounts.Address) {
+	if !t.interrupt.Load() {
 		t.lookupAccount(addr)
 	}
 }

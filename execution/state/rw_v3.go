@@ -647,6 +647,9 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 				return err
 			}
 			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
+			if err := changeAccount(addr); err != nil {
+				return err
+			}
 		}
 		for addr, byKey := range writes.Storages() {
 			acc, err := account(addr)
