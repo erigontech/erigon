@@ -2,11 +2,14 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/blockreplay"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -46,7 +49,7 @@ func TestExecV3ReusesWorkersOverARewoundState(t *testing.T) {
 	require.Len(t, workers, 5)
 
 	require.NoError(t, runOnParent(t, r, fx))
-	require.Equal(t, workers, idleWorkers(r), "the second call did not reuse the first call's workers")
+	require.True(t, slices.Equal(workers, idleWorkers(r)), "the second call did not reuse the first call's workers")
 }
 
 func TestExecV3ReusedWorkersAfterAnInvalidBlock(t *testing.T) {
@@ -61,7 +64,7 @@ func TestExecV3ReusedWorkersAfterAnInvalidBlock(t *testing.T) {
 
 	r.block = valid
 	require.NoError(t, runOnParent(t, r, fx))
-	require.Equal(t, workers, idleWorkers(r))
+	require.True(t, slices.Equal(workers, idleWorkers(r)))
 }
 
 func TestExecV3ReusedWorkersAfterACancelledCall(t *testing.T) {
@@ -82,5 +85,24 @@ func TestExecV3ReusedWorkersAfterACancelledCall(t *testing.T) {
 	r.ctx = context.Background()
 	poolOnRoTxOpen = nil
 	require.NoError(t, runOnParent(t, r, fx))
-	require.Equal(t, workers, idleWorkers(r))
+	require.True(t, slices.Equal(workers, idleWorkers(r)))
+}
+
+func TestWorkerStartupErrorKeepsIdleWorkers(t *testing.T) {
+	pe, _ := newResumeTestExec(t, newResumeTestDB(t), chain.AllProtocolChanges)
+	pe.workerCount = 1
+	pe.cfg.workers = &execWorkerCache{}
+	worker := exec.NewWorkerContext(t.Context(), true, nil, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+	pe.cfg.workers.put([]*exec.WorkerContext{worker})
+	t.Cleanup(func() { closeWorkers(pe.cfg.workers.take(1)) })
+
+	pe.enableChaosMonkey = true
+	failure := errors.New("worker startup failed")
+	pe.chaosFaults.WorkerError = failure
+	_, finish, err := pe.run(t.Context())
+	require.ErrorIs(t, err, failure)
+	finish(nil)
+
+	require.Len(t, pe.cfg.workers.idle, 1, "a startup failure took the worker out of the cache")
+	require.Same(t, worker, pe.cfg.workers.idle[0])
 }

@@ -1745,3 +1745,15 @@ func TestWriteFlushedToIncarnationDecrease(t *testing.T) {
 	require.Contains(t, got.code, c, "the new code survives the account write")
 	require.Equal(t, *uint256.NewInt(5), got.storage[c][slot], "the new storage survives the account write")
 }
+
+func TestResetReaderReplacesTransientStorageMap(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xa1"))
+	key := TransientKey(*uint256.NewInt(1))
+	ibs.SetTransientState(addr, &key, uint256.NewInt(2))
+	previousMap := ibs.transientStorage
+	ibs.ResetReader(nil)
+	ibs.SetTransientState(addr, &key, uint256.NewInt(3))
+	require.Empty(t, previousMap, "ResetReader keeps the largest tx's transient storage map")
+}

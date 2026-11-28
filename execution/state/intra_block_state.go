@@ -364,6 +364,7 @@ func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
 	ibs.sdProbe = nil
 	ibs.committedBase = nil
 	ibs.journal.dirties = make(map[accounts.Address]int)
+	ibs.transientStorage = newTransientStorage()
 	if cap(ibs.journal.entries) > maxKeptJournalEntries {
 		ibs.journal.entries = nil
 	}

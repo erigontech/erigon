@@ -121,6 +121,7 @@ func TestParkDropsTheRunBindings(t *testing.T) {
 func TestParkRacingACancelLeavesTheEVMUncancelled(t *testing.T) {
 	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
 	defer w.Close()
+	w.Park()
 	for range 500 {
 		ctx, cancel := context.WithCancel(t.Context())
 		w.Rebind(ctx, nil)
@@ -147,4 +148,23 @@ func TestParkAndCloseTwice(t *testing.T) {
 	w.Park()
 	w.Close()
 	w.Close()
+}
+
+func TestParkReleasesContextValues(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(t.Context(), contextKey{}, "previous execution")
+	w := NewWorkerContext(ctx, false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.Park()
+	if w.ctx != nil {
+		require.Nil(t, w.ctx.Value(contextKey{}), "a parked worker keeps context values of the previous run")
+	}
+}
+
+func TestParkReleasesTheRunEVM(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	runEVM := w.evm
+	w.Park()
+	require.NotSame(t, runEVM, w.evm, "a parked worker keeps the run's EVM and its call-output buffers")
 }

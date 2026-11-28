@@ -1641,30 +1641,25 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
-	if pe.execWorkers = pe.cfg.workers.take(poolSize); pe.execWorkers != nil {
-		for _, w := range pe.execWorkers {
-			w.Rebind(workersCtx, pe.taskExecMetrics)
-		}
-	} else {
-		var err error
-		pe.execWorkers, _, _, err = exec.NewWorkersPool(
-			workersCtx, true, pe.cfg.db, nil, nil,
-			pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-			poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
-		)
-		if err != nil {
-			return execLoopCtx, execLoopCtxCancel, err
-		}
-	}
-	workers := pe.execWorkers
-	pe.stopWorkers = sync.OnceFunc(func() { pe.cfg.workers.put(workers) })
-
 	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
 	// channels. Deterministic — the fault is decided here, not in a speculative worker.
 	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
+
+	if pe.execWorkers = pe.cfg.workers.take(poolSize); pe.execWorkers != nil {
+		for _, w := range pe.execWorkers {
+			w.Rebind(workersCtx, pe.taskExecMetrics)
+		}
+	} else {
+		pe.execWorkers = make([]*exec.WorkerContext, poolSize)
+		for i := range pe.execWorkers {
+			pe.execWorkers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+		}
+	}
+	workers := pe.execWorkers
+	pe.stopWorkers = sync.OnceFunc(func() { pe.cfg.workers.put(workers) })
 
 	pe.pool = newTaskPool(pe, pe.execWorkers)
 	pe.execLoopGroup.Go(func() error {
