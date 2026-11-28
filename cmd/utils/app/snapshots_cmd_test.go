@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
@@ -137,24 +136,12 @@ func TestTryOpenAggSelectsLegacyCommitmentFromDatadir(t *testing.T) {
 	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1, 2, 3, 4}, 0o644))
 	}
-	dataDir := utils.DataDirFlag
-	cmd := &cli.Command{
-		Name:   "accessor",
-		Flags:  []cli.Flag{&dataDir},
-		Before: commonBeforeSnapshotCommand,
-		Action: func(ctx context.Context, _ *cli.Command) error {
-			chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-			defer chainDB.Close()
-			agg, err := tryOpenAgg(ctx, dirs, chainDB, log.New())
-			if err != nil {
-				return err
-			}
-			require.False(t, statecfg.ExperimentalCommitmentV3)
-			agg.Close()
-			return nil
-		},
-	}
-	require.NoError(t, cmd.Run(t.Context(), []string{"accessor", "--datadir", dirs.DataDir}))
+	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := tryOpenAgg(t.Context(), dirs, chainDB, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+	require.False(t, statecfg.ExperimentalCommitmentV3)
 }
 
 func TestSqueezeCodeSelectsLegacyCommitmentFromDatadir(t *testing.T) {
