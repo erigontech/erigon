@@ -246,6 +246,11 @@ func (m *Merger) Merge(
 		if err != nil {
 			return err
 		}
+		base := snapshots.baseSegType
+		hasBase := slices.ContainsFunc(snapTypes, func(t snaptype.Type) bool { return t.Enum() == base.Enum() })
+		if hasBase && len(toMerge[base.Enum()]) == 0 {
+			return fmt.Errorf("merger.Merge: no %s file inside %d-%d", base.Name(), r.From(), r.To())
+		}
 		for snapType, t := range toMerge {
 			if out[snapType] == nil {
 				out[snapType] = make([]*DirtySegment, 0, len(t))
