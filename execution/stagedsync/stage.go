@@ -108,6 +108,16 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	return execution, err
 }
 
+// RejectedBlockError identifies the block a sync stage rejected.
+type RejectedBlockError struct {
+	Number uint64
+	Hash   common.Hash
+	Err    error
+}
+
+func (e *RejectedBlockError) Error() string { return e.Err.Error() }
+func (e *RejectedBlockError) Unwrap() error { return e.Err }
+
 type UnwindReason struct {
 	// If we're unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected

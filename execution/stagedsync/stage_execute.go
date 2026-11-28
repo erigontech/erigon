@@ -505,31 +505,23 @@ func savesExecProgress(execErr error, out execV3Outcome) bool {
 	return execErr == nil && out.verdict == nil
 }
 
-// renderExecOutcome converts the parallel executor's typed outcome back to the
-// stage's error contracts. Precedence is fixed by the order of the checks: an
-// operational failure (execErr) outranks a verdict, which outranks a resumable
-// boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
-// unwind from the implicated block; any other verdict propagates for the caller to
-// unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
-// it unwinds nothing and returns the verdict unchanged.
+// renderExecOutcome gives operational errors priority over block verdicts and
+// block verdicts priority over a resumable batch boundary. Only a wrong trie
+// root outside the initial cycle and fork validation can schedule a binary-search
+// unwind to locate the bad block. Other verdicts return to the caller with the
+// rejected block's hash when known.
 func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if execErr != nil {
 		return execErr
 	}
 
 	if v := out.verdict; v != nil {
-		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
-			// During the initial cycle a wrong trie root is fatal: there is no fork to
-			// recover from, and handleIncorrectRootHashError can return nil (hiding the
-			// mismatch) or unwind a canonical block. Propagate it instead.
-			if !s.CurrentSyncCycle.IsInitialCycle {
-				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
-			}
+		if !s.CurrentSyncCycle.IsInitialCycle && errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
 		}
-		// A plain invalid block propagates the error without setting a stage unwind
-		// point — the caller owns the unwind. Setting one here would leave a stale
-		// bad-block verdict that blocks a fresh canonical block at the same height
-		// from being re-executed on the next fork-choice.
+		if v.blockHash != (common.Hash{}) {
+			return &RejectedBlockError{Number: v.blockNum, Hash: v.blockHash, Err: v.err}
+		}
 		return v.err
 	}
 

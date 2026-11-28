@@ -75,6 +75,24 @@ func requireValid(t *testing.T, m *execmoduletester.ExecModuleTester, block *typ
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
 
+func TestUpdateForkChoiceRejectedSiblingReturnsParentHash(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+
+	canonicalTip := chain.TopBlock
+	sibling := tamperBlockGasUsed(t, canonicalTip, 1)
+	status, err := m.InsertBlocks(t.Context(), []*types.Block{sibling})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+	result := updateForkChoice(t, m, sibling.Hash(), common.Hash{}, common.Hash{})
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.Status)
+	require.Equal(t, canonicalTip.Hash(), headBlockHash(t, m), "a rejected reorg must preserve the committed head")
+	require.Equal(t, sibling.ParentHash(), result.LatestValidHash, "the rejected sibling's latest valid ancestor is its parent")
+}
+
 func TestUpdateForkChoiceSideForkUnwind(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

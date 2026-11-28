@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -220,6 +219,14 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		rawdb.ReadForkchoiceHead(tx) == blockHash &&
 		(safeHash == (common.Hash{}) || rawdb.ReadForkchoiceSafe(tx) == safeHash) &&
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
+}
+
+func truncateCanonicalAfter(tx kv.RwTx, head uint64) error {
+	from := head + 1
+	if err := rawdb.TruncateCanonicalChain(tx, from); err != nil {
+		return err
+	}
+	return rawdbv3.TxNums.Truncate(tx, from)
 }
 
 // currentFinalisedBlockNum returns zero when finality is unset,
@@ -775,7 +782,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
 			checkpointStateChanges()
-			restoreRecentReceipts = nil
+			// Keep the committed receipts if a later cycle fails.
+			if hasMore && e.accum != nil && e.accum.RecentReceipts != nil {
+				restoreRecentReceipts = e.accum.RecentReceipts.Snapshot()
+			} else {
+				restoreRecentReceipts = nil
+			}
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -808,15 +820,40 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		if errors.Is(err, rules.ErrInvalidBlock) {
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				Status:          ExecutionStatusBadBlock,
-				ValidationError: err.Error(),
-				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
-			}, stateFlushingInParallel)
-			return nil
+		bad, rejected := errors.AsType[*stagedsync.RejectedBlockError](err)
+		if !rejected || bad.Hash == (common.Hash{}) {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		// A catch-up batch from this forkchoice or an earlier one may have
+		// marked the rejected block canonical on disk.
+		// Check the committed view before taking the writer lock for cleanup.
+		canonical, cleanupErr := rawdb.ReadCanonicalHash(roTx, bad.Number)
+		if cleanupErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
+		}
+		var latestValidHash common.Hash
+		if canonical == bad.Hash {
+			teardownOverlay()
+			roTx.Rollback()
+			latestValidHash, cleanupErr = e.pipelineExecutor.discardRejectedCanonicalTail(ctx, bad, blockHash)
+		} else {
+			// An uncommitted reorg may have unwound to a common ancestor. Its head
+			// marker can also point to an unexecuted proposal from an earlier call.
+			var finish uint64
+			finish, cleanupErr = stages.GetStageProgress(tx, stages.Finish)
+			if cleanupErr == nil {
+				latestValidHash, cleanupErr = e.canonicalHash(ctx, tx, finish)
+			}
+		}
+		if cleanupErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
+		}
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			Status:          ExecutionStatusBadBlock,
+			ValidationError: err.Error(),
+			LatestValidHash: latestValidHash,
+		}, stateFlushingInParallel)
+		return nil
 	}
 
 	// if head hash was set then success otherwise no
@@ -864,11 +901,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, stateFlushingInParallel)
 			return nil
 		}
-		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-
-		if err := rawdbv3.TxNums.Truncate(tx, *headNumber+1); err != nil {
+		if err := truncateCanonicalAfter(tx, *headNumber); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 

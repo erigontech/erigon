@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -50,6 +52,7 @@ type PipelineExecutor struct {
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
 	validationNotifications *shards.Notifications
+	stateTransitionObserver StateTransitionObserver
 	dispatcher              *Dispatcher
 	logger                  log.Logger
 }
@@ -208,9 +211,11 @@ func (e *initialSyncPublicationError) Unwrap() error {
 	return e.err
 }
 
-// ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
-// It downloads block files, then executes them in a hasMore loop until
-// all frozen blocks are processed.
+// ProcessFrozenBlocks downloads block snapshots at startup. Unless onlySnapDownload
+// is set, it also executes pending canonical blocks, including those recorded by
+// an interrupted forkchoice. After a rejection, startup can keep the last committed
+// execution checkpoint if discarding the unexecuted suffix preserves frozen blocks
+// and the last accepted chain.
 func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
@@ -223,10 +228,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// Notifications follow database commit boundaries. Earlier committed cycles
 	// must survive a later failure.
-	restoreStateChanges := hook.CheckpointStateChanges()
+	restoreNotifications := hook.CheckpointNotifications()
 	defer func() {
-		if restoreStateChanges != nil {
-			restoreStateChanges()
+		if restoreNotifications != nil {
+			restoreNotifications()
 		}
 	}()
 
@@ -266,7 +271,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		restoreStateChanges = nil
+		restoreNotifications = nil
 		return nil
 	}
 
@@ -303,7 +308,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err := sd.Commit(ctx, tx, resolve); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
-			restoreStateChanges = hook.CheckpointStateChanges()
+			restoreNotifications = hook.CheckpointNotifications()
+			pe.observeStateTransition(ctx, StateTransitionStartupCommitComplete)
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			pe.db.BuildFilesInBackground(collateToTxNum)
@@ -336,7 +342,21 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		bad, ok := errors.AsType[*stagedsync.RejectedBlockError](err)
+		if !ok {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+		// Drop the failed cycle before reading the durable checkpoint. Earlier
+		// cycles still have committed notifications to publish below.
+		doms.Close()
+		tx.Rollback()
+		if err := pe.discardRejectedStartupTail(ctx, bad); err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+		pe.logger.Warn("Discarded unexecuted catch-up blocks at startup", "rejectedBlock", bad.Number, "hash", bad.Hash)
+		if restoreNotifications != nil {
+			restoreNotifications()
+		}
 	}
 
 	if hook != nil {
@@ -351,7 +371,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return err
 			}
 			// Restoring after publication would send the same changes again.
-			restoreStateChanges = nil
+			restoreNotifications = nil
 			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
@@ -361,6 +381,97 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 	return nil
+}
+
+func (pe *PipelineExecutor) discardRejectedStartupTail(ctx context.Context, bad *stagedsync.RejectedBlockError) error {
+	head, err := pe.discardRejectedCanonicalTail(ctx, bad, common.Hash{})
+	if err == nil && head == (common.Hash{}) {
+		return bad
+	}
+	return err
+}
+
+// A committed batch records the proposed chain beyond Finish. Return the checkpoint
+// if the rejected block was in a suffix we could discard, or zero if we kept it.
+func (pe *PipelineExecutor) discardRejectedCanonicalTail(ctx context.Context, bad *stagedsync.RejectedBlockError, proposedHead common.Hash) (common.Hash, error) {
+	var head common.Hash
+	err := pe.db.Update(ctx, func(tx kv.RwTx) error {
+		hash, err := rawdb.ReadCanonicalHash(tx, bad.Number)
+		if err != nil {
+			return err
+		}
+		if hash == (common.Hash{}) || hash != bad.Hash {
+			return nil
+		}
+
+		finish, aligned, err := stages.GetStageProgressIfAllEqual(tx, stages.Finish, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if !aligned || bad.Number <= finish || finish < pe.blockReader.FrozenBlocksInView(tx) {
+			return nil
+		}
+
+		safe, err := pe.preservesAcceptedChain(ctx, tx, finish, proposedHead)
+		if err != nil {
+			return err
+		}
+		if !safe {
+			return nil
+		}
+
+		head, err = pe.resetCanonicalToCheckpoint(ctx, tx, finish)
+		return err
+	})
+	return head, err
+}
+
+// Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
+func (pe *PipelineExecutor) resetCanonicalToCheckpoint(ctx context.Context, tx kv.RwTx, finish uint64) (common.Hash, error) {
+	head, ok, err := pe.blockReader.CanonicalHash(ctx, tx, finish)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !ok {
+		return common.Hash{}, fmt.Errorf("missing canonical hash at committed block %d", finish)
+	}
+	if err := truncateCanonicalAfter(tx, finish); err != nil {
+		return common.Hash{}, err
+	}
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
+		if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
+			return common.Hash{}, err
+		}
+	}
+	// Startup follows these two heads. The consensus client's forkchoice stays at its last accepted update.
+	rawdb.WriteHeadBlockHash(tx, head)
+	return head, rawdb.WriteHeadHeaderHash(tx, head)
+}
+
+func (pe *PipelineExecutor) preservesAcceptedChain(ctx context.Context, tx kv.Tx, finish uint64, proposedHead common.Hash) (bool, error) {
+	accepted := rawdb.ReadForkchoiceHead(tx)
+	if accepted == (common.Hash{}) {
+		// Before the first accepted forkchoice, a live request can identify its
+		// own persisted proposal. Startup has no such request.
+		return proposedHead != (common.Hash{}) && rawdb.ReadHeadHeaderHash(tx) == proposedHead, nil
+	}
+	number, err := pe.blockReader.HeaderNumber(ctx, tx, accepted)
+	if err != nil || number == nil {
+		return false, err
+	}
+	// A taller accepted fork is safe only if it diverged at or below Finish.
+	for height := *number; height > finish; height-- {
+		canonical, err := rawdb.ReadCanonicalHash(tx, height)
+		if err != nil || accepted == canonical {
+			return false, err
+		}
+		header, err := pe.blockReader.Header(ctx, tx, accepted, height)
+		if err != nil || header == nil {
+			return false, err
+		}
+		accepted = header.ParentHash
+	}
+	return true, nil
 }
 
 // lastValidationExecStageTiming reports the Execution stage duration of the most

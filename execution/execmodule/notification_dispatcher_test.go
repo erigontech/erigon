@@ -50,6 +50,7 @@ import (
 
 type stateChangesCapture struct {
 	batch *remoteproto.StateChangeBatch
+	calls int
 }
 
 func TestStateChangesSnapshotMissingExecutedHeader(t *testing.T) {
@@ -103,6 +104,7 @@ func TestStateChangesSnapshotUsesExecutionProgress(t *testing.T) {
 
 func (c *stateChangesCapture) SendStateChanges(_ context.Context, batch *remoteproto.StateChangeBatch) {
 	c.batch = batch
+	c.calls++
 }
 
 func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {

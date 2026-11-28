@@ -614,19 +614,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if opStop != nil && opStop.kind == stopOperational {
 						return opStop.err
 					}
-					// A plain (non-stopCause) context cancellation — shutdown, or the CL
-					// cancelling the payload — is operational, not a block verdict: return
-					// it raw before the missing-block guard, which a cancel would otherwise
-					// trip into a spurious ErrInvalidBlock reported to the CL as INVALID.
-					// A stopCause cancellation falls through to the switch below, which
-					// maps stopReachedMax/stopMoreWork to their proper results.
+					// A caller cancellation can leave results missing. Preserve its cause.
+					// Deliberate batch stops are handled below.
 					if _, isStop := stopCauseOf(executorContext); !isStop && executorContext.Err() != nil {
 						return context.Cause(executorContext)
 					}
-					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-						pe.verdict = &blockVerdict{blockNum: lastBlockResult.BlockNum, err: fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)}
-						return nil
+					if err := checkAppliedBlockResults(txResultBlocks, appliedBlocks); err != nil {
+						return fmt.Errorf("apply loop exited (lastBlockResult=%d maxBlockNum=%d): %w", lastBlockResult.BlockNum, pe.maxBlockNum, err)
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
 					// is a clean batch end (nil), stopMoreWork a partial batch to resume
@@ -1402,20 +1396,23 @@ func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	return nil
 }
 
-// applyLoopMissingBlocks returns the blockNums in txResultBlocks that did not
-// produce a corresponding blockResult — the per-block validator never fired for
-// them and an invalid block could become canonical. Returns nil when every block
-// whose tx-results arrived also produced a blockResult. Does NOT flag a short
-// maxBlockNum: a size-limit-cut partial batch legitimately stops short and resumes
-// via the stage loop's ErrLoopExhausted handling.
-func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
+// ErrIncompleteExecution means the executor stopped before it could determine block validity.
+var ErrIncompleteExecution = errors.New("incomplete execution")
+
+// A batch may end short of its target, but every block that produced transaction
+// results needs a block result before its execution can be committed.
+func checkAppliedBlockResults(txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 	var missing []uint64
 	for n := range txResultBlocks {
 		if _, ok := appliedBlocks[n]; !ok {
 			missing = append(missing, n)
 		}
 	}
-	return missing
+	if len(missing) == 0 {
+		return nil
+	}
+	slices.Sort(missing)
+	return fmt.Errorf("%w: %d block(s) had tx-results without a blockResult: %v", ErrIncompleteExecution, len(missing), missing)
 }
 
 // blockVerdict is a definitive invalid-block verdict from the apply loop's
@@ -1526,11 +1523,8 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 	return pe.consumers.close()
 }
 
-// execLoopExitCheck enforces the completeness invariant for the exec loop's clean
-// exit paths: pe.blockExecutors must be drained. A non-empty map means a block was
-// scheduled but never produced a blockResult (post-validation never fired, so an
-// invalid block could be accepted) — surface it as a loud InvalidBlock error. The
-// reason argument tags the call site in the failure log.
+// A clean exit must drain all scheduled blocks. Pending work means the executor
+// stopped before validation finished, so the caller can retry the batch.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
 	// A deliberate stopCause, or any context cancellation (shutdown, parent/CL
 	// cancel), explains the exit — pending blocks are then not a silent miss.
@@ -1551,7 +1545,7 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	pe.RUnlock()
 	if pendingBlocks > 0 {
 		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
-			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
+			ErrIncompleteExecution, pendingBlocks, pendingNums, reason)
 	}
 	return nil
 }

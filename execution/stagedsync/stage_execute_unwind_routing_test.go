@@ -112,7 +112,8 @@ func TestRenderExecOutcome(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		boom := fmt.Errorf("worker reopen roTx: boom")
-		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, err: plainInvalid}}
+		s.CurrentSyncCycle.IsInitialCycle = true
+		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xbad5"), err: plainInvalid}}
 		got := renderExecOutcome(boom, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, boom)
 		require.NotErrorIs(t, got, rules.ErrInvalidBlock, "operational failure must not surface as an invalid block")
@@ -120,10 +121,8 @@ func TestRenderExecOutcome(t *testing.T) {
 	})
 
 	t.Run("plain invalid verdict propagates without setting an unwind point", func(t *testing.T) {
-		// A plain invalid block propagates the error and lets the caller own the
-		// unwind: setting a stage unwind point here would leave a stale bad-block
-		// verdict that blocks a fresh canonical block at the same height from
-		// re-executing on the next fork-choice.
+		// A pending unwind would carry this rejection into the next forkchoice,
+		// which may select a valid block at the same height.
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, err: plainInvalid}}
@@ -155,7 +154,10 @@ func TestRenderExecOutcome(t *testing.T) {
 		cfg := ExecuteBlockCfg{badBlockHalt: true}
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 20, blockHash: common.HexToHash("0xbad20"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, cfg, s, u, logger)
-		require.Same(t, wrongRoot, got)
+		require.ErrorIs(t, got, wrongRoot)
+		var rejected *RejectedBlockError
+		require.ErrorAs(t, got, &rejected)
+		require.Equal(t, out.verdict.blockHash, rejected.Hash)
 		require.Empty(t, u.calls)
 	})
 
@@ -169,28 +171,27 @@ func TestRenderExecOutcome(t *testing.T) {
 
 	t.Run("wrong root on non-initial cycle takes the binary-search path from the implicated block", func(t *testing.T) {
 		u := &recordingUnwinder{}
-		// blockNum (5) <= s.BlockNumber (10) makes handleIncorrectRootHashError
-		// return nil at its guard, before touching applyTx. If the routing wrongly
-		// fell through to the plain branch it would UnwindTo(lastHeader-1)=19.
+		// The wrong-root handler checks the block height before reading the
+		// database, so this case needs no apply transaction.
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = false
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xdead"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
-		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
+		require.Empty(t, u.calls, "the stage has already reached the block with the wrong root")
 	})
 
-	t.Run("wrong root on initial cycle is fatal and not routed through the recovery handler", func(t *testing.T) {
-		// On the initial cycle there is no fork to recover from, and
-		// handleIncorrectRootHashError would return nil for blockNum (5) <=
-		// s.BlockNumber (10), hiding the mismatch. The wrong trie root must
-		// propagate as a fatal error instead, scheduling no unwind.
+	t.Run("initial cycle reports the rejected block without scheduling an unwind", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 5, blockHash: common.HexToHash("0xdead"), err: wrongRoot}}
 		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		var bad *RejectedBlockError
+		require.ErrorAs(t, got, &bad)
+		require.Equal(t, out.verdict.blockNum, bad.Number)
+		require.Equal(t, out.verdict.blockHash, bad.Hash)
 		require.Empty(t, u.calls, "must not schedule an unwind on the initial cycle")
 	})
 
@@ -213,5 +214,9 @@ func TestRenderExecOutcome(t *testing.T) {
 		require.NoError(t, got)
 		require.Len(t, u.calls, 1)
 		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
+		var rejected *RejectedBlockError
+		require.ErrorAs(t, u.calls[0].reason.ErrBadBlock, &rejected)
+		require.Equal(t, out.verdict.blockNum, rejected.Number, "the rejected block is above the unwind target")
+		require.Equal(t, out.verdict.blockHash, rejected.Hash)
 	})
 }

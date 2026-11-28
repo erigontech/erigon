@@ -27,12 +27,9 @@ import (
 // MaxNotifiedBlocks is the longest block span one notification dispatch covers.
 const MaxNotifiedBlocks = 1024
 
-// RecentReceipts caches recent block receipts for notification dispatch.
-//
-// Requirements:
-// - Erigon3 doesn't store logs in db (yet)
-// - need support unwind of receipts
-// - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
+// RecentReceipts caches block receipts and keeps removed logs for the next
+// notification after an unwind. Dispatchers send notifications once RPC can read
+// the announced state from the published forkchoice overlay or the committed database.
 type RecentReceipts struct {
 	receipts    map[uint64]types.Receipts
 	txs         map[uint64][]types.Transaction
@@ -72,12 +69,21 @@ func (r *RecentReceipts) Clear() {
 func (r *RecentReceipts) Snapshot() (restore func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	receipts, txs, headers, removedLogs := maps.Clone(r.receipts), maps.Clone(r.txs), maps.Clone(r.headers), slices.Clone(r.removedLogs)
+	receipts, txs, headers := cloneReceiptMap(r.receipts), cloneReceiptMap(r.txs), cloneReceiptMap(r.headers)
+	removedLogs := slices.Clone(r.removedLogs)
 	return func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.receipts, r.txs, r.headers, r.removedLogs = receipts, txs, headers, removedLogs
 	}
+}
+
+func cloneReceiptMap[T any](entries map[uint64]T) map[uint64]T {
+	// An empty cache can still have tables reserved for its full capacity.
+	if len(entries) == 0 {
+		return make(map[uint64]T)
+	}
+	return maps.Clone(entries)
 }
 
 // Missing returns the blocks in [from,to) that have no cached receipts.

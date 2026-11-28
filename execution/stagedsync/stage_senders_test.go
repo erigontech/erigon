@@ -379,6 +379,10 @@ func TestSendersUnwindsToTheBlockBeforeABadSignature(t *testing.T) {
 	require.Equal(t, uint64(3), u.point)
 	require.NotNil(t, u.reason.Block)
 	require.Equal(t, hashes[3], *u.reason.Block)
+	var rejected *stagedsync.RejectedBlockError
+	require.ErrorAs(t, u.reason.ErrBadBlock, &rejected)
+	require.Equal(t, uint64(4), rejected.Number)
+	require.Equal(t, hashes[3], rejected.Hash)
 }
 
 func TestSendersBatchUsesEachBlocksSigner(t *testing.T) {
@@ -517,7 +521,10 @@ func recoverSendersOfBlock(t *testing.T, m *execmoduletester.ExecModuleTester, b
 	}()
 	select {
 	case err := <-done:
-		require.Error(t, err)
+		var rejected *stagedsync.RejectedBlockError
+		require.ErrorAs(t, err, &rejected)
+		require.Equal(t, header.Number.Uint64(), rejected.Number)
+		require.Equal(t, hash, rejected.Hash)
 	case <-time.After(10 * time.Second):
 		t.Fatal("senders stage hung after a sender recovery error")
 	}

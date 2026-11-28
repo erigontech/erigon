@@ -1425,7 +1425,9 @@ func (e *EngineServer) HandleForkChoice(
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		// The executor reports its head, which is the last valid ancestor only when it is the parent.
+		// The executor can return a recovery checkpoint. If it differs from the
+		// requested head's parent, latestValidHash is null because the checkpoint
+		// alone cannot tell us where the valid chain ends.
 		var lastValid common.Hash
 		if result.LatestValidHash == header.ParentHash {
 			lastValid = header.ParentHash
