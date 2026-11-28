@@ -168,7 +168,7 @@ func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 
 	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, nil)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, allIrreversible, false))
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, collateAll, false))
 	agg.WaitForFiles()
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		for _, table := range db.Debug().DomainTables(kv.RCacheDomain) {

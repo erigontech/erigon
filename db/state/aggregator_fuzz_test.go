@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -121,7 +121,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(db, txs, allIrreversible)
+		err = agg.BuildFiles(db, txs, collateAll)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -220,7 +220,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(db, txs, allIrreversible)
+		err = agg.BuildFiles(db, txs, collateAll)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())

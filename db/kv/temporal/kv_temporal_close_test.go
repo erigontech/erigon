@@ -40,7 +40,7 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 			return sd.Flush(ctx, tx)
 		}))
 	}
-	require.NoError(t, db.BuildFiles(3, allIrreversible))
+	require.NoError(t, db.BuildFiles(3, collateAll))
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)

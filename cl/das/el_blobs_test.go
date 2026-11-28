@@ -80,12 +80,14 @@ func newELBlobsTestPeerDas(t testing.TB, cfg *clparams.BeaconChainConfig, caplin
 	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	state := peerdasstate.NewPeerDasState(cfg, &networkConfig)
 	state.SetLocalNodeID(newCgcTestLocalNode(t))
-	return &peerdas{
+	d := &peerdas{
 		state:         state,
 		beaconConfig:  cfg,
 		caplinConfig:  caplinConfig,
 		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), cfg, beaconevents.NewEventEmitter()),
 	}
+	d.initBlobBuilds()
+	return d
 }
 
 func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
