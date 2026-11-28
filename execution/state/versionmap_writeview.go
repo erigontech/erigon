@@ -16,7 +16,7 @@ import (
 // a BAL block has no cell. Yielded VersionedWrite values are reused per element, never pointers
 // into the map, so a consumer cannot mutate the map through the view.
 type versionMapWriteView struct {
-	keys  WriteSetView
+	keys  *WriteSet
 	vm    *VersionMap
 	txIdx int
 }
@@ -25,14 +25,17 @@ type versionMapWriteView struct {
 // WriteSetView whose values come from the map. Reads use floor at txIdx+1 so they
 // include the tx's OWN write at txIdx (the reader convention at txIdx would yield
 // the pre-tx state; this publication view wants the tx's produced values).
-func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteSetView {
+func NewVersionMapWriteView(keys *WriteSet, vm *VersionMap, txIdx int) WriteSetView {
+	if keys == nil {
+		keys = &WriteSet{}
+	}
 	return &versionMapWriteView{keys: keys, vm: vm, txIdx: txIdx}
 }
 
 func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint256.Int]) bool) {
 		var vw VersionedWrite[uint256.Int]
-		for addr, kw := range v.keys.Balances() {
+		for addr, kw := range v.keys.balance {
 			vw = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, valStatus: kw.valStatus}, Val: kw.Val}
 			if val, res, ok := v.vm.ReadBalance(addr, v.txIdx+1); ok && res.Status() != MVReadResultNone {
 				vw.Val, vw.valStatus = val, res.ValStatus()
@@ -47,7 +50,7 @@ func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedW
 func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
 		var vw VersionedWrite[uint64]
-		for addr, kw := range v.keys.Nonces() {
+		for addr, kw := range v.keys.nonce {
 			val, ok := versionedUpdateNonce(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
@@ -63,7 +66,7 @@ func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWri
 func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
 		var vw VersionedWrite[uint64]
-		for addr, kw := range v.keys.Incarnations() {
+		for addr, kw := range v.keys.incarnation {
 			val, ok := versionedUpdateIncarnation(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
@@ -79,7 +82,7 @@ func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *Versio
 func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.CodeHash]) bool) {
 		var vw VersionedWrite[accounts.CodeHash]
-		for addr, kw := range v.keys.CodeHashes() {
+		for addr, kw := range v.keys.codeHash {
 			val, ok := versionedUpdateCodeHash(v.vm, addr, v.txIdx+1)
 			if !ok {
 				val = kw.Val
@@ -95,7 +98,7 @@ func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *Versione
 func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.Code]) bool) {
 		var vw VersionedWrite[accounts.Code]
-		for addr, kw := range v.keys.Codes() {
+		for addr, kw := range v.keys.code {
 			code := kw.Val
 			if val, ok := versionedUpdateCode(v.vm, addr, v.txIdx+1); ok {
 				code = val
@@ -111,7 +114,7 @@ func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrit
 func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	return func(yield func(accounts.Address, *VersionedWrite[bool]) bool) {
 		var vw VersionedWrite[bool]
-		for addr, kw := range v.keys.SelfDestructs() {
+		for addr, kw := range v.keys.selfDestruct {
 			val := kw.Val
 			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.resolved() {
 				val = sd
@@ -132,6 +135,10 @@ func (v *versionMapWriteView) IsEmpty() bool {
 	return v.keys.IsEmpty()
 }
 
+func (v *versionMapWriteView) hasPath(path AccountPath) bool {
+	return v.keys.hasPath(path)
+}
+
 func (v *versionMapWriteView) Count() int {
 	return v.keys.Count()
 }
@@ -143,7 +150,7 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 		// Allocating per address made this the hot path of storage-heavy blocks.
 		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
 		var scratch []VersionedWrite[uint256.Int]
-		for addr, inner := range v.keys.Storages() {
+		for addr, inner := range v.keys.storage {
 			clear(out)
 			if cap(scratch) < len(inner) {
 				scratch = make([]VersionedWrite[uint256.Int], len(inner))
@@ -172,7 +179,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
 		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
 		var scratch []VersionedWrite[uint256.Int]
-		for addr, inner := range v.keys.Storages() {
+		for addr, inner := range v.keys.storage {
 			clear(out)
 			// A creation earlier in the block clears storage without writing its slots, so a
 			// later tx's read can predate the clear and its origin is not the slot's prev value.

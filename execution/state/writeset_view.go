@@ -28,6 +28,9 @@ type WriteSetView interface {
 	AccountChanges() iter.Seq[accounts.Address]
 	IsEmpty() bool
 	Count() int
+	// hasPath is false only when the set holds no write of path, so a caller can skip
+	// ranging that iterator: a range-over-func loop allocates even when nothing is yielded.
+	hasPath(path AccountPath) bool
 }
 
 var _ WriteSetView = (*WriteSet)(nil)
