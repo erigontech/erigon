@@ -250,6 +250,10 @@ func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error
 }
 
 func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+	return s.runUnwind(false, sd, tx)
+}
+
+func (s *Sync) runUnwind(initialCycle bool, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -260,11 +264,11 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		s.unwindReason = UnwindReason{}
 		s.currentStage = 0
 	}()
-	for j := 0; j < len(s.unwindOrder); j++ {
-		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
+	for _, stage := range s.unwindOrder {
+		if stage == nil || stage.Disabled || stage.Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], sd, tx); err != nil {
+		if err := s.unwindStage(initialCycle, stage, sd, tx); err != nil {
 			return err
 		}
 	}
@@ -378,23 +382,13 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			reason := s.unwindReason
+			if err := s.runUnwind(initialCycle, sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
