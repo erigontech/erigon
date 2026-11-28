@@ -141,6 +141,7 @@ func coldOps() []fastOp {
 		forked(op("BLOBBASEFEE", "opBlobBaseFee")),
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
+		{name: "MSTORE8", execute: "opMstore8", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore8", dynamicGas: "gasMStore8", allocated: "stack.peek().LtUint64(uint64(len(callContext.Memory.store)))"},
 		op("GAS", "opGas"),
 		copyOp("CALLDATACOPY", "opCallDataCopy", "memoryCallDataCopy", "gasCallDataCopy"),
 		copyOp("CODECOPY", "opCodeCopy", "memoryCodeCopy", "gasCodeCopy"),

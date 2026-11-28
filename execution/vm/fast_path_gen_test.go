@@ -106,6 +106,7 @@ var fastPathOps = map[OpCode]fastPathWant{
 	BLOBBASEFEE:    {opBlobBaseFee, GasQuickStep, 0, 1, nil, nil},
 	PC:             {opPc, GasQuickStep, 0, 1, nil, nil},
 	MSIZE:          {opMsize, GasQuickStep, 0, 1, nil, nil},
+	MSTORE8:        {opMstore8, GasFastestStep, 2, 0, memoryMStore8, gasMStore8},
 	GAS:            {opGas, GasQuickStep, 0, 1, nil, nil},
 	CALLDATACOPY:   {opCallDataCopy, GasFastestStep, 3, 0, memoryCallDataCopy, gasCallDataCopy},
 	CODECOPY:       {opCodeCopy, GasFastestStep, 3, 0, memoryCodeCopy, gasCodeCopy},

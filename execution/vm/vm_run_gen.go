@@ -705,6 +705,14 @@ run:
 						pc++
 						continue run
 					}
+				case MSTORE8:
+					if sLen >= 2 && stack.peek().LtUint64(uint64(len(callContext.Memory.store))) && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						off, val := callContext.Stack.pop2Uint64()
+						callContext.Memory.store[off] = byte(val)
+						pc++
+						continue run
+					}
 				case GAS:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -991,6 +999,7 @@ var isColdOp = [256]bool{
 	BLOBBASEFEE:    true,
 	PC:             true,
 	MSIZE:          true,
+	MSTORE8:        true,
 	GAS:            true,
 	CALLDATACOPY:   true,
 	CODECOPY:       true,
