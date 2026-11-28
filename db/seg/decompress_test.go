@@ -1466,3 +1466,44 @@ func TestDecompressorRejectsDepthsOutOfTreeOrder(t *testing.T) {
 		require.Nil(t, d)
 	})
 }
+
+func TestMadvWillNeedWordsAdvisesPageAlignedWindowsInsideTheMap(t *testing.T) {
+	d := prepareBinaryDict(t, 1024, 512, false)
+	defer d.Close()
+
+	var advised [][2]uint64
+	orig := madviseWillNeed
+	madviseWillNeed = func(b []byte) error {
+		off := uint64(uintptr(unsafe.Pointer(unsafe.SliceData(b))) - uintptr(unsafe.Pointer(unsafe.SliceData(d._mmapHandle))))
+		advised = append(advised, [2]uint64{off, off + uint64(len(b))})
+		return nil
+	}
+	defer func() { madviseWillNeed = orig }()
+
+	page := uint64(os.Getpagesize())
+	base := d.wordsFileOffset
+	words := uint64(len(d._mmapHandle)) - base
+	require.Greater(t, words, uint64(3*willNeedWindow))
+
+	for _, r := range [][2]uint64{{0, words}, {page + 7, 2*willNeedWindow + 9}, {words - 1, words + 1<<20}, {0, 1}} {
+		advised = advised[:0]
+		d.MadvWillNeedWords(r[0], r[1])
+		from, to := base+r[0], min(base+r[1], uint64(len(d._mmapHandle)))
+		require.NotEmpty(t, advised, r)
+		require.Equal(t, from-from%page, advised[0][0], r)
+		require.Equal(t, to, advised[len(advised)-1][1], r)
+		for i, w := range advised {
+			require.LessOrEqual(t, w[1]-w[0], uint64(willNeedWindow), r)
+			require.Zero(t, w[0]%page, r)
+			if i > 0 {
+				require.Equal(t, advised[i-1][1], w[0], r)
+			}
+		}
+	}
+
+	for _, r := range [][2]uint64{{5, 5}, {9, 3}, {words, words + 10}, {words + 10, words + 20}} {
+		advised = advised[:0]
+		d.MadvWillNeedWords(r[0], r[1])
+		require.Empty(t, advised, r)
+	}
+}
