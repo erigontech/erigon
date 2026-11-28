@@ -245,6 +245,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiIdleTimeoutFlag,
 
 	&utils.CaplinArchiveBlocksFlag,
+	&utils.CaplinPruneModeFlag,
+	&utils.CaplinPruneDistanceFlag,
+	&utils.CaplinPruneSidecarsFlag,
+	&utils.CaplinPruneStatesFlag,
 	&utils.CaplinArchiveBlobsFlag,
 	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,

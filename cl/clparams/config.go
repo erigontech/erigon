@@ -44,10 +44,13 @@ import (
 var LatestFinalizedStateFileName = "finalized.ssz_snappy"
 
 type CaplinConfig struct {
+	NodeBinary string
 	// Archive related config
 	ArchiveBlocks             bool
 	ArchiveBlobs              bool
 	ArchiveStates             bool
+	RequestedRetention        CaplinRetention
+	RetentionSource           CaplinRetentionSource
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
@@ -165,6 +168,16 @@ func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSl
 		return MinBlobRetentionFloor(c.BlobsArchiveFromSlot, serveFloor)
 	}
 	return serveFloor
+}
+
+func (c CaplinConfig) ColumnRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
+	if c.ColumnKeepSlots > 0 {
+		if currentSlot <= c.ColumnKeepSlots {
+			return 0
+		}
+		return currentSlot - c.ColumnKeepSlots
+	}
+	return beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
 }
 
 type NetworkType int
@@ -1858,6 +1871,24 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	default:
 		return nil, nil, chainspec.MainnetChainID, errors.New("chain not found")
 	}
+}
+
+func ResolveBeaconConfig(networkID uint64, customConfigPath string, devnet bool) (*BeaconChainConfig, error) {
+	if devnet {
+		beaconCfg, _, err := CustomConfig(customConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		return &beaconCfg, nil
+	}
+	if !EmbeddedSupported(networkID) {
+		return nil, fmt.Errorf("beacon chain config not found for network %d", networkID)
+	}
+	_, beaconCfg := GetConfigsByNetwork(NetworkType(networkID))
+	if beaconCfg.SlotsPerEpoch == 0 {
+		return nil, fmt.Errorf("beacon chain config not found for network %d", networkID)
+	}
+	return beaconCfg, nil
 }
 
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {

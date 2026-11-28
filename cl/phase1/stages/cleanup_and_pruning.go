@@ -54,19 +54,9 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 			logger.Warn("failed to retire blob snapshots", "err", err)
 		}
 	}
-	columnFloor := cfg.beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
-	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {
-		columnFloor = floorFor(currentSlot, keep)
-	}
+	columnFloor := cfg.caplinConfig.ColumnRetentionFloor(cfg.beaconCfg, currentSlot)
 	if err := cfg.peerDas.PruneBelow(columnFloor); err != nil {
 		logger.Warn("failed to prune data column sidecars", "err", err)
 	}
 	return nil
-}
-
-func floorFor(head, keep uint64) uint64 {
-	if head <= keep {
-		return 0
-	}
-	return head - keep
 }

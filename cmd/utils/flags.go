@@ -1081,6 +1081,23 @@ var (
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
+	CaplinPruneModeFlag = cli.StringFlag{
+		Name:  "caplin.prune.mode",
+		Usage: "Caplin retention mode: archive keeps all blocks, sidecars and states; spec uses the chain's block and sidecar serve windows and no state history; pruned accepts epoch counts or all, honors the minimum windows and all in this version, while minimal and tip are available in a later version; alignment example at head slot 15,660,000: distance 100,000, sidecars 8,192, states 4,096 give floors 12,460,000 / 15,390,000 / 15,527,424",
+		Value: "spec",
+	}
+	CaplinPruneDistanceFlag = cli.StringFlag{
+		Name:  "caplin.prune.distance",
+		Usage: "block retention distance in epochs; the minimum is the chain's spec window (33024 / 4096 epochs on mainnet), or all; this version honors the minimum and all, while larger finite distances are available in a later version; alignment example at head slot 15,660,000: distance 100,000, sidecars 8,192, states 4,096 give floors 12,460,000 / 15,390,000 / 15,527,424",
+	}
+	CaplinPruneSidecarsFlag = cli.StringFlag{
+		Name:  "caplin.prune.sidecars",
+		Usage: "blob sidecar and data-column retention distance in epochs; the minimum is the chain's spec window (33024 / 4096 epochs on mainnet), or all; this version honors the minimum and all, and a distance above the minimum keeps data columns that long while blob sidecars keep the spec window; other finite sidecar distances are available in a later version; alignment example at head slot 15,660,000: distance 100,000, sidecars 8,192, states 4,096 give floors 12,460,000 / 15,390,000 / 15,527,424",
+	}
+	CaplinPruneStatesFlag = cli.StringFlag{
+		Name:  "caplin.prune.states",
+		Usage: "state retention distance in epochs; the minimum is 0 epochs, or all; this version honors 0 and all, while finite state distances are available in a later version; alignment example at head slot 15,660,000: distance 100,000, sidecars 8,192, states 4,096 give floors 12,460,000 / 15,390,000 / 15,527,424",
+	}
 	CaplinArchiveStatesFlag = cli.BoolFlag{
 		Name:  "caplin.states-archive",
 		Usage: "enables archival node for historical states in caplin (it will enable block archival as well)",
@@ -1892,6 +1909,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 }
 
 func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.NodeBinary = "erigon"
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
 	cfg.CaplinConfig.DisableIPBlockLimits = ctx.Bool(CaplinIPBlockLimitsDisableFlag.Name)
 	trustedCIDRs := ctx.StringSlice(CaplinIPBlockLimitsTrustedCIDRsFlag.Name)
@@ -1922,6 +1940,9 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 		if ctx.IsSet(CaplinImmediateBlobBackfillFlag.Name) {
 			log.Warn("Caplin's immediate blob backfilling is disabled when engine API is enabled")
 		}
+		if CaplinRetentionFlagsSet(ctx) {
+			log.Warn("Caplin retention flag is disabled when engine API is enabled")
+		}
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
@@ -1934,12 +1955,12 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 	cfg.CaplinConfig.BlobsBackfillEndpointWorkers = ctx.Int(CaplinBlobsBackfillEndpointWorkersFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
-	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
-		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
-	}
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
+	if err := clparams.ApplyCaplinRetentionRestrictions(&cfg.CaplinConfig); err != nil {
+		Fatalf("%v", err)
+	}
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
@@ -1949,6 +1970,95 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
 	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
+}
+
+func applyCaplinRetentionFlags(ctx *cli.Command, cfg *ethconfig.Config) error {
+	cfg.CaplinConfig.RequestedRetention = clparams.CaplinRetention{Mode: clparams.CaplinPruneModeSpec}
+	cfg.CaplinConfig.RetentionSource = clparams.CaplinRetentionSourceDefault
+	newFlag := firstSetFlag(ctx, caplinNewRetentionFlags)
+	legacyFlag := firstSetFlag(ctx, caplinLegacyRetentionFlags)
+	newFlagsSet := newFlag != ""
+	legacyFlagsSet := legacyFlag != ""
+	if cfg.CaplinConfig.EnableEngineAPI {
+		return nil
+	}
+	if newFlagsSet && legacyFlagsSet {
+		return fmt.Errorf("--%s cannot be combined with --%s", newFlag, legacyFlag)
+	}
+	if !newFlagsSet && !legacyFlagsSet {
+		return nil
+	}
+	if !cfg.CaplinConfig.IsDevnet() && !clparams.EmbeddedSupported(cfg.NetworkID) {
+		return nil
+	}
+	beaconCfg, err := clparams.ResolveBeaconConfig(cfg.NetworkID, cfg.CaplinConfig.CustomConfigPath, cfg.CaplinConfig.IsDevnet())
+	if err != nil {
+		return err
+	}
+	if newFlagsSet {
+		return ApplyCaplinNewRetentionFlags(ctx, &cfg.CaplinConfig, beaconCfg)
+	}
+	retention, exact, err := clparams.LegacyRetention(cfg.CaplinConfig, beaconCfg)
+	if err != nil {
+		return err
+	}
+	cfg.CaplinConfig.RequestedRetention = retention
+	if exact {
+		cfg.CaplinConfig.RetentionSource = clparams.CaplinRetentionSourceLegacyExact
+	} else {
+		cfg.CaplinConfig.RetentionSource = clparams.CaplinRetentionSourceLegacyInexact
+	}
+	logArgs := []any{"regime", retention.Mode.String(), "floors", retention.String()}
+	if !exact {
+		logArgs = append(logArgs, "inexact", true)
+	}
+	log.Info("Caplin retention", logArgs...)
+	return nil
+}
+
+func ApplyCaplinNewRetentionFlags(ctx *cli.Command, cfg *clparams.CaplinConfig, beaconCfg *clparams.BeaconChainConfig) error {
+	retention, err := clparams.ParseCaplinRetention(
+		ctx.String(CaplinPruneModeFlag.Name),
+		ctx.String(CaplinPruneDistanceFlag.Name),
+		ctx.String(CaplinPruneSidecarsFlag.Name),
+		ctx.String(CaplinPruneStatesFlag.Name),
+		ctx.IsSet(CaplinPruneDistanceFlag.Name),
+		ctx.IsSet(CaplinPruneSidecarsFlag.Name),
+		ctx.IsSet(CaplinPruneStatesFlag.Name),
+	)
+	if err != nil {
+		return err
+	}
+	retention, err = retention.Normalize(beaconCfg)
+	if err != nil {
+		return err
+	}
+	if err := clparams.ApplyRetention(retention, beaconCfg, cfg); err != nil {
+		return err
+	}
+	if err := clparams.ApplyCaplinRetentionRestrictions(cfg); err != nil {
+		return err
+	}
+	cfg.RequestedRetention = retention
+	cfg.RetentionSource = clparams.CaplinRetentionSourceNewFlags
+	return nil
+}
+
+var caplinNewRetentionFlags = []cli.Flag{&CaplinPruneModeFlag, &CaplinPruneDistanceFlag, &CaplinPruneSidecarsFlag, &CaplinPruneStatesFlag}
+
+var caplinLegacyRetentionFlags = []cli.Flag{&CaplinArchiveBlocksFlag, &CaplinArchiveStatesFlag, &CaplinArchiveBlobsFlag, &CaplinArchiveBlobsFromSlotFlag, &CaplinDisableBlobPruningFlag, &CaplinColumnKeepSlotsFlag}
+
+func CaplinRetentionFlagsSet(ctx *cli.Command) bool {
+	return firstSetFlag(ctx, caplinNewRetentionFlags) != ""
+}
+
+func firstSetFlag(ctx *cli.Command, flags []cli.Flag) string {
+	for _, flag := range flags {
+		if ctx.IsSet(flag.Names()[0]) {
+			return flag.Names()[0]
+		}
+	}
+	return ""
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was
@@ -2216,6 +2326,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	}
 
 	if err := setOverrideGenesis(ctx, cfg); err != nil {
+		Fatalf("%v", err)
+	}
+	if err := applyCaplinRetentionFlags(ctx, cfg); err != nil {
 		Fatalf("%v", err)
 	}
 

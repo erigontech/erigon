@@ -18,9 +18,11 @@ package beacon_indicies
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -99,6 +101,112 @@ func ReadHighestCustodyGroupCount(tx kv.Tx) (uint64, error) {
 		return 0, nil
 	}
 	return base_encoding.Decode64FromBytes4(val), nil
+}
+
+const (
+	caplinRetentionValueVersion byte = 1
+	caplinRetentionValueLength  int  = 29
+)
+
+var caplinRetentionModes = [...]clparams.CaplinPruneMode{
+	clparams.CaplinPruneModeSpec,
+	clparams.CaplinPruneModeArchive,
+	clparams.CaplinPruneModePruned,
+	clparams.CaplinPruneModeMinimal,
+	clparams.CaplinPruneModeTip,
+}
+
+var caplinRetentionFloorKinds = [...]clparams.CaplinFloorKind{
+	clparams.CaplinFloorDistance,
+	clparams.CaplinFloorSlot,
+	clparams.CaplinFloorAll,
+}
+
+var caplinRetentionKey = []byte("CaplinRetention")
+
+func WriteCaplinRetention(tx kv.RwTx, r clparams.CaplinRetention) error {
+	mode, err := encodeCaplinRetentionMode(r.Mode)
+	if err != nil {
+		return err
+	}
+	value := make([]byte, caplinRetentionValueLength)
+	value[0] = caplinRetentionValueVersion
+	value[1] = mode
+	for i, floor := range []clparams.CaplinRetentionFloor{r.Blocks, r.Sidecars, r.States} {
+		offset := 2 + i*9
+		value[offset], err = encodeCaplinRetentionFloorKind(floor.Kind)
+		if err != nil {
+			return err
+		}
+		binary.BigEndian.PutUint64(value[offset+1:], floor.Value)
+	}
+	return tx.Put(kv.DatabaseInfo, caplinRetentionKey, value)
+}
+
+func ReadCaplinRetention(tx kv.Tx) (clparams.CaplinRetention, bool, error) {
+	exists, err := tx.Has(kv.DatabaseInfo, caplinRetentionKey)
+	if err != nil {
+		return clparams.CaplinRetention{}, false, err
+	}
+	if !exists {
+		return clparams.CaplinRetention{}, false, nil
+	}
+	value, err := tx.GetOne(kv.DatabaseInfo, caplinRetentionKey)
+	if err != nil {
+		return clparams.CaplinRetention{}, false, err
+	}
+	if len(value) != caplinRetentionValueLength {
+		return clparams.CaplinRetention{}, false, fmt.Errorf("invalid Caplin retention value length: %d", len(value))
+	}
+	if value[0] != caplinRetentionValueVersion {
+		return clparams.CaplinRetention{}, false, fmt.Errorf("unknown Caplin retention value version: %d", value[0])
+	}
+	mode, err := decodeCaplinRetentionMode(value[1])
+	if err != nil {
+		return clparams.CaplinRetention{}, false, err
+	}
+	retention := clparams.CaplinRetention{Mode: mode}
+	floors := []*clparams.CaplinRetentionFloor{&retention.Blocks, &retention.Sidecars, &retention.States}
+	for i, floor := range floors {
+		offset := 2 + i*9
+		kind, err := decodeCaplinRetentionFloorKind(value[offset])
+		if err != nil {
+			return clparams.CaplinRetention{}, false, err
+		}
+		floor.Kind = kind
+		floor.Value = binary.BigEndian.Uint64(value[offset+1:])
+	}
+	return retention, true, nil
+}
+
+func encodeCaplinRetentionMode(mode clparams.CaplinPruneMode) (byte, error) {
+	index := slices.Index(caplinRetentionModes[:], mode)
+	if index < 0 {
+		return 0, fmt.Errorf("invalid Caplin retention mode: %d", mode)
+	}
+	return byte(index + 1), nil
+}
+
+func decodeCaplinRetentionMode(mode byte) (clparams.CaplinPruneMode, error) {
+	if mode == 0 || int(mode) > len(caplinRetentionModes) {
+		return 0, fmt.Errorf("invalid Caplin retention mode byte: %d", mode)
+	}
+	return caplinRetentionModes[mode-1], nil
+}
+
+func encodeCaplinRetentionFloorKind(kind clparams.CaplinFloorKind) (byte, error) {
+	index := slices.Index(caplinRetentionFloorKinds[:], kind)
+	if index < 0 {
+		return 0, fmt.Errorf("invalid Caplin retention floor kind: %d", kind)
+	}
+	return byte(index + 1), nil
+}
+
+func decodeCaplinRetentionFloorKind(kind byte) (clparams.CaplinFloorKind, error) {
+	if kind == 0 || int(kind) > len(caplinRetentionFloorKinds) {
+		return 0, fmt.Errorf("invalid Caplin retention floor kind byte: %d", kind)
+	}
+	return caplinRetentionFloorKinds[kind-1], nil
 }
 
 var custodyRaiseSlotKey = []byte("CustodyRaiseSlot")

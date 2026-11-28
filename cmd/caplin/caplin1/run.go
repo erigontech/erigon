@@ -306,17 +306,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
-	// Write the genesis beacon block to the index DB before the sentinel and fork
-	// choice are created. This ensures the genesis block is available when peers
-	// ask for it via beacon_blocks_by_root (otherwise we return empty and get banned).
-	// Previously this only ran for dev mode, but Kurtosis devnets also start from
-	// genesis and need the block written early.
-	if state != nil && state.Slot() == 0 {
-		if err := writeDevGenesisBeaconBlock(ctx, state, beaconConfig, indexDB); err != nil {
-			return fmt.Errorf("write genesis beacon block: %w", err)
-		}
-	}
-
 	caplinOptions := []CaplinOption{}
 	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
 		caplinOptions = append(caplinOptions, builderOption)
@@ -352,6 +341,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err := csn.RemoveOwnTmpFiles(); err != nil {
 		logger.Warn("[CaplinSnapshots] could not sweep leftover .tmp files", "err", err)
 	}
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	epbsPool := pool.NewEpbsPool()
@@ -373,6 +365,25 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	emitters := beaconevents.NewEventEmitter()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
+	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
+	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig), logger)
+	if err := stateSnapshots.OpenFolder(); err != nil {
+		return err
+	}
+	oldestStored, err := antiquary.OldestStored(ctx, indexDB, csn, stateSnapshots, blobStorage, columnStorage)
+	if err != nil {
+		return err
+	}
+	if err := resolveAndStoreRetention(ctx, indexDB, oldestStored, &config, beaconConfig, ethClock.GetCurrentSlot(), dirs, logger); err != nil {
+		indexDB.Close()
+		return err
+	}
+	if state != nil && state.Slot() == 0 {
+		if err := writeDevGenesisBeaconBlock(ctx, state, beaconConfig, indexDB); err != nil {
+			return fmt.Errorf("write genesis beacon block: %w", err)
+		}
+	}
 
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
@@ -436,8 +447,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err != nil {
 		return err
 	}
-	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
 	var envelopeRebuilder interface {
 		handlers.EnvelopeRebuilder
 		Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -602,7 +611,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
@@ -714,4 +722,75 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	return err
+}
+
+func resolveAndStoreRetention(ctx context.Context, indexDB kv.RwDB, oldest clparams.OldestStoredResult, config *clparams.CaplinConfig, beaconConfig *clparams.BeaconChainConfig, currentSlot uint64, dirs datadir.Dirs, logger log.Logger) error {
+	var stored clparams.CaplinRetention
+	var storedFound bool
+	if err := indexDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		stored, storedFound, err = beacon_indicies.ReadCaplinRetention(tx)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	resolved, action, err := clparams.ResolveRetention(stored, storedFound, config.RequestedRetention, config.RetentionSource, oldest, currentSlot, beaconConfig, config.NodeBinary, dirs.DataDir)
+	if err != nil {
+		return err
+	}
+	floors, err := resolved.Floors(beaconConfig, currentSlot)
+	if err != nil {
+		return err
+	}
+
+	inherited := storedFound && config.RetentionSource == clparams.CaplinRetentionSourceDefault
+	fieldsKept := false
+	if config.RetentionSource == clparams.CaplinRetentionSourceNewFlags || inherited {
+		candidate := *config
+		if err := clparams.ApplyRetention(resolved, beaconConfig, &candidate); err != nil {
+			if !inherited {
+				return err
+			}
+			fieldsKept = true
+		} else if err := clparams.ApplyCaplinRetentionRestrictions(&candidate); err != nil {
+			return err
+		} else {
+			*config = candidate
+		}
+	}
+
+	if action == clparams.CaplinRetentionActionStore {
+		if err := indexDB.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteCaplinRetention(tx, resolved)
+		}); err != nil {
+			return err
+		}
+	}
+
+	logArgs := []any{
+		"regime", resolved.Mode.String(),
+		"floors", resolved.String(),
+		"slots", floors.String(),
+		"source", config.RetentionSource.String(),
+		"action", action.String(),
+	}
+	if fieldsKept {
+		logArgs = append(logArgs, "fields", "kept parsed")
+	}
+	if config.RetentionSource == clparams.CaplinRetentionSourceLegacyInexact {
+		archive, err := clparams.CaplinRetention{Mode: clparams.CaplinPruneModeArchive}.Normalize(beaconConfig)
+		if err != nil {
+			return err
+		}
+		logArgs = append(logArgs, "archive_hint", clparams.CaplinRetentionHint(archive, oldest, currentSlot, beaconConfig, config.NodeBinary, dirs.DataDir))
+	}
+	if resolved.Mode == clparams.CaplinPruneModeArchive && oldest.HoldsData() {
+		if info, err := os.Stat(path.Join(dirs.CaplinIndexing, "mdbx.dat")); err == nil {
+			logArgs = append(logArgs, "mdbx_size", info.Size())
+		}
+		logArgs = append(logArgs, "hint", "capcli seg retire --datadir="+dirs.DataDir)
+	}
+	logger.Info("Caplin retention", logArgs...)
+	return nil
 }
