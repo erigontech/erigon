@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/chain"
@@ -42,9 +46,10 @@ func runOnParent(t *testing.T, r *ephemeralReplay, fx *blockreplay.Fixture) erro
 }
 
 func idleWorkers(r *ephemeralReplay) []*exec.WorkerContext {
-	r.cfg.workers.mu.Lock()
-	defer r.cfg.workers.mu.Unlock()
-	return append([]*exec.WorkerContext(nil), r.cfg.workers.idle...)
+	if ws := r.cfg.workers.Load(); ws != nil {
+		return slices.Clone(*ws)
+	}
+	return nil
 }
 
 // takenDuringCall reports whether every pool read tx of the next call was opened
@@ -147,10 +152,10 @@ func TestExecV3ReusedWorkersAfterACancelledCall(t *testing.T) {
 func TestWorkerStartupErrorKeepsIdleWorkers(t *testing.T) {
 	pe, _ := newResumeTestExec(t, newResumeTestDB(t), chain.AllProtocolChanges)
 	pe.workerCount = 1
-	pe.cfg.workers = &ExecWorkerCache{}
+	pe.cfg.workers = new(atomic.Pointer[[]*exec.WorkerContext])
 	worker := exec.NewWorkerContext(t.Context(), true, nil, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
-	pe.cfg.workers.put([]*exec.WorkerContext{worker})
-	t.Cleanup(func() { closeWorkers(pe.cfg.workers.take(1)) })
+	putWorkers(pe.cfg.workers, []*exec.WorkerContext{worker})
+	t.Cleanup(func() { closeWorkers(takeWorkers(pe.cfg.workers, 1)) })
 
 	pe.enableChaosMonkey = true
 	failure := errors.New("worker startup failed")
@@ -159,15 +164,17 @@ func TestWorkerStartupErrorKeepsIdleWorkers(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 	finish(nil)
 
-	require.Len(t, pe.cfg.workers.idle, 1, "a startup failure took the worker out of the cache")
-	require.Same(t, worker, pe.cfg.workers.idle[0])
+	idle := pe.cfg.workers.Load()
+	require.NotNil(t, idle, "a startup failure took the worker out of the cache")
+	require.Len(t, *idle, 1)
+	require.Same(t, worker, (*idle)[0])
 }
 
 func TestExecV3ConfigsSharingACacheReuseOneWorkerSet(t *testing.T) {
 	r, fx := newReuseReplay(t)
-	shared := &ExecWorkerCache{}
+	shared := new(atomic.Pointer[[]*exec.WorkerContext])
 	other := r.cfg
-	other.workers = &ExecWorkerCache{}
+	other.workers = new(atomic.Pointer[[]*exec.WorkerContext])
 	r.cfg = r.cfg.ShareWorkers(shared)
 	other = other.ShareWorkers(shared)
 
@@ -180,4 +187,33 @@ func TestExecV3ConfigsSharingACacheReuseOneWorkerSet(t *testing.T) {
 	require.NoError(t, runOnParent(t, r, fx))
 	require.True(t, ranOnCached(), "the second config did not run on the set the first one parked")
 	require.True(t, slices.Equal(workers, idleWorkers(r)))
+}
+
+func TestWorkerCacheNeverGivesOneWorkerToTwoCalls(t *testing.T) {
+	const n = 2
+	cache := new(atomic.Pointer[[]*exec.WorkerContext])
+	var inUse sync.Map
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 200 {
+				workers := takeWorkers(cache, n)
+				if workers == nil {
+					for range n {
+						workers = append(workers, exec.NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New()))
+					}
+				}
+				for _, w := range workers {
+					_, busy := inUse.LoadOrStore(w, struct{}{})
+					assert.False(t, busy, "one worker went to two calls at the same time")
+				}
+				for _, w := range workers {
+					inUse.Delete(w)
+				}
+				putWorkers(cache, workers)
+			}
+		})
+	}
+	wg.Wait()
+	closeWorkers(takeWorkers(cache, n))
 }

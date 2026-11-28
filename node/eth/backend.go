@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -844,7 +845,7 @@ func New(
 	}
 
 	// One worker set for every config that runs ExecV3 over chainDB, blockReader and engine.
-	execWorkers := &stagedsync.ExecWorkerCache{}
+	execWorkers := new(atomic.Pointer[[]*exec.WorkerContext])
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, execWorkers)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder

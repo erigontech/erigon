@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -96,7 +97,10 @@ type ExecuteBlockCfg struct {
 	// reference instead of the header.
 	balSink func(blockNum uint64, bal types.BlockAccessList)
 
-	workers *ExecWorkerCache
+	// workers keeps the idle exec workers between calls. A worker keeps the db, block
+	// reader and engine it was built with, so only configs built over the same ones
+	// may share it.
+	workers *atomic.Pointer[[]*exec.WorkerContext]
 }
 
 // SetBALSink registers a callback receiving each executed block's derived BAL.
@@ -105,8 +109,8 @@ func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.Bloc
 	cfg.balSink = sink
 }
 
-// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own cache.
-func (cfg ExecuteBlockCfg) ShareWorkers(c *ExecWorkerCache) ExecuteBlockCfg {
+// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own.
+func (cfg ExecuteBlockCfg) ShareWorkers(c *atomic.Pointer[[]*exec.WorkerContext]) ExecuteBlockCfg {
 	if c != nil {
 		cfg.workers = c
 	}
@@ -153,7 +157,7 @@ func StageExecuteBlocksCfg(
 		experimentalBAL:   experimentalBAL,
 		readAheader:       readAheader,
 		discardCommitment: dbg.DiscardCommitment(),
-		workers:           &ExecWorkerCache{},
+		workers:           new(atomic.Pointer[[]*exec.WorkerContext]),
 	}
 }
 

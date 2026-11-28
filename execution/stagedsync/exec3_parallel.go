@@ -1648,7 +1648,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
-	if pe.execWorkers = pe.cfg.workers.take(poolSize); pe.execWorkers != nil {
+	if pe.execWorkers = takeWorkers(pe.cfg.workers, poolSize); pe.execWorkers != nil {
 		for _, w := range pe.execWorkers {
 			w.Rebind(workersCtx, pe.taskExecMetrics)
 		}
@@ -1659,7 +1659,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		}
 	}
 	workers := pe.execWorkers
-	pe.stopWorkers = sync.OnceFunc(func() { pe.cfg.workers.put(workers) })
+	pe.stopWorkers = sync.OnceFunc(func() { putWorkers(pe.cfg.workers, workers) })
 
 	pe.pool = newTaskPool(pe, pe.execWorkers)
 	pe.execLoopGroup.Go(func() error {
@@ -3728,3 +3728,41 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 // traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
 func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }
+
+// takeWorkers hands out the idle workers in p when there are n of them, or nil: the
+// caller then builds its own. A nil p keeps no workers.
+func takeWorkers(p *atomic.Pointer[[]*exec.WorkerContext], n int) []*exec.WorkerContext {
+	if p == nil {
+		return nil
+	}
+	ws := p.Swap(nil)
+	if ws != nil && len(*ws) == n {
+		return *ws
+	}
+	if ws != nil {
+		closeWorkers(*ws)
+	}
+	return nil
+}
+
+// putWorkers parks workers that no task runs on and keeps them in p for the next
+// take, or closes them when p is nil or already holds a set. A set is parked before
+// it is published, so a taker never gets a worker that is still bound to a run.
+func putWorkers(p *atomic.Pointer[[]*exec.WorkerContext], workers []*exec.WorkerContext) {
+	if p == nil || p.Load() != nil {
+		closeWorkers(workers)
+		return
+	}
+	for _, w := range workers {
+		w.Park()
+	}
+	if !p.CompareAndSwap(nil, &workers) {
+		closeWorkers(workers)
+	}
+}
+
+func closeWorkers(workers []*exec.WorkerContext) {
+	for _, w := range workers {
+		w.Close()
+	}
+}
