@@ -2,6 +2,7 @@ package blockreplay_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,7 +85,7 @@ func TestWitnessDomainPutOwnedKeepsTheValue(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	doms, _, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, log.New())
+	doms, writes, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, log.New())
 	require.NoError(t, err)
 	defer doms.Close()
 
@@ -94,4 +95,6 @@ func TestWitnessDomainPutOwnedKeepsTheValue(t *testing.T) {
 	got, _, err := doms.GetLatest(kv.CodeDomain, tx, addr[:])
 	require.NoError(t, err)
 	require.Same(t, &owned[0], &got[0])
+	require.Contains(t, writes.Diff(&blockreplay.Outputs{}), fmt.Sprintf("extra code write changes state: %x", addr[:]),
+		"the replay write set must record the owned code write")
 }
