@@ -19,7 +19,10 @@ package p2p
 import (
 	"context"
 	"errors"
+	"maps"
+	"math"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -32,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/p2p/p2pcfg"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -176,7 +180,7 @@ func TestBackwardBlockDownloader_DiscardsBALWithInvalidBlockAccessIndex(t *testi
 	feed := BbdResultFeed{ch: make(chan BlockBatchResult, 1)}
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	require.NoError(t, bbd.downloadBlocksForHeaders(t.Context(), []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed))
+	require.NoError(t, bbd.downloadBlocksForHeaders(t.Context(), []*types.Header{header}, peersContext{}, applyBbdOptions(p2pcfg.DefaultBlockDownload), ticker, feed))
 	batch, err := feed.Next(t.Context())
 	require.NoError(t, err)
 	require.Len(t, batch.Blocks, 1)
@@ -221,7 +225,7 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 		defer ticker.Stop()
 		result := make(chan error, 1)
 		go func() {
-			result <- bbd.downloadBlocksForHeaders(ctx, []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed)
+			result <- bbd.downloadBlocksForHeaders(ctx, []*types.Header{header}, peersContext{}, applyBbdOptions(p2pcfg.DefaultBlockDownload), ticker, feed)
 		}()
 		synctest.Wait()
 		select {
@@ -296,6 +300,109 @@ func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Hea
 	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
 	require.NoError(t, err)
 	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+}
+
+func TestBackwardBlockDownloader_PartialConfigUsesDefaults(t *testing.T) {
+	t.Run("partial", func(t *testing.T) {
+		headers := newTestHeaderChain(31, nil)
+		logger := testlog.Logger(t, log.LvlCrit)
+		peerTracker := NewPeerTracker(logger, nil)
+		peerTracker.PeerConnected(PeerIdFromUint64(1))
+		bbd := NewBackwardBlockDownloader(
+			logger,
+			&chainServingBbdFetcher{headers: headers},
+			peerTracker,
+			t.TempDir(),
+			WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10}),
+		)
+		want := p2pcfg.DefaultBlockDownload
+		want.BlocksBatchSize = 10
+		require.Equal(t, want, bbd.blockDownload)
+		feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+		require.NoError(t, err)
+		require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+	})
+
+	t.Run("zero", func(t *testing.T) {
+		logger := testlog.Logger(t, log.LvlCrit)
+		peerTracker := NewPeerTracker(logger, nil)
+		bbd := NewBackwardBlockDownloader(
+			logger,
+			&chainServingBbdFetcher{},
+			peerTracker,
+			t.TempDir(),
+			WithBlockDownloadConfig(p2pcfg.BlockDownload{}),
+		)
+		require.Equal(t, p2pcfg.DefaultBlockDownload, bbd.blockDownload)
+	})
+}
+
+func TestBackwardBlockDownloader_InvalidMaxParallelBodyDownloadsUseDefault(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value int
+	}{
+		{name: "zero", value: 0},
+		{name: "negative", value: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headers := newTestHeaderChain(31, nil)
+			logger := testlog.Logger(t, log.LvlCrit)
+			peerTracker := NewPeerTracker(logger, nil)
+			peerTracker.PeerConnected(PeerIdFromUint64(1))
+			bbd := NewBackwardBlockDownloader(
+				logger,
+				&chainServingBbdFetcher{headers: headers},
+				peerTracker,
+				t.TempDir(),
+				WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: 10, MaxParallelBodyDownloads: test.value}),
+			)
+			feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+			require.NoError(t, err)
+			require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
+		})
+	}
+}
+
+func TestBackwardBlockDownloader_InvalidTimeoutsUseDefault(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		set  func(*p2pcfg.BlockDownload)
+	}{
+		{name: "initial header fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.InitialHeaderFetchTimeout = -time.Second }},
+		{name: "header chain batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.HeaderChainBatchFetchTimeout = -time.Second }},
+		{name: "bodies batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.BodiesBatchFetchTimeout = -time.Second }},
+		{name: "bals batch fetch", set: func(cfg *p2pcfg.BlockDownload) { cfg.BALsBatchFetchTimeout = -time.Second }},
+		{name: "bals request", set: func(cfg *p2pcfg.BlockDownload) { cfg.BALsRequestTimeout = -time.Second }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := p2pcfg.BlockDownload{BlocksBatchSize: 10}
+			test.set(&cfg)
+			logger := testlog.Logger(t, log.LvlCrit)
+			peerTracker := NewPeerTracker(logger, nil)
+			bbd := NewBackwardBlockDownloader(logger, &stubBbdFetcher{}, peerTracker, t.TempDir(), WithBlockDownloadConfig(cfg))
+			want := p2pcfg.DefaultBlockDownload
+			want.BlocksBatchSize = 10
+			require.Equal(t, want, bbd.blockDownload)
+		})
+	}
+}
+
+func TestBackwardBlockDownloader_LargeBlocksBatchSizeDoesNotPanic(t *testing.T) {
+	headers := newTestHeaderChain(31, nil)
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	peerTracker.PeerConnected(PeerIdFromUint64(1))
+	bbd := NewBackwardBlockDownloader(
+		logger,
+		&chainServingBbdFetcher{headers: headers},
+		peerTracker,
+		t.TempDir(),
+		WithBlockDownloadConfig(p2pcfg.BlockDownload{BlocksBatchSize: math.MaxUint64}),
+	)
+	feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]})
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(t.Context(), t, feed))
 }
 
 // A persistent full BAL deficit must not fail the download: the blocks are
@@ -476,4 +583,51 @@ func TestBackwardBlockDownloader_LastResortRoundTriesPeersMarkedByOldTimeout(t *
 	for peerId, timedOut := range timedOutOnce {
 		require.True(t, timedOut.Load(), peerId.String())
 	}
+}
+
+type timeoutRecordingBbdFetcher struct {
+	chainServingBbdFetcher
+	mu             sync.Mutex
+	headerTimeouts map[time.Duration]int
+	bodyTimeouts   map[time.Duration]int
+}
+
+func (s *timeoutRecordingBbdFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.mu.Lock()
+	s.headerTimeouts[defaultFetcherConfig.CopyWithOptions(opts...).responseTimeout]++
+	s.mu.Unlock()
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func (s *timeoutRecordingBbdFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	s.mu.Lock()
+	s.bodyTimeouts[defaultFetcherConfig.CopyWithOptions(opts...).responseTimeout]++
+	s.mu.Unlock()
+	return s.chainServingBbdFetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+func TestBackwardBlockDownloader_UsesConfiguredTimeouts(t *testing.T) {
+	headers := newTestHeaderChain(31, nil)
+	fetcher := &timeoutRecordingBbdFetcher{
+		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
+		headerTimeouts:         map[time.Duration]int{},
+		bodyTimeouts:           map[time.Duration]int{},
+	}
+	cfg := p2pcfg.DefaultBlockDownload
+	cfg.InitialHeaderFetchTimeout = 3 * time.Second
+	cfg.HeaderChainBatchFetchTimeout = 4 * time.Second
+	cfg.BodiesBatchFetchTimeout = 5 * time.Second
+
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	peerTracker.PeerConnected(PeerIdFromUint64(1))
+	bbd := NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir(), WithBlockDownloadConfig(cfg))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
+	require.NoError(t, err)
+	require.Equal(t, len(headers)-1, drainBbdFeed(ctx, t, feed))
+
+	require.Equal(t, []time.Duration{3 * time.Second, 4 * time.Second}, slices.Sorted(maps.Keys(fetcher.headerTimeouts)))
+	require.Equal(t, []time.Duration{5 * time.Second}, slices.Sorted(maps.Keys(fetcher.bodyTimeouts)))
 }
