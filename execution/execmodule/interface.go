@@ -83,6 +83,9 @@ type ForkChoiceResult struct {
 	MissingHash     common.Hash
 	// UpdateInProgress distinguishes admitted asynchronous work from a Busy rejection.
 	UpdateInProgress bool
+	// HeadBelowFinalized indicates that forkchoiceState.headBlockHash references an ancestor below the finalized block.
+	// As per engine_forkchoiceUpdated spec, client software MUST NOT begin a payload build process in this case.
+	HeadBelowFinalized bool
 }
 
 // ForkChoiceState is the native return type for GetForkChoice.
