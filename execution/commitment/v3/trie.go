@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -181,6 +182,7 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	if err != nil {
 		return nil, err
 	}
+	log.Info("[fss] fold", "keys", seen, "accounts", len(accounts), "storageTasks", len(storage))
 	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.storageWorkersMax, t.fanOutMin)
 	if err != nil {
 		return nil, err
