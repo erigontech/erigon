@@ -523,6 +523,10 @@ func (s *Antiquary) removeBlockOverlaps() {
 	}
 }
 
+func (s *Antiquary) Backfilled() bool {
+	return s.backfilled.Load()
+}
+
 func (s *Antiquary) NotifyBackfilled() {
 	// we set up the range for [lowestRawSlot, finalized]
 	s.backfilled.Store(true) // this is the lowest slot not in snapshots

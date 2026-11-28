@@ -413,6 +413,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 							return fmt.Errorf("failed to write genesis beacon block: %w", err)
 						}
+						if cfg.antiquary != nil {
+							cfg.antiquary.NotifyBackfilled()
+						}
 						cfg.state = nil // Release the state
 						return nil
 					}
