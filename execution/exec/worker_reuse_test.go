@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -90,7 +91,7 @@ func TestParkDropsTheRunBindings(t *testing.T) {
 	w.SetReader(state.NewNoopReader())
 	w.EnablePrevBlockReads(state.NewPrevBlockList())
 	w.chainTx = parkTestTx{}
-	w.rs = &state.StateV3Buffered{}
+	w.rs = state.NewStateV3Buffered(state.NewStateV3(&execctx.SharedDomains{}, false, log.New()))
 
 	versionMap := state.NewVersionMap(nil)
 	w.ibs.SetVersionMap(versionMap)
@@ -189,4 +190,12 @@ func TestACancelReachesOnlyItsOwnRun(t *testing.T) {
 		synctest.Wait()
 		require.True(t, w.evm.Cancelled(), "the run's own cancel did not reach its EVM")
 	})
+}
+
+func TestParkKeepsTheIntraBlockState(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	ibs := w.ibs
+	w.Park()
+	require.Same(t, ibs, w.ibs, "a parked worker drops the IntraBlockState it should keep")
 }

@@ -31,14 +31,14 @@ func (c *execWorkerCache) take(n int) []*exec.WorkerContext {
 }
 
 // put parks workers that no task runs on and keeps them for the next take, or closes
-// them when the cache already holds a set.
+// them when the cache is nil or already holds a set.
 func (c *execWorkerCache) put(workers []*exec.WorkerContext) {
-	for _, w := range workers {
-		w.Park()
-	}
 	if c != nil {
 		c.mu.Lock()
 		if c.idle == nil {
+			for _, w := range workers {
+				w.Park()
+			}
 			c.idle, workers = workers, nil
 		}
 		c.mu.Unlock()
