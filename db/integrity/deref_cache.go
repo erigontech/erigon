@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -25,28 +26,40 @@ import (
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type fileFingerprint struct {
 	basename string
 	hash     [20]byte // SHA1 InfoHash from .torrent file
+	path     string
 }
+
+type verifiedFile struct {
+	path string
+	hash [20]byte
+}
+
+const integrityCacheVersion = "integrity-cache-v1"
 
 // IntegrityCache records which files have already passed an integrity check so
 // that repeated runs can skip them.  has/add must only be called from the main
 // goroutine (before spawning workers and after eg.Wait() respectively).
 type IntegrityCache struct {
-	path    string
-	entries map[string]string // cacheKey (check+basenames) -> tab-separated hashes
-	dirty   bool              // true if entries were added or replaced
+	path        string
+	entries     map[string]string // cacheKey (check+basenames) -> tab-separated hashes
+	dirty       bool              // true if entries were added or replaced
+	verifiedSet map[verifiedFile]struct{}
+	readOnly    bool
 }
 
 // LoadIntegrityCache reads the cache file at path into an IntegrityCache.
 // Returns an empty cache if the file does not exist.
 func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	c := &IntegrityCache{
-		path:    path,
-		entries: make(map[string]string),
+		path:        path,
+		entries:     make(map[string]string),
+		verifiedSet: make(map[verifiedFile]struct{}),
 	}
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -57,6 +70,18 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
+	if !scanner.Scan() {
+		return c, scanner.Err()
+	}
+	header := scanner.Text()
+	if header != integrityCacheVersion {
+		if strings.HasPrefix(header, "integrity-cache-") {
+			c.readOnly = true
+		} else {
+			c.dirty = true
+		}
+		return c, nil
+	}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -68,10 +93,9 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	return c, scanner.Err()
 }
 
-// Save atomically writes all entries to disk.
-// No-ops when nothing changed since Load.
+// Save atomically writes changed entries and upgrades legacy files, not newer formats.
 func (c *IntegrityCache) Save() error {
-	if !c.dirty {
+	if c.readOnly || !c.dirty {
 		return nil
 	}
 	tmpPath := c.path + ".tmp"
@@ -80,6 +104,10 @@ func (c *IntegrityCache) Save() error {
 		return err
 	}
 	w := bufio.NewWriter(f)
+	if _, err := fmt.Fprintln(w, integrityCacheVersion); err != nil {
+		f.Close()
+		return err
+	}
 	for key, hashes := range c.entries {
 		// Reconstruct full entry: interleave basenames from key with hashes
 		if _, err := fmt.Fprintln(w, formatEntry(key, hashes)); err != nil {
@@ -97,10 +125,10 @@ func (c *IntegrityCache) Save() error {
 	return os.Rename(tmpPath, c.path)
 }
 
-// has reports whether (check, files) is already in the cache with matching hashes.
+// has reports whether every file's infohash was verified in this run and matches the cache.
 // Safe to call on nil receiver (returns false).
 func (c *IntegrityCache) has(check string, files []fileFingerprint) bool {
-	if c == nil {
+	if c == nil || !c.filesVerified(files) {
 		return false
 	}
 	key := cacheKey(check, files)
@@ -111,11 +139,10 @@ func (c *IntegrityCache) has(check string, files []fileFingerprint) bool {
 	return hashes == encodeHashes(files)
 }
 
-// add records (check, files) as successfully checked, replacing any existing entry
-// for the same check+basenames combination.
+// add records (check, files) after every file's infohash was verified in this run.
 // Safe to call on nil receiver (no-op).
 func (c *IntegrityCache) add(check string, files []fileFingerprint) {
-	if c == nil {
+	if c == nil || !c.filesVerified(files) {
 		return
 	}
 	key := cacheKey(check, files)
@@ -136,9 +163,48 @@ func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
 		fps = append(fps, fileFingerprint{
 			basename: filepath.Base(path),
 			hash:     mi.HashInfoBytes(),
+			path:     cachePath(path),
 		})
 	}
 	return fps, nil
+}
+
+func (c *IntegrityCache) markVerified(path string, hash [20]byte) {
+	c.verifiedSet[verifiedFile{path: path, hash: hash}] = struct{}{}
+}
+
+func (c *IntegrityCache) filesVerified(files []fileFingerprint) bool {
+	for _, file := range files {
+		if file.path != "" {
+			if _, ok := c.verifiedSet[verifiedFile{path: file.path, hash: file.hash}]; !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func cachePath(path string) string {
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return filepath.Clean(path)
+}
+
+func PrepareIntegrityCache(ctx context.Context, path string, snapshotsDir string, failFast bool, logger log.Logger) (*IntegrityCache, error) {
+	cache, err := LoadIntegrityCache(path)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
+	err = verifyTorrentFiles(ctx, snapshotsDir, failFast, logger, cache.markVerified)
+	if err != nil {
+		return cache, fmt.Errorf("torrent verification failed: %w", err)
+	}
+	return cache, nil
 }
 
 // cacheKey produces a key from check name and file basenames (without hashes).

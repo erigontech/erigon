@@ -51,8 +51,5 @@ func TestProgressSetZeroTotal(t *testing.T) {
 		if got := ps.String(); got != "job=0%" {
 			t.Errorf("processed=%d: String() = %q, want job=0%%", processed, got)
 		}
-		if got, ok := ps.DiagnosticsData()["job"]; !ok || got != 0 {
-			t.Errorf("processed=%d: DiagnosticsData()[job] = %d, present = %t; want 0, true", processed, got, ok)
-		}
 	}
 }

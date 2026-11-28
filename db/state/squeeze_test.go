@@ -41,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -58,7 +60,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(db, uint64(txCount), unboundedFinalityCtx)
+	err := agg.BuildFiles(db, uint64(txCount), collateAll)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -326,8 +328,8 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			}
 			require.NotEmpty(t, v)
 
-			expanded := commitment.BranchData(v)
-			require.NoError(t, expanded.Validate(k),
+			expanded := branch.BranchData(v)
+			require.NoError(t, v2.ValidateBranchData(expanded, k),
 				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
 
 			// Walk embedded plain-key fields and assert each is full-length.
@@ -433,10 +435,9 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 
 	require.Equal(t, rootInFiles, finalRoot)
 	if foldV3 {
-		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 		require.NoError(t, err)
-		require.Zero(t, check.Orphans)
-		require.Equal(t, finalRoot, check.Root)
+		require.Equal(t, finalRoot, checks[0].Root)
 	}
 }
 
@@ -554,7 +555,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 			require.NoError(t, domains.Flush(ctx, rwTx))
 			domains.Close()
 			require.NoError(t, rwTx.Commit())
-			require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+			require.NoError(t, agg.BuildFiles(db, txNum, collateAll))
 			rwTx, err = db.BeginTemporalRw(ctx) //nolint:gocritic
 			require.NoError(t, err)
 			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
@@ -566,7 +567,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
 	if txNum < filesBoundary {
-		require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+		require.NoError(t, agg.BuildFiles(db, txNum, collateAll))
 	}
 
 	dirs := agg.Dirs()
@@ -602,7 +603,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 
 		logger, flushes := log.New(), &flushRecorder{}
 		logger.SetHandler(flushes)
-		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, unboundedFinalityCtx, logger, false)
+		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, collateAll, logger, false)
 		require.NoError(t, err)
 		require.Equal(t, roots[toBlock], common.Hash(root))
 		return flushes.direct
@@ -637,11 +638,10 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		if last >= filesEnd {
 			break
 		}
-		check, err := state.FoldCommitmentV3(ctx, agg, last+1)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{last + 1}, nil)
 		require.NoError(t, err, "block %d", b)
-		require.Zero(t, check.Orphans, "block %d", b)
-		require.Equal(t, uint64(b), check.BlockNum)
-		require.Equal(t, roots[uint64(b)], common.Hash(check.Root), "block %d", b)
+		require.Equal(t, uint64(b), checks[0].BlockNum)
+		require.Equal(t, roots[uint64(b)], common.Hash(checks[0].Root), "block %d", b)
 	}
 }
 
@@ -883,7 +883,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -1101,7 +1101,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Build files
 	t.Logf("Building files for %d txs...", totalTxs)
-	err = agg.BuildFiles(db, totalTxs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, totalTxs, collateAll)
 	require.NoError(t, err)
 
 	// Validate

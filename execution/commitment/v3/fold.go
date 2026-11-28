@@ -38,7 +38,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 	if n.childMask == 0 {
 		return empty.RootHash, nil
 	}
-	if n.plane != planeAccount && n.plane != planeStorage {
+	if n.plane != PlaneAccount && n.plane != PlaneStorage {
 		return [32]byte{}, fmt.Errorf("%w: 0x%02x", errFoldPlane, n.plane)
 	}
 	if len(n.path) > 63 {
@@ -90,7 +90,7 @@ func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
 		return nil, err
 	}
 	var encScratch [leafRefScratch]byte
-	if n.plane == planeAccount {
+	if n.plane == PlaneAccount {
 		return append(out, hashLongRef(appendLeafRLP(encScratch[:0], compact, payload))...), nil
 	}
 	return append(out, hashLongRef(appendStorageLeafRLP(encScratch[:0], compact, payload))...), nil
@@ -122,7 +122,7 @@ func branchRefs(n *node, refStore *[16][32]byte) (refs [16][]byte, err error) {
 func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst, payloadDst []byte) (compact, leafKey, rawPayload, encodedPayload []byte, err error) {
 	suffixCount := 64 - len(n.path) - 1
 	suffix, rawPayload := n.leafAt(nib)
-	if len(suffix) != packedLen(suffixCount) {
+	if len(suffix) != PackedLen(suffixCount) {
 		return nil, nil, nil, nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
 	leafKey = keyDst[:0]
@@ -137,7 +137,7 @@ func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst, payloadDst
 	compactKey[len(leafKey)] = nibbles.Terminator
 	compact = nibbles.HexToCompactInto(compactDst[:0], compactKey[:len(leafKey)+1])
 	encodedPayload = rawPayload
-	if n.plane == planeAccount {
+	if n.plane == PlaneAccount {
 		nonce, balance, codeHash, storageRoot, decodeErr := decodeAccountLeaf(rawPayload)
 		if decodeErr != nil {
 			return nil, nil, nil, nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, decodeErr)

@@ -35,6 +35,8 @@ import (
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/mvcc"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -55,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 var (
@@ -94,10 +95,10 @@ type Domain struct {
 	checker *DependencyIntegrityChecker
 
 	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
-	branchCache *commitment.BranchCache
+	branchCache *branchcache.BranchCache
 	// Adaptive pin controller, co-located with branchCache so pin residency ages
 	// by block-access recency across all SharedDomains rather than per-SD.
-	adaptivePinController *commitment.AdaptivePinController
+	adaptivePinController *branchcache.AdaptivePinController
 
 	// _testBuildAccessorHook - test-only: called with the recsplit and decompressor
 	// before the build loop in buildHashMapAccessor.
@@ -156,13 +157,13 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 // BranchCache returns the long-lived commitment-trie branch cache attached
 // to this domain. Non-nil only on the commitment domain. Lifetime is the
 // owning Aggregator's lifetime.
-func (d *Domain) BranchCache() *commitment.BranchCache {
+func (d *Domain) BranchCache() *branchcache.BranchCache {
 	return d.branchCache
 }
 
 // AdaptivePinController returns the aggregator-lifetime pin controller
 // co-located with BranchCache. Non-nil only on the commitment domain.
-func (d *Domain) AdaptivePinController() *commitment.AdaptivePinController {
+func (d *Domain) AdaptivePinController() *branchcache.AdaptivePinController {
 	return d.adaptivePinController
 }
 
@@ -1507,7 +1508,7 @@ func (dt *DomainRoTx) unwind(
 	rwTx kv.RwTx,
 	txNumUnwindTo uint64,
 	domainDiffs []kv.DomainEntryDiff,
-	expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error),
+	expandBranch func([]byte, branch.BranchData, uint64, uint64) (branch.BranchData, error),
 ) error {
 	d := dt.d
 	step := txNumUnwindTo / dt.stepSize

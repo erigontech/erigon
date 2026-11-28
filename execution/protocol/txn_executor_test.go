@@ -135,8 +135,6 @@ func (r *codeAccessRecordingReader) OnCodeAccess(addr accounts.Address, _ []byte
 	r.accesses = append(r.accesses, addr)
 }
 
-func (*codeAccessRecordingReader) OnCodeChange(accounts.CodeHash) func() { return nil }
-
 type accountErrorReader struct {
 	state.StateReader
 	err error
@@ -1860,4 +1858,52 @@ func TestPrecompileCallRunsOutOfGas(t *testing.T) {
 	need := params.TxGas + uint64(len(words))*params.TxDataZeroGas + params.Sha256BaseGas + 2*params.Sha256PerWordGas
 	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), beforeFloor), "the per-word price counts")
 	require.False(t, PrecompileCallRunsOutOfGas(hash(need), beforeFloor))
+}
+
+// TestSenderWithDelegationDesignatorIsNotEOABeforePrague pins that the EIP-7702 exemption
+// from EIP-3607 starts at Prague: before it, a sender whose code is a delegation designator
+// is a contract like any other.
+func TestSenderWithDelegationDesignatorIsNotEOABeforePrague(t *testing.T) {
+	const blockGasLimit = 1_000_000
+	const gasLimit = 100_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	cancun := chain.TestChainOsakaConfig.Copy()
+	cancun.PragueTime = nil
+	cancun.OsakaTime = nil
+
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+		prague bool
+	}{
+		{"cancun", cancun, false},
+		{"prague", chain.TestChainOsakaConfig, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetCode(sender, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+
+			evm := newTestEVM(ibs, tc.config, blockGasLimit)
+			msg := types.NewMessage(
+				sender, recipient, 0, uint256.NewInt(0), gasLimit,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				nil, nil,
+				false, // checkNonce
+				true,  // checkTransaction
+				true,  // checkGas
+				false, // isFree
+				nil,   // maxFeePerBlobGas
+			)
+			_, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			if tc.prague {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrSenderNoEOA)
+		})
+	}
 }

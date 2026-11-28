@@ -152,7 +152,7 @@ type TxPool struct {
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
 	all                     *BySenderAndNonce                // Ordered by sender ID, nonce domain (account or keyed), then nonce
-	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
+	deletedTxns             []*metaTxn                       // rows to delete and unused sender IDs to release at the next flush
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
@@ -1849,7 +1849,7 @@ func (o *kzgOffenders) add(i int) {
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
 // A remote KZG failure skips later txns from that peer; with nil sources,
-// it skips all later remote txns. Skipped txns keep NotSet and are not returned.
+// it skips all later remote txns. Only inputs that pass validation keep NotSet.
 // Non-nil sources must be index-aligned with txns.
 func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, unwinding bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
@@ -1867,7 +1867,11 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
 			offenders.add(i)
 		}
-		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
+		if reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
+		if !txns.IsLocal[i] && offenders.skip(i) {
+			reasons[i] = txpoolcfg.SkippedAfterKZGFailure
 			continue
 		}
 		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, unwinding)
@@ -1914,21 +1918,6 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
 	}
-}
-
-func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, discardReasonsLRU *simplelru.LRU[string, txpoolcfg.DiscardReason]) []txpoolcfg.DiscardReason {
-	for i := range reasons {
-		if reasons[i] != txpoolcfg.NotSet {
-			continue
-		}
-		reason, ok := discardReasonsLRU.Get(string(newTxns.Txns[i].IDHash[:]))
-		if ok {
-			reasons[i] = reason
-		} else {
-			reasons[i] = txpoolcfg.Success
-		}
-	}
-	return reasons
 }
 
 const localAdmissionTimeout = 30 * time.Second
@@ -2017,20 +2006,17 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false)
 			if err != nil {
 				return err
 			}
-			// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
-			// Walk reasons and advance j only on slots that survived validation.
-			for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
-				if reasons[i] != txpoolcfg.NotSet || newTxns.Txns[i] != goodTxns.Txns[j] {
-					continue
+			// Only inputs that passed validation have an insertion result, in input order.
+			for i, j := 0, 0; i < len(reasons); i++ {
+				if reasons[i] == txpoolcfg.NotSet {
+					reasons[i] = addReasons[j]
+					j++
 				}
-				reasons[i] = addReasons[j]
-				j++
 			}
-			reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 			p.notifyPendingTxns(announcements)
 			return nil
 		})
@@ -2049,8 +2035,10 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
+// addTxns returns results in input order. On reload, it queues rows rejected at
+// insertion. discardLocked queues rows for transactions evicted later.
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, fromDB bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -2064,12 +2052,13 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
+	installed := make([]*metaTxn, len(newTxns.Txns))
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
-			if collect && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
+			if !fromDB && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
@@ -2077,9 +2066,14 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
 		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+			if fromDB {
+				mt.TxnSlot = &TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}
+				p.deletedTxns = append(p.deletedTxns, mt)
+			}
 			discardReasons[i] = reason
 			continue
 		}
+		installed[i], discardReasons[i] = mt, txpoolcfg.Success
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
@@ -2100,6 +2094,13 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 
 	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements); err != nil {
 		return announcements, discardReasons, err
+	}
+	// A later input or promotion can evict the entry this input installed. Its
+	// discard reason survives even if the bounded hash cache has forgotten it.
+	for i, mt := range installed {
+		if mt != nil && mt.discardReason != txpoolcfg.NotSet {
+			discardReasons[i] = mt.discardReason
+		}
 	}
 	return announcements, discardReasons, nil
 }
@@ -2331,9 +2332,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	return txpoolcfg.NotSet
 }
 
-// dropping transaction from all sub-structures and from db
-// Important: don't call it while iterating by all
+// discardLocked removes the entry from the pool indexes and queues its database
+// row for deletion on flush. Finish iterating p.all before calling it.
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
+	mt.discardReason = reason
 	p.releaseFrame(mt.TxnSlot)
 	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
 		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
@@ -3420,7 +3422,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
+		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true); err != nil {
 		return err
 	}
 

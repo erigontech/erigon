@@ -31,17 +31,16 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/execfinality"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+const collateAll = uint64(math.MaxUint64)
 
 func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	t.Helper()
@@ -111,7 +110,7 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -124,10 +123,10 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 		require.NoError(t, err)
 	} else {
 		require.ErrorIs(t, err, integrity.ErrSkipped)
-		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 		require.NoError(t, err)
-		require.NotZero(t, check.Records)
-		require.Equal(t, endTxNum-1, check.TxNum)
+		require.NotZero(t, checks[0].Records)
+		require.Equal(t, endTxNum-1, checks[0].TxNum)
 	}
 }
 
@@ -247,7 +246,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(db, 400, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, 400, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -345,10 +344,10 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 			continue
 		}
 
-		bd := commitment.BranchData(v)
-		t.Logf("Branch key=%x data=%s", k, bd.String())
+		bd := branch.BranchData(v)
+		t.Logf("Branch key=%x data=%s", k, v2.BranchDataString(bd))
 
-		err = commitment.VerifyBranchHashes(k, bd, accountValues, storageValues)
+		err = v2.VerifyBranchHashes(k, bd, accountValues, storageValues)
 		checked++
 		if err != nil {
 			t.Errorf("VerifyBranchHashes FAILED for key=%x: %v", k, err)

@@ -19,18 +19,25 @@ package validator_params
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 )
 
+// attachmentTTL is how long a validator stays attached after its last request. Validator clients repeat
+// their proposer preparation and committee subscriptions every epoch, so only a validator that moved to
+// another beacon node or stopped goes unrefreshed for this long.
+const attachmentTTL = time.Hour
+
 type ValidatorParams struct {
 	feeRecipients      sync.Map
-	attachedValidators sync.Map
+	attachedValidators sync.Map // validator index -> time.Time of the last request that attached it
 	generation         atomic.Uint64
+	now                func() time.Time
 }
 
 func NewValidatorParams() *ValidatorParams {
-	return &ValidatorParams{}
+	return &ValidatorParams{now: time.Now}
 }
 
 func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient common.Address) {
@@ -43,7 +50,11 @@ func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient c
 }
 
 func (vp *ValidatorParams) AddAttachedValidator(validatorIndex uint64) {
-	vp.attachedValidators.Store(validatorIndex, struct{}{})
+	vp.attachedValidators.Store(validatorIndex, vp.now())
+}
+
+func isAttached(attachedAt any, now time.Time) bool {
+	return now.Sub(attachedAt.(time.Time)) < attachmentTTL
 }
 
 // Generation changes whenever a registration is added or its fee recipient changes, and is zero
@@ -62,14 +73,21 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 }
 
 func (vp *ValidatorParams) HasAttachedValidator(validatorIndex uint64) bool {
-	_, ok := vp.attachedValidators.Load(validatorIndex)
-	return ok
+	attachedAt, ok := vp.attachedValidators.Load(validatorIndex)
+	return ok && isAttached(attachedAt, vp.now())
 }
 
+// GetValidators returns the attached validators and drops the expired ones.
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
-	vp.attachedValidators.Range(func(key, value any) bool {
-		validators = append(validators, key.(uint64))
+	now := vp.now()
+	vp.attachedValidators.Range(func(key, attachedAt any) bool {
+		if isAttached(attachedAt, now) {
+			validators = append(validators, key.(uint64))
+		} else {
+			// A request that refreshed the entry meanwhile keeps it.
+			vp.attachedValidators.CompareAndDelete(key, attachedAt)
+		}
 		return true
 	})
 	return validators

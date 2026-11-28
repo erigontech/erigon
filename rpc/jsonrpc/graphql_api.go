@@ -314,26 +314,11 @@ const zeroStorageHash = "0x00000000000000000000000000000000000000000000000000000
 
 // GetAccountInfo returns the balance (hex), nonce, and bytecode for an account at the given block.
 func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error) {
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	if err != nil {
 		return "", 0, "", err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return "", 0, "", err
-	}
-
-	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return "", 0, "", err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return "", 0, "", err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
@@ -347,7 +332,11 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 	balStr := acc.Balance.Hex()
 	codeStr := "0x"
 	if !acc.IsEmptyCodeHash() {
-		if codeBytes, codeErr := reader.ReadAccountCode(addr); codeErr == nil && codeBytes != nil {
+		codeBytes, err := reader.ReadAccountCode(addr)
+		if err != nil {
+			return "", 0, "", err
+		}
+		if codeBytes != nil {
 			codeStr = hexutil.Encode(codeBytes)
 		}
 	}
@@ -365,26 +354,11 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, reader, err := api.stateReaderAt(ctx, api.db, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	if err != nil {
-		return "", err
+		return zeroStorageHash, err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.ResolveExecutedBlock(ctx, true, blockNrOrHash, tx, api._blockReader)
-	if err != nil {
-		return zeroStorageHash, err
-	}
-
-	if err := api.checkPruneState(ctx, tx, blockNum); err != nil {
-		return zeroStorageHash, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
-	if err != nil {
-		return zeroStorageHash, err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)

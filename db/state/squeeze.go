@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/version"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 
 	"github.com/c2h5oh/datasize"
 
@@ -336,11 +337,11 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 // BranchData.ReplacePlainKeys keeps the original bytes. A lookup miss returns an error naming
 // the offending shortened key.
 func ExpandShortenedKeysInBranch(
-	branch commitment.BranchData,
+	branch v2branch.BranchData,
 	accounts, storage *DomainRoTx,
 	accountFile, storageFile *FilesItem,
 	startTxNum, endTxNum uint64,
-) (commitment.BranchData, error) {
+) (v2branch.BranchData, error) {
 	storageGetter := storage.dataReader(storageFile.decompressor)
 	accountGetter := accounts.dataReader(accountFile.decompressor)
 	logger := log.Root()
@@ -488,7 +489,7 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx kv.FinalityContext, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, collateToTxNum uint64, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
@@ -626,7 +627,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			toStep++
 		}
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, collateToTxNum, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()

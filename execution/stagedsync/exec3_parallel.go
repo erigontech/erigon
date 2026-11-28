@@ -1641,22 +1641,25 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
-	var err error
-	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
-		workersCtx, true, pe.cfg.db, nil, nil,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
-	)
-	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
-	}
-
 	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
 	// channels. Deterministic — the fault is decided here, not in a speculative worker.
 	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
+
+	if pe.execWorkers = takeWorkers(pe.cfg.workers, poolSize); pe.execWorkers != nil {
+		for _, w := range pe.execWorkers {
+			w.Rebind(workersCtx, pe.taskExecMetrics)
+		}
+	} else {
+		pe.execWorkers = make([]*exec.WorkerContext, poolSize)
+		for i := range pe.execWorkers {
+			pe.execWorkers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+		}
+	}
+	workers := pe.execWorkers
+	pe.stopWorkers = sync.OnceFunc(func() { putWorkers(pe.cfg.workers, workers) })
 
 	pe.pool = newTaskPool(pe, pe.execWorkers)
 	pe.execLoopGroup.Go(func() error {
@@ -1750,7 +1753,8 @@ type txResult struct {
 // sweep, broadcast the advanced frontier.
 //
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
-// is re-queued once the commit frontier reaches its predecessor.
+// is re-queued once that writer validates, and after the named re-run limit once the
+// commit frontier reaches its predecessor.
 
 // selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
 // writes of the previous run that this run no longer makes.
@@ -1759,7 +1763,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
-	// dependency and pauses until this tx commits.
+	// dependency and re-runs once this tx validates.
 	be.versionMap.FlushWrites(result.TxOut, false)
 }
 
@@ -2439,6 +2443,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
+	// A speculative run that read an unfinished write is re-run anyway, so recordDep cancels it.
+	ibs.SetCancel(evm.Cancel)
+	defer func() {
+		ibs.SetCancel(nil)
+		// The cancel must not reach this worker's next task, which may run without a Reset.
+		evm.Reset(evm.TxContext, evm.IntraBlockState())
+	}()
 	result = ev.execTask.Execute(evm, engine, genesis, ibs,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
@@ -2620,10 +2631,13 @@ type blockExecutor struct {
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
+	// re-queues wakeAt[F] and wakeValidated[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
+	// wakeValidated maps a task to the named re-runs waiting for it to validate; a waiter
+	// added after that validation waits for the commit, which also drains this queue.
+	wakeValidated map[int][]*poolTask
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2673,6 +2687,8 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
+		wakeAt:              map[int][]*poolTask{},
+		wakeValidated:       map[int][]*poolTask{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3011,7 +3027,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
 	waiters := be.wakeAt[tx]
+	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
+	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3033,7 +3051,7 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	if pt.parked {
 		pt.parked = false
 		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt) {
+		if !be.requeueAt(tx, tx-1, pt, be.wakeAt) {
 			be.pool.push(pt)
 		}
 		return
@@ -3051,6 +3069,18 @@ func (be *blockExecutor) finishTask(tx int) {
 	}
 }
 
+// signalValidated wakes the named re-runs waiting for tx: its writes are now
+// Validated, which a reader continues on.
+func (be *blockExecutor) signalValidated(tx int) {
+	be.wakeMu.Lock()
+	waiters := be.wakeValidated[tx]
+	delete(be.wakeValidated, tx)
+	be.wakeMu.Unlock()
+	for _, pt := range waiters {
+		be.pool.push(pt)
+	}
+}
+
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
@@ -3062,9 +3092,20 @@ func (be *blockExecutor) dispatchLimit(workers int) int {
 	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
-// requeueAt registers pt to be re-queued when the frontier reaches target. Returns
+// requeueAt registers pt in queue (wakeAt or wakeValidated) under target. Returns
 // false when the frontier is already there; the caller then continues in place.
-func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
+func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask, queue map[int][]*poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target {
+		return false
+	}
+	queue[target] = append(queue[target], pt)
+	return true
+}
+
+func (be *blockExecutor) checkWaitTarget(tx, target int) {
 	// A target beyond the last task can never be signalled — the worker would park
 	// forever. That means a versionMap (block-TxIndex) dependency reached here
 	// without a taskIndexOf translation; fail loud at the exact site.
@@ -3079,13 +3120,6 @@ func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
-	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3214,6 +3248,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
+				be.signalValidated(tx)
 				// Validated against current state; only a later write to one of its
 				// read cells (markReadersDirty) re-flags it for finalize re-validation.
 				delete(be.revalidate, tx)
@@ -3517,9 +3552,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// calculator, producing a wrong trie root when an EIP-7002/7251 SSTORE
 				// changes a previously-untouched slot.
 				syscallIBS := ibs
+				var chainTx kv.Tx = applyTx
+				if overlay := pe.doms.BlockOverlay(); overlay != nil {
+					chainTx = overlay.NewReadView(applyTx)
+				}
+				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, chainTx, pe.cfg.blockReader, pe.logger)
+				getHash := protocol.GetHashFnFromChain(tt.Header, chainReader)
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig, getHash)
 					if err != nil {
 						return nil, err
 					}
@@ -3527,7 +3568,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return ret, err
 				}
 
-				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger,
@@ -3632,7 +3672,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
-		be.wakeAt = map[int][]*poolTask{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
@@ -3694,3 +3733,41 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 // traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
 func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }
+
+// takeWorkers hands out the idle workers in p when there are n of them, or nil: the
+// caller then builds its own. A nil p keeps no workers.
+func takeWorkers(p *atomic.Pointer[[]*exec.WorkerContext], n int) []*exec.WorkerContext {
+	if p == nil {
+		return nil
+	}
+	ws := p.Swap(nil)
+	if ws != nil && len(*ws) == n {
+		return *ws
+	}
+	if ws != nil {
+		closeWorkers(*ws)
+	}
+	return nil
+}
+
+// putWorkers parks workers that no task runs on and keeps them in p for the next
+// take, or closes them when p is nil or already holds a set. A set is parked before
+// it is published, so a taker never gets a worker that is still bound to a run.
+func putWorkers(p *atomic.Pointer[[]*exec.WorkerContext], workers []*exec.WorkerContext) {
+	if p == nil || p.Load() != nil {
+		closeWorkers(workers)
+		return
+	}
+	for _, w := range workers {
+		w.Park()
+	}
+	if !p.CompareAndSwap(nil, &workers) {
+		closeWorkers(workers)
+	}
+}
+
+func closeWorkers(workers []*exec.WorkerContext) {
+	for _, w := range workers {
+		w.Close()
+	}
+}

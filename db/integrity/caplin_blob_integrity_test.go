@@ -824,6 +824,9 @@ func checkCaplinBlobIntegrityChain(t *testing.T, cfg *clparams.BeaconChainConfig
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
+	if chain.cache != nil {
+		require.NoError(t, verifyTorrentFiles(t.Context(), dirs.Snap, true, log.New(), chain.cache.markVerified))
+	}
 	return CheckCaplinBlobSidecars(t.Context(), db, snapshots, cfg, 0, true, chain.cache, log.New())
 }
 
@@ -950,5 +953,10 @@ func (bed *blobIntegrityBed) markCanonical(t *testing.T, slot uint64, root commo
 
 func (bed *blobIntegrityBed) check(t *testing.T, failFast bool, cache *IntegrityCache) error {
 	t.Helper()
+	if cache != nil {
+		if err := verifyTorrentFiles(t.Context(), bed.snapshots.Dir(), true, log.New(), cache.markVerified); err != nil {
+			return err
+		}
+	}
 	return CheckCaplinBlobSidecars(t.Context(), bed.db, bed.snapshots, &bed.cfg, 0, failFast, cache, log.New())
 }

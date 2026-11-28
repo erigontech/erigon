@@ -228,13 +228,9 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 				return nil
 			}
 		}
-		// After SeekBothRange returns nil, cursor position is indeterminate;
-		// use NextSubtree+Seek (not NextNoDup) to safely advance.
-		next, ok := kv.NextSubtree(k)
-		if !ok {
-			break
-		}
-		k, _, err = hi.valsCDup.Seek(next)
+		// After SeekBothRange returns nil, cursor position is indeterminate, so Seek
+		// to k+0x00: the smallest key after k. NextSubtree(k) would skip keys that have k as a prefix.
+		k, _, err = hi.valsCDup.Seek(append(bytes.Clone(k), 0))
 		if err != nil {
 			return err
 		}

@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -92,7 +92,7 @@ func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	key := []byte{0xaa, 0xbb}

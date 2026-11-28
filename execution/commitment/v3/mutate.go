@@ -66,7 +66,7 @@ func remove(n *node, path []byte) (removalState, error) {
 	}
 
 	if n.leafMask&bit != 0 {
-		if suffix, _ := n.leafAt(nib); !packedMatches(suffix, path[depth+1:]) {
+		if suffix, _ := n.leafAt(nib); !PackedMatches(suffix, path[depth+1:]) {
 			return removalState{}, ErrRemoveNotFound
 		}
 		n.clear(nib)
@@ -96,7 +96,7 @@ func applyRemoval(n *node, nib int, state removalState) bool {
 		n.clear(nib)
 	case removalLeaf:
 		var packScratch [32]byte
-		n.setLeaf(nib, packPath(state.path[len(n.path)+1:], packScratch[:0]), state.value)
+		n.setLeaf(nib, PackPath(state.path[len(n.path)+1:], packScratch[:0]), state.value)
 	case removalBranch:
 		n.setStoredChild(nib, state.hash, state.path[len(n.path)+1:])
 	case removalNode:
@@ -144,7 +144,7 @@ func insert(n *node, path, value []byte) error {
 	depth := len(n.path)
 	targetNib := int(path[depth])
 	var packScratch [32]byte
-	wantSuffix := packPath(path[depth+1:], packScratch[:0])
+	wantSuffix := PackPath(path[depth+1:], packScratch[:0])
 
 	bit := uint16(1) << targetNib
 	if n.childMask&bit == 0 {
@@ -166,7 +166,7 @@ func insert(n *node, path, value []byte) error {
 func newBranch(path []byte, common int, value []byte) *node {
 	branch := fork(path[:common])
 	var packScratch [32]byte
-	branch.setLeaf(int(path[common]), packPath(path[common+1:], packScratch[:0]), value)
+	branch.setLeaf(int(path[common]), PackPath(path[common+1:], packScratch[:0]), value)
 	return branch
 }
 
@@ -187,7 +187,7 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 
 	branch := newBranch(path, common, value)
 	var packScratch [32]byte
-	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], packScratch[:0]), oldValue)
+	branch.setLeaf(int(oldPath[common]), PackPath(oldPath[common+1:], packScratch[:0]), oldValue)
 	parent.setChild(nib, branch)
 	return nil
 }

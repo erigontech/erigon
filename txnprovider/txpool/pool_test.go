@@ -610,6 +610,7 @@ func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 // memory but still makes the hash look known.
 func TestFromDBDeletesRejectedRows(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
+	pool.cfg.MaxNonceGap = 1
 	sender := common.Address{1}
 	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
 	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
@@ -617,8 +618,9 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	nonceTooLow := newTestTxnSlot(0, 0, 1, 2, 21_000)
 	valid := newTestTxnSlot(1, 0, 1, 2, 21_000)
 	insufficientFunds := newTestTxnSlot(2, 0, 1, 100_000_000_000_000, 21_000)
+	nonceGap := newTestTxnSlot(10, 0, 1, 2, 21_000)
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-		for _, txn := range []*TxnSlot{nonceTooLow, valid, insufficientFunds} {
+		for _, txn := range []*TxnSlot{nonceTooLow, valid, insufficientFunds, nonceGap} {
 			var encoded bytes.Buffer
 			if err := txn.Txn.MarshalBinary(&encoded); err != nil {
 				return err
@@ -635,6 +637,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	reset.StateVersionId = 1
 	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.fromDB(ctx))
+	require.Len(t, pool.deletedTxns, 3, "each rejected or evicted row must be queued once")
 	_, err := pool.flush(ctx)
 	require.NoError(t, err)
 
@@ -646,6 +649,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 			"nonce too low":      {nonceTooLow, false},
 			"valid":              {valid, true},
 			"insufficient funds": {insufficientFunds, false},
+			"evicted nonce gap":  {nonceGap, false},
 		} {
 			hash := want.txn.Txn.Hash()
 			has, err := tx.Has(kv.PoolTransaction, hash[:])
@@ -656,14 +660,14 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 	}))
 }
 
-// addLocked drops blob txns below p.pendingBlobFee.
+// On reload, addLocked drops blob txns below p.pendingBlobFee, and the next flush deletes their rows.
 func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	const blobFee = 1_000_000
-	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, poolDB, _ := newTestPool(t)
+	pricedSender, underpricedSender := common.Address{1}, common.Address{2}
 
-	blobTxn := func(nonce, blobFeeCap uint64) ([]byte, common.Hash) {
+	blobTxn := func(sender common.Address, blobFeeCap uint64) ([]byte, common.Hash) {
 		wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
-		wrapped.Tx.Nonce = nonce
 		wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(blobFeeCap)
 		wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
 		wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
@@ -671,8 +675,8 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 		require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
 		return append(sender[:], encoded.Bytes()...), wrapped.Tx.Hash()
 	}
-	priced, pricedHash := blobTxn(0, 2*blobFee)
-	underpriced, underpricedHash := blobTxn(1, blobFee/2)
+	priced, pricedHash := blobTxn(pricedSender, 2*blobFee)
+	underpriced, underpricedHash := blobTxn(underpricedSender, blobFee/2)
 
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := tx.Put(kv.PoolTransaction, pricedHash[:], priced); err != nil {
@@ -681,13 +685,28 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
 	}))
 
-	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0, pricedSender, underpricedSender)
 	reset.PendingBlobFeePerGas = blobFee
 	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(pricedHash[:]))
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
+	_, ok := pool.senders.getID(underpricedSender)
+	require.True(t, ok)
+
+	_, err := pool.flush(ctx)
+	require.NoError(t, err)
+	_, ok = pool.senders.getID(underpricedSender)
+	require.False(t, ok, "flush must release the sender ID when its only transaction was rejected")
+	_, ok = pool.senders.getID(pricedSender)
+	require.True(t, ok)
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		has, err := tx.Has(kv.PoolTransaction, underpricedHash[:])
+		require.NoError(t, err)
+		require.False(t, has)
+		return nil
+	}))
 }
 
 func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
@@ -3520,6 +3539,23 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
 }
 
+func TestAddLocalTxnsKeepsEachReplacementOutcome(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.discardReasonsLRU.Resize(1)
+	var txns TxnSlots
+	for i, fee := range []uint64{2, 4, 8} {
+		txn := newTestTxnSlot(0, 0, fee, fee, 100_000)
+		txn.IDHash[0] = byte(i + 1)
+		txns.Append(txn, sender[:], true)
+	}
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.ReplacedByHigherTip, txpoolcfg.ReplacedByHigherTip, txpoolcfg.Success,
+	}, reasons)
+}
+
 func TestAddLocalTxnsClearsPreviousDiscardReason(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
@@ -3563,6 +3599,7 @@ func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidAuthorizationNonce}, reasons)
 
+	require.Empty(t, pool.deletedTxns, "a rejected submission has no stored row to delete")
 	require.Contains(t, pool.byHash, string(original.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
 	pending, baseFee, queued := pool.CountContent()

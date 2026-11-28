@@ -55,6 +55,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1118,13 +1120,63 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func runCommitmentV3Tests(t *testing.T, test func(*testing.T, bool)) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "v3-off", v3: false},
+		{name: "v3-on", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			test(t, tc.v3)
+		})
+	}
+}
+
+func requireCommitmentVariant(t *testing.T, m *execmoduletester.ExecModuleTester, wantV3 bool) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	wantVariant := commitment.VariantHexPatriciaTrie
+	wantKey := commitment.KeyCommitmentState
+	otherKey := commitment.KeyCommitmentV3State
+	if wantV3 {
+		wantVariant = commitment.VariantCommitmentV3
+		wantKey, otherKey = otherKey, wantKey
+	}
+	require.Equal(t, wantVariant, domains.GetCommitmentCtx().Trie().Variant())
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, wantKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, state)
+	otherState, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, otherState)
+	if wantV3 {
+		_, _, _, err = commitment.DecodeCommitmentV3State(state)
+		require.NoError(t, err)
+	}
+}
+
 func TestGetProof(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProof)
+}
+
+func testGetProof(t *testing.T, v3 bool) {
 	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
+	requireCommitmentVariant(t, m, v3)
 	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
@@ -1283,6 +1335,22 @@ func TestGetProof(t *testing.T) {
 	}
 }
 
+func TestGetProofHistoricalCommitmentV3(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain))
+	requireCommitmentVariant(t, m, true)
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	const blockNum = 2
+	proof, err := api.GetProof(context.Background(), m.Address, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(blockNum)))
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.NotEmpty(t, proof.AccountProof)
+	require.NotZero(t, (*uint256.Int)(proof.Balance).Uint64())
+
+	require.NoError(t, trie.VerifyAccountProof(testChain.Blocks[blockNum-1].Root(), proof))
+}
+
 type missingHeaderBlockReader struct {
 	dbservices.FullBlockReader
 }
@@ -1292,6 +1360,10 @@ func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint6
 }
 
 func TestGetProofMissingHeader(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofMissingHeader)
+}
+
+func testGetProofMissingHeader(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1299,6 +1371,7 @@ func TestGetProofMissingHeader(t *testing.T) {
 	})
 
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 	base := newBaseApiForTest(m)
 	base._blockReader = missingHeaderBlockReader{FullBlockReader: base._blockReader}
 	api := newEthApiForTest(base, m.DB, nil, nil)
@@ -1314,6 +1387,10 @@ func TestGetProofMissingHeader(t *testing.T) {
 }
 
 func TestGetProofPinsReadSnapshot(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofPinsReadSnapshot)
+}
+
+func testGetProofPinsReadSnapshot(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1321,6 +1398,7 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 	})
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -1357,6 +1435,10 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 }
 
 func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofIgnoresNewerSharedBranchCache)
+}
+
+func testGetProofIgnoresNewerSharedBranchCache(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -1364,11 +1446,12 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	})
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	provider, ok := roTx.AggTx().(branchcache.BranchCacheProvider)
 	require.True(t, ok)
 	branchCache := provider.BranchCache()
 	require.NotNil(t, branchCache)
@@ -1378,7 +1461,7 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	rootKey := nibbles.HexToCompact(nil)
 	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
 	require.NoError(t, err)
-	newerRootBranch := make(commitment.BranchData, 4)
+	newerRootBranch := make(branch.BranchData, 4)
 	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
 	cachedRootBranch, _, ok := branchCache.Get(rootKey)
 	require.True(t, ok)
@@ -1401,10 +1484,15 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofGenesisPrunedCommitmentHistory)
+}
+
+func testGetProofGenesisPrunedCommitmentHistory(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
@@ -1461,7 +1549,12 @@ func requirePrunedProofError(t *testing.T, err error) {
 }
 
 func TestGetProofWithoutCommitmentHistory(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofWithoutCommitmentHistory)
+}
+
+func testGetProofWithoutCommitmentHistory(t *testing.T, v3 bool) {
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 	ctx := context.Background()
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
@@ -1478,6 +1571,10 @@ func TestGetProofWithoutCommitmentHistory(t *testing.T) {
 }
 
 func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofCommitmentNotAtRequestedBlock)
+}
+
+func testGetProofCommitmentNotAtRequestedBlock(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	cfg := statecfg.Schema.CommitmentDomain
@@ -1486,6 +1583,7 @@ func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
 	statecfg.Schema.CommitmentDomain = cfg
 
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 	ctx := context.Background()
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
@@ -1572,6 +1670,10 @@ func TestStorageKeysUnmarshalJSON(t *testing.T) {
 // fields for each account shape, the block parameter forms execution-apis allows, and
 // the storage-key list rules.
 func TestGetProofRequestShapes(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofRequestShapes)
+}
+
+func testGetProofRequestShapes(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -1726,11 +1828,16 @@ func TestGetProofRequestShapes(t *testing.T) {
 // empty storage-key list serializes as an array rather than null, and a short key is
 // echoed minimized next to a zero value.
 func TestGetProofJSONShape(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofJSONShape)
+}
+
+func testGetProofJSONShape(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	requireCommitmentVariant(t, m, v3)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
@@ -2692,6 +2799,10 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 }
 
 func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
+	runCommitmentV3Tests(t, testGetProofSystemContractSlotMatchesProof)
+}
+
+func testGetProofSystemContractSlotMatchesProof(t *testing.T, v3 bool) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -2711,6 +2822,7 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 	require.NoError(t, m.InsertChain(ch))
+	requireCommitmentVariant(t, m, v3)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
 
 	const bn = 2

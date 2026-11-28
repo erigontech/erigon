@@ -24,19 +24,19 @@ const (
 )
 
 func StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte {
-	return nodeKey(tagStorageNode, addrHash[:], path, dst)
+	return NodeKey(tagStorageNode, addrHash[:], path, dst)
 }
 
-func nodeKey(tag byte, addrHash, path, dst []byte) []byte {
+func NodeKey(tag byte, addrHash, path, dst []byte) []byte {
 	if len(path) > 64 {
 		panic("commitment v3: path exceeds 64 nibbles")
 	}
-	packed := packedLen(len(path))
+	packed := PackedLen(len(path))
 	dst = slices.Grow(dst, 2+len(addrHash)+packed)
 	dst = append(dst, tag)
 	dst = append(dst, addrHash...)
 	start := len(dst)
 	dst = dst[:start+packed]
-	packPath(path, dst[start:start+packed:start+packed])
+	PackPath(path, dst[start:start+packed:start+packed])
 	return append(dst, byte(len(path)))
 }
