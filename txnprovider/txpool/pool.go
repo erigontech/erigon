@@ -1101,17 +1101,14 @@ func (p *TxPool) selectBestLocked(n int, txns *TxnsRlp, onTopOf uint64,
 
 		sender := p.senders.senderID2Addr[slot.SenderID]
 		// The gas limits determine whether a transaction fits. Until it executes,
-		// estimate the execution gas left for later candidates by deducting its
-		// intrinsic cost. From Prague onward, use the gas floor if it is higher.
+		// estimate the execution gas left for later candidates by deducting the
+		// intrinsic execution cost or the applicable gas floor, whichever is higher.
 		if !isFrame {
 			to := slot.Txn.GetTo()
 			isSelfTransfer := to != nil && *to == sender
 			intrinsicGasResult, _ = poolIntrinsicGas(slot.Txn, isSelfTransfer, isEIP3860, isEIP7623, isAmsterdam)
 		}
-		intrinsicGas := intrinsicGasResult.ExecutionGas
-		if isEIP7623 {
-			intrinsicGas = intrinsicGasResult.RequiredGas()
-		}
+		intrinsicGas := intrinsicGasResult.RequiredGas()
 		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
