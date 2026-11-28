@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 )
 
 // --- memStore unit tests (behavior parity with MDBX) ---
@@ -930,4 +931,153 @@ func TestMemStore_DeleteCurrentAfterDelete(t *testing.T) {
 			require.Equal(t, []byte("C"), k)
 		})
 	}
+}
+
+// A NoLocks tree copy must stay readable while the original keeps changing.
+func TestMemStore_TreeCopyIsSafeAgainstWriter(t *testing.T) {
+	tree := newMemTable(false).tree
+	for i := range 1000 {
+		tree.Set(memEntry{k: fmt.Appendf(nil, "k%05d", i), v: []byte("old")})
+	}
+	clone := tree.Copy()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 5000 {
+			k := fmt.Appendf(nil, "k%05d", i%2000)
+			if i%3 == 0 {
+				tree.Delete(memEntry{k: k})
+			} else {
+				tree.Set(memEntry{k: k, v: []byte("new")})
+			}
+		}
+	})
+	for range 50 {
+		n := 0
+		iter := clone.Iter()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			require.Equal(t, []byte("old"), iter.Item().v)
+			n++
+		}
+		iter.Release()
+		require.Equal(t, 1000, n)
+		_, found := clone.Get(memEntry{k: []byte("k00999")})
+		require.True(t, found)
+	}
+	wg.Wait()
+}
+
+func TestMemStore_ReadsSkipTombstones(t *testing.T) {
+	s := newMemStore()
+	for _, k := range []string{"A", "B", "C"} {
+		require.NoError(t, s.Put("test", []byte(k), []byte("1")))
+	}
+	require.NoError(t, s.Delete("test", []byte("B")))
+	require.NoError(t, s.Delete("test", []byte("D")))
+
+	has, err := s.Has("test", []byte("B"))
+	require.NoError(t, err)
+	require.False(t, has)
+	n, err := s.Count("test")
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), n)
+	var keys []string
+	require.NoError(t, s.ForEach("test", nil, func(k, _ []byte) error {
+		keys = append(keys, string(k))
+		return nil
+	}))
+	require.Equal(t, []string{"A", "C"}, keys)
+	it, err := s.Range("test", nil, nil, false, -1)
+	require.NoError(t, err)
+	keys = keys[:0]
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, string(k))
+	}
+	require.Equal(t, []string{"C", "A"}, keys)
+	c := s.newCursor("test")
+	defer c.Close()
+	k, _, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, []byte("C"), k)
+	require.True(t, s.isHidden("test", []byte("B"), nil))
+	require.False(t, s.isHidden("test", []byte("A"), nil))
+}
+
+func TestMemStore_KeyTombstoneDoesNotHideEmptyValue(t *testing.T) {
+	s := newMemStore()
+	table, key := kv.TblAccountVals, []byte("k")
+	require.NoError(t, s.Delete(table, key))
+	require.NoError(t, s.Put(table, key, []byte{}))
+	c := s.newCursor(table)
+	defer c.Close()
+	k, v, err := c.SeekExact(key)
+	require.NoError(t, err)
+	require.Equal(t, key, k)
+	require.Empty(t, v)
+	require.True(t, s.isHidden(table, key, []byte("db")))
+
+	require.NoError(t, c.DeleteExact(key, []byte{}))
+	k, _, err = c.First()
+	require.NoError(t, err)
+	require.Nil(t, k)
+	_, rows := s.tombstones(table)
+	require.Equal(t, []entry{{k: key}, {k: key, v: []byte{}}}, rows)
+}
+
+func TestMemStore_DescRangeDupSortStopsBeforeNextKeyTombstone(t *testing.T) {
+	for _, nextLive := range []bool{false, true} {
+		s := newMemStore()
+		table, key, next := kv.TblAccountVals, []byte{1}, []byte{2}
+		require.NoError(t, s.Put(table, key, []byte("v1")))
+		require.NoError(t, s.Delete(table, next))
+		if nextLive {
+			require.NoError(t, s.Put(table, next, []byte("w")))
+		}
+		it, err := s.RangeDupSort(table, key, nil, nil, order.Desc, kv.Unlim)
+		require.NoError(t, err)
+		var vals []string
+		for it.HasNext() {
+			_, v, err := it.Next()
+			require.NoError(t, err)
+			vals = append(vals, string(v))
+		}
+		require.Equal(t, []string{"v1"}, vals, "nextLive=%v", nextLive)
+	}
+}
+
+func TestMemStore_SnapshotRejectsWrites(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put(kv.Headers, []byte("k"), []byte("v")))
+	snap := s.snapshot()
+	require.Same(t, snap, snap.snapshot())
+	require.Panics(t, func() { _ = snap.Put(kv.Headers, []byte("k"), []byte("v2")) })
+	require.Panics(t, func() { _ = snap.Delete(kv.Headers, []byte("k")) })
+	require.Panics(t, func() { _ = snap.ClearTable(kv.Headers) })
+	require.Panics(t, func() { _, _ = snap.IncrementSequence("seq", 1) })
+	require.Panics(t, func() { _ = snap.newCursor(kv.Headers).DeleteExact([]byte("k"), nil) })
+	v, err := snap.GetOne(kv.Headers, []byte("k"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("v"), v)
+}
+
+func TestMemStore_ConcurrentCursorsOnSharedSnapshot(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put(kv.Headers, []byte("k"), []byte("v")))
+	snap := s.snapshot()
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			for j := range 100 {
+				c := snap.newCursor(fmt.Sprintf("missing%d_%d", i, j))
+				k, _, _ := c.First()
+				assert.Nil(t, k)
+				assert.False(t, snap.isHidden(kv.Headers, []byte("k"), nil))
+			}
+		})
+	}
+	wg.Wait()
+	exists, err := snap.ExistsTable("missing0_0")
+	require.NoError(t, err)
+	require.False(t, exists)
 }

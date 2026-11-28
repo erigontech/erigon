@@ -49,6 +49,15 @@ func PinToOverlay(tx kv.TemporalTx, overlay *membatchwithdb.MemoryMutation) kv.T
 	return &PinnedRoTx{TemporalTx: view, raw: tx, overlay: overlay}
 }
 
+// Rebind pins tx to the overlay data t reads, reusing t's overlay snapshot.
+func (t *PinnedRoTx) Rebind(tx kv.TemporalTx) kv.TemporalTx {
+	view := tx
+	if v, ok := t.TemporalTx.(*membatchwithdb.MemoryMutation); ok && t.overlay != nil {
+		view = v.Rebind(tx)
+	}
+	return &PinnedRoTx{TemporalTx: view, raw: tx, overlay: t.overlay}
+}
+
 func (t *PinnedRoTx) Rollback() {
 	t.raw.Rollback()
 }

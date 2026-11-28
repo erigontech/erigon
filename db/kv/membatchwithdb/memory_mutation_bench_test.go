@@ -155,3 +155,35 @@ func BenchmarkMemoryMutationReadViewGetOne(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkWriterWithLiveView(b *testing.B) {
+	for _, op := range []string{"Put", "Delete"} {
+		b.Run(op, func(b *testing.B) {
+			_, tx := newTestTx(b)
+			batch, err := membatchwithdb.NewMemoryBatch(tx)
+			require.NoError(b, err)
+			defer batch.Close()
+			const rows = 10_000
+			keys := make([][]byte, rows)
+			for i := range keys {
+				keys[i] = dbutils.HeaderKey(uint64(i+1), common.Hash{})
+				require.NoError(b, batch.Put(kv.Headers, keys[i], []byte("value")))
+			}
+			view := batch.NewReadView(tx)
+			defer view.Rollback()
+			i := 0
+			for b.Loop() {
+				key := keys[i%rows]
+				i++
+				if op == "Put" {
+					err = batch.Put(kv.Headers, key, []byte("new"))
+				} else {
+					err = batch.Delete(kv.Headers, key)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

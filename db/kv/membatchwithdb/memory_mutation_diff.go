@@ -25,7 +25,7 @@ type entry struct {
 
 type MemoryDiff struct {
 	diff              map[table][]entry // god.
-	deletedEntries    map[string][]string
+	deletedEntries    map[string][]entry
 	clearedTableNames []string
 }
 
@@ -42,11 +42,9 @@ func (m *MemoryDiff) Flush(tx kv.RwTx) error {
 		}
 	}
 	// Obliterate entries who are to be deleted
-	for bucket, keys := range m.deletedEntries {
-		for _, key := range keys {
-			if err := tx.Delete(bucket, []byte(key)); err != nil {
-				return err
-			}
+	for bucket, rows := range m.deletedEntries {
+		if err := deleteRows(tx, bucket, rows); err != nil {
+			return err
 		}
 	}
 	// Iterate over each bucket and apply changes accordingly.
@@ -72,6 +70,35 @@ func (m *MemoryDiff) Flush(tx kv.RwTx) error {
 			}
 			return nil
 		}(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteRows applies tombstones to tx: a row with a nil value deletes the whole
+// key, any other row deletes only that DupSort pair.
+func deleteRows(tx kv.RwTx, bucket string, rows []entry) error {
+	var pairs []entry
+	for _, row := range rows {
+		if row.v != nil {
+			pairs = append(pairs, row)
+			continue
+		}
+		if err := tx.Delete(bucket, row.k); err != nil {
+			return err
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	c, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, pair := range pairs {
+		if err := c.DeleteExact(pair.k, pair.v); err != nil {
 			return err
 		}
 	}
