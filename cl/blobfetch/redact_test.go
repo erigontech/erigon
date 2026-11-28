@@ -18,6 +18,7 @@ package blobfetch
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -62,8 +63,10 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 func TestRedactURLErrorDropsTextAroundNetworkCause(t *testing.T) {
 	const secret = "SECRET-DUMMY-KEY"
 	causes := map[string]error{
-		"dial": &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")},
-		"dns":  &net.DNSError{Err: "no such host", Name: "beacon.example", IsNotFound: true},
+		"dial":          &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")},
+		"dns":           &net.DNSError{Err: "no such host", Name: "beacon.example", IsNotFound: true},
+		"dial over dns": &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "beacon.example", IsNotFound: true}},
+		"dns over dial": &net.DNSError{Err: "server misbehaving", Name: "beacon.example", UnwrapErr: &net.OpError{Op: "dial", Net: "udp", Err: fmt.Errorf("connection refused")}},
 	}
 	for name, cause := range causes {
 		t.Run(name, func(t *testing.T) {
@@ -81,6 +84,7 @@ func TestRedactURLErrorDropsTextAroundNetworkCause(t *testing.T) {
 			require.NotContains(t, err.Error(), secret)
 			require.NotContains(t, err.Error(), "/eth/v1/node")
 			require.ErrorIs(t, err, cause)
+			require.Equal(t, cause, errors.Unwrap(err))
 		})
 	}
 }

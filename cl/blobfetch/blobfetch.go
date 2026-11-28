@@ -445,11 +445,13 @@ func RedactURLError(err error) error {
 }
 
 func networkCause(err error) error {
-	if opErr, ok := errors.AsType[*net.OpError](err); ok {
-		return opErr
-	}
-	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
+	dnsErr, isDNS := errors.AsType[*net.DNSError](err)
+	opErr, isOp := errors.AsType[*net.OpError](err)
+	switch {
+	case isDNS && (!isOp || errors.Is(dnsErr, opErr)):
 		return dnsErr
+	case isOp:
+		return opErr
 	}
 	return errors.New("HTTP request failed")
 }
