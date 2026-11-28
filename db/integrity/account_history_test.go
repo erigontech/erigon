@@ -119,7 +119,7 @@ func TestCheckStorageOfAbsentAccount(t *testing.T) {
 		db := buildAccountHistory(t, accountHistoryFaults{storageKeptAfterDestroy: true})
 		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, true, 0, log.New())
 		require.ErrorIs(t, err, integrity.ErrIntegrity)
-		require.ErrorContains(t, err, "txNum 17")
+		require.ErrorContains(t, err, "txNum 15")
 	})
 }
 
@@ -138,6 +138,76 @@ func TestCheckCodeHash(t *testing.T) {
 	t.Run("code kept after clear, latest state only", func(t *testing.T) {
 		db := buildAccountHistory(t, accountHistoryFaults{codeKeptAfterClear: true})
 		err := integrity.CheckCodeHash(t.Context(), sc, db, true, 4, log.New())
+		require.ErrorIs(t, err, integrity.ErrIntegrity)
+		require.ErrorContains(t, err, "latest")
+	})
+}
+
+// buildDestroyedContract writes a contract with one storage slot at txNum 1 and destroys it
+// at txNum 15 without re-creating it. wipeAt is where the storage wipe is written (0: never),
+// and writeAt is where the slot is written again after the destroy (0: never). The contract
+// address ends in 0xff, and its NextSubtree neighbour is a live account with storage.
+func buildDestroyedContract(t *testing.T, wipeAt, writeAt uint64) kv.TemporalRwDB {
+	t.Helper()
+	ctx := t.Context()
+	const stepSize, txs = 10, 60
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(stepSize))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	contract, neighbour, filler := common.HexToAddress("0xff"), common.HexToAddress("0x0100"), common.HexToAddress("0xf0")
+	h := common.BytesToHash([]byte{1})
+	slot := append(contract[:], h[:]...)
+	account := func(nonce uint64) []byte {
+		return accounts.SerialiseV3(&accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash})
+	}
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, contract[:], account(1), 1, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{7}, 1, nil))
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, neighbour[:], account(1), 1, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(neighbour[:], h[:]...), []byte{7}, 1, nil))
+	if wipeAt > 0 {
+		require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, contract[:], wipeAt))
+	}
+	require.NoError(t, domains.DomainDel(kv.AccountsDomain, tx, contract[:], 15, nil))
+	if writeAt > 0 {
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{8}, writeAt, nil))
+	}
+	for txNum := uint64(30); txNum < txs; txNum++ {
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, filler[:], account(txNum), txNum, nil))
+	}
+
+	require.NoError(t, domains.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles(db, txs, collateAll))
+	return db
+}
+
+func TestStorageKeptAfterDestroyNotRecreated(t *testing.T) {
+	sc := integrity.SamplerCfg{SampleRatio: 1}
+	t.Run("wiped at destroy", func(t *testing.T) {
+		db := buildDestroyedContract(t, 15, 0)
+		require.NoError(t, integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, true, 0, log.New()))
+	})
+	t.Run("wiped late", func(t *testing.T) {
+		db := buildDestroyedContract(t, 25, 0)
+		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, true, 0, log.New())
+		require.ErrorIs(t, err, integrity.ErrIntegrity)
+		require.ErrorContains(t, err, "txNum 15")
+	})
+	t.Run("wiped late, all problems listed", func(t *testing.T) {
+		db := buildDestroyedContract(t, 25, 0)
+		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, false, 0, log.New())
+		require.ErrorIs(t, err, integrity.ErrIntegrity)
+		require.ErrorContains(t, err, "found 1 problem(s)")
+	})
+	t.Run("never wiped", func(t *testing.T) {
+		db := buildDestroyedContract(t, 15, 20)
+		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, true, 0, log.New())
 		require.ErrorIs(t, err, integrity.ErrIntegrity)
 		require.ErrorContains(t, err, "latest")
 	})

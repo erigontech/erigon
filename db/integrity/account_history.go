@@ -28,7 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -36,20 +38,37 @@ import (
 )
 
 // CheckStorageOfAbsentAccount checks that an account absent before a txNum has no storage
-// as of that txNum. A destroyed account's storage history must record the wipe in the
-// destroying tx.
+// as of that txNum, that a destroyed account's storage history records the wipe in the
+// destroying tx, and that every account with storage in the latest state exists.
 func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	var probs problems
-	err := walkAccountHistory(ctx, sc, db, fromStep, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, _ []byte) error {
-		if len(before) > 0 {
+	err := walkAccountHistory(ctx, sc, db, fromStep, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
+		asOf, state := txNum, "absent before"
+		switch {
+		case len(before) == 0:
+		case len(after) == 0:
+			asOf, state = txNum+1, "destroyed at"
+		default:
 			return nil
 		}
-		slot, found, err := firstStorageAsOf(tx, addr, txNum)
-		if err != nil || !found {
+		slot, err := firstStorageAsOf(tx, addr, asOf)
+		if err != nil || slot == nil {
 			return err
 		}
-		return probs.report(failFast, fmt.Errorf("%w: %s: account %x is absent before txNum %d, but its slot %x is set",
-			ErrIntegrity, StorageOfAbsentAccount, addr, txNum, slot))
+		return probs.report(failFast, fmt.Errorf("%w: %s: account %x is %s txNum %d, but its slot %x is set",
+			ErrIntegrity, StorageOfAbsentAccount, addr, state, txNum, slot))
+	})
+	if err != nil {
+		return err
+	}
+	err = walkLatest(ctx, sc, db, kv.StorageDomain, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, k, _ []byte) error {
+		addr := k[:length.Addr]
+		acc, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		if err != nil || len(acc) > 0 {
+			return err
+		}
+		return probs.report(failFast, fmt.Errorf("%w: %s: account %x is absent in the latest state, but its slot %x is set",
+			ErrIntegrity, StorageOfAbsentAccount, addr, k[length.Addr:]))
 	})
 	if err != nil {
 		return err
@@ -57,23 +76,23 @@ func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.Tempo
 	return probs.verdict(string(StorageOfAbsentAccount))
 }
 
-func firstStorageAsOf(tx kv.TemporalTx, addr []byte, txNum uint64) (slot []byte, found bool, err error) {
+func firstStorageAsOf(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, error) {
 	to, _ := kv.NextSubtree(addr)
 	it, err := tx.RangeAsOf(kv.StorageDomain, addr, to, txNum, order.Asc, -1)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		if len(v) > 0 {
-			return bytes.Clone(k[len(addr):]), true, nil
+			return bytes.Clone(k[len(addr):]), nil
 		}
 	}
-	return nil, false, nil
+	return nil, nil
 }
 
 // CheckCodeHash checks that the code domain holds the code of the account's code hash: in
@@ -94,17 +113,31 @@ func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failF
 	if err != nil {
 		return err
 	}
-	if err := checkLatestCodeHash(ctx, sc, db, failFast, &probs); err != nil {
+	err = walkLatest(ctx, sc, db, kv.CodeDomain, logger, CodeHash, func(tx kv.TemporalTx, addr, code []byte) error {
+		acc, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		if err != nil {
+			return err
+		}
+		return reportCodeMismatch(&probs, failFast, addr, accounts.DeserialiseV3CodeHash(acc), code, "in the latest state")
+	})
+	if err != nil {
 		return err
 	}
 	return probs.verdict(string(CodeHash))
 }
 
-func checkLatestCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, probs *problems) error {
+// walkLatest calls visit for the sampled keys of the domain's latest state, with one
+// goroutine per first key byte.
+func walkLatest(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, d kv.Domain, logger log.Logger, check Check, visit func(tx kv.TemporalTx, k, v []byte) error) error {
+	start := time.Now()
+	var done atomic.Uint64
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 	for first := range 256 {
 		g.Go(func() error {
+			defer done.Add(1)
 			tx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
 				return err
@@ -112,46 +145,46 @@ func checkLatestCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 			defer tx.Rollback()
 			from := []byte{byte(first)}
 			to, _ := kv.NextSubtree(from)
-			it, err := tx.Debug().RangeLatest(kv.CodeDomain, from, to, -1)
+			it, err := tx.Debug().RangeLatest(d, from, to, -1)
 			if err != nil {
 				return err
 			}
 			defer it.Close()
 			sampler := sc.NewWindowSampler(uint64(first))
 			for it.HasNext() {
-				addr, code, err := it.Next()
+				k, v, err := it.Next()
 				if err != nil {
 					return err
 				}
 				if sampler.CanSkip() {
 					continue
 				}
-				acc, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
-				if err != nil {
+				if err := visit(tx, k, v); err != nil {
 					return err
 				}
-				if err := reportCodeMismatch(probs, failFast, addr, accounts.DeserialiseV3CodeHash(acc), code, "in the latest state"); err != nil {
-					return err
+				select {
+				case <-logEvery.C:
+					logger.Info(fmt.Sprintf("[integrity] %s: latest state", check), "prefixes", fmt.Sprintf("%d/256", done.Load()))
+				default:
 				}
 			}
 			return ctx.Err()
 		})
 	}
-	return g.Wait()
+	err := g.Wait()
+	logger.Info(fmt.Sprintf("[integrity] %s: latest state walked", check), "took", time.Since(start))
+	return err
 }
 
 func reportCodeMismatch(probs *problems, failFast bool, addr, codeHash, code []byte, when string) error {
-	if codeHash == nil && len(code) == 0 {
-		return nil
-	}
-	if codeHash != nil && crypto.Keccak256Hash(code) == common.Hash(codeHash) {
-		return nil
-	}
-	want := "no code"
+	want := empty.CodeHash
 	if codeHash != nil {
-		want = fmt.Sprintf("code hash %x", codeHash)
+		want = common.Hash(codeHash)
 	}
-	return probs.report(failFast, fmt.Errorf("%w: %s: account %x %s has %s, but code %x",
+	if crypto.Keccak256Hash(code) == want {
+		return nil
+	}
+	return probs.report(failFast, fmt.Errorf("%w: %s: account %x %s has code hash %x, but code %x",
 		ErrIntegrity, CodeHash, addr, when, want, common.Shorten(code, 32)))
 }
 
@@ -182,7 +215,7 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 		}
 	}
 
-	work := make(chan []accountChanges, 1024)
+	work := make(chan []accountChanges, estimate.AlmostAllCPUs())
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(work)
@@ -191,13 +224,32 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 		for _, f := range files {
 			scans.Go(func() error {
 				defer scanned.Add(1)
-				return scanAccountHistoryFile(scanCtx, sc.NewWindowSampler(f.StartRootNum()), db, f, work)
+				return scanAccountHistoryFile(scanCtx, sc.NewWindowSampler(f.StartRootNum()), db, f, work, progress)
 			})
 		}
 		return scans.Wait()
 	})
 	for range estimate.AlmostAllCPUs() {
-		g.Go(func() error { return visitAccountWork(gCtx, db, work, visit, &changes, progress) })
+		g.Go(func() error {
+			tx, err := db.BeginTemporalRo(gCtx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for batch := range work {
+				for _, acc := range batch {
+					if err := visitAccountChanges(tx, acc, visit); err != nil {
+						return err
+					}
+					changes.Add(uint64(len(acc.txNums)))
+				}
+				if err := gCtx.Err(); err != nil {
+					return err
+				}
+				progress()
+			}
+			return nil
+		})
 	}
 	err = g.Wait()
 	logger.Info(fmt.Sprintf("[integrity] %s: history walked", check), "files", len(files), "changes", common.PrettyCounter(changes.Load()), "took", time.Since(start))
@@ -212,36 +264,23 @@ func accountHistoryFiles(ctx context.Context, db kv.TemporalRoDB, fromStep uint6
 	defer tx.Rollback()
 	fromTxNum := fromStep * tx.Debug().StepSize()
 	var files []kv.VisibleFile
+	anyHistory := false
 	for _, f := range tx.Debug().DomainFiles(kv.AccountsDomain) {
-		if strings.HasSuffix(f.Fullpath(), ".ef") && f.EndRootNum() > fromTxNum {
+		if !strings.HasSuffix(f.Fullpath(), ".ef") {
+			continue
+		}
+		anyHistory = true
+		if f.EndRootNum() > fromTxNum {
 			files = append(files, f)
 		}
+	}
+	if !anyHistory {
+		return nil, fmt.Errorf("%w: no accounts history files", ErrSkipped)
 	}
 	return files, nil
 }
 
-func visitAccountWork(ctx context.Context, db kv.TemporalRoDB, work <-chan []accountChanges, visit accountChangeVisitor, changes *atomic.Uint64, progress func()) error {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for batch := range work {
-		for _, acc := range batch {
-			if err := visitAccountChanges(tx, acc, visit); err != nil {
-				return err
-			}
-			changes.Add(uint64(len(acc.txNums)))
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		progress()
-	}
-	return nil
-}
-
-func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.TemporalRoDB, f kv.VisibleFile, work chan<- []accountChanges) error {
+func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.TemporalRoDB, f kv.VisibleFile, work chan<- []accountChanges, progress func()) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -276,14 +315,15 @@ func scanAccountHistoryFile(ctx context.Context, sampler *Sampler, db kv.Tempora
 			return err
 		}
 		if !bytes.Equal(k, addr) {
-			addr = append(addr[:0], k...)
+			addr = bytes.Clone(k)
+			progress()
 			if sampled = !sampler.CanSkip(); sampled {
 				if batchLen >= batchChanges {
 					if err := send(); err != nil {
 						return err
 					}
 				}
-				batch = append(batch, accountChanges{addr: bytes.Clone(k)})
+				batch = append(batch, accountChanges{addr: addr})
 			}
 		}
 		if sampled {
