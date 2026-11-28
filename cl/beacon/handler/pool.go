@@ -25,7 +25,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -253,6 +252,10 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
 			return
 		}
+		if attestation.Data == nil {
+			failures = append(failures, poolingFailure{Index: i, Message: "attestation is missing data"})
+			continue
+		}
 		var (
 			slot                      = attestation.AttestationData().Slot
 			epoch                     = slot / a.beaconChainCfg.SlotsPerEpoch
@@ -471,19 +474,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
-}
-
-// decodeJSONList decodes a JSON array of objects. encoding/json stores a null element as a nil
-// pointer without calling the element's UnmarshalJSON, so such elements are rejected here.
-func decodeJSONList[T any](body io.Reader) ([]*T, error) {
-	var list []*T
-	if err := json.NewDecoder(body).Decode(&list); err != nil {
-		return nil, err
-	}
-	if i := slices.Index(list, nil); i >= 0 {
-		return nil, fmt.Errorf("element at index %d is null", i)
-	}
-	return list, nil
 }
 
 type poolingFailure struct {
@@ -751,6 +741,10 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
+		if v.Message == nil || v.Message.Contribution == nil {
+			failures = append(failures, poolingFailure{Index: idx, Message: "invalid contribution and proof"})
+			continue
+		}
 		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
 			continue // skip empty contributions
 		}

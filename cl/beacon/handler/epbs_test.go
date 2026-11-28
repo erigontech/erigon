@@ -702,10 +702,10 @@ type nonNilSentinelClient struct {
 	sentinelproto.SentinelClient
 }
 
-func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
+func TestPostPayloadAttestationsReportsMissingData(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[{}]`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
@@ -858,7 +858,7 @@ func TestPostPayloadAttestationsCapsJSONCardinality(t *testing.T) {
 		{name: "maximum plus one", count: maxItems + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := "[" + strings.TrimSuffix(strings.Repeat("null,", tc.count), ",") + "]"
+			body := "[" + strings.TrimSuffix(strings.Repeat("{},", tc.count), ",") + "]"
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Eth-Consensus-Version", "gloas")
@@ -4364,7 +4364,7 @@ func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
 		{name: "maximum plus one", count: maxProposerPreferencesRequestItems + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := "[" + strings.TrimSuffix(strings.Repeat("null,", tc.count), ",") + "]"
+			body := "[" + strings.TrimSuffix(strings.Repeat("{},", tc.count), ",") + "]"
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Eth-Consensus-Version", "gloas")
