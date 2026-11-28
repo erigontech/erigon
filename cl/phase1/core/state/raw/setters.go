@@ -208,6 +208,7 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 
 func (b *BeaconState) SetValidators(validators *solid.ValidatorSet) {
 	b.markLeaf(ValidatorsLeafIndex)
+	validators.SetProgressiveHashing(b.version >= clparams.GloasVersion)
 	b.validators = validators
 }
 
@@ -318,7 +319,7 @@ func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 
 func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) error {
 	if b.events.OnNewValidator != nil {
-		if err := b.events.OnNewValidator(b.validators.Length(), validator, balance); err != nil {
+		if err := b.events.OnNewValidator(b.validators.Length(), validator.View(), balance); err != nil {
 			return err
 		}
 	}

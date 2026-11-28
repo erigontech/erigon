@@ -31,9 +31,9 @@ func TestValidatorRootWorkerPoolLetsOverlappingBuildsRunInParallel(t *testing.T)
 	runtime.GOMAXPROCS(16)
 	workers := newDefaultValidatorRootWorkerPool()
 
-	first := workers.acquireHelpers(parallelMinValidators)
-	second := workers.acquireHelpers(parallelMinValidators)
-	third := workers.acquireHelpers(parallelMinValidators)
+	first := workers.acquireHelpers(parallelMinChunks)
+	second := workers.acquireHelpers(parallelMinChunks)
+	third := workers.acquireHelpers(parallelMinChunks)
 	require.Equal(t, []int{7, 7, 2}, []int{first, second, third})
 
 	workers.releaseHelpers(first)
@@ -52,9 +52,9 @@ func TestValidatorRootWorkerPoolHonorsRuntimeBudgetAcrossBuilds(t *testing.T) {
 	}
 
 	acquired := []int{
-		workers.acquireHelpers(parallelMinValidators),
-		workers.acquireHelpers(parallelMinValidators),
-		workers.acquireHelpers(parallelMinValidators),
+		workers.acquireHelpers(parallelMinChunks),
+		workers.acquireHelpers(parallelMinChunks),
+		workers.acquireHelpers(parallelMinChunks),
 	}
 	require.Equal(t, []int{3, 2, 0}, acquired)
 	require.Equal(t, int64(5), liveHelpers.Load())
@@ -86,7 +86,7 @@ func TestValidatorSetParallelWorkerBudget(t *testing.T) {
 		}
 	}
 
-	validators := testValidatorSet(parallelMinValidators)
+	validators := testValidatorSet(parallelMinValidatorCount)
 	want := validatorSetRootReference(t, validators)
 	type hashResult struct {
 		root [32]byte
@@ -107,7 +107,7 @@ func TestValidatorSetParallelWorkerBudget(t *testing.T) {
 	results := make(chan hashResult, competingBuilds)
 	for range competingBuilds {
 		go func() {
-			root, err := testValidatorSet(parallelMinValidators).HashSSZ()
+			root, err := testValidatorSet(parallelMinValidatorCount).HashSSZ()
 			results <- hashResult{root: root, err: err}
 		}()
 	}
@@ -134,199 +134,135 @@ func TestValidatorSetParallelWorkerBudget(t *testing.T) {
 	require.Zero(t, liveHelpers.Load())
 }
 
-func TestValidatorSetParallelColdHashCopy(t *testing.T) {
-	oldWorkers := validatorRootWorkers
-	workers := newValidatorRootWorkerPool(4)
-	validatorRootWorkers = workers
-	t.Cleanup(func() { validatorRootWorkers = oldWorkers })
+func TestValidatorSetParallelColdHashSharesChunksWithSibling(t *testing.T) {
+	for _, mode := range []struct {
+		name        string
+		progressive bool
+		hash        func(*ValidatorSet) ([32]byte, error)
+		reference   func(*testing.T, *ValidatorSet) [32]byte
+	}{
+		{name: "fulu", hash: (*ValidatorSet).HashSSZ, reference: validatorSetRootReference},
+		{name: "gloas", progressive: true, hash: (*ValidatorSet).HashSSZProgressive, reference: validatorSetProgressiveRootReference},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			oldWorkers := validatorRootWorkers
+			workers := newValidatorRootWorkerPool(4)
+			validatorRootWorkers = workers
+			t.Cleanup(func() { validatorRootWorkers = oldWorkers })
 
-	helpersAcquired := make(chan struct{})
-	releaseHelpers := make(chan struct{})
-	var holderBlocked atomic.Bool
-	workers.helperHook = func(delta int) {
-		if delta > 0 && holderBlocked.CompareAndSwap(false, true) {
-			close(helpersAcquired)
-			<-releaseHelpers
-		}
-	}
+			helpersAcquired := make(chan struct{})
+			releaseHelpers := make(chan struct{})
+			var holderBlocked atomic.Bool
+			workers.helperHook = func(delta int) {
+				if delta > 0 && holderBlocked.CompareAndSwap(false, true) {
+					close(helpersAcquired)
+					<-releaseHelpers
+				}
+			}
 
-	validators := testValidatorSet(parallelMinValidators)
-	want := validatorSetRootReference(t, validators)
-	type hashResult struct {
-		root [32]byte
-		err  error
-	}
-	holderResult := make(chan hashResult, 1)
-	holderDone := make(chan struct{})
-	go func() {
-		defer close(holderDone)
-		root, err := validators.HashSSZ()
-		holderResult <- hashResult{root: root, err: err}
-	}()
-	t.Cleanup(func() {
-		select {
-		case <-releaseHelpers:
-		default:
+			validators := testValidatorSet(parallelMinValidatorCount)
+			validators.SetProgressiveHashing(mode.progressive)
+			want := mode.reference(t, validators)
+			sibling := NewValidatorSet(validators.Cap())
+			validators.CopyTo(sibling)
+
+			type hashResult struct {
+				root [32]byte
+				err  error
+			}
+			holderResult := make(chan hashResult, 1)
+			holderDone := make(chan struct{})
+			go func() {
+				defer close(holderDone)
+				root, err := mode.hash(validators)
+				holderResult <- hashResult{root: root, err: err}
+			}()
+			t.Cleanup(func() {
+				select {
+				case <-releaseHelpers:
+				default:
+					close(releaseHelpers)
+				}
+				<-holderDone
+			})
+
+			select {
+			case <-helpersAcquired:
+			case <-time.After(10 * time.Second):
+				t.Fatal("cold build did not acquire a helper")
+			}
+
+			siblingRoot, err := mode.hash(sibling)
+			require.NoError(t, err)
+			require.Equal(t, want, siblingRoot)
+
+			require.NotPanics(t, func() { mutateValidator(sibling, sibling.Length()/2) })
+			assertValidatorSetRoot(t, sibling, mode.hash, mode.reference)
+
 			close(releaseHelpers)
-		}
-		<-holderDone
-	})
-
-	select {
-	case <-helpersAcquired:
-	case <-time.After(10 * time.Second):
-		t.Fatal("cold build did not acquire a helper")
+			result := <-holderResult
+			require.NoError(t, result.err)
+			require.Equal(t, want, result.root)
+			assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
+		})
 	}
-
-	copied := NewValidatorSet(validators.c)
-	validators.CopyTo(copied)
-	copiedRoot, err := copied.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, want, copiedRoot)
-
-	require.NotPanics(t, func() { mutateValidator(copied, copied.l/2) })
-	assertValidatorSetRoot(t, copied, (*ValidatorSet).HashSSZ, validatorSetRootReference)
-
-	close(releaseHelpers)
-	result := <-holderResult
-	require.NoError(t, result.err)
-	require.Equal(t, want, result.root)
 }
 
-func TestValidatorSetProgressiveParallelColdHashCopy(t *testing.T) {
-	oldWorkers := validatorRootWorkers
-	workers := newValidatorRootWorkerPool(4)
-	validatorRootWorkers = workers
-	t.Cleanup(func() { validatorRootWorkers = oldWorkers })
+func TestValidatorSetParallelFanOutIsBoundedByDirtyChunks(t *testing.T) {
+	for _, mode := range []struct {
+		name        string
+		progressive bool
+		hash        func(*ValidatorSet) ([32]byte, error)
+	}{
+		{name: "fulu", hash: (*ValidatorSet).HashSSZ},
+		{name: "gloas", progressive: true, hash: (*ValidatorSet).HashSSZProgressive},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			oldWorkers := validatorRootWorkers
+			workers := newValidatorRootWorkerPool(3)
+			validatorRootWorkers = workers
+			t.Cleanup(func() { validatorRootWorkers = oldWorkers })
 
-	firstTreeBuilt := make(chan struct{})
-	releaseBuild := make(chan struct{})
-	var holderBlocked atomic.Bool
-	workers.progressiveTreeHook = func() {
-		if holderBlocked.CompareAndSwap(false, true) {
-			close(firstTreeBuilt)
-			<-releaseBuild
-		}
+			var helpersStarted atomic.Int64
+			workers.helperHook = func(delta int) {
+				if delta > 0 {
+					helpersStarted.Add(1)
+				}
+			}
+
+			small := testValidatorSet(parallelMinValidatorCount - 2*256)
+			small.SetProgressiveHashing(mode.progressive)
+			_, err := mode.hash(small)
+			require.NoError(t, err)
+			require.Zero(t, helpersStarted.Load())
+
+			large := testValidatorSet(parallelMinValidatorCount)
+			large.SetProgressiveHashing(mode.progressive)
+			_, err = mode.hash(large)
+			require.NoError(t, err)
+			require.Positive(t, helpersStarted.Load())
+
+			helpersStarted.Store(0)
+			mutateValidator(large, 0)
+			_, err = mode.hash(large)
+			require.NoError(t, err)
+			require.Zero(t, helpersStarted.Load())
+
+			for i := range 100 {
+				mutateValidator(large, i)
+			}
+			_, err = mode.hash(large)
+			require.NoError(t, err)
+			require.Zero(t, helpersStarted.Load())
+
+			for i := 0; i < large.Length(); i += 128 {
+				mutateValidator(large, i)
+			}
+			_, err = mode.hash(large)
+			require.NoError(t, err)
+			require.Positive(t, helpersStarted.Load())
+		})
 	}
-
-	validators := testValidatorSet(parallelMinValidators)
-	want := validatorSetProgressiveRootReference(t, validators)
-	type hashResult struct {
-		root [32]byte
-		err  error
-	}
-	holderResult := make(chan hashResult, 1)
-	holderDone := make(chan struct{})
-	go func() {
-		defer close(holderDone)
-		root, err := validators.HashSSZProgressive()
-		holderResult <- hashResult{root: root, err: err}
-	}()
-	t.Cleanup(func() {
-		select {
-		case <-releaseBuild:
-		default:
-			close(releaseBuild)
-		}
-		<-holderDone
-	})
-
-	select {
-	case <-firstTreeBuilt:
-	case <-time.After(10 * time.Second):
-		t.Fatal("cold build did not build the first progressive tree")
-	}
-
-	copied := NewValidatorSet(validators.c)
-	validators.CopyTo(copied)
-	copiedRoot, err := copied.HashSSZProgressive()
-	require.NoError(t, err)
-	require.Equal(t, want, copiedRoot)
-
-	require.NotPanics(t, func() { mutateValidator(copied, copied.l/2) })
-	assertValidatorSetRoot(t, copied, (*ValidatorSet).HashSSZProgressive, validatorSetProgressiveRootReference)
-
-	close(releaseBuild)
-	result := <-holderResult
-	require.NoError(t, result.err)
-	require.Equal(t, want, result.root)
-}
-
-func TestValidatorSetParallelFanOutIsColdAndSizeBounded(t *testing.T) {
-	oldWorkers := validatorRootWorkers
-	workers := newValidatorRootWorkerPool(3)
-	validatorRootWorkers = workers
-	t.Cleanup(func() { validatorRootWorkers = oldWorkers })
-
-	var helpersStarted atomic.Int64
-	workers.helperHook = func(delta int) {
-		if delta > 0 {
-			helpersStarted.Add(1)
-		}
-	}
-
-	small := testValidatorSet(parallelMinValidators - 1)
-	_, err := small.HashSSZ()
-	require.NoError(t, err)
-	require.Zero(t, helpersStarted.Load())
-
-	large := testValidatorSet(parallelMinValidators)
-	_, err = large.HashSSZ()
-	require.NoError(t, err)
-	require.Positive(t, helpersStarted.Load())
-
-	helpersStarted.Store(0)
-	validator := append(Validator(nil), large.Get(0)...)
-	validator[0]++
-	large.Set(0, validator)
-	_, err = large.HashSSZ()
-	require.NoError(t, err)
-	require.Zero(t, helpersStarted.Load())
-
-	for i := range 100 {
-		validator = append(validator[:0], large.Get(i)...)
-		validator[0]++
-		large.Set(i, validator)
-	}
-	_, err = large.HashSSZ()
-	require.NoError(t, err)
-	require.Zero(t, helpersStarted.Load())
-}
-
-func TestValidatorSetProgressiveParallelFanOutIsColdOnly(t *testing.T) {
-	oldWorkers := validatorRootWorkers
-	workers := newValidatorRootWorkerPool(3)
-	validatorRootWorkers = workers
-	t.Cleanup(func() { validatorRootWorkers = oldWorkers })
-
-	var helpersStarted atomic.Int64
-	workers.helperHook = func(delta int) {
-		if delta > 0 {
-			helpersStarted.Add(1)
-		}
-	}
-
-	validators := testValidatorSet(parallelMinValidators)
-	_, err := validators.HashSSZProgressive()
-	require.NoError(t, err)
-	require.Positive(t, helpersStarted.Load())
-
-	helpersStarted.Store(0)
-	validator := append(Validator(nil), validators.Get(0)...)
-	validator[0]++
-	validators.Set(0, validator)
-	_, err = validators.HashSSZProgressive()
-	require.NoError(t, err)
-	require.Zero(t, helpersStarted.Load())
-
-	for i := range 100 {
-		validator = append(validator[:0], validators.Get(i)...)
-		validator[0]++
-		validators.Set(i, validator)
-	}
-	_, err = validators.HashSSZProgressive()
-	require.NoError(t, err)
-	require.Zero(t, helpersStarted.Load())
 }
 
 func TestValidatorRootMatchesSerialReference(t *testing.T) {
@@ -351,9 +287,10 @@ func TestValidatorRootMatchesSerialReference(t *testing.T) {
 func TestValidatorSetRootsMatchSerialReferences(t *testing.T) {
 	helpersStarted := useFixedValidatorRootWorkerPool(t)
 	type rootMode struct {
-		name      string
-		hash      func(*ValidatorSet) ([32]byte, error)
-		reference func(*testing.T, *ValidatorSet) [32]byte
+		name        string
+		progressive bool
+		hash        func(*ValidatorSet) ([32]byte, error)
+		reference   func(*testing.T, *ValidatorSet) [32]byte
 	}
 	modes := []rootMode{
 		{
@@ -364,7 +301,8 @@ func TestValidatorSetRootsMatchSerialReferences(t *testing.T) {
 			reference: validatorSetRootReference,
 		},
 		{
-			name: "gloas",
+			name:        "gloas",
+			progressive: true,
 			hash: func(validators *ValidatorSet) ([32]byte, error) {
 				return validators.HashSSZProgressive()
 			},
@@ -382,9 +320,10 @@ func TestValidatorSetRootsMatchSerialReferences(t *testing.T) {
 			for _, count := range counts {
 				t.Run(strconv.Itoa(count), func(t *testing.T) {
 					validators := randomValidatorSet(count)
+					validators.SetProgressiveHashing(mode.progressive)
 					helpersBefore := helpersStarted.Load()
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
-					if count >= parallelMinValidators {
+					if count >= parallelMinValidatorCount {
 						require.Greater(t, helpersStarted.Load(), helpersBefore)
 					}
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
@@ -401,7 +340,7 @@ func TestValidatorSetRootsMatchSerialReferences(t *testing.T) {
 
 					originalRoot, err := mode.hash(validators)
 					require.NoError(t, err)
-					copied := NewValidatorSet(validators.c)
+					copied := NewValidatorSet(validators.Cap())
 					validators.CopyTo(copied)
 					if count == 0 {
 						copied.Append(NewValidator())
@@ -422,9 +361,10 @@ func TestValidatorSetProgressiveAppendAcrossSegmentBoundary(t *testing.T) {
 	for _, count := range []int{0, 4, 20, 84, 340, 1_364} {
 		t.Run(strconv.Itoa(count+1), func(t *testing.T) {
 			validators := randomValidatorSet(count)
+			validators.SetProgressiveHashing(true)
 			_, err := validators.HashSSZProgressive()
 			require.NoError(t, err)
-			validators.Append(randomValidatorSet(1).Get(0))
+			validators.Append(randomValidatorSet(1).Get(0).Clone())
 			assertValidatorSetRoot(t, validators, (*ValidatorSet).HashSSZProgressive, validatorSetProgressiveRootReference)
 		})
 	}
@@ -433,21 +373,23 @@ func TestValidatorSetProgressiveAppendAcrossSegmentBoundary(t *testing.T) {
 func TestValidatorSetParallelColdHashThenAppend(t *testing.T) {
 	helpersStarted := useFixedValidatorRootWorkerPool(t)
 	for _, mode := range []struct {
-		name      string
-		hash      func(*ValidatorSet) ([32]byte, error)
-		reference func(*testing.T, *ValidatorSet) [32]byte
+		name        string
+		progressive bool
+		hash        func(*ValidatorSet) ([32]byte, error)
+		reference   func(*testing.T, *ValidatorSet) [32]byte
 	}{
 		{name: "fulu", hash: (*ValidatorSet).HashSSZ, reference: validatorSetRootReference},
-		{name: "gloas", hash: (*ValidatorSet).HashSSZProgressive, reference: validatorSetProgressiveRootReference},
+		{name: "gloas", progressive: true, hash: (*ValidatorSet).HashSSZProgressive, reference: validatorSetProgressiveRootReference},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			for _, count := range []int{5_461, 21_845, 50_003} {
+			for _, count := range []int{21_845, 50_003} {
 				t.Run(strconv.Itoa(count+1), func(t *testing.T) {
 					validators := randomValidatorSet(count)
+					validators.SetProgressiveHashing(mode.progressive)
 					helpersBefore := helpersStarted.Load()
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
 					require.Greater(t, helpersStarted.Load(), helpersBefore)
-					validators.Append(randomValidatorSet(1).Get(0))
+					validators.Append(randomValidatorSet(1).Get(0).Clone())
 					assertValidatorSetRoot(t, validators, mode.hash, mode.reference)
 				})
 			}
@@ -460,7 +402,7 @@ func TestValidatorSetDecodedColdRootsAndCacheModeSwitches(t *testing.T) {
 	source := randomValidatorSet(21_845)
 	encoded, err := source.EncodeSSZ(nil)
 	require.NoError(t, err)
-	validators := NewValidatorSet(source.c)
+	validators := NewValidatorSet(source.Cap())
 	require.NoError(t, validators.DecodeSSZ(encoded, 0))
 
 	helpersBefore := helpersStarted.Load()
@@ -492,26 +434,35 @@ func useFixedValidatorRootWorkerPool(t *testing.T) *atomic.Int64 {
 	return helpersStarted
 }
 
+const parallelMinValidatorCount = parallelMinChunks * 256
+
 func testValidatorSet(count int) *ValidatorSet {
-	validators := NewValidatorSetWithLength(1_000_000, count)
-	for i := range validators.buffer {
-		validators.buffer[i] = byte(i*31 + i/validatorSize)
+	encoded := make([]byte, count*validatorSize)
+	for i := range encoded {
+		encoded[i] = byte(i*31 + i/validatorSize)
+	}
+	validators := NewValidatorSet(1_000_000)
+	if err := validators.DecodeSSZ(encoded, 0); err != nil {
+		panic(err)
 	}
 	return validators
 }
 
 func randomValidatorSet(count int) *ValidatorSet {
-	validators := NewValidatorSetWithLength(1_000_000, count)
+	encoded := make([]byte, count*validatorSize)
 	rng := rand.New(rand.NewSource(int64(count) + 1))
-	_, err := rng.Read(validators.buffer)
-	if err != nil {
+	if _, err := rng.Read(encoded); err != nil {
+		panic(err)
+	}
+	validators := NewValidatorSet(1_000_000)
+	if err := validators.DecodeSSZ(encoded, 0); err != nil {
 		panic(err)
 	}
 	return validators
 }
 
 func mutateValidator(validators *ValidatorSet, index int) {
-	validator := append(Validator(nil), validators.Get(index)...)
+	validator := validators.Get(index).Clone()
 	validator[index%validatorSize]++
 	validators.Set(index, validator)
 }
@@ -530,14 +481,14 @@ func assertValidatorSetRoot(
 }
 
 func validatorSetRootReference(t *testing.T, validators *ValidatorSet) [32]byte {
-	roots := make([][32]byte, validators.l)
+	roots := make([][32]byte, validators.Length())
 	var hashBuffer [8 * 32]byte
 	for i := range roots {
-		require.NoError(t, validators.Get(i).CopyHashBufferTo(hashBuffer[:]))
+		require.NoError(t, validators.Get(i).Clone().CopyHashBufferTo(hashBuffer[:]))
 		require.NoError(t, merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], roots[i][:]))
 	}
-	root, err := merkle_tree.MerkleizeVector(roots, uint64(validators.c))
+	root, err := merkle_tree.MerkleizeVector(roots, uint64(validators.Cap()))
 	require.NoError(t, err)
-	lengthRoot := merkle_tree.Uint64Root(uint64(validators.l))
+	lengthRoot := merkle_tree.Uint64Root(uint64(validators.Length()))
 	return crypto.Sha256(root[:], lengthRoot[:])
 }

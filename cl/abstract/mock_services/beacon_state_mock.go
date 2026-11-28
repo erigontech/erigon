@@ -1579,7 +1579,7 @@ func (c *MockBeaconStateForEachSlashingSegmentCall) DoAndReturn(f func(func(int,
 }
 
 // ForEachValidator mocks base method.
-func (m *MockBeaconState) ForEachValidator(fn func(solid.Validator, int, int) bool) {
+func (m *MockBeaconState) ForEachValidator(fn func(solid.ValidatorView, int, int) bool) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "ForEachValidator", fn)
 }
@@ -1603,13 +1603,13 @@ func (c *MockBeaconStateForEachValidatorCall) Return() *MockBeaconStateForEachVa
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateForEachValidatorCall) Do(f func(func(solid.Validator, int, int) bool)) *MockBeaconStateForEachValidatorCall {
+func (c *MockBeaconStateForEachValidatorCall) Do(f func(func(solid.ValidatorView, int, int) bool)) *MockBeaconStateForEachValidatorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateForEachValidatorCall) DoAndReturn(f func(func(solid.Validator, int, int) bool)) *MockBeaconStateForEachValidatorCall {
+func (c *MockBeaconStateForEachValidatorCall) DoAndReturn(f func(func(solid.ValidatorView, int, int) bool)) *MockBeaconStateForEachValidatorCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -6563,10 +6563,10 @@ func (c *MockBeaconStateValidatorExitEpochCall) DoAndReturn(f func(int) (uint64,
 }
 
 // ValidatorForValidatorIndex mocks base method.
-func (m *MockBeaconState) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
+func (m *MockBeaconState) ValidatorForValidatorIndex(index int) (solid.ValidatorView, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ValidatorForValidatorIndex", index)
-	ret0, _ := ret[0].(solid.Validator)
+	ret0, _ := ret[0].(solid.ValidatorView)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -6584,19 +6584,19 @@ type MockBeaconStateValidatorForValidatorIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateValidatorForValidatorIndexCall) Return(arg0 solid.Validator, arg1 error) *MockBeaconStateValidatorForValidatorIndexCall {
+func (c *MockBeaconStateValidatorForValidatorIndexCall) Return(arg0 solid.ValidatorView, arg1 error) *MockBeaconStateValidatorForValidatorIndexCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateValidatorForValidatorIndexCall) Do(f func(int) (solid.Validator, error)) *MockBeaconStateValidatorForValidatorIndexCall {
+func (c *MockBeaconStateValidatorForValidatorIndexCall) Do(f func(int) (solid.ValidatorView, error)) *MockBeaconStateValidatorForValidatorIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateValidatorForValidatorIndexCall) DoAndReturn(f func(int) (solid.Validator, error)) *MockBeaconStateValidatorForValidatorIndexCall {
+func (c *MockBeaconStateValidatorForValidatorIndexCall) DoAndReturn(f func(int) (solid.ValidatorView, error)) *MockBeaconStateValidatorForValidatorIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

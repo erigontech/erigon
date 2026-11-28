@@ -159,6 +159,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 }
 
 func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
+	validatorSet.SetProgressiveHashing(b.version >= clparams.GloasVersion)
 	b.validators = validatorSet
 }
 
@@ -261,10 +262,6 @@ func (b *BeaconState) RawInactivityScores() []byte {
 
 func (b *BeaconState) RawBalances() []byte {
 	return b.balances.Bytes()
-}
-
-func (b *BeaconState) RawValidatorSet() []byte {
-	return b.validators.Bytes()
 }
 
 func (b *BeaconState) RawPreviousEpochParticipation() []byte {

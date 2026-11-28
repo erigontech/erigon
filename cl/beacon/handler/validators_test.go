@@ -98,7 +98,7 @@ func TestHeadValidatorsResponseMatchesHeadState(t *testing.T) {
 		expected := httptest.NewRecorder()
 		require.NoError(t, syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 			registryOrder := func(yield func(validatorEntry) bool) {
-				s.Validators().Range(func(i int, v solid.Validator, _ int) bool {
+				s.Validators().Range(func(i int, v solid.ValidatorView, _ int) bool {
 					if len(tc.ids) > 0 && !slices.Contains(tc.ids, uint64(i)) {
 						return true
 					}

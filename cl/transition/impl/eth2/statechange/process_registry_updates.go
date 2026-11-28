@@ -19,11 +19,9 @@ package statechange
 import (
 	"cmp"
 	"slices"
-	"sync"
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
@@ -46,11 +44,9 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	beaconConfig := s.BeaconConfig()
 	currentEpoch := state.Epoch(s)
 	// start also initializing the activation queue.
-	var m sync.Mutex
 	activationQueue := make([]minimizeQueuedValidator, 0)
 	// Process activation eligibility and ejections.
-	if err := threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
-		validator := s.ValidatorSet().Get(i)
+	for i, validator := range s.ValidatorSet().All(0, s.ValidatorSet().Length()) {
 		if state.IsValidatorEligibleForActivationQueue(s, validator) {
 			if err := s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1); err != nil {
 				return err
@@ -66,16 +62,11 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch &&
 			validator.ActivationEpoch() == s.BeaconConfig().FarFutureEpoch {
-			m.Lock()
 			activationQueue = append(activationQueue, minimizeQueuedValidator{
 				validatorIndex:             uint64(i),
 				activationEligibilityEpoch: activationEligibilityEpoch,
 			})
-			m.Unlock()
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	if s.Version() <= clparams.DenebVersion {

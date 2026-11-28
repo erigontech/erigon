@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -84,8 +85,13 @@ func TestBuildGenesisState_GloasValidatorsRoot(t *testing.T) {
 
 	progressiveRoot, err := genesisState.Validators().HashSSZProgressive()
 	require.NoError(t, err)
-	legacyRoot, err := genesisState.Validators().HashSSZ()
+	legacyValidators := solid.NewValidatorSet(genesisState.Validators().Cap())
+	genesisState.Validators().CopyTo(legacyValidators)
+	legacyValidators.SetProgressiveHashing(false)
+	legacyRoot, err := legacyValidators.HashSSZ()
 	require.NoError(t, err)
+	_, err = genesisState.Validators().HashSSZ()
+	require.Error(t, err)
 	require.Equal(t, common.Hash(progressiveRoot), genesisState.GenesisValidatorsRoot())
 	require.NotEqual(t, legacyRoot, progressiveRoot)
 	require.Equal(t, elHash, genesisState.GetLatestBlockHash())

@@ -52,7 +52,34 @@ func getEnvelopeTempFilename(blockRoot common.Hash) string {
 	return getEnvelopeFilename(blockRoot) + ".tmp"
 }
 
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	bs, prevRoot, err := f.decodeBeaconStateFile(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	// Take the head view only after releasing stateDumpLock: states are dumped while the head view is held.
+	shared, err := bs.InitBeaconStateSharing(f.viewHeadState)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init beacon state: %w, root: %x", err, blockRoot)
+	}
+	sharedValidatorChunksCounter.AddInt(shared)
+	if prevRoot != nil {
+		bs.SetPreviousStateRoot(*prevRoot)
+	}
+	return bs, nil
+}
+
+func (f *forkGraphDisk) viewHeadState(use func(head *state.CachingBeaconState)) {
+	if f.syncedData == nil {
+		return
+	}
+	_ = f.syncedData.ViewHeadState(func(head *state.CachingBeaconState) error {
+		use(head)
+		return nil
+	})
+}
+
+func (f *forkGraphDisk) decodeBeaconStateFile(blockRoot common.Hash) (bs *state.CachingBeaconState, prevRoot *common.Hash, err error) {
 	var file afero.File
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
@@ -68,22 +95,22 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	// Read the version
 	v := []byte{0}
 	if _, err := sr.Read(v); err != nil {
-		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
+		return nil, nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
 	n, err = io.ReadFull(sr, lengthBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
+		return nil, nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
-		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
+		return nil, nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
 	length := binary.BigEndian.Uint64(lengthBytes)
 	if length > maxSSZObjectSize {
-		return nil, fmt.Errorf("corrupt beacon state file: length %d exceeds max %d, root: %x", length, maxSSZObjectSize, blockRoot)
+		return nil, nil, fmt.Errorf("corrupt beacon state file: length %d exceeds max %d, root: %x", length, maxSSZObjectSize, blockRoot)
 	}
 	if length > uint64(cap(f.sszBuffer)) {
 		f.sszBuffer = make([]byte, length)
@@ -92,23 +119,24 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	}
 	n, err = io.ReadFull(sr, f.sszBuffer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
+		return nil, nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
 	bs = state.New(f.beaconCfg)
 
-	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
-		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
+	if err = bs.BeaconState.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
+	decodedStateSizeHistogram.Observe(float64(len(f.sszBuffer)))
 
 	// Try to read the persisted previousStateRoot (appended after SSZ data).
 	// This is needed for GLOAS where the execution payload envelope modifies
 	// the state after TransitionState, making HashSSZ() diverge from
 	// the block's state_root. Older state files won't have this field;
 	// in that case we leave previousStateRoot as zero (HashSSZ fallback).
-	var prevRoot [32]byte
-	if _, readErr := io.ReadFull(sr, prevRoot[:]); readErr == nil {
-		bs.SetPreviousStateRoot(common.Hash(prevRoot))
+	var root common.Hash
+	if _, readErr := io.ReadFull(sr, root[:]); readErr == nil {
+		prevRoot = &root
 	}
 
 	return

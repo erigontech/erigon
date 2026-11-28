@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -371,7 +372,7 @@ func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
 	stale := store.justifiedCheckpoint.Load().(solid.Checkpoint)
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: stale.Epoch + 1, Root: stale.Root})
 
-	_, _, ok, err := store.getHeadOnce(nil, stale, false)
+	_, _, ok, err := store.getHeadOnce(nil, stale, false, rand.New(rand.NewSource(1)))
 	require.NoError(t, err)
 	require.False(t, ok, "a superseded checkpoint must not produce a head")
 

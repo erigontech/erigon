@@ -344,3 +344,14 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 func (arr *byteBasedUint64Slice) EncodingSizeSSZ() int {
 	return arr.l * 8
 }
+
+func progressiveSegmentForIndex(index int) (segment, localIndex, capacity int) {
+	localIndex = index
+	capacity = 1
+	for localIndex >= capacity {
+		localIndex -= capacity
+		capacity *= 4
+		segment++
+	}
+	return segment, localIndex, capacity
+}

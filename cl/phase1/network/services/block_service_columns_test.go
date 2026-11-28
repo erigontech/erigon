@@ -175,8 +175,9 @@ func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBea
 	require.NoError(t, err)
 	privateKey, err := bls.GenerateKey()
 	require.NoError(t, err)
-	validator, err := parentState.ValidatorForValidatorIndex(int(proposerIndex))
+	validatorView, err := parentState.ValidatorForValidatorIndex(int(proposerIndex))
 	require.NoError(t, err)
+	validator := validatorView.Clone()
 	var publicKey [48]byte
 	copy(publicKey[:], bls.CompressPublicKey(privateKey.PublicKey()))
 	validator.SetPublicKey(publicKey)

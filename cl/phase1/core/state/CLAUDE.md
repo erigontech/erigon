@@ -27,7 +27,7 @@ and Gloas helper extensions in `epbs.go`.
 | `accessors.go`: `GetTotalSlashingAmount` | Phase0 `get_total_slashing_amount` |
 | `accessors.go`: `GetBlockRoot` | Phase0 `get_block_root` |
 | `accessors.go`: `FinalityDelay`, `InactivityLeaking` | Phase0/Altair `get_finality_delay`, `is_in_inactivity_leak` |
-| `accessors.go`: `IsUnslashedParticipatingIndex`, `EligibleValidatorsIndicies` | Phase0/Altair `get_unslashed_participating_indices`, `get_eligible_validator_indices` |
+| `accessors.go`: `EligibleValidatorsIndicies` | Phase0 `get_eligible_validator_indices` |
 | `accessors.go`: `IsValidIndexedAttestation` | Phase0 `is_valid_indexed_attestation` |
 | `accessors.go`: `IsValidatorEligibleForActivationQueue` | Phase0 `is_eligible_for_activation_queue`; Electra modified `is_eligible_for_activation_queue` |
 | `accessors.go`: `IsMergeTransitionComplete` | Bellatrix `is_merge_transition_complete` |

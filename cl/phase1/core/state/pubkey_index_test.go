@@ -44,6 +44,104 @@ func TestNewStateSetValidatorsBuildsPubkeyIndex(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestPubkeyIndexFromBaseWithShorterRegistryHasNoDelta(t *testing.T) {
+	src := newPubkeyIndex(validatorSet(1, 2, 3))
+
+	copied := pubkeyIndexFromBase(src, validatorSet(1, 2))
+
+	require.Empty(t, copied.delta)
+	got, ok := copied.get(activeValidatorWithIndex(2).PublicKey())
+	require.True(t, ok)
+	require.Equal(t, uint64(1), got)
+}
+
+func TestPubkeyIndexFromBaseHidesBaseEntriesPastTheValidators(t *testing.T) {
+	src := newPubkeyIndex(validatorSet(1, 2, 3, 4, 5))
+
+	copied := pubkeyIndexFromBase(src, validatorSet(1, 2, 3))
+
+	for _, index := range []uint64{4, 5} {
+		_, ok := copied.get(activeValidatorWithIndex(index).PublicKey())
+		require.False(t, ok, "validator %d is past the copied registry", index)
+	}
+	got, ok := copied.get(activeValidatorWithIndex(3).PublicKey())
+	require.True(t, ok)
+	require.Equal(t, uint64(2), got)
+
+	copied.add(activeValidatorWithIndex(5).PublicKey(), 3)
+	copied.add(activeValidatorWithIndex(9).PublicKey(), 4)
+	got, ok = copied.get(activeValidatorWithIndex(5).PublicKey())
+	require.True(t, ok)
+	require.Equal(t, uint64(3), got)
+	got, ok = copied.get(activeValidatorWithIndex(9).PublicKey())
+	require.True(t, ok)
+	require.Equal(t, uint64(4), got)
+}
+
+func TestPubkeyIndexFromBaseLongerRegistryUsesDelta(t *testing.T) {
+	src := newPubkeyIndex(validatorSet(1, 2, 3))
+
+	copied := pubkeyIndexFromBase(src, validatorSet(1, 2, 3, 4, 5))
+
+	for index := uint64(1); index <= 5; index++ {
+		got, ok := copied.get(activeValidatorWithIndex(index).PublicKey())
+		require.True(t, ok)
+		require.Equal(t, index-1, got)
+	}
+	require.Len(t, copied.delta, 2)
+	require.Empty(t, src.delta)
+}
+
+func TestPubkeyIndexLimitSurvivesCopy(t *testing.T) {
+	full := newPubkeyIndex(validatorSet(1, 2, 3, 4, 5))
+	hidden := []uint64{4, 5}
+	newLimited := func() *CachingBeaconState {
+		limited := stateWithValidators(t, 1, 2, 3)
+		limited.publicKeyIndices = pubkeyIndexFromBase(full, limited.ValidatorSet())
+		require.NoError(t, limited.AddValidator(activeValidatorWithIndex(9), 32_000_000_000))
+		return limited
+	}
+	assertHidden := func(t *testing.T, copied *CachingBeaconState) {
+		t.Helper()
+		assertPubkeyIndexMatchesValidators(t, copied)
+		for _, index := range hidden {
+			got, ok := copied.ValidatorIndexByPubkey(activeValidatorWithIndex(index).PublicKey())
+			require.False(t, ok, "validator %d is past the limit", index)
+			require.Zero(t, got)
+		}
+		got, ok := copied.ValidatorIndexByPubkey(activeValidatorWithIndex(9).PublicKey())
+		require.True(t, ok)
+		require.Equal(t, uint64(3), got)
+		require.NoError(t, copied.AddValidator(activeValidatorWithIndex(5), 32_000_000_000))
+		got, ok = copied.ValidatorIndexByPubkey(activeValidatorWithIndex(5).PublicKey())
+		require.True(t, ok)
+		require.Equal(t, uint64(4), got)
+	}
+
+	t.Run("Copy", func(t *testing.T) {
+		copied, err := newLimited().Copy()
+		require.NoError(t, err)
+		assertHidden(t, copied)
+	})
+	t.Run("CopyInto fresh destination", func(t *testing.T) {
+		copied := New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, newLimited().CopyInto(copied))
+		assertHidden(t, copied)
+	})
+	t.Run("CopyInto reused destination", func(t *testing.T) {
+		copied := stateWithValidators(t, 20, 21, 22, 23, 24, 25, 26, 4, 5)
+		require.NoError(t, newLimited().CopyInto(copied))
+		assertHidden(t, copied)
+	})
+	t.Run("copy of a copy", func(t *testing.T) {
+		first, err := newLimited().Copy()
+		require.NoError(t, err)
+		second, err := first.Copy()
+		require.NoError(t, err)
+		assertHidden(t, second)
+	})
+}
+
 func TestPubkeyIndexSurvivesFuluToGloasUpgrade(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
@@ -256,7 +354,7 @@ func assertPubkeyIndexMatchesUniverse(t *testing.T, beaconState *CachingBeaconSt
 
 func pubkeyIndexFromValidators(beaconState *CachingBeaconState) map[[48]byte]uint64 {
 	want := make(map[[48]byte]uint64, beaconState.ValidatorLength())
-	beaconState.ForEachValidator(func(validator solid.Validator, index, _ int) bool {
+	beaconState.ForEachValidator(func(validator solid.ValidatorView, index, _ int) bool {
 		want[validator.PublicKey()] = uint64(index)
 		return true
 	})

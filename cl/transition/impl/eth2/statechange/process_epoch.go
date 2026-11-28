@@ -19,6 +19,7 @@ package statechange
 import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,9 +32,13 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
 
-	for validatorIndex := range validatorSet.Length() {
+	for validatorIndex, validator := range validatorSet.All(0, validatorSet.Length()) {
+		if !validator.Active(previousEpoch) || validator.Slashed() {
+			continue
+		}
+		participation := cltypes.ParticipationFlags(previousEpochParticipation.Get(validatorIndex))
 		for i := range weights {
-			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
+			flagsUnslashedIndiciesSet[i][validatorIndex] = participation.HasFlag(i)
 		}
 	}
 

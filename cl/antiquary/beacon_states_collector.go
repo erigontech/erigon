@@ -163,7 +163,7 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 
 	events := state_accessors.NewStateEvents()
 
-	state.ForEachValidator(func(v solid.Validator, index, total int) bool {
+	state.ForEachValidator(func(v solid.ValidatorView, index, total int) bool {
 		events.AddValidator(uint64(index), v)
 		return true
 	})
@@ -173,7 +173,7 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 		return err
 	}
 
-	if err := i.collectEffectiveBalancesDump(slot, state.RawValidatorSet()); err != nil {
+	if err := i.collectEffectiveBalancesDump(slot, state.ValidatorSet()); err != nil {
 		return err
 	}
 	if err := antiquateFullUint64List(i.slashingsCollector, roundedSlotToDump, state.RawSlashings(), i.buf, i.compressor); err != nil {
@@ -280,11 +280,11 @@ func (i *beaconStatesCollector) storeSlotData(st *state.CachingBeaconState, rewa
 	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncompressed []byte) error {
+func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, validators *solid.ValidatorSet) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	i.effBalScratch = base_encoding.AppendEffectiveBalances(i.effBalScratch[:0], uncompressed)
+	i.effBalScratch = base_encoding.AppendEffectiveBalances(i.effBalScratch[:0], validators)
 	if _, err := i.compressor.Write(i.effBalScratch); err != nil {
 		return err
 	}

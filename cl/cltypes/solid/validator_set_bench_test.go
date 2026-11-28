@@ -37,7 +37,7 @@ func BenchmarkValidatorSetWarmDirty(b *testing.B) {
 			for iteration := 0; iteration < b.N; iteration++ {
 				b.StopTimer()
 				for i := range dirty {
-					validator := append(Validator(nil), validators.Get(i)...)
+					validator := validators.Get(i).Clone()
 					validator[0] = byte(iteration + i)
 					validators.Set(i, validator)
 				}
@@ -61,16 +61,16 @@ func benchmarkValidatorSetCold(b *testing.B, count int, progressive bool) {
 		b.Run(benchmark.name, func(b *testing.B) {
 			oldWorkers := validatorRootWorkers
 			workers := newValidatorRootWorkerPool(benchmark.maxWorkers)
-			workers.minValidators = 1
+			workers.minChunks = 1
 			validatorRootWorkers = workers
 			b.Cleanup(func() { validatorRootWorkers = oldWorkers })
 
 			validators := testValidatorSet(count)
+			validators.SetProgressiveHashing(progressive)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				validators.MerkleTree = nil
-				validators.progressiveTrees = nil
+				dropValidatorSetCaches(validators)
 				var err error
 				if progressive {
 					_, err = validators.HashSSZProgressive()
@@ -83,4 +83,13 @@ func benchmarkValidatorSetCold(b *testing.B, count int, progressive bool) {
 			}
 		})
 	}
+}
+
+func dropValidatorSetCaches(validators *ValidatorSet) {
+	for i := range validators.list.chunks {
+		chunk := validators.list.chunks[i].Load()
+		chunk.tree = nil
+		chunk.rootValid.Store(false)
+	}
+	validators.list.dropTop()
 }

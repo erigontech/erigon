@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func Test64(t *testing.T) {
@@ -60,24 +62,37 @@ func TestDiff64(t *testing.T) {
 	require.Equal(t, old, new3[:len(old)])
 }
 
+func validatorSetWithEffectiveBalances(t *testing.T, balances []uint64) *solid.ValidatorSet {
+	t.Helper()
+	set := solid.NewValidatorSet(len(balances))
+	for _, balance := range balances {
+		v := solid.NewValidator()
+		v.SetPublicKey([48]byte{1, 2, 3})
+		v.SetEffectiveBalance(balance)
+		set.Append(v)
+	}
+	return set
+}
+
 func TestDiff64Effective(t *testing.T) {
 	sizeOld := 800
 	sizeNew := 816
-	old := make([]byte, sizeOld*validatorSSZSize)
-	new := make([]byte, sizeNew*validatorSSZSize)
+	oldBalances := make([]uint64, sizeOld)
+	newBalances := make([]uint64, sizeNew)
 	previous := make([]byte, sizeOld*8)
 	expected := make([]byte, sizeNew*8)
 	for i := range sizeNew {
-		effBalOffset := i*validatorSSZSize + effectiveBalanceOffset
 		newNum := i + 32
 		oldNum := i + 12
 		binary.LittleEndian.PutUint64(expected[i*8:], uint64(newNum))
-		binary.LittleEndian.PutUint64(new[effBalOffset:], uint64(newNum))
-		if i < len(old)/validatorSSZSize {
+		newBalances[i] = uint64(newNum)
+		if i < sizeOld {
 			binary.LittleEndian.PutUint64(previous[i*8:], uint64(oldNum))
-			binary.LittleEndian.PutUint64(old[effBalOffset:], uint64(oldNum))
+			oldBalances[i] = uint64(oldNum)
 		}
 	}
+	old := validatorSetWithEffectiveBalances(t, oldBalances)
+	new := validatorSetWithEffectiveBalances(t, newBalances)
 
 	require.Equal(t, previous, AppendEffectiveBalances(nil, old))
 	require.Equal(t, expected, AppendEffectiveBalances(nil, new))
@@ -95,28 +110,14 @@ func TestDiff64Effective(t *testing.T) {
 }
 
 func TestAppendEffectiveBalances(t *testing.T) {
-	require.Empty(t, AppendEffectiveBalances(nil, nil))
+	require.Empty(t, AppendEffectiveBalances(nil, solid.NewValidatorSet(0)))
 
 	const validators = 800
-	ssz := make([]byte, validators*validatorSSZSize)
+	balances := make([]uint64, validators)
 	packed := make([]byte, validators*8)
-	for i := range ssz {
-		ssz[i] = byte(i*7 + 1) // noise in non-effective-balance fields
-	}
 	for i := range validators {
-		binary.LittleEndian.PutUint64(ssz[i*validatorSSZSize+effectiveBalanceOffset:], uint64(i+32))
+		balances[i] = uint64(i + 32)
 		binary.LittleEndian.PutUint64(packed[i*8:], uint64(i+32))
 	}
-	require.Equal(t, packed, AppendEffectiveBalances(nil, ssz))
-
-	// a truncated trailing record (past the effective-balance offset) must be ignored
-	twoValidators := make([]byte, 2*validatorSSZSize)
-	binary.LittleEndian.PutUint64(twoValidators[effectiveBalanceOffset:], 111)
-	binary.LittleEndian.PutUint64(twoValidators[validatorSSZSize+effectiveBalanceOffset:], 222)
-	withPartialTail := make([]byte, len(twoValidators)+effectiveBalanceOffset+10)
-	copy(withPartialTail, twoValidators)
-	expected := make([]byte, 16)
-	binary.LittleEndian.PutUint64(expected[0:], 111)
-	binary.LittleEndian.PutUint64(expected[8:], 222)
-	require.Equal(t, expected, AppendEffectiveBalances(nil, withPartialTail))
+	require.Equal(t, packed, AppendEffectiveBalances(nil, validatorSetWithEffectiveBalances(t, balances)))
 }

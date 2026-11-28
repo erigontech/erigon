@@ -163,7 +163,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	b.SetVersion(clparams.ElectraVersion)
 
 	earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
-	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(i int, v solid.ValidatorView, _ int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch {
 			if v.ExitEpoch() > earliestExitEpoch {
 				earliestExitEpoch = v.ExitEpoch()
@@ -191,26 +191,29 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 
 	// add validators that are not yet active to pending balance deposits
 	type tempValidator struct {
-		validator solid.Validator
-		index     uint64
+		pubkey      [48]byte
+		creds       common.Hash
+		eligibility uint64
+		index       uint64
 	}
 	validators := []tempValidator{}
-	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(i int, v solid.ValidatorView, _ int) bool {
 		if v.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch {
 			validators = append(validators, tempValidator{
-				validator: v,
-				index:     uint64(i),
+				pubkey:      v.PublicKey(),
+				creds:       v.WithdrawalCredentials(),
+				eligibility: v.ActivationEligibilityEpoch(),
+				index:       uint64(i),
 			})
 		}
 		return true
 	})
 	// sort
 	slices.SortFunc(validators, func(a, b tempValidator) int {
-		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
-		if ae == be {
+		if a.eligibility == b.eligibility {
 			return cmp.Compare(a.index, b.index)
 		}
-		return cmp.Compare(ae, be)
+		return cmp.Compare(a.eligibility, b.eligibility)
 	})
 
 	for _, v := range validators {
@@ -221,10 +224,6 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		if err := b.SetValidatorBalance(int(v.index), 0); err != nil {
 			return err
 		}
-		curValidator := v.validator
-		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
-		// curValidator.SetEffectiveBalance(0)
-		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
 		if err := b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0); err != nil {
 			return err
 		}
@@ -234,8 +233,8 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
 		// and GENESIS_SLOT to distinguish from a pending deposit request
 		b.AppendPendingDeposit(&solid.PendingDeposit{
-			PubKey:                curValidator.PublicKey(),
-			WithdrawalCredentials: curValidator.WithdrawalCredentials(),
+			PubKey:                v.pubkey,
+			WithdrawalCredentials: v.creds,
 			Amount:                balance,
 			Signature:             bls.InfiniteSignature,
 			Slot:                  b.BeaconConfig().GenesisSlot,
@@ -244,9 +243,9 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 
 	// Ensure early adopters of compounding credentials go through the activation churn
 	var queueErr error
-	b.ValidatorSet().Range(func(vindex int, v solid.Validator, _ int) bool {
+	b.ValidatorSet().Range(func(vindex int, v solid.ValidatorView, _ int) bool {
 		if HasCompoundingWithdrawalCredential(v, b.BeaconConfig()) {
-			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), &v); queueErr != nil {
+			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), v); queueErr != nil {
 				return false
 			}
 		}

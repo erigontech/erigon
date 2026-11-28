@@ -659,6 +659,7 @@ func TestCheckpointStateAttestingIndiciesCoversAllCommittees(t *testing.T) {
 	beaconState := state.New(&cfg)
 	beaconState.SetVersion(clparams.ElectraVersion)
 	validators := make([]solid.Validator, 97)
+	validatorViews := make([]solid.ValidatorView, len(validators))
 	for i := range validators {
 		var publicKey common.Bytes48
 		binary.LittleEndian.PutUint64(publicKey[:8], uint64(i))
@@ -672,6 +673,7 @@ func TestCheckpointStateAttestingIndiciesCoversAllCommittees(t *testing.T) {
 			cfg.FarFutureEpoch,
 			cfg.FarFutureEpoch,
 		)
+		validatorViews[i] = validators[i].View()
 		require.NoError(t, beaconState.AddValidator(validators[i], cfg.MaxEffectiveBalance))
 	}
 	require.Equal(t, uint64(3), beaconState.CommitteeCount(0))
@@ -687,7 +689,7 @@ func TestCheckpointStateAttestingIndiciesCoversAllCommittees(t *testing.T) {
 	checkpointState := newCheckpointState(
 		&cfg,
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		validators,
+		validatorViews,
 		beaconState.RandaoMixes(),
 		beaconState.GenesisValidatorsRoot(),
 		beaconState.Fork(),

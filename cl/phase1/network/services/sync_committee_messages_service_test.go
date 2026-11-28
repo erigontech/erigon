@@ -283,8 +283,9 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 			require.NoError(t, head.SetSlot(nextPeriod-tt.headBehind))
 
 			publicKey := common.Bytes48{0xaa}
-			validator, err := head.ValidatorForValidatorIndex(0)
+			validatorView, err := head.ValidatorForValidatorIndex(0)
 			require.NoError(t, err)
+			validator := validatorView.Clone()
 			validator.SetPublicKey(publicKey)
 			head.SetValidatorAtIndex(0, validator)
 			current, next := head.CurrentSyncCommittee().Copy(), head.NextSyncCommittee().Copy()
@@ -430,8 +431,9 @@ func newOutsideG2SyncCommitteeFixture(t *testing.T) *outsideG2SyncCommitteeFixtu
 		key, err := bls.GenerateKey()
 		require.NoError(t, err)
 		publicKey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
-		validator, err := head.ValidatorForValidatorIndex(index)
+		view, err := head.ValidatorForValidatorIndex(index)
 		require.NoError(t, err)
+		validator := view.Clone()
 		validator.SetPublicKey(publicKey)
 		head.SetValidatorAtIndex(index, validator)
 		for _, position := range memberPositions {

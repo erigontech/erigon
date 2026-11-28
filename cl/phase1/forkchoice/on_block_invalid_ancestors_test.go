@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"math/rand"
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -314,7 +315,7 @@ func TestPreGloasHeadIgnoresVotesForInvalidatedBlocks(t *testing.T) {
 		f.setLatestMessage(uint64(i), LatestMessage{Epoch: 10, Root: root})
 	}
 
-	head, _, err := f.getHead(nil, false)
+	head, _, err := f.getHead(nil, false, rand.New(rand.NewSource(1)))
 
 	require.NoError(t, err)
 	require.Equal(t, a1, head.Root)

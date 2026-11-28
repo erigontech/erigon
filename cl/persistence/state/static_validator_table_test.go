@@ -56,7 +56,7 @@ func (c validatorErrorCursor) Close()                        {}
 
 func TestReadValidatorsTableReturnsCursorError(t *testing.T) {
 	var row bytes.Buffer
-	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator(), 0).Serialize(&row))
+	require.NoError(t, NewStaticValidatorFromValidator(solid.NewValidator().View(), 0).Serialize(&row))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	wantErr := errors.New("cursor failed")
@@ -82,7 +82,7 @@ func TestStaticValidatorTable(t *testing.T) {
 
 	table := NewStaticValidatorTable()
 	for i := range vals {
-		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
+		require.NoError(t, table.AddValidator(vals[i].View(), uint64(i), 0))
 	}
 	// Now let us play with this
 	require.NoError(t, table.AddExitEpoch(1, 32, 34))

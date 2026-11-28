@@ -326,7 +326,9 @@ func TestProcessBlockPreservesGloasBatchErrorAfterValidBid(t *testing.T) {
 	block.Body.PayloadAttestations = newPayloadAttestationList(s)
 	proposer, err := s.ValidatorForValidatorIndex(0)
 	require.NoError(t, err)
-	clear(proposer.PublicKeyBytes())
+	invalidProposer := proposer.Clone()
+	invalidProposer.SetPublicKey([48]byte{})
+	s.SetValidatorAtIndex(0, invalidProposer)
 
 	err = machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.ErrorIs(t, err, bls.ErrDeserializePublicKey)
@@ -457,9 +459,11 @@ func setComplementaryValidatorKeys(t testing.TB, s *state.CachingBeaconState) []
 	require.NoError(t, err)
 	keys := []*bls.PrivateKey{first, second}
 	for i, key := range keys {
-		validator, err := s.ValidatorForValidatorIndex(i)
+		view, err := s.ValidatorForValidatorIndex(i)
 		require.NoError(t, err)
+		validator := view.Clone()
 		copy(validator.PublicKeyBytes(), bls.CompressPublicKey(key.PublicKey()))
+		s.SetValidatorAtIndex(i, validator)
 	}
 	return keys
 }

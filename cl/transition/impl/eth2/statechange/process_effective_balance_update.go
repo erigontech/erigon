@@ -35,7 +35,7 @@ func ProcessEffectiveBalanceUpdates(s abstract.BeaconState) error {
 	// Iterate over validator set and compute the diff of each validator.
 	var err error
 	var balance uint64
-	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
+	s.ForEachValidator(func(validator solid.ValidatorView, index, total int) bool {
 		balance, err = s.ValidatorBalance(index)
 		if err != nil {
 			return false

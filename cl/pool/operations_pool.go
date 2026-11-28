@@ -133,15 +133,15 @@ func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, fin
 	}
 }
 
-func validatorFromState(finalizedState abstract.BeaconState, validatorIndex uint64) (solid.Validator, bool) {
+func validatorFromState(finalizedState abstract.BeaconState, validatorIndex uint64) (solid.ValidatorView, bool) {
 	if validatorIndex >= uint64(finalizedState.ValidatorLength()) {
-		return nil, false
+		return solid.ValidatorView{}, false
 	}
 	validator, err := finalizedState.ValidatorForValidatorIndex(int(validatorIndex))
-	return validator, err == nil && validator != nil
+	return validator, err == nil
 }
 
-func slashingTerminal(validator solid.Validator, finalizedEpoch uint64) bool {
+func slashingTerminal(validator solid.ValidatorView, finalizedEpoch uint64) bool {
 	return validator.Slashed() || validator.WithdrawableEpoch() <= finalizedEpoch
 }
 

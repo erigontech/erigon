@@ -55,12 +55,12 @@ func NewStateEventsFromBytes(buf []byte) *StateEvents {
 	return &StateEvents{buf: bytes.Clone(buf)}
 }
 
-func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
+func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.ValidatorView) {
 	se.mu.Lock()
 	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(addValidator))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
-	se.buf = append(se.buf, validator...)
+	se.buf, _ = validator.EncodeSSZ(se.buf)
 }
 
 func (se *StateEvents) ChangeExitEpoch(validatorIndex uint64, exitEpoch uint64) {
@@ -127,7 +127,7 @@ func (se *StateEvents) Reset() {
 }
 
 // ReplayEvents replays the events in the buffer and will return the err on handler failure
-func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Validator) error,
+func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.ValidatorView) error,
 	onChangeExitEpoch func(validatorIndex uint64, exitEpoch uint64) error,
 	onChangeWithdrawableEpoch func(validatorIndex uint64, withdrawableEpoch uint64) error,
 	onChangeWithdrawalCredentials func(validatorIndex uint64, withdrawalCredentials common.Hash) error,
@@ -146,7 +146,7 @@ func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Val
 		case addValidator:
 			validatorIndex := binary.BigEndian.Uint64(buf)
 			buf = buf[8:]
-			validator := solid.Validator(buf[:121])
+			validator := solid.Validator(buf[:121]).View()
 			buf = buf[121:]
 			if err := onAddValidator(validatorIndex, validator); err != nil {
 				return err

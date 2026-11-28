@@ -158,7 +158,7 @@ func FillStaticValidatorsTableIfNeeded(logger log.Logger, stateSn *snapshotsync.
 		}
 		event := state_accessors.NewStateEventsFromBytes(buf)
 		if err := state_accessors.ReplayEvents(
-			func(validatorIndex uint64, validator solid.Validator) error {
+			func(validatorIndex uint64, validator solid.ValidatorView) error {
 				return validatorsTable.AddValidator(validator, validatorIndex, slot)
 			},
 			func(validatorIndex uint64, exitEpoch uint64) error {
@@ -236,7 +236,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		// Mark all validators as touched because we just initizialized the whole state.
 		var addErr error
-		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
+		s.currentState.ForEachValidator(func(v solid.ValidatorView, index, total int) bool {
 			changedValidators.Store(uint64(index), struct{}{})
 			if addErr = s.validatorsTable.AddValidator(v, uint64(index), 0); addErr != nil {
 				return false
@@ -269,7 +269,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
 			return stateAntiquaryCollector.collectIntraEpochRandaoMix(slot, mix)
 		},
-		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
+		OnNewValidator: func(index int, v solid.ValidatorView, balance uint64) error {
 			changedValidators.Store(uint64(index), struct{}{})
 			events.AddValidator(uint64(index), v)
 			return s.validatorsTable.AddValidator(v, uint64(index), slot)
@@ -434,7 +434,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
+				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.ValidatorSet()); err != nil {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
@@ -471,7 +471,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			continue
 		}
 		// snapshot before TransitionState mutates the validator buffer in place
-		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.RawValidatorSet())
+		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.ValidatorSet())
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
@@ -532,7 +532,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.ValidatorSet()); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
@@ -593,7 +593,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
-			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.RawValidatorSet())
+			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.ValidatorSet())
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(slot, prevEffectiveBalances, newEffectiveBalances); err != nil {
 				return err
 			}

@@ -54,7 +54,7 @@ type StaticValidator struct {
 
 // NewStaticValidatorFromValidator creates a new StaticValidator from a given Validator and Slot,
 // initializing the fields with the current state of the Validator at the given Slot.
-func NewStaticValidatorFromValidator(v solid.Validator, slot uint64) *StaticValidator {
+func NewStaticValidatorFromValidator(v solid.ValidatorView, slot uint64) *StaticValidator {
 	return &StaticValidator{
 		// Initializes each field with the current state of the validator.
 		publicKeys:            []staticValidatorField[common.Bytes48]{{slot, v.PublicKey()}},
@@ -285,7 +285,7 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 	}
 }
 
-func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
+func (s *StaticValidatorTable) AddValidator(v solid.ValidatorView, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	// Idempotency is by index, not slot: guarding on slot leaves a table restored

@@ -51,8 +51,7 @@ const (
 )
 
 func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -85,8 +84,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 }
 
 func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -115,8 +113,7 @@ func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 }
 
 func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -172,8 +169,7 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 }
 
 func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -204,8 +200,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 }
 
 func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -234,8 +229,7 @@ func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) erro
 }
 
 func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -264,8 +258,7 @@ func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase
 }
 
 func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -336,8 +329,7 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 }
 
 func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -374,8 +366,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 }
 
 func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -405,8 +396,7 @@ func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCa
 }
 
 func operationConsolidationRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -436,8 +426,7 @@ func operationConsolidationRequestHandler(t *testing.T, root fs.FS, c spectest.T
 }
 
 func operationDepositRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -467,8 +456,7 @@ func operationDepositRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase
 }
 
 func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -498,8 +486,7 @@ func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestC
 }
 
 func operationBuilderDepositRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -528,8 +515,7 @@ func operationBuilderDepositRequestHandler(t *testing.T, root fs.FS, c spectest.
 }
 
 func operationBuilderExitRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -558,8 +544,7 @@ func operationBuilderExitRequestHandler(t *testing.T, root fs.FS, c spectest.Tes
 }
 
 func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -635,8 +620,7 @@ func verifySignatureSet(signature, signingRoot, publicKey []byte, err error) err
 }
 
 func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -682,8 +666,7 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 }
 
 func operationParentExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
@@ -713,8 +696,7 @@ func operationParentExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest
 }
 
 func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
-	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
-	require.NoError(t, err)
+	preState := readFrozenPreState(t, root, c.Version())
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {

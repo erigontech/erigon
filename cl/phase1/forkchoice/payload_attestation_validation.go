@@ -226,12 +226,7 @@ func buildPayloadAttestationValidationContext(blockState *state.CachingBeaconSta
 		if err != nil {
 			return nil, fmt.Errorf("failed to get PTC validator %d: %w", validatorIndex, err)
 		}
-		if len(validator.PublicKeyBytes()) != len(common.Bytes48{}) {
-			return nil, fmt.Errorf("invalid public key length for PTC validator %d", validatorIndex)
-		}
-		var publicKey common.Bytes48
-		copy(publicKey[:], validator.PublicKeyBytes())
-		validationContext.publicKeys[validatorIndex] = publicKey
+		validationContext.publicKeys[validatorIndex] = validator.PublicKey()
 	}
 	return validationContext, nil
 }

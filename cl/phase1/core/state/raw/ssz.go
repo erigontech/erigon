@@ -215,6 +215,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.payloadExpectedWithdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(b.beaconConfig.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
 		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(b.beaconConfig.PtcSize))
 	}
+	b.validators.SetProgressiveHashing(b.version >= clparams.GloasVersion)
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
 	}

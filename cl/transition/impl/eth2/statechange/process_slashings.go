@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 func ProcessSlashings(s abstract.BeaconState) error {
@@ -40,10 +39,9 @@ func ProcessSlashings(s abstract.BeaconState) error {
 	slashing := min(totalBalance, state.GetTotalSlashingAmount(s)*s.BeaconConfig().GetProportionalSlashingMultiplier(s.Version()))
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
-	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
-		validator := s.ValidatorSet().Get(i)
+	for i, validator := range s.ValidatorSet().All(0, s.ValidatorSet().Length()) {
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
-			return nil
+			continue
 		}
 		// Get the effective balance increment
 		increment := beaconConfig.EffectiveBalanceIncrement
@@ -52,8 +50,11 @@ func ProcessSlashings(s abstract.BeaconState) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		return state.DecreaseBalance(s, uint64(i), penalty)
-	})
+		if err := state.DecreaseBalance(s, uint64(i), penalty); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func processSlashingsElectra(s abstract.BeaconState) error {
@@ -67,13 +68,15 @@ func processSlashingsElectra(s abstract.BeaconState) error {
 	cfg := s.BeaconConfig()
 	increment := cfg.EffectiveBalanceIncrement
 	penaltyPerEffectiveBalanceIncr := adjustTotalSlashingBalance / (totalBalance / increment)
-	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
-		v := s.ValidatorSet().Get(i)
+	for i, v := range s.ValidatorSet().All(0, s.ValidatorSet().Length()) {
 		if !v.Slashed() || epoch+cfg.EpochsPerSlashingsVector/2 != v.WithdrawableEpoch() {
-			return nil
+			continue
 		}
 		effectiveBalanceIncrements := v.EffectiveBalance() / increment
 		penalty := penaltyPerEffectiveBalanceIncr * effectiveBalanceIncrements
-		return state.DecreaseBalance(s, uint64(i), penalty)
-	})
+		if err := state.DecreaseBalance(s, uint64(i), penalty); err != nil {
+			return err
+		}
+	}
+	return nil
 }

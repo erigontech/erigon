@@ -370,7 +370,7 @@ func TestBeaconState_SetValidatorAtIndex(t *testing.T) {
 	index := 0
 	validator := solid.NewValidator()
 	state.SetValidatorAtIndex(index, validator)
-	assert.Equal(t, validator, state.validators.Get(index))
+	assert.Equal(t, validator.View(), state.validators.Get(index))
 }
 
 // TestValidatorSetterLeavesLeafCleanOnHookError pins that a setter which aborts

@@ -32,7 +32,7 @@ func (b *CachingBeaconState) copyInto(bs *CachingBeaconState, totalActiveBalance
 		return err
 	}
 
-	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices.base, bs.ValidatorSet())
+	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices, bs.ValidatorSet())
 	pubkeyIndexDeltaSize.SetInt(len(bs.publicKeyIndices.delta))
 	err = bs.reinitCaches(totalActiveBalance)
 	if err != nil {

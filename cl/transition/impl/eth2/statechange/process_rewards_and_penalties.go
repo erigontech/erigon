@@ -17,7 +17,6 @@
 package statechange
 
 import (
-	"fmt"
 	"runtime"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -49,14 +48,8 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 			to = s.ValidatorLength()
 		}
 		wp.AddWork(func() error {
-			for validatorIndex := from; validatorIndex < to; validatorIndex++ {
-				if validatorIndex >= s.ValidatorLength() {
-					break
-				}
-				effectiveBalance, err := s.ValidatorEffectiveBalance(validatorIndex)
-				if err != nil {
-					return fmt.Errorf("failed to get validator effective balance: %w", err)
-				}
+			for validatorIndex, validator := range s.ValidatorSet().All(from, to) {
+				effectiveBalance := validator.EffectiveBalance()
 				for weight := range weights {
 					if flagsUnslashedIndiciesSet[weight][validatorIndex] {
 						flagsTotalBalancesShards[weight][workerID] += effectiveBalance
@@ -162,7 +155,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 	// Make buffer for flag indexes totTargetal balances.
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
+	s.ForEachValidator(func(validator solid.ValidatorView, idx, total int) bool {
 		if validator.Slashed() {
 			return true
 		}
@@ -264,7 +257,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 	}
 	// Lastly process late attestations
 
-	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
+	s.ForEachValidator(func(validator solid.ValidatorView, index, total int) bool {
 		var previousMatchingSourceAttester bool
 		var attestation *solid.PendingAttestation
 		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(index); err != nil {

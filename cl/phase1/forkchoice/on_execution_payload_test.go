@@ -5429,7 +5429,7 @@ func TestExecutionPayloadCommitmentFallbackRefreshesAfterYield(t *testing.T) {
 
 func TestExecutionPayloadEnvelopeCurrentStateCopiesAreCoherent(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	validator := blockState.ValidatorSet().Get(0)
+	validator := blockState.ValidatorSet().Get(0).Clone()
 	for range 1_000 {
 		require.NoError(t, blockState.AddValidator(validator, cfg.MaxEffectiveBalance))
 	}

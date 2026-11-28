@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"math"
 	"net/http"
 	"net/url"
@@ -736,32 +737,37 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if hRoot != wRoot {
 		haveState.PrintLeaves()
 		wantState.PrintLeaves()
-		for i := 0; i < haveState.ValidatorLength(); i++ {
-			haveState.ValidatorSet().Get(i)
+		nextWant, stopWant := iter.Pull2(wantState.ValidatorSet().All(0, wantState.ValidatorLength()))
+		defer stopWant()
+		for i, have := range haveState.ValidatorSet().All(0, haveState.ValidatorLength()) {
+			_, want, ok := nextWant()
+			if !ok {
+				break
+			}
 			// Compare each field
-			if haveState.ValidatorSet().Get(i).PublicKey() != wantState.ValidatorSet().Get(i).PublicKey() {
-				log.Error("PublicKey mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).PublicKey(), "want", wantState.ValidatorSet().Get(i).PublicKey())
+			if have.PublicKey() != want.PublicKey() {
+				log.Error("PublicKey mismatch", "index", i, "have", have.PublicKey(), "want", want.PublicKey())
 			}
-			if haveState.ValidatorSet().Get(i).WithdrawalCredentials() != wantState.ValidatorSet().Get(i).WithdrawalCredentials() {
-				log.Error("WithdrawalCredentials mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawalCredentials(), "want", wantState.ValidatorSet().Get(i).WithdrawalCredentials())
+			if have.WithdrawalCredentials() != want.WithdrawalCredentials() {
+				log.Error("WithdrawalCredentials mismatch", "index", i, "have", have.WithdrawalCredentials(), "want", want.WithdrawalCredentials())
 			}
-			if haveState.ValidatorSet().Get(i).EffectiveBalance() != wantState.ValidatorSet().Get(i).EffectiveBalance() {
-				log.Error("EffectiveBalance mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).EffectiveBalance(), "want", wantState.ValidatorSet().Get(i).EffectiveBalance())
+			if have.EffectiveBalance() != want.EffectiveBalance() {
+				log.Error("EffectiveBalance mismatch", "index", i, "have", have.EffectiveBalance(), "want", want.EffectiveBalance())
 			}
-			if haveState.ValidatorSet().Get(i).Slashed() != wantState.ValidatorSet().Get(i).Slashed() {
-				log.Error("Slashed mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).Slashed(), "want", wantState.ValidatorSet().Get(i).Slashed())
+			if have.Slashed() != want.Slashed() {
+				log.Error("Slashed mismatch", "index", i, "have", have.Slashed(), "want", want.Slashed())
 			}
-			if haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch() != wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch() {
-				log.Error("ActivationEligibilityEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch(), "want", wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch())
+			if have.ActivationEligibilityEpoch() != want.ActivationEligibilityEpoch() {
+				log.Error("ActivationEligibilityEpoch mismatch", "index", i, "have", have.ActivationEligibilityEpoch(), "want", want.ActivationEligibilityEpoch())
 			}
-			if haveState.ValidatorSet().Get(i).ActivationEpoch() != wantState.ValidatorSet().Get(i).ActivationEpoch() {
-				log.Error("ActivationEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ActivationEpoch(), "want", wantState.ValidatorSet().Get(i).ActivationEpoch())
+			if have.ActivationEpoch() != want.ActivationEpoch() {
+				log.Error("ActivationEpoch mismatch", "index", i, "have", have.ActivationEpoch(), "want", want.ActivationEpoch())
 			}
-			if haveState.ValidatorSet().Get(i).ExitEpoch() != wantState.ValidatorSet().Get(i).ExitEpoch() {
-				log.Error("ExitEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ExitEpoch(), "want", wantState.ValidatorSet().Get(i).ExitEpoch())
+			if have.ExitEpoch() != want.ExitEpoch() {
+				log.Error("ExitEpoch mismatch", "index", i, "have", have.ExitEpoch(), "want", want.ExitEpoch())
 			}
-			if haveState.ValidatorSet().Get(i).WithdrawableEpoch() != wantState.ValidatorSet().Get(i).WithdrawableEpoch() {
-				log.Error("WithdrawableEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawableEpoch(), "want", wantState.ValidatorSet().Get(i).WithdrawableEpoch())
+			if have.WithdrawableEpoch() != want.WithdrawableEpoch() {
+				log.Error("WithdrawableEpoch mismatch", "index", i, "have", have.WithdrawableEpoch(), "want", want.WithdrawableEpoch())
 			}
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", common.Hash(hRoot), common.Hash(wRoot))

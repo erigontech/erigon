@@ -30,6 +30,11 @@ import (
 
 func newStateWithQueues(version clparams.StateVersion) *BeaconState {
 	s := newTestState(version)
+	addQueues(s, version)
+	return s
+}
+
+func addQueues(s *BeaconState, version clparams.StateVersion) {
 	for i := range 7600 {
 		s.AppendPendingDeposit(&solid.PendingDeposit{Amount: uint64(i), Slot: uint64(i)})
 	}
@@ -48,19 +53,27 @@ func newStateWithQueues(version clparams.StateVersion) *BeaconState {
 			s.payloadExpectedWithdrawals.Append(&cltypes.Withdrawal{Index: uint64(i), Amount: uint64(i)})
 		}
 	}
-	return s
 }
 
 func BenchmarkHashSSZAfterCopyInto(b *testing.B) {
 	for _, tc := range []struct {
-		name    string
-		version clparams.StateVersion
+		name       string
+		version    clparams.StateVersion
+		validators int
 	}{
-		{"fulu", clparams.FuluVersion},
-		{"gloas", clparams.GloasVersion},
+		{"fulu", clparams.FuluVersion, 0},
+		{"gloas", clparams.GloasVersion, 0},
+		{"fulu_2400k", clparams.FuluVersion, 2_400_000},
+		{"gloas_2400k", clparams.GloasVersion, 2_400_000},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			src := newStateWithQueues(tc.version)
+			var src *BeaconState
+			if tc.validators == 0 {
+				src = newStateWithQueues(tc.version)
+			} else {
+				src = newMainnetSizedState(b, tc.validators, tc.version)
+				addQueues(src, tc.version)
+			}
 			if _, err := src.HashSSZ(); err != nil {
 				b.Fatal(err)
 			}
@@ -79,9 +92,9 @@ func BenchmarkHashSSZAfterCopyInto(b *testing.B) {
 	}
 }
 
-func newMainnetSizedState(b *testing.B, validators int) *BeaconState {
+func newMainnetSizedState(b *testing.B, validators int, version clparams.StateVersion) *BeaconState {
 	b.Helper()
-	s := newTestState(clparams.FuluVersion)
+	s := newTestState(version)
 	for i := range validators {
 		var publicKey [48]byte
 		binary.LittleEndian.PutUint32(publicKey[:], uint32(i))
@@ -99,21 +112,24 @@ func newMainnetSizedState(b *testing.B, validators int) *BeaconState {
 	return s
 }
 
-// BenchmarkHashSSZAfterBlock hashes a mainnet-sized Fulu state after the field updates of one normal block.
+// BenchmarkHashSSZAfterBlock hashes a mainnet-sized state after the field updates of one normal block.
 func BenchmarkHashSSZAfterBlock(b *testing.B) {
 	if testing.Short() {
-		b.Skip("resource-heavy benchmark: builds a 2.1M-validator state")
+		b.Skip("resource-heavy benchmark: builds a 2.4M-validator state")
 	}
-	const validators, attestersPerBlock, withdrawalsPerBlock = 2_100_001, 25_000, 16
+	const validators, attestersPerBlock, withdrawalsPerBlock = 2_400_000, 25_000, 16
 	for _, tc := range []struct {
 		name               string
+		version            clparams.StateVersion
 		previousEpochShare int // out of 4 attestations
 	}{
-		{"current_epoch_attestations", 0},
-		{"half_previous_epoch_attestations", 2},
+		{"current_epoch_attestations", clparams.FuluVersion, 0},
+		{"half_previous_epoch_attestations", clparams.FuluVersion, 2},
+		{"gloas/current_epoch_attestations", clparams.GloasVersion, 0},
+		{"gloas/half_previous_epoch_attestations", clparams.GloasVersion, 2},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			s := newMainnetSizedState(b, validators)
+			s := newMainnetSizedState(b, validators, tc.version)
 			rng := rand.New(rand.NewSource(1))
 			b.ReportAllocs()
 			for b.Loop() {

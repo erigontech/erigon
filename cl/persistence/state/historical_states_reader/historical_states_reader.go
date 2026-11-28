@@ -19,6 +19,7 @@ package historical_states_reader
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -783,11 +784,13 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGe
 
 	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
+	scratch := solid.NewValidator()
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if validatorIndex >= validatorSetLength {
 			return false
 		}
-		validator.ToValidator(out.Get(int(validatorIndex)), slot)
+		validator.ToValidator(scratch, slot)
+		out.Set(int(validatorIndex), scratch)
 		return true
 	})
 	// Read the balances
@@ -797,8 +800,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGe
 		return nil, err
 	}
 	for i := 0; i < int(validatorSetLength); i++ {
-		out.Get(i).
-			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
+		out.SetEffectiveBalanceForValidatorAtIndex(i, binary.LittleEndian.Uint64(bytesEffectiveBalances[i*8:]))
 	}
 	return out, nil
 }

@@ -1889,10 +1889,11 @@ func (imp *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidati
 	}
 
 	// Initiate source validator exit and append pending consolidation
-	if err := s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance())); err != nil {
+	exitEpoch := computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance())
+	if err := s.SetExitEpochForValidatorAtIndex(int(sourceIndex), exitEpoch); err != nil {
 		return err
 	}
-	if err := s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay); err != nil {
+	if err := s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), exitEpoch+s.BeaconConfig().MinValidatorWithdrawabilityDelay); err != nil {
 		return err
 	}
 
@@ -1952,7 +1953,11 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	if err := s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc); err != nil {
 		return err
 	}
-	return state.QueueExcessActiveBalance(s, vindex, &validator)
+	validator, err = s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		return err
+	}
+	return state.QueueExcessActiveBalance(s, vindex, validator)
 }
 
 // compute_consolidation_epoch_and_update_churn

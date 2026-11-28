@@ -105,7 +105,7 @@ func validatorStatusFromString(s string) (validatorStatus, error) {
 	}
 }
 
-func validatorStatusFromValidator(v solid.Validator, currentEpoch uint64, balance uint64) validatorStatus {
+func validatorStatusFromValidator(v solid.ValidatorView, currentEpoch uint64, balance uint64) validatorStatus {
 	activationEpoch := v.ActivationEpoch()
 	// pending section
 	if activationEpoch > currentEpoch {
@@ -617,7 +617,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 
 type validatorEntry struct {
 	index     int
-	validator solid.Validator
+	validator solid.ValidatorView
 	balance   uint64
 }
 
@@ -625,7 +625,7 @@ type validatorEntry struct {
 func validatorEntries(filterIndicies []uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet) iter.Seq[validatorEntry] {
 	return func(yield func(validatorEntry) bool) {
 		if len(filterIndicies) == 0 {
-			validators.Range(func(i int, v solid.Validator, _ int) bool {
+			validators.Range(func(i int, v solid.ValidatorView, _ int) bool {
 				return yield(validatorEntry{i, v, balances.Get(i)})
 			})
 			return
@@ -644,14 +644,11 @@ func copyValidatorEntries(s *state.CachingBeaconState, filterIndicies []uint64) 
 	if len(filterIndicies) > 0 {
 		end, _ := slices.BinarySearch(filterIndicies, uint64(s.ValidatorLength()))
 		entries := make([]validatorEntry, end)
-		var records []byte
+		records := make([]byte, 0, end*solid.NewValidator().EncodingSizeSSZ())
 		for i, idx := range filterIndicies[:end] {
-			record := s.Validators().Get(int(idx))
-			if records == nil {
-				records = make([]byte, 0, end*len(record))
-			}
-			records = append(records, record...)
-			entries[i] = validatorEntry{int(idx), records[len(records)-len(record) : len(records) : len(records)], s.Balances().Get(int(idx))}
+			start := len(records)
+			records, _ = s.Validators().Get(int(idx)).EncodeSSZ(records)
+			entries[i] = validatorEntry{int(idx), solid.Validator(records[start:len(records):len(records)]).View(), s.Balances().Get(int(idx))}
 		}
 		return slices.Values(entries), nil
 	}
@@ -660,9 +657,7 @@ func copyValidatorEntries(s *state.CachingBeaconState, filterIndicies []uint64) 
 		return nil, err
 	}
 	validators := solid.NewValidatorSet(s.Validators().Cap())
-	if err := validators.DecodeSSZ(s.Validators().Bytes(), 0); err != nil {
-		return nil, err
-	}
+	s.Validators().CopyTo(validators)
 	return validatorEntries(nil, balances, validators), nil
 }
 
@@ -689,7 +684,7 @@ func responseValidatorEntries(w http.ResponseWriter, entries iter.Seq[validatorE
 	b.WriteString("[")
 	first := true
 	var err error
-	appendValidator := func(i int, v solid.Validator, balance uint64) bool {
+	appendValidator := func(i int, v solid.ValidatorView, balance uint64) bool {
 		// "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
 		status := validatorStatusFromValidator(v, stateEpoch, balance)
 		if shouldStatusBeFiltered(status, filterStatuses) {
@@ -1009,7 +1004,7 @@ func newValidatorIdentities(validators *solid.ValidatorSet, filter *validatorIde
 		return nil
 	}
 	validatorIdentities := solid.NewStaticListSSZ[*validatorIdentityResponse](validators.Length(), (&validatorIdentityResponse{}).EncodingSizeSSZ())
-	validators.Range(func(i int, v solid.Validator, l int) bool {
+	validators.Range(func(i int, v solid.ValidatorView, l int) bool {
 		if !filter.empty() {
 			_, byIndex := filter.indices[uint64(i)]
 			_, byPubkey := filter.pubkeys[common.Bytes48(v.PublicKey())]
