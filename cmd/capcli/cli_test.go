@@ -821,7 +821,7 @@ func TestBeaconAPITransportErrorOmitsBaseURL(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = original })
 	_, err := getHead(t.Context(), "https://beacon.example?apikey=query-secret")
 	require.ErrorContains(t, err, "beacon eth/v2/debug/beacon/heads: ")
-	require.ErrorContains(t, err, "connection failed")
+	require.ErrorContains(t, err, "HTTP request failed")
 	require.NotContains(t, err.Error(), "https://beacon.example")
 	require.NotContains(t, err.Error(), "query-secret")
 }
