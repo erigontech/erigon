@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -138,19 +140,41 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	if slotFilter != nil && !(epoch*a.beaconChainCfg.SlotsPerEpoch <= *slotFilter && *slotFilter < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot %d is not in epoch %d", *slotFilter, epoch))
 	}
-	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	isFinalized := canonicalRoot == blockRoot && slot <= a.forkchoiceStore.FinalizedSlot()
 	// s, cn := a.syncedData.HeadState()
 	// defer cn()
 
 	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
 		var resp []*committeeResponse
-		err = a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			resp, err = buildResponse(s, epoch)
-			return err
+		matched := false
+		err = a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, headSlot uint64) error {
+			if root == blockRoot && ((blockId.GetSlot() == nil && blockId.GetRoot() == nil) || headSlot == slot) {
+				matched = true
+				resp, err = buildResponse(s, epoch)
+				return err
+			}
+			return nil
 		})
 		if err != nil {
 			return nil, err
+		}
+		if !matched {
+			s, err := a.forkchoiceStateAtBlockSlot(blockId, blockRoot, slot)
+			if err != nil && !errors.Is(err, fork_graph.ErrStateNotFound) {
+				return nil, err
+			}
+			if s == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found: %x", blockRoot))
+			}
+			resp, err = buildResponse(s, epoch)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
