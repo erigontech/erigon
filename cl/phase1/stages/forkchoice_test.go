@@ -1203,7 +1203,7 @@ func TestUpdateCanonicalChainReportsAReorgWhenTheEventCannotBeBuilt(t *testing.T
 
 			require.NoError(t, f.cfg.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
 				faultyTx := failingStateRootReadTx{RwTx: tx, root: failingRoot, err: errors.New("state root read failed")}
-				forkSlot, reorged, err := updateCanonicalChainInTheDatabase(faultyTx, f.block.Block.Slot, f.branchRoot, f.cfg)
+				forkSlot, reorged, err := updateCanonicalChainInTheDatabase(faultyTx, f.block.Block.Slot, forkchoice.ForkChoiceNode{Root: f.branchRoot}, f.cfg)
 				require.NoError(t, err)
 				require.True(t, reorged)
 				require.Equal(t, f.forkSlot, forkSlot)
@@ -1438,7 +1438,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			}))
 
 			err := db.Update(t.Context(), func(tx kv.RwTx) error {
-				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, forkchoice.ForkChoiceNode{Root: root102b}, cfg)
 				return err
 			})
 			require.ErrorIs(t, err, errBlockIndicesPending, "canonical publication must wait for the pending block write")
@@ -1453,7 +1453,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 				return nil
 			}))
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, forkchoice.ForkChoiceNode{Root: root102b}, cfg)
 				return err
 			}))
 			requireCanonical(root101b, root102b)
@@ -1472,7 +1472,7 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			tx := mdbxtest.BeginRw(t, db)
 
-			_, _, err := updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg)
+			_, _, err := updateCanonicalChainInTheDatabase(tx, anchorSlot, forkchoice.ForkChoiceNode{Root: fixture.headRoot}, fixture.cfg)
 			require.NoError(t, err)
 			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot)
 			require.NoError(t, err)
@@ -1482,7 +1482,7 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, anchorSlot+1, oldRoot))
 			require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, newRoot, anchorSlot+2))
 			require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, newRoot, fixture.headRoot))
-			_, _, err = updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg)
+			_, _, err = updateCanonicalChainInTheDatabase(tx, anchorSlot+2, forkchoice.ForkChoiceNode{Root: newRoot}, fixture.cfg)
 			require.NoError(t, err)
 			root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot+1)
 			require.NoError(t, err)
@@ -1525,7 +1525,7 @@ func TestCanonicalRootsLeaveSkippedSlotsEmpty(t *testing.T) {
 					}
 					require.NoError(t, persistAcceptedBlock(ctx, cfg, block))
 					require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-						_, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, root, cfg)
+						_, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, forkchoice.ForkChoiceNode{Root: root}, cfg)
 						return err
 					}))
 				}
@@ -1568,7 +1568,7 @@ func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.
 	sub := cfg.emitter.State().Subscribe(ch)
 	defer sub.Unsubscribe()
 
-	_, _, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	_, _, err := updateCanonicalChainInTheDatabase(tx, headSlot, forkchoice.ForkChoiceNode{Root: headRoot}, cfg)
 	require.NoError(t, err)
 
 	for {

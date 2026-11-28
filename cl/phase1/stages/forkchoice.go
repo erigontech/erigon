@@ -114,7 +114,8 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 
 // updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
 // block or the trusted anchor as canonical, once the required block indices are available.
-func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) (forkSlot uint64, reorged bool, err error) {
+func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, head forkchoice.ForkChoiceNode, cfg *Cfg) (forkSlot uint64, reorged bool, err error) {
+	headRoot := head.Root
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
@@ -223,7 +224,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		}
 		executionOptimistic := false
 		if cfg.forkChoice != nil {
-			executionOptimistic = cfg.forkChoice.IsRootOptimistic(headRoot)
+			executionOptimistic = cfg.forkChoice.IsNodeOptimistic(head)
 		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
@@ -244,7 +245,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 func currentHeadSnapshot(store forkchoice.ForkChoiceStorageReader, isGloas bool) func() (common.Hash, uint64, string, bool, error) {
 	return func() (common.Hash, uint64, string, bool, error) {
 		head, slot, err := store.GetHeadNode()
-		return head.Root, slot, headPayloadStatus(head, isGloas), store.IsRootOptimistic(head.Root), err
+		return head.Root, slot, headPayloadStatus(head, isGloas), store.IsNodeOptimistic(head), err
 	}
 }
 
@@ -256,7 +257,7 @@ func headEventSnapshot(store forkchoice.ForkChoiceStorageReader, headSlot uint64
 	if head.Root != headRoot || slot != headSlot {
 		return head, false, false, nil
 	}
-	return head, true, store.IsRootOptimistic(headRoot), nil
+	return head, true, store.IsNodeOptimistic(head), nil
 }
 
 func headPayloadStatus(head forkchoice.ForkChoiceNode, isGloas bool) string {
@@ -608,7 +609,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	forkSlot, reorged, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	forkSlot, reorged, err := updateCanonicalChainInTheDatabase(tx, headSlot, head, cfg)
 	if err != nil {
 		if errors.Is(err, errBlockIndicesPending) {
 			cfg.forkChoiceWaitingForIndices = true

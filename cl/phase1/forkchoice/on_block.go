@@ -417,7 +417,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
-			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash); err != nil {
+			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash, false); err != nil {
 				if cleanupErr := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); cleanupErr != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", cleanupErr)
 				}
@@ -431,12 +431,14 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
 				return fmt.Errorf("%w: %w", ErrNewPayloadNoStatus, err)
 			case execution_client.PayloadStatusNotValidated:
+				f.trackOptimisticPayloadLocked(blockRoot, block.Block.Body.ExecutionPayload, false)
 				log.Trace("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 				// optimistic block candidate
 				if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to add block to optimistic store: %w", err)
 				}
 			case execution_client.PayloadStatusInvalidated:
+				f.resolveOptimisticPayloadLocked(executionBlockHash, execution_client.PayloadStatusInvalidated)
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
 				if ancestorsErr := f.invalidateOptimisticAncestorsLocked(err, block.Block); ancestorsErr != nil {
 					return ancestorsErr
@@ -447,6 +449,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 				return invalidBlockError(errors.New("execution payload is invalid"))
 			case execution_client.PayloadStatusValidated:
+				f.validateOptimisticPayloadChainLocked(block.Block.Body.ExecutionPayload)
 				log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 				// remove from optimistic candidate
 				if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
@@ -551,7 +554,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	case fork_graph.PreValidated:
 		unlocked = true
 		f.mu.Unlock()
-		f.processPendingEnvelopeAfterBlock(ctx, common.Hash(blockRoot), checkDataAvaiability)
+		f.ProcessPendingExecutionPayloadEnvelope(ctx, common.Hash(blockRoot), checkDataAvaiability)
 		return nil
 	case fork_graph.Success:
 	case fork_graph.BelowAnchor:
@@ -692,7 +695,7 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	return nil
 }
 
-func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
+func (f *ForkChoiceStore) ProcessPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return
 	}
@@ -745,7 +748,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 				continue
 			}
 			seen[root] = struct{}{}
-			f.processPendingEnvelopeAfterBlock(ctx, root, true)
+			f.ProcessPendingExecutionPayloadEnvelope(ctx, root, true)
 			if f.pendingLocalSelfBuildEnvelopes.Contains(root) {
 				f.pendingLocalSelfBuildEnvelopes.Get(root)
 			}
@@ -852,7 +855,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root 
 	if !f.rebookPendingEnvelopeRetry(root, booked, attempt) {
 		return booked.at
 	}
-	f.processPendingEnvelopeAfterBlock(ctx, root, true)
+	f.ProcessPendingExecutionPayloadEnvelope(ctx, root, true)
 	if ctx.Err() != nil {
 		// The caller's context ended the attempt before a verdict, so it does not hold the interval.
 		f.rebookPendingEnvelopeRetry(root, attempt, nil)

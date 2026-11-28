@@ -27,6 +27,9 @@ func GetDataColumnSidecars(
 		return nil, fmt.Errorf("number of cells/proofs entries (%d) does not match number of KZG commitments (%d)", len(cellsAndKZGProofs), kzgCommitments.Len())
 	}
 
+	if len(cellsAndKZGProofs) == 0 {
+		return nil, nil
+	}
 	cfg := clparams.GetBeaconConfig()
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
@@ -68,6 +71,9 @@ func GetDataColumnSidecarsGloas(
 	beaconBlockRoot common.Hash,
 	cellsAndKZGProofs []CellsAndKZGProofs,
 ) ([]*cltypes.DataColumnSidecar, error) {
+	if len(cellsAndKZGProofs) == 0 {
+		return nil, nil
+	}
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
 	// Initialize sidecars for each column

@@ -866,6 +866,10 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, committedBid.ExecutionRequestsRoot)
 	}
 
+	return ValidatePayloadAgainstState(s, payload)
+}
+
+func ValidatePayloadAgainstState(s abstract.BeaconState, payload *cltypes.Eth1Block) error {
 	// Verify consistency of the parent hash with respect to the previous execution payload
 	if payload.ParentHash != s.GetLatestBlockHash() {
 		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
@@ -895,8 +899,6 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if payloadWithdrawalsRoot != expectedWithdrawalsRoot {
 		return errors.New("ProcessExecutionPayloadEnvelope: withdrawals root mismatch with expected")
 	}
-
-	// NOTE: execution_engine.verify_and_notify_new_payload is handled outside state transition
 
 	return nil
 }

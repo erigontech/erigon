@@ -182,6 +182,7 @@ func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView, try
 		f.headHash = headRoot
 		f.headSlot = headSlot
 		f.headPayloadStatus = cltypes.PayloadStatusPending
+		f.headIsFallback.Store(false)
 		f.publishSelectedHead(f.headHash, f.headSlot)
 		return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, f.headSlot, nil
 	}
@@ -277,6 +278,7 @@ func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Che
 
 func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+		f.headIsFallback.Store(false)
 		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
 			"justifiedRoot", justifiedCheckpoint.Root)
 		return ForkChoiceNode{
@@ -292,7 +294,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	// payload tiebreakers on the same slot even when the clock advances during this walk.
 	currentSlot := f.Slot()
 	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
-	f.headIsFallback = len(nodes) == 0
+	f.headIsFallback.Store(len(nodes) == 0)
 	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 	if len(nodes) == 0 {
 		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
@@ -370,6 +372,9 @@ func (f *ForkChoiceStore) getFilteredNodeTree(base common.Hash, justifiedCheckpo
 	currentEpoch := f.computeEpochAtSlot(currentSlot)
 	baseHeader, hasBase := f.forkGraph.GetHeader(base)
 	if !hasBase {
+		return nodes, nodeChildren
+	}
+	if bid := f.executionPayloadBid(base); bid != nil && f.executionHashMarkedInvalid(bid.ParentBlockHash) {
 		return nodes, nodeChildren
 	}
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
@@ -609,7 +614,7 @@ func (f *ForkChoiceStore) headCheckpointToWarmLocked(slot uint64) (solid.Checkpo
 
 func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
 	status := f.headPayloadStatus
-	if f.headIsFallback {
+	if f.headIsFallback.Load() {
 		// get_head did not choose this variant over the other one, so neither rules the other out.
 		status = cltypes.PayloadStatusPending
 	}

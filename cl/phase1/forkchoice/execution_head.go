@@ -27,6 +27,10 @@ import (
 func (f *ForkChoiceStore) GetExecutionHead(head ForkChoiceNode) (common.Hash, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	return f.executionHead(head)
+}
+
+func (f *ForkChoiceStore) executionHead(head ForkChoiceNode) (common.Hash, bool) {
 	bid := f.executionPayloadBid(head.Root)
 	if bid == nil {
 		return common.Hash{}, false

@@ -1334,19 +1334,19 @@ func newBlobSidecar(index int, blob *cltypes.Blob, commitments *solid.ListSSZ[*c
 	return cltypes.NewBlobSidecar(uint64(index), blob, kzgCommitment, common.Bytes48(proof), header, inclusionProof), nil
 }
 
-func hasSignedHeaderOfBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash) bool {
+func VerifyDataColumnSidecarForBlock(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash) bool {
 	if sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 		return false
 	}
 	root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-	return err == nil && root == blockRoot
+	return err == nil && root == blockRoot && VerifyDataColumnSidecar(sidecar) && VerifyDataColumnSidecarInclusionProof(sidecar)
 }
 
 func isBlockColumn(sidecar *cltypes.DataColumnSidecar, blockRoot common.Hash, isGloas bool, gloasCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	if isGloas {
 		return sidecar.BeaconBlockRoot == blockRoot && VerifyDataColumnSidecarWithCommitments(sidecar, gloasCommitments)
 	}
-	return VerifyDataColumnSidecar(sidecar) && hasSignedHeaderOfBlock(sidecar, blockRoot) && VerifyDataColumnSidecarInclusionProof(sidecar)
+	return VerifyDataColumnSidecarForBlock(sidecar, blockRoot)
 }
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
@@ -2510,7 +2510,7 @@ func (d *peerdas) slotDuration() time.Duration {
 }
 
 func (d *peerdas) payloadDueMs() uint64 {
-	return d.beaconConfig.SecondsPerSlot * d.beaconConfig.PayloadDueBps / (clparams.BpsFactor / 1000)
+	return d.beaconConfig.BpsToMs(d.beaconConfig.PayloadDueBps)
 }
 
 // deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A

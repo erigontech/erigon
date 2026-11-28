@@ -87,6 +87,7 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
+	IsHeadLate(root common.Hash) bool
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope reports whether an envelope is cached for a retained root
 	// and is neither corrupt nor rejected. It does not read disk or imply EL validation.
@@ -139,6 +140,7 @@ type ForkChoiceStorageReader interface {
 
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool
+	IsNodeOptimistic(node ForkChoiceNode) bool
 	IsHeadOptimistic() bool
 	GetPeerDas() das.PeerDas
 	// [New in Gloas:EIP7732] GetRecentExecutionPayloadStatus returns the validation status of a recently

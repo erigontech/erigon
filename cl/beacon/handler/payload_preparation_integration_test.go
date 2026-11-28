@@ -455,7 +455,7 @@ func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
 	})
 }
 
-func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T) {
+func TestGloasGossipRejectsEnvelopeWithMismatchedPrevRandao(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -468,11 +468,10 @@ func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T)
 		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
 		service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
 
-		require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
-		require.Eventually(t, func() bool {
-			_, err := fixture.store.TryClaimExecutionPayloadEnvelopeForGossip(childRoot, childEnvelope.Message.BuilderIndex)
-			return errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-		}, 5*time.Second, 10*time.Millisecond)
+		require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, childEnvelope), forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		token, err := fixture.store.TryClaimExecutionPayloadEnvelopeForGossip(childRoot, childEnvelope.Message.BuilderIndex)
+		require.NoError(t, err)
+		fixture.store.FinishExecutionPayloadEnvelopeForGossip(token, false)
 		require.False(t, fixture.store.HasEnvelope(childRoot))
 	})
 }

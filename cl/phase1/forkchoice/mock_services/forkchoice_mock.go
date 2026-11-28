@@ -43,6 +43,7 @@ import (
 )
 
 type ForkChoiceStorageMock struct {
+	HeadLate                              bool
 	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
@@ -728,6 +729,8 @@ func (f *ForkChoiceStorageMock) HasBlockChildAtOrAfter(blockRoot common.Hash, sl
 	return false
 }
 
+func (f *ForkChoiceStorageMock) IsHeadLate(common.Hash) bool { return f.HeadLate }
+
 func (f *ForkChoiceStorageMock) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
 	for root, header := range f.Headers {
 		if root != exceptRoot && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
@@ -939,6 +942,10 @@ func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(
 
 func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 	return f.IsRootOptimisticVal
+}
+
+func (f *ForkChoiceStorageMock) IsNodeOptimistic(node forkchoice.ForkChoiceNode) bool {
+	return f.IsRootOptimistic(node.Root)
 }
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {

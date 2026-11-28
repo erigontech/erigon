@@ -105,25 +105,7 @@ func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
 				clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
 				digest, err := clock.ComputeForkDigest(0)
 				require.NoError(t, err)
-				first := makeGloasBlock(10, common.Hash{}, common.Hash{})
-				bid := first.Block.Body.SignedExecutionPayloadBid.Message
-				bid.Slot = 10
-				good := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
-				good.Message.Payload.SlotNumber = 10
-				_, err = good.Message.Payload.EncodeSSZ(nil)
-				require.NoError(t, err)
-				bid.ExecutionRequestsRoot, err = good.Message.ExecutionRequests.HashSSZ()
-				require.NoError(t, err)
-				requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, good.Message.ExecutionRequests))
-				good.Message.Payload.BlockHash = common.HexToHash("0xefd641f283ac9ad546ad48be6207db401e3f70fe94adc9a10d6c858d845b67e3")
-				header, err := good.Message.Payload.RlpHeader(&good.Message.ParentBeaconBlockRoot, requestsHash, nil)
-				require.NoError(t, err)
-				good.Message.Payload.BlockHash = header.Hash()
-				bid.BlockHash = header.Hash()
-				root, err := first.Block.HashSSZ()
-				require.NoError(t, err)
-				good.Message.BeaconBlockRoot = root
-				require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, first, good))
+				first, good, root := makeFullGloasTipAndEnvelope(t, cfg, 10)
 				goodBytes, err := good.EncodeSSZ(nil)
 				require.NoError(t, err)
 				bad := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
@@ -134,7 +116,7 @@ func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
 				require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, bad, digest[:]...))
 				sentinel := &invalidEnvelopeSentinel{response: wire.Bytes()}
 				client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
-				second := makeGloasBlock(11, hash(2), bid.BlockHash)
+				second := makeGloasBlock(11, hash(2), good.Message.Payload.BlockHash)
 				linkBeaconBlocks(t, first, second)
 				var httpCalls atomic.Int32
 				previousClient := beaconAPIClient

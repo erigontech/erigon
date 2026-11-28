@@ -92,16 +92,15 @@ func makeFullGloasTipAndEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, 
 	bid.Slot = slot
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
 	envelope.Message.Payload.SlotNumber = slot
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
 	_, err := envelope.Message.Payload.EncodeSSZ(nil)
 	require.NoError(t, err)
 	bid.ExecutionRequestsRoot, err = envelope.Message.ExecutionRequests.HashSSZ()
 	require.NoError(t, err)
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-	envelope.Message.Payload.BlockHash = common.HexToHash("0xefd641f283ac9ad546ad48be6207db401e3f70fe94adc9a10d6c858d845b67e3")
-	header, err := envelope.Message.Payload.RlpHeader(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
 	require.NoError(t, err)
-	envelope.Message.Payload.BlockHash = header.Hash()
-	bid.BlockHash = header.Hash()
+	bid.BlockHash = envelope.Message.Payload.BlockHash
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	envelope.Message.BeaconBlockRoot = root

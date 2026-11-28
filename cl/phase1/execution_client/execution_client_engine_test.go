@@ -417,7 +417,7 @@ func (s *newPayloadEngineStub) NewPayloadV4(context.Context, *engine_types.Execu
 }
 
 func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return nil, s.err
+	return s.status, s.err
 }
 
 // A timeout of the client's own request is no EL verdict, whatever the fork: the caller must not
@@ -478,4 +478,22 @@ func TestValidationInterrupted(t *testing.T) {
 	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusNone, errors.New("connection refused")))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
+}
+
+func TestGloasNewPayloadDistinguishesNullLatestValidHash(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	payload := gloas(&cfg, []byte{0xc0})
+	for _, hash := range []*common.Hash{nil, {}, {1}} {
+		reply := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: hash}
+		client := &ExecutionClientEngine{engine: &newPayloadEngineStub{status: reply}, beaconCfg: &cfg}
+		status, err := client.NewPayload(t.Context(), payload, &common.Hash{}, nil, nil)
+		require.EqualValues(t, PayloadStatusInvalidated, status)
+		if hash == nil {
+			require.ErrorIs(t, err, ErrInvalidEnvelope)
+		} else {
+			var invalid *InvalidPayloadError
+			require.ErrorAs(t, err, &invalid)
+			require.Equal(t, *hash, invalid.LatestValidHash)
+		}
+	}
 }

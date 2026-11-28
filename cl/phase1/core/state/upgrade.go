@@ -334,9 +334,9 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 
 	b.SetNextWithdrawalBuilderIndex(0)
 
-	// Initialize execution_payload_availability to all 1s (all prior slots had payloads)
+	// Pre-fork slots had payloads. The fork slot starts without one.
 	for i := uint64(0); i < cfg.SlotsPerHistoricalRoot; i++ {
-		b.SetExecutionPayloadAvailability(i, true)
+		b.SetExecutionPayloadAvailability(i, i != b.Slot()%cfg.SlotsPerHistoricalRoot)
 	}
 
 	// Initialize builder_pending_payments with empty payments
@@ -393,28 +393,17 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 	for i := 0; i < pendingDeposits.Len(); i++ {
 		deposit := pendingDeposits.Get(i)
 
-		// Deposits for existing validators stay in pending queue
-		if _, isValidator := b.ValidatorIndexByPubkey(deposit.PubKey); isValidator {
+		if !IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg) {
 			newPendingDeposits.Append(deposit)
 			continue
 		}
-
-		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
-		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
-
-		if !isExistingBuilder {
-			if !hasBuilderCredentials {
-				newPendingDeposits.Append(deposit)
-				continue
-			}
-			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
-				newPendingDeposits.Append(deposit)
-				continue
-			}
-		}
-
 		if err := ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot); err != nil {
 			return err
+		}
+		if !IsBuilderPubkey(b, deposit.PubKey) {
+			if _, exists := b.ValidatorIndexByPubkey(deposit.PubKey); exists || IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
+				newPendingDeposits.Append(deposit)
+			}
 		}
 	}
 

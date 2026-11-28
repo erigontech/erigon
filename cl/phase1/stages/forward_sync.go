@@ -454,7 +454,8 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if cfg.forkChoice.IsEnvelopeRejected(anchorRoot) {
 		return fmt.Errorf("%w: anchor envelope previously rejected", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	}
-	if cfg.forkChoice.IsBlockInvalid(anchorRoot) {
+	status, _ := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	if status == execution_client.PayloadStatusInvalidated || cfg.forkChoice.IsBlockInvalid(anchorRoot) {
 		return fmt.Errorf("%w: anchor execution payload previously invalidated", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	}
 	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
@@ -558,12 +559,7 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
-	status, recorded := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
-		anchorRoot,
-		env.Message.Payload.BlockHash,
-		status,
-		env.Message.Payload.GasLimit,
-	)
+	status, recorded := cfg.forkChoice.RecordGloasPayloadResult(anchorRoot, env.Message.Payload, status, err)
 	if !recorded {
 		return nil
 	}
@@ -584,12 +580,7 @@ func validateAndRecordAnchorEnvelope(cfg *Cfg, anchorState *state.CachingBeaconS
 		if errors.Is(err, misc.ErrMismatchBlobHashes) {
 			cfg.forkChoice.RejectEnvelope(anchorRoot)
 		} else {
-			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
-				anchorRoot,
-				env.Message.Payload.BlockHash,
-				execution_client.PayloadStatusInvalidated,
-				env.Message.Payload.GasLimit,
-			)
+			cfg.forkChoice.RecordGloasPayloadResult(anchorRoot, env.Message.Payload, execution_client.PayloadStatusInvalidated, err)
 		}
 		return true, fmt.Errorf("%w: anchor payload validation failed: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
 	}

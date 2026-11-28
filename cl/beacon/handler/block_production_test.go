@@ -597,9 +597,9 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 
 	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, 0)
 
-	// Attestation deadline is 3999ms; polling stops a quarter of it earlier, at 2999.25ms.
-	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond).Add(-minPayloadPollingWindow), window.firstGetAt)
-	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
+	// Attestation deadline is 4 seconds. Polling stops a quarter of it earlier.
+	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
 }
 
 func TestBlockBuilderWindowGloas(t *testing.T) {
@@ -3786,7 +3786,7 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 
 	// A late request clamps the first poll up to now but still stops at 2999.25ms, preserving the margin.
 	require.Equal(t, now, window.firstGetAt)
-	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
 }
 
 func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
@@ -3820,7 +3820,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		deadline      time.Duration
 		wantPollUntil time.Duration
 	}{
-		{"pre-gloas", clparams.ElectraVersion, 3999 * time.Millisecond, 2_999_250 * time.Microsecond},
+		{"pre-gloas", clparams.ElectraVersion, 4 * time.Second, 3 * time.Second},
 		{"gloas", clparams.GloasVersion, 3 * time.Second, time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

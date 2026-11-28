@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -44,6 +45,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		return time.Unix(int64(slot*12), 0)
 	}).AnyTimes()
 	fcMock := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fcMock.HeadLate = true
 	epbsPool := pool.NewEpbsPool()
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SlotsPerEpoch = 32
@@ -650,7 +652,7 @@ func TestExecutionPayloadBidServiceOrdersHighestBeforeStatelessChecks(t *testing
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
 	msg.Message.ExecutionPayment = 10
 	msg.Message.ExecutionPayment = 1
-	epbsPool.HighestBids.Add(pool.HighestBidKey{
+	epbsPool.StoreHighestBid(pool.HighestBidKey{
 		Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot,
 	}, newTestSignedExecutionPayloadBid(100, 2, 2))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
@@ -683,7 +685,7 @@ func TestValidateDirectBidDoesNotApplyGossipHighestFilter(t *testing.T) {
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
 	addPreferencesToPool(epbsPool, 100)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
-	epbsPool.HighestBids.Add(pool.HighestBidKey{
+	epbsPool.StoreHighestBid(pool.HighestBidKey{
 		Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot,
 	}, newTestSignedExecutionPayloadBid(100, 2, 2))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).Times(2)
@@ -734,7 +736,7 @@ func TestExecutionPayloadBidRejectsParentBlockHash(t *testing.T) {
 			}
 			require.ErrorContains(t, err, "block hash equals parent block hash", "api=%t zero=%t", api, zero)
 			require.NotErrorIs(t, err, ErrIgnore)
-			require.False(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+			require.Zero(t, service.seenCache.Count(newSeenBidKey(msg.Message)))
 			require.Empty(t, epbsPool.HighestBids.Keys())
 		}
 	}
@@ -851,7 +853,10 @@ func TestExecutionPayloadBidServiceNextSlot(t *testing.T) {
 	addPreferencesToPool(epbsPool, 101)
 
 	// Current slot is 100, bid for slot 101 → valid (next slot)
-	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	service.now = func() time.Time {
+		return ethClockMock.GetSlotTime(100).Add(time.Duration(service.beaconCfg.PayloadAttestationDueMs()) * time.Millisecond)
+	}
+	fcMock.Headers[fcMock.HeadVal].Slot = 100
 
 	fcMock.ExecutionPayloadStatusMap[common.HexToHash("0xaaaa")] = execution_client.PayloadStatusValidated
 	fcMock.Headers[common.HexToHash("0xbbbb")] = &cltypes.BeaconBlockHeader{}
@@ -997,6 +1002,7 @@ func TestExecutionPayloadBidServiceUsesGenesisDependentRootInEarlyEpoch(t *testi
 
 	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
 	msg := newTestSignedExecutionPayloadBid(1, 1, 1000)
+	fcMock.Headers[fcMock.HeadVal].Slot = 0
 	genesisRoot := common.HexToHash("0x1234")
 	fcMock.Ancestors[0] = forkchoice.ForkChoiceNode{Root: genesisRoot}
 	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
@@ -1020,13 +1026,14 @@ func TestBidCompatibleWithHead(t *testing.T) {
 	headHeader := &cltypes.BeaconBlockHeader{ParentRoot: parentRoot, Slot: 99}
 	headBid := &cltypes.ExecutionPayloadBid{ParentBlockHash: parentPayload, BlockHash: headPayload}
 
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
 	buildsOnParent := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: parentRoot, ParentBlockHash: parentPayload}
-	require.True(t, bidCompatibleWithHead(buildsOnParent, headRoot, headHeader, headBid, true))
+	require.True(t, service.bidCompatibleWithHead(buildsOnParent, headRoot, headHeader, headBid, true))
 	buildsOnHead := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: headRoot, ParentBlockHash: headPayload}
-	require.True(t, bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, true))
-	require.False(t, bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, false))
+	require.True(t, service.bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, true))
+	require.False(t, service.bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, false))
 	stale := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: common.HexToHash("0x50"), ParentBlockHash: parentPayload}
-	require.False(t, bidCompatibleWithHead(stale, headRoot, headHeader, headBid, false))
+	require.False(t, service.bidCompatibleWithHead(stale, headRoot, headHeader, headBid, false))
 }
 
 func TestExecutionPayloadBidServiceFirstGloasSlotBuildsOnFuluHead(t *testing.T) {
@@ -1165,7 +1172,7 @@ func TestExecutionPayloadBidServiceDuplicate(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "already seen bid")
+	require.Contains(t, err.Error(), "not higher than existing")
 }
 
 func TestExecutionPayloadBidServiceBuilderInactiveError(t *testing.T) {
@@ -1191,7 +1198,7 @@ func TestExecutionPayloadBidServiceBuilderInactiveError(t *testing.T) {
 
 	// Should NOT be marked as seen
 	seenKey := newSeenBidKey(msg.Message)
-	require.False(t, service.seenCache.Contains(seenKey))
+	require.Zero(t, service.seenCache.Count(seenKey))
 }
 
 func TestExecutionPayloadBidServiceRejectsInvalidBuilderBeforeBalance(t *testing.T) {
@@ -1318,8 +1325,8 @@ func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *tes
 	high := newTestSignedExecutionPayloadBid(100, 1, 2000)
 	low := newTestSignedExecutionPayloadBid(100, 2, 500)
 
-	require.NoError(t, service.storeValidBidAt(high, time.Time{}))
-	err := service.storeValidBidAt(low, time.Time{})
+	require.NoError(t, service.storeValidBidAt(high, time.Time{}, 1, false))
+	err := service.storeValidBidAt(low, time.Time{}, 1, false)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrIgnore)
 
@@ -1327,7 +1334,7 @@ func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *tes
 	stored, found := epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, high, stored)
-	require.False(t, service.seenCache.Contains(newSeenBidKey(low.Message)))
+	require.Zero(t, service.seenCache.Count(newSeenBidKey(low.Message)))
 }
 
 func TestExecutionPayloadBidServiceSeenBidsRetainsEveryBidInGossipWindow(t *testing.T) {
@@ -1344,16 +1351,16 @@ func TestExecutionPayloadBidServiceSeenBidsRetainsEveryBidInGossipWindow(t *test
 		bid.Message.ParentBlockHash[1] = byte(builderIndex >> 8)
 		bid.Message.ParentBlockRoot[0] = byte(builderIndex)
 		bid.Message.ParentBlockRoot[1] = byte(builderIndex >> 8)
-		require.NoError(t, service.storeValidBidAt(bid, service.now()))
+		require.NoError(t, service.storeValidBidAt(bid, service.now(), 1, false))
 	}
 
 	first := newTestSignedExecutionPayloadBid(100, 0, 1000)
-	require.True(t, service.seenCache.Contains(newSeenBidKey(first.Message)))
+	require.NotZero(t, service.seenCache.Count(newSeenBidKey(first.Message)))
 	firstKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: first.Message.ParentBlockHash, ParentBlockRoot: first.Message.ParentBlockRoot}
 	_, found := service.epbsPool.HighestBids.Get(firstKey)
 	require.True(t, found)
 	lower := newTestSignedExecutionPayloadBid(100, builders+1, 999)
-	err := service.storeValidBidAt(lower, service.now())
+	err := service.storeValidBidAt(lower, service.now(), 1, false)
 	require.ErrorIs(t, err, ErrIgnore)
 	stored, found := service.epbsPool.HighestBids.Get(firstKey)
 	require.True(t, found)
@@ -1368,15 +1375,15 @@ func TestExecutionPayloadBidServiceSeenBidsPrunesAfterGossipWindow(t *testing.T)
 	boundary := time.Unix(101*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return boundary }
 	stale := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	require.NoError(t, service.storeValidBidAt(stale, service.now()))
-	require.True(t, service.seenCache.Contains(newSeenBidKey(stale.Message)))
+	require.NoError(t, service.storeValidBidAt(stale, service.now(), 1, false))
+	require.NotZero(t, service.seenCache.Count(newSeenBidKey(stale.Message)))
 
 	service.now = func() time.Time { return boundary.Add(time.Nanosecond) }
 	trigger := newTestSignedExecutionPayloadBid(101, 2, 1000)
 	trigger.Message.ParentBlockHash = common.Hash{2}
 	trigger.Message.ParentBlockRoot = common.Hash{3}
-	require.NoError(t, service.storeValidBidAt(trigger, service.now()))
-	require.False(t, service.seenCache.Contains(newSeenBidKey(stale.Message)))
+	require.NoError(t, service.storeValidBidAt(trigger, service.now(), 1, false))
+	require.Zero(t, service.seenCache.Count(newSeenBidKey(stale.Message)))
 	_, found := service.epbsPool.HighestBids.Get(pool.HighestBidKey{
 		Slot:            stale.Message.Slot,
 		ParentBlockHash: stale.Message.ParentBlockHash,
@@ -1491,7 +1498,7 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 
 	// Verify stored in seen cache
 	seenKey := newSeenBidKey(msg.Message)
-	require.True(t, service.seenCache.Contains(seenKey))
+	require.NotZero(t, service.seenCache.Count(seenKey))
 
 	// Verify stored in pool
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
@@ -1541,14 +1548,14 @@ func TestExecutionPayloadBidServiceParentBuilderExitPredicate(t *testing.T) {
 			if test.fullParent && test.samePubkey && test.sameAddress {
 				require.ErrorIs(t, err, ErrIgnore)
 				require.ErrorContains(t, err, "builder may exit")
-				require.False(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+				require.Zero(t, service.seenCache.Count(newSeenBidKey(msg.Message)))
 				require.Empty(t, epbsPool.HighestBids.Keys())
 				request.PubKey[0]++
 				request.SourceAddress[0]++
 				require.ErrorIs(t, service.ValidateBid(t.Context(), msg), ErrIgnore)
 			} else {
 				require.NoError(t, err)
-				require.True(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+				require.NotZero(t, service.seenCache.Count(newSeenBidKey(msg.Message)))
 				require.Len(t, epbsPool.HighestBids.Keys(), 1)
 				require.NoError(t, service.ValidateBid(t.Context(), msg))
 			}
@@ -1576,7 +1583,9 @@ func TestExecutionPayloadBidServicePreGloasParentDoesNotReadLatestBid(t *testing
 	}
 
 	require.NotPanics(t, func() {
-		require.NoError(t, service.validateBidAuthentication(t.Context(), msg, entry, time.Now()))
+		builder, err := entry.builderForBid(msg.Message, service.beaconCfg)
+		require.NoError(t, err)
+		require.NoError(t, service.validateBidAuthentication(t.Context(), msg, entry, builder, time.Now()))
 	})
 }
 
@@ -1595,7 +1604,9 @@ func TestExecutionPayloadBidServiceGloasParentRejectsMissingLatestBid(t *testing
 	}
 
 	require.NotPanics(t, func() {
-		err := service.validateBidAuthentication(t.Context(), msg, entry, time.Now())
+		builder, err := entry.builderForBid(msg.Message, service.beaconCfg)
+		require.NoError(t, err)
+		err = service.validateBidAuthentication(t.Context(), msg, entry, builder, time.Now())
 		require.ErrorIs(t, err, ErrIgnore)
 		require.ErrorContains(t, err, "latest execution payload bid unavailable")
 	})
@@ -2208,10 +2219,77 @@ func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {
 
 	// Should NOT be in seen cache
 	seenKey := newSeenBidKey(msg.Message)
-	require.False(t, service.seenCache.Contains(seenKey))
+	require.Zero(t, service.seenCache.Count(seenKey))
 
 	// Should NOT be in pool
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	_, found := epbsPool.GetHighestBid(bidKey)
 	require.False(t, found)
+}
+
+func TestExecutionPayloadBidServiceBuilderBidLimit(t *testing.T) {
+	service, _, clock, fc, bids := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	addPreferencesToPool(bids, 100)
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+	parent.GetBuilders().Get(1).Balance = 3_000_000_000
+	parent.GetBuilderPendingWithdrawals().Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 1, Amount: 1_000_000_000})
+	for _, value := range []uint64{1, 2} {
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedExecutionPayloadBid(100, 1, value)))
+	}
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedExecutionPayloadBid(100, 1, 3)), ErrIgnore)
+}
+
+func TestExecutionPayloadBidServicePreviousSlotDeadline(t *testing.T) {
+	service, _, clock, fc, bids := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	addPreferencesToPool(bids, 100)
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	deadline := clock.GetSlotTime(99).Add(time.Duration(service.beaconCfg.PayloadAttestationDueMs()) * time.Millisecond)
+	service.now = func() time.Time { return deadline.Add(-time.Millisecond) }
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrIgnore)
+	service.now = func() time.Time { return deadline }
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+}
+
+func TestBidOnHeadParentRequiresReorg(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	bid := newTestSignedExecutionPayloadBid(100, 1, 1).Message
+	fc.HeadLate = false
+	fc.Headers[bid.ParentBlockRoot].Slot = 98
+	for _, slot := range []uint64{100, 101} {
+		bid.Slot = slot
+		compatible, err := service.isBidCompatibleWithHead(bid)
+		require.NoError(t, err)
+		require.False(t, compatible)
+	}
+	fc.Headers[common.Hash{42}] = &cltypes.BeaconBlockHeader{Slot: 99}
+	bid.Slot = 100
+	compatible, err := service.isBidCompatibleWithHead(bid)
+	require.NoError(t, err)
+	require.True(t, compatible)
+}
+
+func TestLocalProposerCanUseBidAboveForwardingLimit(t *testing.T) {
+	service, _, clock, fc, bids := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	service.validators = validator_params.NewValidatorParams()
+	service.validators.AddAttachedValidator(99)
+	addPreferencesToPool(bids, 100)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+	parent.GetBuilders().Get(1).Balance = service.beaconCfg.MinDepositAmount + 10
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedExecutionPayloadBid(100, 1, 5)), ErrIgnore)
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedExecutionPayloadBid(100, 2, 3)))
+	key := pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
+	best, ok := bids.GetHighestBid(key)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), best.Message.Value)
+	forwarded, ok := bids.ForwardedBidValues.Get(key)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), forwarded)
 }

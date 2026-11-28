@@ -42,10 +42,10 @@ func newTestForkChoiceStore(secondsPerSlot, intervalsPerSlot, slotsPerEpoch, glo
 }
 
 func TestGetAttestationDueMs_PreGloas(t *testing.T) {
-	// Pre-GLOAS: 12 * 3333 / 10 = 3999 ms
+	// Pre-GLOAS: 3333 basis points of 12 seconds rounds to 4000 ms
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
-	require.Equal(t, uint64(3999), f.getAttestationDueMs(0))
-	require.Equal(t, uint64(3999), f.getAttestationDueMs(100))
+	require.Equal(t, uint64(4000), f.getAttestationDueMs(0))
+	require.Equal(t, uint64(4000), f.getAttestationDueMs(100))
 }
 
 func TestGetAttestationDueMs_PostGloas(t *testing.T) {
@@ -54,7 +54,7 @@ func TestGetAttestationDueMs_PostGloas(t *testing.T) {
 	require.Equal(t, uint64(3000), f.getAttestationDueMs(10))
 	require.Equal(t, uint64(3000), f.getAttestationDueMs(100))
 	// Pre-GLOAS epoch keeps the pre-GLOAS deadline
-	require.Equal(t, uint64(3999), f.getAttestationDueMs(9))
+	require.Equal(t, uint64(4000), f.getAttestationDueMs(9))
 }
 
 func TestGetAggregateDueMs_PreGloas(t *testing.T) {
@@ -122,7 +122,7 @@ func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
 
 func TestRecordBlockTimelinessUsesMilliseconds(t *testing.T) {
 	t.Run("pre-Gloas", func(t *testing.T) {
-		f := newTestForkChoiceStore(5, 3, 32, math.MaxUint64, 0, 1665)
+		f := newTestForkChoiceStore(5, 3, 32, math.MaxUint64, 0, 1666)
 		block := &cltypes.BeaconBlock{Slot: 0}
 
 		f.recordBlockTimeliness(block, common.Hash{0x01}, f.timeMs.Load())
@@ -160,12 +160,12 @@ func TestRecordBlockTimelinessDeadlines(t *testing.T) {
 		timelyAtMs      uint64
 		lateAtMs        uint64
 	}{
-		{name: "12s pre-Gloas attestation", secondsPerSlot: 12, gloasForkEpoch: math.MaxUint64, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 3998, lateAtMs: 3999},
-		{name: "12s pre-Gloas attestation non-zero genesis", secondsPerSlot: 12, gloasForkEpoch: math.MaxUint64, genesisTime: 1606824023, slot: 1, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 3998, lateAtMs: 3999},
+		{name: "12s pre-Gloas attestation", secondsPerSlot: 12, gloasForkEpoch: math.MaxUint64, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 3999, lateAtMs: 4000},
+		{name: "12s pre-Gloas attestation non-zero genesis", secondsPerSlot: 12, gloasForkEpoch: math.MaxUint64, genesisTime: 1606824023, slot: 1, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 3999, lateAtMs: 4000},
 		{name: "12s Gloas attestation", secondsPerSlot: 12, gloasForkEpoch: 0, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 2999, lateAtMs: 3000},
 		{name: "12s Gloas PTC", secondsPerSlot: 12, gloasForkEpoch: 0, timelinessIndex: clparams.PtcTimelinessIndex, timelyAtMs: 8999, lateAtMs: 9000},
 		{name: "5s Gloas PTC", secondsPerSlot: 5, gloasForkEpoch: 0, timelinessIndex: clparams.PtcTimelinessIndex, timelyAtMs: 3749, lateAtMs: 3750},
-		{name: "5s pre-Gloas attestation", secondsPerSlot: 5, gloasForkEpoch: math.MaxUint64, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 1665, lateAtMs: 1666},
+		{name: "5s pre-Gloas attestation", secondsPerSlot: 5, gloasForkEpoch: math.MaxUint64, timelinessIndex: clparams.AttestationTimelinessIndex, timelyAtMs: 1666, lateAtMs: 1667},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, check := range []struct {
@@ -223,7 +223,7 @@ func TestRecordBlockTimeliness_PreGloas_Timely(t *testing.T) {
 }
 
 func TestRecordBlockTimeliness_PreGloas_Late(t *testing.T) {
-	// Pre-GLOAS: block arrives late (5s into slot, threshold 3999ms)
+	// Pre-GLOAS: block arrives late (5s into slot, threshold 4000ms)
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5*1000)
 
 	block := &cltypes.BeaconBlock{Slot: 0}
@@ -317,7 +317,7 @@ func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {
 }
 
 func TestUpdateProposerBoostRoot_LateBlock(t *testing.T) {
-	// Late block (5s into slot, threshold 3999ms) should NOT get boost
+	// Late block (5s into slot, threshold 4000ms) should NOT get boost
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5*1000)
 
 	block := &cltypes.BeaconBlock{Slot: 0}

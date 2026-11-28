@@ -136,6 +136,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 		if status == execmodule.ExecutionStatusBadBlock && lvh != (common.Hash{}) {
 			return PayloadStatusInvalidated, &InvalidPayloadError{LatestValidHash: lvh, Err: err}
 		}
+		if payload.Version() >= clparams.GloasVersion {
+			err = errors.Join(ErrInvalidEnvelope, err)
+		}
 		return PayloadStatusInvalidated, err
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil

@@ -115,6 +115,18 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 	require.True(t, store.verifiedExecutionPayload.Contains(blockRoot))
 }
 
+func TestValidPreGloasBlockVerifiesOptimisticParentPayload(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	selfConsistentPayload(t, block)
+	parentHash := block.Block.Body.ExecutionPayload.ParentHash
+	store.trackOptimisticPayloadLocked(block.Block.ParentRoot, &cltypes.Eth1Block{BlockHash: parentHash, ParentHash: common.Hash{0xaa}}, false)
+	require.NoError(t, store.OnBlock(t.Context(), block, true, false, false))
+	_, optimistic := store.optimisticPayloads.Load(parentHash)
+	require.False(t, optimistic)
+}
+
 // A GetHead that runs while f.mu is released caches a head computed without the
 // incoming block, so OnBlock has to drop that cache again after it resumes.
 func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
@@ -629,7 +641,7 @@ func TestNewPayloadHonoursTheAuthoritativeInvalidSet(t *testing.T) {
 	derived := selfConsistentPayload(t, block)
 
 	// Only the authoritative set knows, as it would be once the LRUs evicted the entry.
-	store.invalidatedExecutionPayloads.Store(payload.BlockHash, struct{}{})
+	store.invalidatedExecutionPayloads.Store(payload.BlockHash, &optimisticPayload{parentHash: payload.ParentHash})
 
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),

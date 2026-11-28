@@ -120,7 +120,7 @@ type ForkChoiceStore struct {
 	headHash                       common.Hash
 	headSlot                       uint64
 	headPayloadStatus              cltypes.PayloadStatus
-	headIsFallback                 bool                           // Gloas get_head found no viable node and fell back to the justified root
+	headIsFallback                 atomic.Bool                    // Gloas get_head found no viable node and fell back to the justified root
 	selectedHead                   atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
 	genesisTime                    uint64
 	genesisValidatorsRoot          common.Hash
@@ -131,7 +131,8 @@ type ForkChoiceStore struct {
 	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
 	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
 	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads   *sync.Map
+	invalidatedExecutionPayloads   *sync.Map // execution hash -> prior *optimisticPayload, or nil for a cached verdict
+	optimisticPayloads             sync.Map  // execution hash -> *optimisticPayload
 	// Carries an invalid verdict until the caller makes it durable, since the bounded
 	// caches below can evict in between. Not refcounted, so the writer clears its own key.
 	inFlightInvalidPayloads *sync.Map
@@ -344,7 +345,7 @@ func NewForkChoiceStore(
 		delete(roots, blockRoot)
 		if len(roots) == 0 {
 			delete(executionPayloadRoots, executionBlockHash)
-			invalidatedExecutionPayloads.Delete(executionBlockHash)
+			invalidatedExecutionPayloads.CompareAndDelete(executionBlockHash, nil)
 		}
 	})
 	if err != nil {
@@ -1249,7 +1250,7 @@ func (f *ForkChoiceStore) trackExecutionPayloadRootLocked(blockRoot, executionBl
 			if len(previousRoots) == 0 {
 				delete(f.executionPayloadRoots, previousHash)
 				if f.invalidatedExecutionPayloads != nil {
-					f.invalidatedExecutionPayloads.Delete(previousHash)
+					f.invalidatedExecutionPayloads.CompareAndDelete(previousHash, nil)
 				}
 			}
 		}
@@ -1291,7 +1292,7 @@ func (f *ForkChoiceStore) MarkPayloadStatusAndGasLimitIfRetained(
 ) (execution_client.PayloadStatus, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status, &gasLimit)
+	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status, &gasLimit, false)
 }
 
 func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
@@ -1299,13 +1300,14 @@ func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
 	executionBlockHash common.Hash,
 	status execution_client.PayloadStatus,
 	gasLimit *uint64,
+	payloadOnly bool,
 ) (execution_client.PayloadStatus, bool) {
 	if f.IsEnvelopeRejected(blockRoot) {
 		return execution_client.PayloadStatusNone, false
 	}
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
-		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
+		effective := f.markPayloadStatus(blockRoot, executionBlockHash, status, nil, payloadOnly)
 		if gasLimit != nil {
 			f.cacheExecutionPayloadGasLimit(executionBlockHash, *gasLimit)
 		}
@@ -1313,7 +1315,7 @@ func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
 	}
 	effective := status
 	retained := guard.WithRetainedBlock(blockRoot, func(isRetained func(common.Hash) bool) {
-		effective = f.markPayloadStatus(blockRoot, executionBlockHash, status, isRetained)
+		effective = f.markPayloadStatus(blockRoot, executionBlockHash, status, isRetained, payloadOnly)
 		if gasLimit != nil {
 			f.cacheExecutionPayloadGasLimit(executionBlockHash, *gasLimit)
 		}
@@ -1332,7 +1334,7 @@ func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlo
 }
 
 func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
-	return f.markPayloadStatus(blockRoot, executionBlockHash, status, nil)
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, nil, false)
 }
 
 func (f *ForkChoiceStore) markPayloadStatus(
@@ -1340,6 +1342,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	executionBlockHash common.Hash,
 	status execution_client.PayloadStatus,
 	isRetained func(common.Hash) bool,
+	payloadOnly bool,
 ) execution_client.PayloadStatus {
 	if f.IsEnvelopeRejected(blockRoot) {
 		return execution_client.PayloadStatusNone
@@ -1375,7 +1378,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		if f.invalidatedExecutionPayloads == nil {
 			f.invalidatedExecutionPayloads = &sync.Map{}
 		}
-		f.invalidatedExecutionPayloads.Store(executionBlockHash, struct{}{})
+		f.invalidatedExecutionPayloads.LoadOrStore(executionBlockHash, nil)
 		for root := range f.executionPayloadRoots[executionBlockHash] {
 			if root == blockRoot {
 				continue
@@ -1388,9 +1391,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 					f.payloadStatusByRoot.Add(root, execution_client.PayloadStatusInvalidated)
 				}
 				if f.forkGraph != nil {
-					f.forkGraph.MarkPayloadAvailable(root)
-					f.forkGraph.ClearPayloadAccepted(root)
-					f.forkGraph.MarkHeaderAsInvalid(root)
+					f.invalidatePayloadRoot(root, payloadOnly)
 				}
 			}
 			if isRetained != nil {
@@ -1435,9 +1436,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 			f.forkGraph.MarkPayloadAvailable(blockRoot)
 			f.forkGraph.MarkPayloadAccepted(blockRoot, true)
 		case execution_client.PayloadStatusInvalidated:
-			f.forkGraph.MarkPayloadAvailable(blockRoot)
-			f.forkGraph.ClearPayloadAccepted(blockRoot)
-			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+			f.invalidatePayloadRoot(blockRoot, payloadOnly)
 		}
 	}
 	if !known || current != effective {
@@ -1446,6 +1445,16 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		f.selectedHead.Store(nil)
 	}
 	return effective
+}
+
+func (f *ForkChoiceStore) invalidatePayloadRoot(root common.Hash, payloadOnly bool) {
+	f.forkGraph.ClearPayloadAccepted(root)
+	if payloadOnly {
+		f.forkGraph.MarkPayloadUnavailable(root)
+	} else {
+		f.forkGraph.MarkPayloadAvailable(root)
+		f.forkGraph.MarkHeaderAsInvalid(root)
+	}
 }
 
 // reachableFromSelectedHead reports whether get_head could reach child from root when root is
@@ -1475,7 +1484,7 @@ func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 		return f.forkGraph.IsBlockInvalid(root)
 	}
 	parentRoot := block.Block.ParentRoot
-	if !f.forkGraph.IsBlockInvalid(parentRoot) && !f.IsEnvelopeRejected(parentRoot) {
+	if !f.forkGraph.IsBlockInvalid(parentRoot) && !f.IsEnvelopeRejected(parentRoot) && !f.payloadExecutionHashInvalidated(parentRoot) {
 		return false
 	}
 	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
@@ -1570,7 +1579,25 @@ func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot common.Hash)
 }
 
 func (f *ForkChoiceStore) IsRootOptimistic(root common.Hash) bool {
-	return f.optimisticStore.IsOptimistic(root)
+	return f.IsNodeOptimistic(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+}
+
+func (f *ForkChoiceStore) IsNodeOptimistic(node ForkChoiceNode) bool {
+	if f.forkGraph != nil {
+		if hash, ok := f.executionHead(node); ok {
+			_, optimistic := f.optimisticPayloads.Load(hash)
+			return optimistic
+		}
+	}
+	if f.optimisticStore == nil || !f.optimisticStore.IsOptimistic(node.Root) {
+		return false
+	}
+	if f.payloadStatusByRoot != nil {
+		if status, known := f.payloadStatusByRoot.Get(node.Root); known {
+			return status == execution_client.PayloadStatusNotValidated
+		}
+	}
+	return true
 }
 
 func (f *ForkChoiceStore) IsHeadOptimistic() bool {
@@ -1578,7 +1605,10 @@ func (f *ForkChoiceStore) IsHeadOptimistic() bool {
 		return false
 	}
 
-	return f.optimisticStore.IsOptimistic(f.syncedDataManager.HeadRoot())
+	if head := f.selectedHead.Load(); head != nil {
+		return f.headIsFallback.Load() || f.IsNodeOptimistic(*head)
+	}
+	return f.IsRootOptimistic(f.syncedDataManager.HeadRoot())
 }
 
 func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) error {

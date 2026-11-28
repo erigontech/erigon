@@ -69,3 +69,16 @@ func TestGetDataColumnSidecarsGloasRejectsIncompleteCellVectors(t *testing.T) {
 		require.ErrorContains(t, err, "incomplete cell data")
 	})
 }
+
+func TestGetDataColumnSidecarsWithoutBlobs(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig)
+	}
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	fulu, err := GetDataColumnSidecars(nil, commitments, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, fulu, 0)
+	gloas, err := GetDataColumnSidecarsGloas(clparams.GetBeaconConfig(), 1, common.Hash{}, nil)
+	require.NoError(t, err)
+	require.Len(t, gloas, 0)
+}

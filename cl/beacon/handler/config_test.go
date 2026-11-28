@@ -247,9 +247,9 @@ func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
 			require.Equal(t, mainnetConfig.ContributionDueBpsGloas, config.ContributionDueBpsGloas)
 			require.Equal(t, mainnetConfig.PayloadAttestationDueBps, config.PayloadAttestationDueBps)
 			require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
-			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBps/(clparams.BpsFactor/1000), config.AttestationDueMs(false))
-			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBpsGloas/(clparams.BpsFactor/1000), config.AttestationDueMs(true))
-			require.Equal(t, config.SecondsPerSlot*config.PayloadAttestationDueBps/(clparams.BpsFactor/1000), config.PayloadAttestationDueMs())
+			require.Equal(t, config.BpsToMs(config.AttestationDueBps), config.AttestationDueMs(false))
+			require.Equal(t, config.BpsToMs(config.AttestationDueBpsGloas), config.AttestationDueMs(true))
+			require.Equal(t, config.BpsToMs(config.PayloadAttestationDueBps), config.PayloadAttestationDueMs())
 		})
 	}
 }
