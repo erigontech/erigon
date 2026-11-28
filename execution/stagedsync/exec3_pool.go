@@ -177,10 +177,9 @@ func (pt *poolTask) waitThen(t, next int) bool {
 const poolNamedReruns = 3
 
 func (pt *poolTask) rerunAfter(named int) bool {
-	pt.reruns++
-	if pt.reruns <= poolNamedReruns {
+	if t, ok := pt.rerunTarget(named); ok {
 		pt.next = psReexec
-		return !pt.be.requeueAt(pt.tv.index, named, pt, pt.be.wakeValidated)
+		return !pt.be.requeueAt(pt.tv.index, t, pt, pt.be.wakeValidated)
 	}
 	return pt.waitThen(pt.tv.index-1, psReexec)
 }
@@ -286,12 +285,12 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 	return pt.publish(p)
 }
 
-func (pt *poolTask) rerunTarget(t int) int {
+func (pt *poolTask) rerunTarget(t int) (int, bool) {
 	pt.reruns++
 	if pt.reruns > poolNamedReruns {
-		return pt.tv.index - 1
+		return pt.tv.index - 1, false
 	}
-	return t
+	return t, true
 }
 
 func (pt *poolTask) publish(p *taskPool) bool {
@@ -301,7 +300,7 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.mu.Lock()
 	if pt.pending {
 		pt.pending = false
-		target := pt.rerunTarget(pt.pendingTarget)
+		target, _ := pt.rerunTarget(pt.pendingTarget)
 		pt.mu.Unlock()
 		return pt.waitThen(target, psReexec)
 	}

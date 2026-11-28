@@ -3025,7 +3025,7 @@ func (be *blockExecutor) signalSelfLoopReexec(tx, target int) {
 	}
 	if pt.parked {
 		pt.parked = false
-		target = pt.rerunTarget(target)
+		target, _ = pt.rerunTarget(target)
 		pt.mu.Unlock()
 		if !be.requeueAt(tx, target, pt, be.wakeAt) {
 			be.pool.push(pt)
