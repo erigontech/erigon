@@ -362,10 +362,14 @@ func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
 
 // DropTxMaps replaces the maps that clear keeps at their largest size, so a state
 // kept across blocks does not pay its largest transaction's clear cost on every later one.
+// It also drops an oversized journal, which Reset keeps at its peak.
 func (ibs *IntraBlockState) DropTxMaps() {
 	ibs.accessList = accessList{addresses: make(map[accounts.Address]int)}
 	ibs.sdProbe = nil
 	ibs.committedBase = nil
+	if cap(ibs.journal.entries) > maxKeptJournalEntries {
+		ibs.journal.entries = nil
+	}
 }
 
 // statePool is sync.Pool's surface, so a test can substitute one that keeps
@@ -476,6 +480,9 @@ func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
 
 // maxKeptTxOutput bounds the output buffer one transaction leaves to the next.
 const maxKeptTxOutput = int(datasize.MB)
+
+// maxKeptJournalEntries bounds the journal a kept state carries to its next block: about 1 MB.
+const maxKeptJournalEntries = 1 << 14
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then

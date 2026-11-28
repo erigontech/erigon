@@ -1258,6 +1258,25 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
 }
 
+func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	for i := range maxKeptJournalEntries + 1 {
+		k := TransientKey(*uint256.NewInt(uint64(i)))
+		ibs.SetTransientState(addr, &k, uint256.NewInt(1))
+	}
+	ibs.Reset()
+	require.Greater(t, cap(ibs.journal.entries), maxKeptJournalEntries, "Reset keeps the journal's peak")
+
+	ibs.DropTxMaps()
+
+	require.Zero(t, cap(ibs.journal.entries))
+	k := TransientKey(*uint256.NewInt(1))
+	ibs.SetTransientState(addr, &k, uint256.NewInt(2))
+	require.Equal(t, 1, ibs.journal.length())
+}
+
 func TestDropTxMapsReleasesWhatATransactionGrew(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
