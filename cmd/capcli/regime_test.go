@@ -141,6 +141,9 @@ func regimeNodeConfig(t *testing.T, dirs datadir.Dirs, args ...string) clparams.
 		return nil
 	}}
 	require.NoError(t, app.Run(t.Context(), append([]string{"erigon"}, args...)))
+	if cfg.Downloader != nil {
+		require.NoError(t, cfg.Downloader.CloseTorrentLogFile())
+	}
 	return cfg.CaplinConfig
 }
 
