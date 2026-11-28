@@ -171,7 +171,8 @@ type ForkChoiceStore struct {
 	totalActiveBalances *lru.Cache[common.Hash, uint64]
 	// Randao mixes
 	randaoMixesLists *lru.Cache[common.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
-	randaoDeltas     *lru.Cache[common.Hash, randaoDelta]       // small entry can be lots of elements.
+	ancestors        *lru.Cache[ancestorKey, ForkChoiceNode]
+	randaoDeltas     *lru.Cache[common.Hash, randaoDelta] // small entry can be lots of elements.
 	// participation tracking
 	participation *lru.Cache[uint64, *solid.ParticipationBitList] // epoch -> [participation]
 
@@ -480,6 +481,7 @@ func NewForkChoiceStore(
 		finalityCheckpoints:            finalityCheckpoints,
 		totalActiveBalances:            totalActiveBalances,
 		randaoMixesLists:               randaoMixesLists,
+		ancestors:                      newAncestorCache(),
 		randaoDeltas:                   randaoDeltas,
 		headSet:                        headSet,
 		weights:                        make(map[common.Hash]uint64),
@@ -1105,6 +1107,10 @@ func (f *ForkChoiceStore) HasBlockEquivocation(slot, proposerIndex uint64, excep
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
+}
+
+func (f *ForkChoiceStore) IsBlockInvalid(blockRoot common.Hash) bool {
+	return f.forkGraph.IsBlockInvalid(blockRoot)
 }
 
 // IsPayloadVerified returns whether the execution payload for the beacon block root

@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sync"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
@@ -209,6 +211,7 @@ type ApiHandler struct {
 	mux *chi.Mux
 
 	blockReader          freezeblocks.BeaconSnapshotReader
+	envelopeRebuilder    envelopeRebuilder
 	indiciesDB           kv.RwDB
 	netConfig            *clparams.NetworkConfig
 	ethClock             eth_clock.EthereumClock
@@ -256,8 +259,10 @@ type ApiHandler struct {
 	syncMessagePool           sync_contribution_pool.SyncContributionPool
 	committeeSub              committee_subscription.CommitteeSubscribe
 	attestationProducer       attestation_producer.AttestationDataProducer
-	attestationDataImportWait time.Duration
+	importWait                time.Duration
+	// Each endpoint that waits for an import has its own per-slot budget, so a caller of one does not cut the wait of the other.
 	attestationDataWaitedSlot atomic.Uint64
+	headRootWaitedSlot        atomic.Uint64
 	aggregatePool             aggregation.AggregationPool
 
 	// services
@@ -292,6 +297,11 @@ type ApiHandler struct {
 	builderRoutes                           *builderRouteStore
 	// Keyed by envelope root: it covers the block root and builder index, so a second envelope for the same block and builder does not hide the first.
 	executionPayloadEnvelopeBroadcasts *lru.Cache[[32]byte, struct{}]
+}
+
+type envelopeRebuilder interface {
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 func NewApiHandler(
@@ -335,6 +345,7 @@ func NewApiHandler(
 	executionPayloadBidService services.ExecutionPayloadBidService,
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
+	rebuilder envelopeRebuilder,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
@@ -378,6 +389,7 @@ func NewApiHandler(
 		forkchoiceStore:       forkchoiceStore,
 		operationsPool:        operationsPool,
 		blockReader:           rcsn,
+		envelopeRebuilder:     rebuilder,
 		syncedData:            syncedData,
 		stateReader:           stateReader,
 		caplinStateSnapshots:  caplinStateSnapshots,
@@ -394,7 +406,7 @@ func NewApiHandler(
 		columnStorage:                      columnStorage,
 		caplinSnapshots:                    blobSnapshots,
 		attestationProducer:                attestationProducer,
-		attestationDataImportWait:          defaultAttestationDataImportWait,
+		importWait:                         defaultImportWait,
 		blobBundles:                        blobBundles,
 		engine:                             engine,
 		syncMessagePool:                    syncMessagePool,
@@ -696,7 +708,6 @@ func (a *ApiHandler) init() {
 		})
 		if a.routerCfg.Validator {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
-			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Post("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlock))
 		}
 	})

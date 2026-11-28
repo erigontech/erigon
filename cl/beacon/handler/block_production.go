@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -608,21 +609,26 @@ func attemptsMade(attempts int) string {
 }
 
 const (
-	defaultAttestationDataImportWait  = time.Second
-	attestationDataImportPollInterval = 5 * time.Millisecond
+	defaultImportWait  = time.Second
+	importPollInterval = 5 * time.Millisecond
 )
 
-func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
-	waitedSlot := slot + 1
-	deadline := time.Now().Add(a.attestationDataImportWait)
+func (a *ApiHandler) importInProgress(slot uint64) bool {
+	return a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
+}
+
+// waitForImportedHead returns the fork choice head once the import of the slot's block ends. waitedSlot records the
+// slot whose wait reached the cap, so later callers sharing it do not wait again for that slot.
+func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64, waitedSlot *atomic.Uint64) (forkchoice.ForkChoiceNode, bool) {
+	spentMarker := slot + 1
+	deadline := time.Now().Add(a.importWait)
 	for {
-		waitSpent := a.attestationDataWaitedSlot.Load() == waitedSlot
+		waitSpent := waitedSlot.Load() == spentMarker
 		if !waitSpent && !time.Now().Before(deadline) {
-			a.attestationDataWaitedSlot.Store(waitedSlot)
+			waitedSlot.Store(spentMarker)
 			waitSpent = true
 		}
-		importInProgress := a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
-		if !importInProgress || waitSpent {
+		if !a.importInProgress(slot) || waitSpent {
 			if head, ok := a.forkchoiceStore.TryGetHeadNode(); ok {
 				return head, true
 			}
@@ -633,7 +639,7 @@ func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (f
 		select {
 		case <-ctx.Done():
 			return forkchoice.ForkChoiceNode{}, false
-		case <-time.After(attestationDataImportPollInterval):
+		case <-time.After(importPollInterval):
 		}
 	}
 }
@@ -664,7 +670,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
-	head, haveHead := a.waitForAttestationHead(r.Context(), *slot)
+	head, haveHead := a.waitForImportedHead(r.Context(), *slot, &a.attestationDataWaitedSlot)
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
@@ -827,13 +833,16 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("invalid slot: %w", err),
 		)
 	}
+	if gloasOptions == nil && a.beaconChainCfg.GetCurrentStateVersion(targetSlot/a.beaconChainCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("block production from Gloas requires POST /eth/v4/validator/blocks/{slot}"))
+	}
 
 	builderBoostFactor := uint64(100)
-	if options := gloasBlockOptionsFromContext(ctx); options != nil {
-		builderBoostFactor = options.builderConfig.BuilderBoostFactor
+	if gloasOptions != nil {
+		builderBoostFactor = gloasOptions.builderConfig.BuilderBoostFactor
 	}
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
-	if builderBoostFactorStr != "" && gloasBlockOptionsFromContext(ctx) == nil {
+	if builderBoostFactorStr != "" && gloasOptions == nil {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
@@ -970,14 +979,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			if err != nil {
 				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
 			} else {
-				options := gloasBlockOptionsFromContext(ctx)
-				var cached *selfBuildPayload
-				if options != nil {
-					cached = options.selfBuildPayload
-				} else {
-					cached, _ = a.selfBuildPayloads.Get(bid.Message.BlockHash)
-				}
-				if cached != nil {
+				if cached := gloasOptions.selfBuildPayload; cached != nil {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
 						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
@@ -990,10 +992,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
 					a.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: targetSlot, BeaconBlockRoot: beaconBlockRoot}, envelope)
-					// SSZ encoding only serializes Data, not Extra — only include
-					// the envelope in JSON responses to keep the header truthful.
-					switch {
-					case options != nil && options.includePayload:
+					if gloasOptions.includePayload {
 						contents := cltypes.NewGloasBlockContents(a.beaconChainCfg, targetSlot)
 						contents.Block = denebBlock.Block
 						contents.ExecutionPayloadEnvelope = envelope
@@ -1004,9 +1003,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 							With("execution_payload_blinded", block.IsBlinded()).
 							With("execution_payload_value", block.GetExecutionValue().String()).
 							With("consensus_block_value", consensusValue.String())
-						executionPayloadIncluded = true
-					case options == nil && !beaconhttp.WillEncodeSSZ(r.Header.Get("Accept")):
-						resp = resp.With("execution_payload_envelope", envelope)
 						executionPayloadIncluded = true
 					}
 					log.Info("BlockProduction: included unsigned execution payload envelope in response",

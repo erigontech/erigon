@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/sentinel/service"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -442,6 +444,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), beaconConfig, emitters)
+	var envelopeRebuilder interface {
+		handlers.EnvelopeRebuilder
+		Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	}
+	if engine != nil {
+		envelopeRebuilder = envelope_history.NewRebuilder(beaconConfig, rcsn, engine)
+	}
 	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
@@ -465,6 +474,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		SubscribeAllTopics:           config.SubscribeAllTopics,
 		EnableBlocks:                 true,
 		ActiveIndicies:               uint64(len(activeIndicies)),
+		EnvelopeRebuilder:            envelopeRebuilder,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
@@ -510,7 +520,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, pool, false, batchSignatureVerifier)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
@@ -664,6 +674,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			executionPayloadBidService,
 			payloadAttestationService,
 			proposerPreferencesService,
+			envelopeRebuilder,
 		)
 		apiHandler.StartPayloadPreparation(ctx)
 		apiHandler.StartPayloadAttributes(ctx)

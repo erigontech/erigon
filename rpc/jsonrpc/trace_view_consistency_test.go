@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -155,7 +154,7 @@ func TestTraceCallUsesCommittedHeader(t *testing.T) {
 
 	contractAddress := common.Address{3}
 	coinbaseCode := hexutil.Bytes{byte(vm.COINBASE), 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
-	traceConfig := &config.TraceConfig{
+	traceConfig := &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddress): {Code: &coinbaseCode},
 		},

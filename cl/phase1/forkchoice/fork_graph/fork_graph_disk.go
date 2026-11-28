@@ -400,8 +400,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 				}
 				log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 				f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-				// The block root does not cover the signature: a copy with a bad proposer signature does not
-				// make the block with this root invalid.
 				if !errors.Is(invalidBlockErr, eth2.ErrInvalidBlockSignature) {
 					f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 				}

@@ -314,6 +314,8 @@ func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeac
 	return g.state, nil
 }
 
+func (dataAvailabilityForkGraph) IsBlockInvalid(common.Hash) bool { return false }
+
 func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return g.block, g.block != nil
 }
@@ -5639,4 +5641,21 @@ func TestHeadV2ReorgBackAfterPayloadArrival(t *testing.T) {
 		}
 	}
 	require.Equal(t, []common.Hash{oldRoot, root, oldRoot}, roots, "head_v2 must announce a return to the old head after payload integration announced another head")
+}
+
+type invalidBlockForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (invalidBlockForkGraph) IsBlockInvalid(common.Hash) bool { return true }
+
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsInvalidBlock(t *testing.T) {
+	cfg, _, _, envelope := validAdmissionCancellationFixture(t)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: invalidBlockForkGraph{}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
 }

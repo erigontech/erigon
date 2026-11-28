@@ -27,13 +27,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -61,6 +64,13 @@ type ConsensusHandlers struct {
 	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
 	now                func() time.Time
+	envelopeRebuilder  EnvelopeRebuilder
+}
+
+type EnvelopeRebuilder interface {
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	PrepareFromBlocks(kv.Tx, uint64, common.Hash, *cltypes.SignedBeaconBlock, uint64, *cltypes.SignedBeaconBlock) (*envelope_history.PreparedRebuild, error)
+	TryRebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 const (
@@ -86,6 +96,7 @@ func NewConsensusHandlers(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	enabledBlocks bool,
+	rebuilder EnvelopeRebuilder,
 ) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
@@ -104,6 +115,7 @@ func NewConsensusHandlers(
 		dataColumnStorage:  dataColumnStorage,
 		peerdasStateReader: peerDasStateReader,
 		now:                time.Now,
+		envelopeRebuilder:  rebuilder,
 	}
 
 	hm := map[string]func(s network.Stream) error{

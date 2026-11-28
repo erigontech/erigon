@@ -144,7 +144,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -212,7 +212,7 @@ func TestLightClientFinality(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -288,7 +288,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -361,7 +361,7 @@ func TestLightClientUpdates(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
