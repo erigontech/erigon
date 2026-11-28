@@ -340,6 +340,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"memory":   prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0, MLOAD, PUSH1, 16, MLOAD, PUSH1, 32, MLOAD, PUSH1, 0xbb, PUSH1, 8, MSTORE, PUSH1, 33, MLOAD, PUSH1, 8, MLOAD),
 		"memhuge":  prog(PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, MLOAD),
 		"memover":  prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 1, SWAP1, MSTORE),
+		"mstore8":  prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH2, 0x12, 0x34, PUSH1, 31, MSTORE8, PUSH1, 0xcd, PUSH1, 32, MSTORE8, PUSH1, 0xef, PUSH1, 0, MSTORE8, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD),
+		"m8over":   prog(PUSH1, 0, PUSH1, 0, MSTORE, PUSH1, 1, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, MSTORE8),
 		"push1end": {byte(PUSH1)},
 		"push2end": {byte(PUSH1), 1, byte(PUSH2), 0x12},
 		"push9end": {byte(PUSH1), 1, byte(PUSH9), 1, 2, 3},
@@ -499,6 +501,25 @@ func TestRunTakesCopyFastPath(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestRunTakesMstore8FastPath fails when MSTORE8 into allocated memory falls
+// back to the jump table.
+func TestRunTakesMstore8FastPath(t *testing.T) {
+	t.Parallel()
+	errJumpTable := errors.New("jump table MSTORE8")
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	jt := *evm.jt
+	jt[MSTORE8].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
+	evm.jt = &jt
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 0xab, byte(PUSH1), 31, byte(MSTORE8)}
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.NoError(t, err)
+	_, _, _, err = evm.runTraced(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.ErrorIs(t, err, errJumpTable)
 }
 
 func TestRunRejectsMcopyBeforeCancun(t *testing.T) {
