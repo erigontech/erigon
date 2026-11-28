@@ -42,6 +42,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -3894,6 +3895,90 @@ func duCaplinBytes(files []duFileInfo) int64 {
 	return total
 }
 
+func duCaplinDataPresent(dirs datadir.Dirs, files []duFileInfo) bool {
+	if duCaplinBytes(files) > 0 {
+		return true
+	}
+	if slices.ContainsFunc([]string{dirs.CaplinBlobs, dirs.CaplinColumnData}, duHasRegularFile) {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(dirs.CaplinIndexing, "mdbx.dat"))
+	return err == nil
+}
+
+func duHasRegularFile(root string) bool {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		if entry.IsDir() {
+			if duHasRegularFile(path) {
+				return true
+			}
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func duCollectCaplin(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc *chain.Config, chainName string, logger log.Logger, verbose bool) (*antiquary.CaplinDuResult, error) {
+	if !duCaplinDataPresent(dirs, files) {
+		return nil, nil
+	}
+	var beaconConfig *clparams.BeaconChainConfig
+	var err error
+	if cc != nil && cc.ChainID != nil {
+		beaconConfig, err = clparams.ResolveBeaconConfig(cc.ChainID.Uint64(), "", false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	indexDB, err := antiquary.OpenCaplinDuIndexDB(ctx, dirs.CaplinIndexing, logger)
+	if err != nil {
+		return nil, err
+	}
+	if indexDB != nil {
+		defer indexDB.Close()
+	}
+	result, err := antiquary.CollectCaplinDu(ctx, antiquary.CaplinDuRequest{
+		Chain:        chainName,
+		Dirs:         dirs,
+		BeaconConfig: beaconConfig,
+		IndexDB:      indexDB,
+		Verbose:      verbose,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !duCaplinResultHasData(result) {
+		return nil, nil
+	}
+	return &result, nil
+}
+
+func duCaplinResultHasData(result antiquary.CaplinDuResult) bool {
+	if result.RegimeStored {
+		return true
+	}
+	for _, row := range result.Rows {
+		if row.HasData {
+			return true
+		}
+	}
+	for _, table := range result.MDBX.Tables {
+		if table.Bytes > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func duChainInfo(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*chain.Config, string) {
 	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
 	if err != nil {
@@ -4041,6 +4126,7 @@ type duResult struct {
 	OtherExtensions []string                             `json:"other_extensions,omitempty"`
 	Estimates       []duEstimate                         `json:"estimates"`
 	CaplinBytes     int64                                `json:"caplin_bytes"` // excluded from Estimates
+	Caplin          *antiquary.CaplinDuResult            `json:"caplin,omitempty"`
 }
 
 // duAggregateCategories computes per-category byte totals and file counts.
@@ -4213,9 +4299,13 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 			est.Mode, duFormatSize(est.TotalBytes), deltaStr,
 			est.BlocksDesc, est.HistoryDesc)
 	}
-	if result.CaplinBytes > 0 {
-		fmt.Fprintf(w, "\n  caplin %s is on top of every mode above: --prune.mode does not\n"+
-			"  govern it, the --caplin.*-archive flags do.\n", duFormatSize(result.CaplinBytes))
+	if result.Caplin != nil {
+		regime := result.Caplin.Regime
+		if result.Caplin.RegimeStored {
+			regime += " (stored)"
+		}
+		fmt.Fprintf(w, "\n  caplin rows are not governed by --prune.mode; the %s Caplin regime governs them.\n", regime)
+		antiquary.FormatCaplinDu(w, *result.Caplin)
 	}
 }
 
@@ -4265,7 +4355,7 @@ func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc 
 	return duComputeEstimates(ctx, duBlockFilesTx{Tx: tx, view: view}, freezeblocks.NewBlockReader(blockSnaps), cc, stepSize, files, dirs.Snap)
 }
 
-func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duResult, error) {
+func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger, verbose bool) (duResult, error) {
 	cc, configuredMode := duChainInfo(ctx, dirs, logger)
 	chainName := "unknown"
 	if cc != nil && cc.ChainName != "" {
@@ -4276,6 +4366,10 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 	files, err := duWalkSnapshots(dirs)
 	if err != nil {
 		return duResult{}, fmt.Errorf("walking snapshots: %w", err)
+	}
+	caplin, err := duCollectCaplin(ctx, dirs, files, cc, chainName, logger, verbose)
+	if err != nil {
+		logger.Warn("seg du: Caplin breakdown omitted", "err", err)
 	}
 
 	// Compute ranges.
@@ -4321,12 +4415,13 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 		OtherExtensions: duOtherExtensions(files),
 		Estimates:       estimates,
 		CaplinBytes:     duCaplinBytes(files),
+		Caplin:          caplin,
 	}, nil
 }
 
 // doDU implements the "erigon seg du" subcommand.
 func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger log.Logger) error {
-	result, err := duCollect(ctx, dirs, logger)
+	result, err := duCollect(ctx, dirs, logger, cliCtx.Bool("v"))
 	if err != nil {
 		return err
 	}

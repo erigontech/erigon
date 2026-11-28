@@ -403,7 +403,7 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 	return block, nil
 }
 
-func fromToml(in []byte) (PreverifiedItems, error) {
+func ParseToml(in []byte) (PreverifiedItems, error) {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		return nil, err
@@ -666,7 +666,7 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		var err error
 		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
 		if err == nil {
-			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
+			_, err = ParseToml(hashes) // a CDN error page can come back with HTTP 200
 		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
@@ -678,7 +678,7 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		}
 	}
 
-	items, err := fromToml(hashes)
+	items, err := ParseToml(hashes)
 	if err != nil {
 		return fmt.Errorf("parse snapshot hashes of %s: %w", chainName, err)
 	}
@@ -690,7 +690,7 @@ func SetToml(networkName string, toml []byte, local bool) error {
 	if _, ok := knownChains[networkName]; !ok {
 		return nil
 	}
-	items, err := fromToml(toml)
+	items, err := ParseToml(toml)
 	if err != nil {
 		return fmt.Errorf("parse snapshot hashes of %s: %w", networkName, err)
 	}

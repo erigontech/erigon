@@ -70,6 +70,7 @@ func commands() []*cli.Command {
 		(&DumpBlobsSnapshotsToStore{}).command(),
 		(&DumpStateSnapshots{}).command(),
 		(&MakeDepositArgs{}).command(),
+		segCommand(),
 	}
 }
 

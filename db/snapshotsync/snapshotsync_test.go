@@ -930,10 +930,10 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 func TestBlobSidecarDownloadFilter(t *testing.T) {
 	seg := "v1.1-008620-008630-blobsidecars.seg"
 	idx := "v1.1-008620-008630-blocksidecars.idx"
-	require.True(t, isBlobSidecarFile(seg))
-	require.True(t, isBlobSidecarFile(idx), "the blob index is named blocksidecars and must follow its segment")
-	require.False(t, isBlobSidecarFile("v1.1-008620-008630-beaconblocks.seg"))
-	require.False(t, isBlobSidecarFile("v1.1-000000-000500-bodies.seg"))
+	require.True(t, IsBlobSidecarFile(seg))
+	require.True(t, IsBlobSidecarFile(idx), "the blob index is named blocksidecars and must follow its segment")
+	require.False(t, IsBlobSidecarFile("v1.1-008620-008630-beaconblocks.seg"))
+	require.False(t, IsBlobSidecarFile("v1.1-000000-000500-bodies.seg"))
 
 	for _, name := range []string{seg, idx} {
 		require.False(t, blobSegmentBelow(name, 0), "zero keeps every segment")

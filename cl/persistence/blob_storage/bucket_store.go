@@ -41,6 +41,7 @@ import (
 
 const (
 	subdivisionSlot = 10_000
+	BucketSlots     = subdivisionSlot
 	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
