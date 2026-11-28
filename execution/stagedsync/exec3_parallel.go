@@ -1675,21 +1675,24 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
-	if pe.execWorkers = takeWorkers(pe.cfg.workers, poolSize); pe.execWorkers != nil {
-		for _, w := range pe.execWorkers {
+	set := pe.cfg.workers.take(poolSize)
+	if set != nil {
+		for _, w := range set.workers {
 			w.Rebind(workersCtx, pe.taskExecMetrics)
 		}
 	} else {
-		pe.execWorkers = make([]*exec.WorkerContext, poolSize)
-		for i := range pe.execWorkers {
-			pe.execWorkers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+		workers := make([]*exec.WorkerContext, poolSize)
+		for i := range workers {
+			workers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
 		}
+		set = newWorkerSet(workers)
 	}
 	npCons.pool.Add(int64(time.Since(npPoolT0)))
-	workers := pe.execWorkers
-	pe.stopWorkers = sync.OnceFunc(func() { putWorkers(pe.cfg.workers, workers) })
+	pe.execWorkers = set.workers
+	pe.stopWorkers = sync.OnceFunc(func() { pe.cfg.workers.put(set) })
 
-	pe.pool = newTaskPool(pe, pe.execWorkers)
+	pe.pool = newTaskPool(pe)
+	set.start(pe.pool)
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(pe.rs)
 		pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
@@ -3764,40 +3767,100 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 // traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
 func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }
 
-// takeWorkers hands out the idle workers in p when there are n of them, or nil: the
-// caller then builds its own. A nil p keeps no workers.
-func takeWorkers(p *atomic.Pointer[[]*exec.WorkerContext], n int) []*exec.WorkerContext {
-	if p == nil {
+// ExecWorkers keeps the parallel executor's idle workers, and the goroutines that
+// run them, between ExecV3 calls. Close stops them.
+type ExecWorkers struct {
+	mu     sync.Mutex
+	idle   *workerSet
+	closed bool
+}
+
+// take hands out the idle set when it has n workers, or nil: the caller then builds
+// its own. A nil c keeps no workers.
+func (c *ExecWorkers) take(n int) *workerSet {
+	if c == nil {
 		return nil
 	}
-	ws := p.Swap(nil)
-	if ws != nil && len(*ws) == n {
-		return *ws
+	c.mu.Lock()
+	s := c.idle
+	c.idle = nil
+	c.mu.Unlock()
+	if s != nil && len(s.workers) != n {
+		s.close()
+		return nil
 	}
-	if ws != nil {
-		closeWorkers(*ws)
-	}
-	return nil
+	return s
 }
 
-// putWorkers parks workers that no task runs on and keeps them in p for the next
-// take, or closes them when p is nil or already holds a set. A set is parked before
-// it is published, so a taker never gets a worker that is still bound to a run.
-func putWorkers(p *atomic.Pointer[[]*exec.WorkerContext], workers []*exec.WorkerContext) {
-	if p == nil || p.Load() != nil {
-		closeWorkers(workers)
+// put parks s and keeps it for the next take, or closes it when c is nil, closed or
+// already holds a set. A set is parked before it is published, so a taker never gets
+// a worker that is still bound to a run.
+func (c *ExecWorkers) put(s *workerSet) {
+	if c != nil {
+		c.mu.Lock()
+		keep := !c.closed && c.idle == nil
+		if keep {
+			s.park()
+			c.idle = s
+		}
+		c.mu.Unlock()
+		if keep {
+			return
+		}
+	}
+	s.close()
+}
+
+// Close stops the idle goroutines and closes their workers; a set put later is closed too.
+func (c *ExecWorkers) Close() {
+	if c == nil {
 		return
 	}
-	for _, w := range workers {
-		w.Park()
-	}
-	if !p.CompareAndSwap(nil, &workers) {
-		closeWorkers(workers)
+	c.mu.Lock()
+	s := c.idle
+	c.idle, c.closed = nil, true
+	c.mu.Unlock()
+	if s != nil {
+		s.close()
 	}
 }
 
-func closeWorkers(workers []*exec.WorkerContext) {
+// workerSet runs one goroutine per worker; between runs the goroutines wait for the next pool.
+type workerSet struct {
+	workers []*exec.WorkerContext
+	runs    chan *taskPool
+	done    sync.WaitGroup
+}
+
+func newWorkerSet(workers []*exec.WorkerContext) *workerSet {
+	s := &workerSet{workers: workers, runs: make(chan *taskPool, len(workers))}
 	for _, w := range workers {
-		w.Close()
+		s.done.Go(func() {
+			defer w.Close()
+			for p := range s.runs {
+				p.workerLoop(&poolWorker{w: w})
+				p.pe.runWG.Done()
+			}
+		})
 	}
+	return s
+}
+
+// start hands p to every goroutine of s; p.pe.runWG waits for them to leave p.
+func (s *workerSet) start(p *taskPool) {
+	p.pe.runWG.Add(len(s.workers))
+	for range s.workers {
+		s.runs <- p
+	}
+}
+
+func (s *workerSet) park() {
+	for _, w := range s.workers {
+		w.Park()
+	}
+}
+
+func (s *workerSet) close() {
+	close(s.runs)
+	s.done.Wait()
 }

@@ -74,7 +74,7 @@ var (
 	poolOnRun      func(runs int)
 )
 
-func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
+func newTaskPool(pe *parallelExecutor) *taskPool {
 	p := &taskPool{pe: pe}
 	p.cond = sync.NewCond(&p.mu)
 	context.AfterFunc(pe.workersCtx, func() {
@@ -83,9 +83,6 @@ func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
 		p.mu.Unlock()
 		p.cond.Broadcast()
 	})
-	for _, w := range base {
-		pe.runWG.Go(func() { p.workerLoop(&poolWorker{w: w}) })
-	}
 	return p
 }
 

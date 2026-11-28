@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -366,7 +365,7 @@ func NewDefaultStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
-	execWorkers *atomic.Pointer[[]*exec.WorkerContext],
+	execWorkers *stagedsync.ExecWorkers,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -397,7 +396,7 @@ func NewPipelineStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
-	execWorkers *atomic.Pointer[[]*exec.WorkerContext],
+	execWorkers *stagedsync.ExecWorkers,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -431,7 +430,7 @@ func NewInMemoryExecution(
 	blockWriter *blockio.BlockWriter,
 	logger log.Logger,
 	readAheader *exec.BlockReadAheader,
-	execWorkers *atomic.Pointer[[]*exec.WorkerContext],
+	execWorkers *stagedsync.ExecWorkers,
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,

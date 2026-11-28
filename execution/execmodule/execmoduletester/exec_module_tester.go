@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -154,12 +153,16 @@ type ExecModuleTester struct {
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
+	execWorkers    *stagedsync.ExecWorkers
 	bgComponentsEg errgroup.Group
 }
 
 func (emt *ExecModuleTester) Close() {
 	emt.Cancel()
 	err := emt.bgComponentsEg.Wait()
+	if emt.execWorkers != nil {
+		emt.execWorkers.Close()
+	}
 	if emt.blockRetire != nil {
 		emt.blockRetire.Close()
 	}
@@ -846,7 +849,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	execWorkers := new(atomic.Pointer[[]*exec.WorkerContext])
+	mock.execWorkers = &stagedsync.ExecWorkers{}
+	execWorkers := mock.execWorkers
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader, execWorkers)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
