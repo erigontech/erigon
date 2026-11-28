@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -89,7 +90,7 @@ func accountChanged(account *types.AccountChanges) bool {
 
 type balCommitmentContext struct {
 	tx         kv.TemporalTx
-	cache      *commitment.BranchCache
+	cache      *branchcache.BranchCache
 	cacheStats *balCommitmentCacheStats
 }
 
@@ -211,8 +212,8 @@ func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats
 			onErr(errors.New("BAL commitment warmup requires a temporal read transaction"))
 			return nil, nil
 		}
-		var cache *commitment.BranchCache
-		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
+		var cache *branchcache.BranchCache
+		if provider, ok := txTemporal.AggTx().(branchcache.BranchCacheProvider); ok {
 			cache = provider.BranchCache()
 		}
 		return &balCommitmentContext{

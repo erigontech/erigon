@@ -3,7 +3,6 @@ package commitment
 import "github.com/erigontech/erigon/common/dbg"
 
 const (
-	DefaultMaxDeferredUpdates     = 50_000
 	DefaultRebuildShardMaxSteps   = 64
 	DefaultKeyReferencingMinSteps = 2
 )

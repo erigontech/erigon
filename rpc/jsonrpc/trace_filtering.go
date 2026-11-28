@@ -863,13 +863,19 @@ func (api *TraceAPIImpl) callBlock(
 		})
 	}
 
+	getHash := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		return api._blockReader.Header(ctx, dbtx, hash, number)
+	})
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{}, getHash)
 		return ret, err
 	}
 
 	if withSyscall != nil {
 		if err := withSyscall(syscall); err != nil {
+			return nil, nil, err
+		}
+		if err := ibs.StateReadError(); err != nil {
 			return nil, nil, err
 		}
 	}
