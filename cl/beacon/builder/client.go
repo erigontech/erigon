@@ -337,6 +337,9 @@ func (b *builderClient) RequestExecutionPayloadBid(ctx context.Context, builderU
 	if responseBody.Version != clparams.GloasVersion.String() || responseBody.Data == nil || responseBody.Data.Message == nil {
 		return nil, errors.New("execution payload bid response is missing Gloas data")
 	}
+	if err := responseBody.Data.Message.ValidateInclusionListBits(clparams.GloasVersion); err != nil {
+		return nil, fmt.Errorf("execution payload bid: %w", err)
+	}
 	return responseBody.Data, nil
 }
 

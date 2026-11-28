@@ -337,6 +337,7 @@ type ExecutionPayloadBid struct {
 	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+	InclusionListBits     *solid.BitVector              `json:"inclusion_list_bits,omitempty"` // nil before Heze
 }
 
 // VersionedHashes returns blob versioned hashes in commitment order.
@@ -370,7 +371,7 @@ func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []any{
+	schema := []any{
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -383,18 +384,26 @@ func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
 		e.ExecutionPayment,
 		blobRoot[:],
 		e.ExecutionRequestsRoot[:],
-	}, nil
+	}
+	if e.InclusionListBits != nil {
+		schema = append(schema, e.InclusionListBits)
+	}
+	return schema, nil
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
 	// The fixed section contains five hashes, one address, five uint64 values,
-	// and the offset for BlobKzgCommitments.
+	// the BlobKzgCommitments offset and, from Heze, the inclusion_list_bits vector.
 	const dynamicOffsetSize = 4
-	return length.Hash*5 +
+	size := length.Hash*5 +
 		length.Addr +
 		length.BlockNum*5 +
 		dynamicOffsetSize +
 		e.BlobKzgCommitments.EncodingSizeSSZ()
+	if e.InclusionListBits != nil {
+		size += e.InclusionListBits.EncodingSizeSSZ()
+	}
+	return size
 }
 
 func (e *ExecutionPayloadBid) Static() bool {
@@ -402,8 +411,7 @@ func (e *ExecutionPayloadBid) Static() bool {
 }
 
 func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(
-		buf,
+	schema := []any{
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -416,7 +424,11 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 		e.ExecutionPayment,
 		&e.BlobKzgCommitments,
 		e.ExecutionRequestsRoot[:],
-	)
+	}
+	if e.InclusionListBits != nil {
+		schema = append(schema, e.InclusionListBits)
+	}
+	return ssz2.MarshalSSZ(buf, schema...)
 }
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
@@ -443,6 +455,11 @@ func (e *ExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bool) er
 		&e.ExecutionPayment,
 		&e.BlobKzgCommitments,
 		e.ExecutionRequestsRoot[:],
+	}
+	e.InclusionListBits = nil
+	if clparams.StateVersion(version) >= clparams.HezeVersion {
+		e.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+		schema = append(schema, e.InclusionListBits)
 	}
 	if strict {
 		return ssz2.UnmarshalSSZStrict(buf, version, schema...)
@@ -471,6 +488,19 @@ func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, (*executionPayloadBid)(e)); err != nil {
 		return err
 	}
+	if e.InclusionListBits != nil {
+		return e.InclusionListBits.ValidateSize(clparams.InclusionListCommitteeSize)
+	}
+	return nil
+}
+
+// ValidateInclusionListBits checks that inclusion_list_bits is present exactly from Heze on.
+// Decoders already enforce the preset size.
+func (e *ExecutionPayloadBid) ValidateInclusionListBits(version clparams.StateVersion) error {
+	hasBits := e.InclusionListBits != nil
+	if wantBits := version >= clparams.HezeVersion; hasBits != wantBits {
+		return fmt.Errorf("execution payload bid inclusion_list_bits present=%v, want %v for %s", hasBits, wantBits, version)
+	}
 	return nil
 }
 
@@ -487,9 +517,20 @@ func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 		Value:                 e.Value,
 		ExecutionPayment:      e.ExecutionPayment,
 		ExecutionRequestsRoot: e.ExecutionRequestsRoot,
+		InclusionListBits:     e.InclusionListBits.Copy(),
 	}
 	e.BlobKzgCommitments.ShallowCopyTo(&copied.BlobKzgCommitments)
 	return copied
+}
+
+func newSignedExecutionPayloadBid(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedExecutionPayloadBid {
+	bid := &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48),
+	}
+	if version >= clparams.HezeVersion {
+		bid.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+	}
+	return &SignedExecutionPayloadBid{Message: bid}
 }
 
 // SignedExecutionPayloadBid represents a signed execution payload bid.
@@ -590,7 +631,7 @@ func ParseExecutionPayloadEnvelopeVersion(header string) (clparams.StateVersion,
 
 // ValidateExecutionPayloadEnvelopeVersion rejects fork schemas unsupported by this build.
 func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) error {
-	if version != clparams.GloasVersion {
+	if version < clparams.GloasVersion || version > clparams.HezeVersion {
 		return fmt.Errorf("unsupported execution payload envelope consensus version %d", version)
 	}
 	return nil

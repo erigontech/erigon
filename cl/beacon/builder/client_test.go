@@ -366,6 +366,15 @@ func TestRequestExecutionPayloadBid(t *testing.T) {
 	require.NotNil(t, bid)
 }
 
+func TestRequestExecutionPayloadBidRejectsInclusionListBits(t *testing.T) {
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return builderTestResponse(r, http.StatusOK, `{"version":"gloas","data":{"message":{"blob_kzg_commitments":[],"inclusion_list_bits":"0x0000"},"signature":"0x`+strings.Repeat("00", 96)+`"}}`, http.Header{"Eth-Consensus-Version": {"gloas"}}), nil
+	}))
+	bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 12, common.Hash{2}, common.Hash{3}, common.Bytes48{1}, validBuilderRequestAuth(), 750*time.Millisecond)
+	require.Error(t, err)
+	require.Nil(t, bid)
+}
+
 func TestRequestExecutionPayloadBidNoContent(t *testing.T) {
 	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
 		return builderTestResponse(r, http.StatusNoContent, "", nil), nil

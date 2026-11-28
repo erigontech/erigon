@@ -92,7 +92,7 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		// available. This is more reliable than deriving the version from the slot
 		// when running against devnets whose custom config may not be fully loaded.
 		if hdr := resp.Header.Get("Eth-Consensus-Version"); hdr != "" {
-			if hdrVersion := cycleDetectVersion(hdr); hdrVersion != stateVersion {
+			if hdrVersion, ok := cycleDetectVersion(hdr); ok && hdrVersion != stateVersion {
 				log.Info("[Checkpoint Sync] Overriding config-derived version with Eth-Consensus-Version header",
 					"configVersion", stateVersion, "headerVersion", hdrVersion)
 				stateVersion = hdrVersion
@@ -220,25 +220,27 @@ func normalizeCheckpointURL(uri string) string {
 }
 
 // cycleDetectVersion maps the Eth-Consensus-Version header to a clparams version.
-func cycleDetectVersion(header string) clparams.StateVersion {
+func cycleDetectVersion(header string) (clparams.StateVersion, bool) {
 	switch strings.ToLower(header) {
 	case "phase0":
-		return clparams.Phase0Version
+		return clparams.Phase0Version, true
 	case "altair":
-		return clparams.AltairVersion
+		return clparams.AltairVersion, true
 	case "bellatrix":
-		return clparams.BellatrixVersion
+		return clparams.BellatrixVersion, true
 	case "capella":
-		return clparams.CapellaVersion
+		return clparams.CapellaVersion, true
 	case "deneb":
-		return clparams.DenebVersion
+		return clparams.DenebVersion, true
 	case "electra":
-		return clparams.ElectraVersion
+		return clparams.ElectraVersion, true
 	case "fulu":
-		return clparams.FuluVersion
+		return clparams.FuluVersion, true
 	case "gloas", "glamsterdam":
-		return clparams.GloasVersion
+		return clparams.GloasVersion, true
+	case "heze":
+		return clparams.HezeVersion, true
 	default:
-		return clparams.GloasVersion // Assume latest
+		return 0, false
 	}
 }

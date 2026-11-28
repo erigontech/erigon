@@ -1670,6 +1670,12 @@ func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+
+		if state.Epoch(s) == beaconConfig.HezeForkEpoch {
+			if err := s.UpgradeToHeze(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

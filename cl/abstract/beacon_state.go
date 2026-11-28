@@ -39,6 +39,7 @@ type BeaconStateUpgradable interface {
 	UpgradeToElectra() error
 	UpgradeToFulu() error
 	UpgradeToGloas() error
+	UpgradeToHeze() error
 }
 
 type BeaconStateExtension interface {

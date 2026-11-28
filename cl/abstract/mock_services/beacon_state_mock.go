@@ -6445,6 +6445,44 @@ func (c *MockBeaconStateUpgradeToGloasCall) DoAndReturn(f func() error) *MockBea
 	return c
 }
 
+// UpgradeToHeze mocks base method.
+func (m *MockBeaconState) UpgradeToHeze() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpgradeToHeze")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpgradeToHeze indicates an expected call of UpgradeToHeze.
+func (mr *MockBeaconStateMockRecorder) UpgradeToHeze() *MockBeaconStateUpgradeToHezeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpgradeToHeze", reflect.TypeOf((*MockBeaconState)(nil).UpgradeToHeze))
+	return &MockBeaconStateUpgradeToHezeCall{Call: call}
+}
+
+// MockBeaconStateUpgradeToHezeCall wrap *gomock.Call
+type MockBeaconStateUpgradeToHezeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateUpgradeToHezeCall) Return(arg0 error) *MockBeaconStateUpgradeToHezeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateUpgradeToHezeCall) Do(f func() error) *MockBeaconStateUpgradeToHezeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateUpgradeToHezeCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToHezeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ValidatorBalance mocks base method.
 func (m *MockBeaconState) ValidatorBalance(index int) (uint64, error) {
 	m.ctrl.T.Helper()

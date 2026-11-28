@@ -1584,7 +1584,7 @@ func TestDumpEnvelopeRejectsUnsupportedVersion(t *testing.T) {
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 	addEnvelopeTestBlock(f, root, 1)
-	version := clparams.GloasVersion + 1
+	version := clparams.HezeVersion + 1
 	envelope := testEnvelopeWithVersion(root, []byte{1, 2, 3}, version)
 
 	require.ErrorContains(t, f.DumpEnvelopeOnDisk(root, envelope), "unsupported execution payload envelope consensus version")
@@ -1597,7 +1597,7 @@ func TestReadEnvelopeRejectsUnsupportedFramingVersion(t *testing.T) {
 	addEnvelopeTestBlock(f, root, 1)
 	encoded, err := testEnvelopeWithTransaction(root, []byte{1}).EncodeSSZ(nil)
 	require.NoError(t, err)
-	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion+1, encoded)
+	writeEnvelopeTestFile(t, fs, root, clparams.HezeVersion+1, encoded)
 
 	_, err = f.ReadEnvelopeFromDisk(root)
 	require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")

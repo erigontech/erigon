@@ -380,6 +380,30 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	return nil
 }
 
+func (b *CachingBeaconState) UpgradeToHeze() error {
+	if b.Eth1DepositIndex() != b.GetDepositRequestsStartIndex() {
+		return fmt.Errorf("UpgradeToHeze: eth1 deposit index %d differs from deposit requests start index %d", b.Eth1DepositIndex(), b.GetDepositRequestsStartIndex())
+	}
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	cfg := b.BeaconConfig()
+
+	forkData := b.Fork()
+	forkData.Epoch = epoch
+	forkData.PreviousVersion = forkData.CurrentVersion
+	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.HezeForkVersion))
+	b.SetFork(forkData)
+
+	bid := b.GetLatestExecutionPayloadBid().Copy()
+	bid.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+	b.SetLatestExecutionPayloadBid(bid)
+
+	b.SetVersion(clparams.HezeVersion)
+
+	log.Debug("Upgrade to Heze complete")
+	return nil
+}
+
 // onboardBuildersFromPendingDeposits processes pending deposits to onboard builders at the fork.
 // Applies any pending deposit for builders, effectively onboarding builders at the fork.
 // [New in Gloas:EIP7732]

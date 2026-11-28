@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/utils"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -145,6 +146,23 @@ func TestCustomConfigBoundsMaxValidatorsPerCommittee(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, validators, beaconCfg.MaxValidatorsPerCommittee)
+		})
+	}
+}
+
+func TestCustomConfigRejectsUnsupportedInclusionListCommitteeSize(t *testing.T) {
+	for _, size := range []uint64{8, InclusionListCommitteeSize, 32} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, "INCLUSION_LIST_COMMITTEE_SIZE: %d\n", size), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if size != InclusionListCommitteeSize {
+				require.EqualError(t, err, fmt.Sprintf("INCLUSION_LIST_COMMITTEE_SIZE is not supported: %d != %d", size, InclusionListCommitteeSize))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, size, beaconCfg.InclusionListCommitteeSize)
 		})
 	}
 }
@@ -510,4 +528,66 @@ func TestSnapshotBlobsFromSlotIgnoresCutoffUnderCustomConfig(t *testing.T) {
 
 func TestChiadoUsesTheGnosisPartialWithdrawalsSweep(t *testing.T) {
 	require.EqualValues(t, 6, chiadoConfig().MaxPendingPartialsPerWithdrawalsSweep)
+}
+
+func TestHezeForkConfig(t *testing.T) {
+	for _, cfg := range []BeaconChainConfig{MainnetBeaconConfig, BeaconConfigs[chainspec.SepoliaChainID]} {
+		require.EqualValues(t, 0x08000000, cfg.HezeForkVersion, cfg.ConfigName)
+		require.Equal(t, uint64(math.MaxUint64), cfg.HezeForkEpoch, cfg.ConfigName)
+		require.EqualValues(t, 16, cfg.InclusionListCommitteeSize, cfg.ConfigName)
+	}
+	minimal := MainnetBeaconConfig
+	ApplyMinimalPreset(&minimal)
+	require.EqualValues(t, 16, minimal.InclusionListCommitteeSize)
+}
+
+func TestHezeForkSchedule(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 5
+	cfg.HezeForkEpoch = 10
+	cfg.InitializeForkSchedule()
+
+	require.Equal(t, GloasVersion, cfg.GetCurrentStateVersion(9))
+	require.Equal(t, HezeVersion, cfg.GetCurrentStateVersion(10))
+	require.Equal(t, uint32(cfg.HezeForkVersion), cfg.GetForkVersionByVersion(HezeVersion))
+	require.Equal(t, uint64(10), cfg.GetForkEpochByVersion(HezeVersion))
+
+	entry, ok := cfg.ForkVersionSchedule[utils.Uint32ToBytes4(uint32(cfg.HezeForkVersion))]
+	require.True(t, ok)
+	require.Equal(t, VersionScheduleEntry{Epoch: 10, StateVersion: HezeVersion}, entry)
+
+	require.NotPanics(t, func() {
+		cfg.GetMinSlashingPenaltyQuotient(HezeVersion)
+		cfg.GetProportionalSlashingMultiplier(HezeVersion)
+		cfg.GetPenaltyQuotient(HezeVersion)
+		cfg.MaxEffectiveBalanceForVersion(HezeVersion)
+		cfg.MaxBlobsPerBlockByVersion(HezeVersion)
+		cfg.BlobSidecarSubnetCountByVersion(HezeVersion)
+		cfg.MaxRequestBlobSidecarsByVersion(HezeVersion)
+	})
+}
+
+func TestForkSchemaMatchesSlotAcrossHeze(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 1
+	cfg.HezeForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	spe := cfg.SlotsPerEpoch
+
+	require.True(t, cfg.ForkSchemaMatchesSlot(spe, GloasVersion))
+	require.True(t, cfg.ForkSchemaMatchesSlot(2*spe, HezeVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(2*spe, GloasVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(spe, HezeVersion))
 }

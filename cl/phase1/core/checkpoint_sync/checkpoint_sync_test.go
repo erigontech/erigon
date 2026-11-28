@@ -601,3 +601,12 @@ func TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent(t *testing.T) {
 
 	assert.Equal(t, wantRoot, haveRoot)
 }
+
+func TestCycleDetectVersion(t *testing.T) {
+	version, ok := cycleDetectVersion("Heze")
+	require.True(t, ok)
+	require.Equal(t, clparams.HezeVersion, version)
+
+	_, ok = cycleDetectVersion("unknown-fork")
+	require.False(t, ok)
+}

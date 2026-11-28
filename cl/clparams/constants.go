@@ -24,6 +24,9 @@ const (
 	// New code should use BeaconChainConfig.PtcSize for the runtime value.
 	PtcSize = MaxPtcSize
 
+	// InclusionListCommitteeSize is the INCLUSION_LIST_COMMITTEE_SIZE preset (16 on mainnet and minimal).
+	InclusionListCommitteeSize = 16
+
 	AttestationTimelinessIndex  = 0
 	PtcTimelinessIndex          = 1
 	NumBlockTimelinessDeadlines = 2

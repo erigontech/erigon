@@ -712,6 +712,8 @@ type BeaconChainConfig struct {
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
 	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas (Glamsterdam).
 	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas (Glamsterdam).
+	HezeForkVersion      ConfigForkVersion `yaml:"HEZE_FORK_VERSION" spec:"true" json:"HEZE_FORK_VERSION"`              // HezeForkVersion is used to represent the fork version for Heze.
+	HezeForkEpoch        uint64            `yaml:"HEZE_FORK_EPOCH" spec:"true" json:"HEZE_FORK_EPOCH,string"`           // HezeForkEpoch is used to represent the assigned fork epoch for Heze.
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -831,6 +833,8 @@ type BeaconChainConfig struct {
 	BuilderPendingWithdrawalsLimit       uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
 	MaxBuildersPerWithdrawalsSweep       uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
 	MinBuilderWithdrawabilityDelay       uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
+	// Heze
+	InclusionListCommitteeSize uint64 `yaml:"INCLUSION_LIST_COMMITTEE_SIZE" spec:"true" json:"INCLUSION_LIST_COMMITTEE_SIZE,string"` // InclusionListCommitteeSize is the number of validators in the inclusion list committee (EIP-7805).
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -922,6 +926,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
 		b.GloasForkEpoch,
+		b.HezeForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
@@ -935,11 +940,22 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 
 // ForkSchemaMatchesSlot reports whether an object decoded with decodedVersion is
 // consistent with the fork implied by slot. A peer picks the response fork digest,
-// so the two are independent inputs; Gloas changed which fields BeaconBody and
-// DataColumnSidecar carry, so a disagreement reaches a field left unset.
+// so the two are independent inputs; Gloas and Heze changed which fields BeaconBody
+// and DataColumnSidecar carry, so a disagreement reaches a field left unset.
 func (b *BeaconChainConfig) ForkSchemaMatchesSlot(slot uint64, decodedVersion StateVersion) bool {
-	slotIsGloas := b.GetCurrentStateVersion(slot/b.SlotsPerEpoch) >= GloasVersion
-	return slotIsGloas == (decodedVersion >= GloasVersion)
+	return bodySchema(b.GetCurrentStateVersion(slot/b.SlotsPerEpoch)) == bodySchema(decodedVersion)
+}
+
+// bodySchema returns the first fork of the body layout that v uses.
+func bodySchema(v StateVersion) StateVersion {
+	switch {
+	case v >= HezeVersion:
+		return HezeVersion
+	case v >= GloasVersion:
+		return GloasVersion
+	default:
+		return Phase0Version
+	}
 }
 
 // AttestationDueMs returns the attestation deadline in milliseconds from slot start.
@@ -976,14 +992,23 @@ func (b *BeaconChainConfig) InitializeForkSchedule() {
 
 func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleEntry {
 	fvs := map[common.Bytes4]VersionScheduleEntry{}
-	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
-	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
-	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
+	add := func(version ConfigForkVersion, epoch uint64, stateVersion StateVersion) {
+		key := utils.Uint32ToBytes4(uint32(version))
+		// An unscheduled fork that reuses a fork version must not hide the fork that uses it.
+		if _, ok := fvs[key]; ok && epoch == b.FarFutureEpoch {
+			return
+		}
+		fvs[key] = VersionScheduleEntry{epoch, stateVersion}
+	}
+	add(b.GenesisForkVersion, b.GenesisSlot/b.SlotsPerEpoch, Phase0Version)
+	add(b.AltairForkVersion, b.AltairForkEpoch, AltairVersion)
+	add(b.BellatrixForkVersion, b.BellatrixForkEpoch, BellatrixVersion)
+	add(b.CapellaForkVersion, b.CapellaForkEpoch, CapellaVersion)
+	add(b.DenebForkVersion, b.DenebForkEpoch, DenebVersion)
+	add(b.ElectraForkVersion, b.ElectraForkEpoch, ElectraVersion)
+	add(b.FuluForkVersion, b.FuluForkEpoch, FuluVersion)
+	add(b.GloasForkVersion, b.GloasForkEpoch, GloasVersion)
+	add(b.HezeForkVersion, b.HezeForkEpoch, HezeVersion)
 	return fvs
 }
 
@@ -1157,6 +1182,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	FuluForkEpoch:        411392,
 	GloasForkVersion:     0x07000000,
 	GloasForkEpoch:       math.MaxUint64,
+	HezeForkVersion:      0x08000000,
+	HezeForkEpoch:        math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1271,6 +1298,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	BuilderPendingWithdrawalsLimit:       1 << 20,
 	MaxBuildersPerWithdrawalsSweep:       1 << 14,
 	MinBuilderWithdrawabilityDelay:       64,
+	// Heze
+	InclusionListCommitteeSize: 16,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1320,6 +1349,7 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		"ELECTRA_FORK_EPOCH":   &beaconCfg.ElectraForkEpoch,
 		"FULU_FORK_EPOCH":      &beaconCfg.FuluForkEpoch,
 		"GLOAS_FORK_EPOCH":     &beaconCfg.GloasForkEpoch,
+		"HEZE_FORK_EPOCH":      &beaconCfg.HezeForkEpoch,
 	}
 	for key, epoch := range forkEpochs {
 		if _, ok := rawCfg[key]; !ok {
@@ -1336,6 +1366,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	}
 	if beaconCfg.MaxValidatorsPerCommittee > MaxSupportedValidatorsPerCommittee {
 		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_VALIDATORS_PER_COMMITTEE exceeds supported limit: %d > %d", beaconCfg.MaxValidatorsPerCommittee, uint64(MaxSupportedValidatorsPerCommittee))
+	}
+	if beaconCfg.InclusionListCommitteeSize != InclusionListCommitteeSize {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("INCLUSION_LIST_COMMITTEE_SIZE is not supported: %d != %d", beaconCfg.InclusionListCommitteeSize, InclusionListCommitteeSize)
 	}
 
 	// setup network config
@@ -1657,7 +1690,7 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion, GloasVersion:
+	case ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
@@ -1677,7 +1710,7 @@ func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersi
 		return b.ProportionalSlashingMultiplier
 	case AltairVersion:
 		return b.ProportionalSlashingMultiplierAltair
-	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion:
+	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.ProportionalSlashingMultiplierBellatrix
 	default:
 		panic("not implemented")
@@ -1696,7 +1729,7 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion, GloasVersion:
+	case ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1737,7 +1770,7 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	switch version {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxEffectiveBalance
-	case ElectraVersion, FuluVersion, GloasVersion:
+	case ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.MaxEffectiveBalanceElectra
 	default:
 		panic("invalid version")
@@ -1748,7 +1781,7 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxBlobsPerBlock
-	case ElectraVersion, FuluVersion, GloasVersion:
+	case ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
@@ -1778,7 +1811,7 @@ func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.BlobSidecarSubnetCount
-	case ElectraVersion, FuluVersion, GloasVersion:
+	case ElectraVersion, FuluVersion, GloasVersion, HezeVersion:
 		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
@@ -1802,6 +1835,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.FuluForkVersion)
 	case GloasVersion:
 		return uint32(b.GloasForkVersion)
+	case HezeVersion:
+		return uint32(b.HezeForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1824,6 +1859,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.FuluForkEpoch
 	case GloasVersion:
 		return b.GloasForkEpoch
+	case HezeVersion:
+		return b.HezeForkEpoch
 	}
 	panic("invalid version")
 }

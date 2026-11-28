@@ -1328,9 +1328,10 @@ func TestRunDownloadDoesNotRepeatConclusiveInvalidBlobValidation(t *testing.T) {
 // This drives the real BeaconRpcP2P decode path, so it also pins that
 // DataColumnSidecar.Version() reflects the peer's digest choice.
 func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
-	// Kept at mainnet's schedule: Gloas sits at FAR_FUTURE_EPOCH, so its digest is
+	// Gloas sits one epoch before Heze at FAR_FUTURE_EPOCH, so its digest is
 	// registered and resolvable even though no slot maps to Gloas.
 	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch - 1
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 

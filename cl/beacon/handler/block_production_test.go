@@ -624,7 +624,7 @@ func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
 	bid.Message.ExecutionPayment = 1
 
-	selected := selectGloasBid(localWei, []gloasBidCandidate{{
+	selected := selectGloasBid(clparams.GloasVersion, localWei, []gloasBidCandidate{{
 		bid:                 bid,
 		boostFactor:         100,
 		maxExecutionPayment: 1,
@@ -638,12 +638,12 @@ func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
 func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 2)}
 
-	require.Nil(t, selectGloasBid(big.NewInt(2_000_000_000), []gloasBidCandidate{{
+	require.Nil(t, selectGloasBid(clparams.GloasVersion, big.NewInt(2_000_000_000), []gloasBidCandidate{{
 		bid:                 bid,
 		boostFactor:         100,
 		maxExecutionPayment: 0,
 	}}))
-	require.Nil(t, selectGloasBid(big.NewInt(1), []gloasBidCandidate{{
+	require.Nil(t, selectGloasBid(clparams.GloasVersion, big.NewInt(1), []gloasBidCandidate{{
 		bid:                 bid,
 		boostFactor:         0,
 		maxExecutionPayment: 0,
@@ -652,7 +652,7 @@ func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
 
 func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T) {
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 0)}
-	selected := selectGloasBid(nil, []gloasBidCandidate{{
+	selected := selectGloasBid(clparams.GloasVersion, nil, []gloasBidCandidate{{
 		bid: bid, boostFactor: 100, maxExecutionPayment: math.MaxUint64,
 	}})
 
@@ -866,7 +866,7 @@ func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
 	overflow := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, ^uint64(0))}
 	overflow.Message.ExecutionPayment = ^uint64(0)
 
-	selected := selectGloasBid(big.NewInt(2_500_000_000), []gloasBidCandidate{
+	selected := selectGloasBid(clparams.GloasVersion, big.NewInt(2_500_000_000), []gloasBidCandidate{
 		{bid: capped, boostFactor: 100, maxExecutionPayment: 1},
 		{bid: overflow, boostFactor: 1, maxExecutionPayment: ^uint64(0)},
 	})
@@ -886,7 +886,7 @@ func TestSelectGloasBidSaturatesOverflowTotalsAndKeepsFirstTie(t *testing.T) {
 	b.Message.ExecutionPayment = 2
 
 	for _, bids := range [][]*cltypes.SignedExecutionPayloadBid{{a, b}, {b, a}} {
-		selected := selectGloasBid(nil, []gloasBidCandidate{
+		selected := selectGloasBid(clparams.GloasVersion, nil, []gloasBidCandidate{
 			{bid: bids[0], boostFactor: 100, maxExecutionPayment: 2},
 			{bid: bids[1], boostFactor: 100, maxExecutionPayment: 2},
 		})
@@ -912,7 +912,7 @@ func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
 		big.NewInt(1),
 	)
 
-	require.Nil(t, selectGloasBid(localValueWei, []gloasBidCandidate{{
+	require.Nil(t, selectGloasBid(clparams.GloasVersion, localValueWei, []gloasBidCandidate{{
 		bid: bid, boostFactor: 100, maxExecutionPayment: 1,
 	}}))
 }
@@ -920,12 +920,33 @@ func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
 func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 5)}
 	bid.Message.ExecutionPayment = 10
-	require.Nil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+	require.Nil(t, selectGloasBid(clparams.GloasVersion, new(big.Int), []gloasBidCandidate{{
 		bid: bid, boostFactor: 100, maxExecutionPayment: 2, minBid: 8,
 	}}))
-	require.NotNil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+	require.NotNil(t, selectGloasBid(clparams.GloasVersion, new(big.Int), []gloasBidCandidate{{
 		bid: bid, boostFactor: 100, maxExecutionPayment: 3, minBid: 8,
 	}}))
+}
+
+func TestSelectGloasBidSkipsBidsWithTheWrongForkLayout(t *testing.T) {
+	newBid := func(builderIndex, value uint64, heze bool) *cltypes.SignedExecutionPayloadBid {
+		bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, builderIndex, value)}
+		if heze {
+			bid.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+		}
+		return bid
+	}
+	for _, version := range []clparams.StateVersion{clparams.GloasVersion, clparams.HezeVersion} {
+		compatible := newBid(1, 5, version >= clparams.HezeVersion)
+		higherOtherLayout := newBid(2, 50, version < clparams.HezeVersion)
+
+		selected := selectGloasBid(version, nil, []gloasBidCandidate{
+			{bid: compatible, boostFactor: 100, maxExecutionPayment: 1},
+			{bid: higherOtherLayout, boostFactor: 100, maxExecutionPayment: 1, builderURL: "http://builder"},
+		})
+		require.NotNil(t, selected, version)
+		require.Same(t, compatible, selected.bid, version)
+	}
 }
 
 func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
@@ -4743,6 +4764,23 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
+func TestProcessProducedBlockSelectsHezeExternalBidWithInclusionListBits(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{
+		version: clparams.HezeVersion,
+		mutateBid: func(bid *cltypes.ExecutionPayloadBid) {
+			bid.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+		},
+	})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Zero(t, fixture.externalBid.Message.InclusionListBits.BitLen())
+}
+
 // newGloasProductionHandler returns a handler that produces a block on the fixture's head: the
 // execution engine builds `builds` payloads worth localValueWei each.
 func newGloasProductionHandler(t *testing.T, fixture *gloasBidSelectionFixture, builds int, localValueWei *big.Int) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock) {
@@ -5103,6 +5141,16 @@ func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
 				builder.Version++
 			}},
 		},
+		{
+			name:    "heze bid without inclusion list bits",
+			options: gloasBidSelectionOptions{version: clparams.HezeVersion},
+		},
+		{
+			name: "gloas bid with inclusion list bits",
+			options: gloasBidSelectionOptions{mutateBid: func(bid *cltypes.ExecutionPayloadBid) {
+				bid.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+			}},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -5135,6 +5183,7 @@ func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
 }
 
 type gloasBidSelectionOptions struct {
+	version       clparams.StateVersion
 	exitBuilder   bool
 	slotOffset    uint64
 	mutateBuilder func(*cltypes.Builder)
@@ -5154,15 +5203,16 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
 	cfg.PayloadBuilderVersion = 7
+	version := max(options.version, clparams.GloasVersion)
 	productionState := state.New(&cfg)
-	productionState.SetVersion(clparams.GloasVersion)
+	productionState.SetVersion(version)
 	slot := cfg.SlotsPerEpoch + options.slotOffset
 	require.NoError(t, productionState.SetSlot(slot))
 	productionState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
 	productionState.SetGenesisValidatorsRoot(common.Hash{0x91})
 	productionState.SetFork(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.FuluForkVersion)),
-		CurrentVersion:  utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
+		CurrentVersion:  utils.Uint32ToBytes4(uint32(cfg.GetForkVersionByVersion(version))),
 		Epoch:           state.Epoch(productionState),
 	})
 	require.NoError(t, productionState.SetRandaoMixAt(
@@ -5252,7 +5302,7 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 	copy(externalBid.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
 
 	selfCommitments := solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
-	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body := cltypes.NewBeaconBody(&cfg, version)
 	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
 		Message: &cltypes.ExecutionPayloadBid{
 			ParentBlockHash:    parentHash,
@@ -5264,6 +5314,9 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 			BlobKzgCommitments: *selfCommitments,
 		},
 		Signature: common.Bytes96(bls.InfiniteSignature),
+	}
+	if version >= clparams.HezeVersion {
+		body.SignedExecutionPayloadBid.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
 	}
 	body.ParentExecutionRequests = parentRequests
 

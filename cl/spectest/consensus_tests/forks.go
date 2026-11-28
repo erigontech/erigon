@@ -53,11 +53,14 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = preState.UpgradeToFulu()
 	case clparams.FuluVersion:
 		err = preState.UpgradeToGloas()
+	case clparams.GloasVersion:
+		err = preState.UpgradeToHeze()
 	default:
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
 	if expectedError {
 		assert.Error(t, err)
+		return nil
 	}
 
 	haveRoot, err := preState.HashSSZ()

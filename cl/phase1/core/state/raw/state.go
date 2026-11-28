@@ -234,6 +234,11 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["payload_expected_withdrawals"] = b.payloadExpectedWithdrawals
 		obj["ptc_window"] = b.ptcWindow
 	}
+	if b.version >= clparams.HezeVersion {
+		for _, removed := range []string{"eth1_data", "eth1_data_votes", "eth1_deposit_index", "deposit_requests_start_index"} {
+			delete(obj, removed)
+		}
+	}
 	return json.Marshal(obj)
 }
 

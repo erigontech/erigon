@@ -76,3 +76,46 @@ func TestExecutionPayloadBidServiceFirstGloasBidDoesNotRequireFuluEnvelope(t *te
 	require.Empty(t, fc.Envelopes)
 	require.NoError(t, bidErr)
 }
+
+func TestExecutionPayloadBidServiceIgnoresLayoutOfAnotherFork(t *testing.T) {
+	const clockSlot = 95 // last Gloas slot; Heze starts at slot 96
+	tests := []struct {
+		name           string
+		bidSlot        uint64
+		hasBits        bool
+		wantLayoutFail bool
+	}{
+		{name: "GloasLayoutForHezeSlot", bidSlot: 96, hasBits: false, wantLayoutFail: true},
+		{name: "HezeLayoutForGloasSlot", bidSlot: 95, hasBits: true, wantLayoutFail: true},
+		{name: "HezeLayoutForHezeSlot", bidSlot: 96, hasBits: true},
+		{name: "GloasLayoutForGloasSlot", bidSlot: 95, hasBits: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+			cfg := service.beaconCfg
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
+			cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch, cfg.HezeForkEpoch = 0, 0, 0, 3
+			cfg.InitializeForkSchedule()
+			msg := newTestSignedExecutionPayloadBid(tt.bidSlot, 1, 1000)
+			if tt.hasBits {
+				msg.Message.InclusionListBits = solid.NewBitVector(clparams.InclusionListCommitteeSize)
+			}
+			delete(fc.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
+			fc.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{Slot: 94}
+			clock.EXPECT().GetCurrentSlot().Return(uint64(clockSlot)).AnyTimes()
+
+			for _, err := range []error{
+				service.ProcessMessage(t.Context(), nil, msg),
+				service.ValidateBid(t.Context(), msg),
+			} {
+				if tt.wantLayoutFail {
+					require.ErrorContains(t, err, "inclusion_list_bits")
+					require.ErrorIs(t, err, ErrIgnore)
+				} else if err != nil {
+					require.NotContains(t, err.Error(), "inclusion_list_bits")
+				}
+			}
+		})
+	}
+}
