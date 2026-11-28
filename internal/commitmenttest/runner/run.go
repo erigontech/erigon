@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/stretchr/testify/require"
+
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 )
 
 type openFunc func(context.Context, RunSpec) (commitment.Trie, error)
@@ -59,13 +61,13 @@ type observation struct {
 
 func OpenHPH(ctx context.Context, spec RunSpec) (commitment.Trie, error) {
 	if spec.Mode == commitment.ModeParallel {
-		return commitment.NewParallelPatriciaHashed(spec.Memory.Open, 20, commitment.DefaultTrieConfig()), nil
+		return v2.NewParallelPatriciaHashed(spec.Memory.Open, 20, commitment.DefaultTrieConfig()), nil
 	}
 	if spec.Mode != commitment.ModeUpdate {
 		return nil, fmt.Errorf("unsupported HPH mode: %s", spec.Mode)
 	}
 	reader, _ := spec.Memory.Open(ctx)
-	return commitment.NewHexPatriciaHashed(20, reader, commitment.DefaultTrieConfig()), nil
+	return v2.NewHexPatriciaHashed(20, reader, commitment.DefaultTrieConfig()), nil
 }
 
 func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) observation {

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -42,7 +43,7 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) (branchKey, branc
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	provider, ok := tx.AggTx().(commitment.BranchCacheProvider)
+	provider, ok := tx.AggTx().(branchcache.BranchCacheProvider)
 	require.True(t, ok)
 	cache := provider.BranchCache()
 	require.NotNil(t, cache)

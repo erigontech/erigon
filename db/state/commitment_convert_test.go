@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/convert"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
@@ -476,8 +477,8 @@ func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
 func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 	out := make(chan *convertedBatch, 1)
 	sink := convertedSink{ctx: t.Context(), out: out, res: getConvertedBatch()}
-	require.NoError(t, sink.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
-	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect))
+	require.NoError(t, sink.emit([]byte{1}, []byte{2}, convert.LegacyDirect))
+	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, convert.LegacyDirect))
 	full := <-out
 	require.Len(t, full.ents, 1)
 	require.LessOrEqual(t, len(full.buf), commitmentV3BatchBytes)
@@ -485,13 +486,13 @@ func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 }
 
 func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
-	for _, kind := range []v3.LegacyKind{v3.LegacyDirect, v3.LegacySynthesized} {
+	for _, kind := range []convert.LegacyKind{convert.LegacyDirect, convert.LegacySynthesized} {
 		t.Run(fmt.Sprint(kind), func(t *testing.T) {
-			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []v3.LegacyEntry{
+			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []convert.LegacyEntry{
 				{Kind: kind, Value: []byte{1}},
 				{Kind: kind, Value: []byte{2}},
 			})
-			require.ErrorIs(t, err, v3.ErrLegacyConflict)
+			require.ErrorIs(t, err, convert.ErrLegacyConflict)
 		})
 	}
 }

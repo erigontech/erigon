@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -281,7 +282,7 @@ type SharedDomains struct {
 	// branchCache is the aggregator-scoped commitment cache consulted after local
 	// and parent memory. It is nil when the shared branch cache is disabled or
 	// unavailable.
-	branchCache *commitment.BranchCache
+	branchCache *branchcache.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator
 	// scope). Finished per-worker metrics are sent here (ownership transfer)
@@ -302,7 +303,7 @@ type SharedDomains struct {
 	// miss pressure. nil when branchCache is nil or the adaptive layer is disabled.
 	// Its miss callback is wired via Bind in EnableParaTrieDB; OnBlockComplete fires
 	// from Commit using the in-flight (pre-Commit) tx.
-	adaptivePinController *commitment.AdaptivePinController
+	adaptivePinController *branchcache.AdaptivePinController
 }
 
 // cacheUnwindState records the lowest boundary that the next durable cache
@@ -371,8 +372,8 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
-	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
+	var branchCache *branchcache.BranchCache
+	if p, ok := tx.AggTx().(branchcache.BranchCacheProvider); ok && o.useSharedBranchCache {
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
@@ -383,7 +384,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
-	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
+	if p, ok := tx.AggTx().(branchcache.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
 		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
@@ -1279,7 +1280,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 					return m
 				}
 				defer c.Close()
-				evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
+				evenFrom, evenTo, oddFrom, oddTo := branchcache.ContractTrunkKeyRanges(branchcache.ContractNibbles(contractHash))
 				// Bound the scan by what this step can pin — gathering further is
 				// pure waste on the Commit path, and a key left out of the hint
 				// still resolves authoritatively through pinBranchResolver. A nil

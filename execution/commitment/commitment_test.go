@@ -19,10 +19,6 @@ package commitment
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
-	"fmt"
-	"math/bits"
-	"math/rand"
 	"slices"
 	"strconv"
 	"sync"
@@ -30,11 +26,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 type noopPatriciaContext struct{}
@@ -416,234 +415,6 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 	}
 }
 
-func TestBranchData_MergeHexBranches2(t *testing.T) {
-	t.Parallel()
-	row, bm, enc := encodeCellRow(t, 16)
-	require.NotEmpty(t, enc)
-	t.Logf("enc [%d] %x\n", len(enc), enc)
-
-	bmg := NewHexBranchMerger(8192)
-	res, err := bmg.Merge(enc, enc)
-	require.NoError(t, err)
-	require.Equal(t, enc, res)
-
-	tm, am, origins, err := res.decodeCells()
-	require.NoError(t, err)
-	require.Equal(t, tm, am)
-	require.Equal(t, bm, am)
-
-	i := 0
-	for _, c := range origins {
-		if c == nil {
-			continue
-		}
-		require.Equal(t, row[i].extLen, c.extLen)
-		require.Equal(t, row[i].extension, c.extension)
-		require.Equal(t, row[i].accountAddrLen, c.accountAddrLen)
-		require.Equal(t, row[i].accountAddr, c.accountAddr)
-		require.Equal(t, row[i].storageAddrLen, c.storageAddrLen)
-		require.Equal(t, row[i].storageAddr, c.storageAddr)
-		i++
-	}
-}
-
-func TestBranchData_ChildCount(t *testing.T) {
-	t.Parallel()
-
-	require.Equal(t, 0, BranchData(nil).ChildCount())
-	require.Equal(t, 0, BranchData{}.ChildCount())
-	require.Equal(t, 0, BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
-
-	for _, size := range []int{1, 2, 5, 16} {
-		_, bm, enc := encodeCellRow(t, size)
-		require.Equal(t, size, bits.OnesCount16(bm))
-		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
-	}
-
-	var buf BranchData = make([]byte, 4)
-	binary.BigEndian.PutUint16(buf[0:], 0xffff)
-	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
-	require.Equal(t, 3, buf.ChildCount())
-}
-
-func TestBranchData_IsComplete(t *testing.T) {
-	t.Parallel()
-
-	// Buffers shorter than the 4-byte touchMap+afterMap header are not complete
-	// and must not panic. Empty values are deletion tombstones kept across merges.
-	require.False(t, BranchData(nil).IsComplete())
-	require.False(t, BranchData{}.IsComplete())
-	require.False(t, BranchData{0x00}.IsComplete())
-	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
-
-	complete := make(BranchData, 4)
-	binary.BigEndian.PutUint16(complete[0:], 0xffff)
-	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
-	require.True(t, complete.IsComplete())
-
-	incomplete := make(BranchData, 4)
-	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
-	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
-	require.False(t, incomplete.IsComplete())
-}
-
-func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
-	t.Parallel()
-
-	merger := NewHexBranchMerger(1024)
-
-	branch1 := BranchData{}
-	branch2 := BranchData{0x02, 0x02, 0x03, 0x03, 0x0C, 0x02, 0x04, 0x0C}
-	mergedBranch, err := merger.Merge(branch1, branch2)
-	require.NoError(t, err)
-	require.Equal(t, branch2, mergedBranch)
-
-	branch1 = BranchData{}
-	branch2 = BranchData{}
-	mergedBranch, err = merger.Merge(branch1, branch2)
-	require.NoError(t, err)
-	require.Equal(t, branch1, mergedBranch)
-}
-
-func TestDecodeBranchWithLeafHashes(t *testing.T) {
-	row, bm := generateCellRow(t, 16)
-
-	for i := range row {
-		if row[i].accountAddrLen > 0 {
-			rand.Read(row[i].stateHash[:])
-			row[i].stateHashLen = 32
-		}
-	}
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
-	require.NotEmpty(t, enc)
-}
-
-func TestBranchData_ReplacePlainKeys(t *testing.T) {
-	t.Parallel()
-
-	_, _, enc := encodeCellRow(t, 16)
-
-	original := bytes.Clone(enc)
-
-	target := make([]byte, 0, len(enc))
-	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
-		oldKeys = append(oldKeys, key)
-		if isStorage {
-			return key[:8], nil
-		}
-		return key[:4], nil
-	})
-	require.NoError(t, err)
-	require.Lessf(t, len(replaced), len(enc), "replaced expected to be shorter than original enc")
-
-	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		require.Equal(t, oldKeys[keyI][:4], key[:4])
-		defer func() { keyI++ }()
-		return oldKeys[keyI], nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, original, replacedBack)
-
-	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := bytes.Clone(original)
-
-		merged, err := replaced.MergeHexBranches(original, nil)
-		require.NoError(t, err)
-		require.EqualValues(t, orig, merged)
-
-		merged, err = merged.MergeHexBranches(replacedBack, nil)
-		require.NoError(t, err)
-		require.EqualValues(t, orig, merged)
-	})
-}
-
-func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
-	t.Parallel()
-
-	_, _, enc := encodeCellRow(t, 16)
-
-	original := bytes.Clone(enc)
-
-	target := make([]byte, 0, len(enc))
-	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
-		oldKeys = append(oldKeys, key)
-		if isStorage {
-			return nil, nil
-		}
-		return nil, nil
-	})
-	require.NoError(t, err)
-	require.Lenf(t, replaced, len(enc), "replaced expected to be equal to origin (since no replacements were made)")
-
-	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		require.Equal(t, oldKeys[keyI][:4], key[:4])
-		defer func() { keyI++ }()
-		return oldKeys[keyI], nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, original, replacedBack)
-
-	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := bytes.Clone(original)
-
-		merged, err := replaced.MergeHexBranches(original, nil)
-		require.NoError(t, err)
-		require.EqualValues(t, orig, merged)
-
-		merged, err = merged.MergeHexBranches(replacedBack, nil)
-		require.NoError(t, err)
-		require.EqualValues(t, orig, merged)
-	})
-}
-
-func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
-	t.Parallel()
-
-	_, _, enc := encodeCellRow(t, 16)
-
-	original := bytes.Clone(enc)
-
-	type keyRecord struct {
-		key       []byte
-		isStorage bool
-	}
-	var origKeys []keyRecord
-	replaced, err := BranchData(bytes.Clone(enc)).ReplacePlainKeys(
-		make([]byte, 0, len(enc)),
-		func(key []byte, isStorage bool) ([]byte, error) {
-			origKeys = append(origKeys, keyRecord{bytes.Clone(key), isStorage})
-			if isStorage {
-				return nil, nil
-			}
-			return key[:4], nil
-		},
-	)
-	require.NoError(t, err)
-
-	keyI := 0
-	expandedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		rec := origKeys[keyI]
-		keyI++
-		if isStorage {
-			require.True(t, rec.isStorage)
-			return nil, nil
-		}
-		require.False(t, rec.isStorage)
-		return rec.key, nil
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, original, expandedBack,
-		"round-trip with partial key replacement should reproduce original")
-}
-
 func TestNewUpdates(t *testing.T) {
 	t.Parallel()
 
@@ -747,135 +518,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	warmuper2.CloseAndWait()
 }
 
-type recordingCtx struct {
-	puts []struct{ prefix, data, prev []byte }
-}
-
-func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
-func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
-	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
-		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
-	})
-	return nil
-}
-func (r *recordingCtx) Account(_ []byte) (*Update, error) { return nil, nil }
-func (r *recordingCtx) Storage(_ []byte) (*Update, error) { return nil, nil }
-func (r *recordingCtx) TxNum() uint64                     { return 0 }
-
-// CollectTombstone writes the empty-branch tombstone raw and carries prev through
-// for the domain diff — it must NOT merge the tombstone against prev (a real branch
-// can be shorter than its bitmap implies, and Merge would overrun it).
-func TestCollectTombstone_WritesRawAndCarriesPrev(t *testing.T) {
-	t.Parallel()
-	prefix := []byte{0xab, 0xcd}
-	row, bm := generateCellRow(t, 5)
-	cells := generateCellEncodeDataRow(t, row, bm)
-
-	be := NewBranchEncoder(1024)
-	branch, err := be.EncodeBranch(bm, bm, bm, &cells)
-	require.NoError(t, err)
-	prev := bytes.Clone(branch)
-
-	wantTomb, err := NewBranchEncoder(1024).EncodeBranch(0, bm, 0, nil)
-	require.NoError(t, err)
-
-	ctx := &recordingCtx{}
-	require.NoError(t, be.CollectTombstone(ctx, prefix, bm, prev))
-	require.Len(t, ctx.puts, 1)
-	require.Equal(t, 0, BranchData(ctx.puts[0].data).ChildCount(), "tombstone is an empty branch")
-	require.Equal(t, []byte(wantTomb), ctx.puts[0].data, "raw tombstone, not a merge of prev")
-	require.Equal(t, prev, ctx.puts[0].prev, "prev is carried for the domain diff / unwind")
-}
-
-func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
-	t.Parallel()
-	prefix := []byte{0xab, 0xcd}
-	row, bm := generateCellRow(t, 4)
-	cells := generateCellEncodeDataRow(t, row, bm)
-
-	ctxNew := &recordingCtx{}
-	beNew := NewBranchEncoder(1024)
-	require.NoError(t, beNew.CollectUpdate(ctxNew, prefix, bm, bm, bm, &cells, nil))
-	require.Len(t, ctxNew.puts, 1)
-	require.Empty(t, ctxNew.puts[0].prev)
-
-	beSame := NewBranchEncoder(1024)
-	encoded, err := beSame.EncodeBranch(bm, bm, bm, &cells)
-	require.NoError(t, err)
-	unchanged := bytes.Clone(encoded)
-
-	ctxSame := &recordingCtx{}
-	require.NoError(t, beSame.CollectUpdate(ctxSame, prefix, bm, bm, bm, &cells, unchanged))
-	require.Empty(t, ctxSame.puts, "a supplied prev identical to the update suppresses the write, so prev is really being used")
-}
-
-func TestCollectDeferredUpdate_CarriesSuppliedPrev(t *testing.T) {
-	t.Parallel()
-	prefix := []byte{0x11, 0x22}
-	row, bm := generateCellRow(t, 4)
-	cells := generateCellEncodeDataRow(t, row, bm)
-	prev := []byte{0x00, 0x0f, 0x00, 0x0f, 0xaa}
-
-	ctx := &recordingCtx{}
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-	require.NoError(t, be.CollectDeferredUpdate(ctx, prefix, bm, bm, bm, &cells, prev))
-
-	require.Len(t, be.deferred, 1)
-	require.Equal(t, prev, []byte(be.deferred[0].prev), "the record must carry the prev it was given")
-	require.Empty(t, ctx.puts, "deferred collection writes nothing")
-}
-
-// TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply pins the
-// contract documented on getDeferredUpdate: putDeferredUpdate recycles the
-// prefix/raw backing arrays for a later, unrelated update, so a PutBranch
-// implementation that copies (as recordingCtx and every real implementation
-// do) must see its own copy stay correct across that recycle.
-// Not parallel: it swaps the global deferredUpdatePool for a deterministic one, since
-// sync.Pool may hand back a fresh object and leave the recycle unexercised.
-func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
-	seed := &DeferredBranchUpdate{}
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
-
-	rowA, bmA := generateCellRow(t, 8)
-	cellsA := generateCellEncodeDataRow(t, rowA, bmA)
-	rowB, bmB := generateCellRow(t, 2)
-	cellsB := generateCellEncodeDataRow(t, rowB, bmB)
-
-	wantBE := NewBranchEncoder(1024)
-	rawA, err := wantBE.EncodeBranch(bmA, bmA, bmA, &cellsA)
-	require.NoError(t, err)
-	wantA := bytes.Clone([]byte(rawA))
-	rawB, err := wantBE.EncodeBranch(bmB, bmB, bmB, &cellsB)
-	require.NoError(t, err)
-	wantB := bytes.Clone([]byte(rawB))
-	require.NotEqual(t, wantA, wantB, "test rows must be distinctive")
-	require.Greater(t, len(wantA), len(wantB), "round A must be longer so a truncation bug on reuse is visible")
-
-	ctx := &recordingCtx{}
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-
-	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, 0xAA}, bmA, bmA, bmA, &cellsA, nil))
-	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
-	be.ClearDeferred() // recycles this round's DeferredBranchUpdate into the pool
-
-	require.Len(t, ctx.puts, 1)
-	require.Equal(t, wantA, ctx.puts[0].data)
-
-	// A shorter, distinctive second round reuses the pool's backing arrays.
-	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xBB, 0xBB}, bmB, bmB, bmB, &cellsB, nil))
-	require.Same(t, seed, be.deferred[0], "second round must run on the recycled object, or it proves nothing")
-	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
-	be.ClearDeferred()
-
-	require.Len(t, ctx.puts, 2)
-	require.Equal(t, wantA, ctx.puts[0].data, "recycling the pool must not corrupt data already handed to PutBranch")
-	require.Equal(t, wantB, ctx.puts[1].data, "reused buffer must not retain stale bytes from the earlier, longer round")
-}
-
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
@@ -889,7 +531,7 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	// so scanning it with only plainKey set as pivot returns nothing.
 	entry, ok := updates.treeIdx[key]
 	require.True(t, ok, "key should be present after TouchPlainKey rewrite")
-	got := entry.update
+	got := entry.Update
 
 	require.NotNil(t, got)
 	require.Equal(t, StorageUpdate, got.Flags)
@@ -915,8 +557,8 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	defer ut.Close()
 
 	require.Equal(t, ModeParallel, ut.mode)
-	require.NotNil(t, ut.parallel, "parallel field must be allocated")
-	require.NotNil(t, ut.parallel.trie, "parallel trie must be allocated")
+	require.NotNil(t, ut.Parallel, "parallel field must be allocated")
+	require.NotNil(t, ut.Parallel.Trie, "parallel trie must be allocated")
 	require.NotNil(t, ut.keys, "keys dedup map must be allocated")
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
@@ -928,8 +570,8 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 func requireParallelCount(t *testing.T, ut *Updates, n int, msg string) {
 	t.Helper()
 	require.Equal(t, uint64(n), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, n, ut.parallel.trie.root.subtreeCount, msg)
+	ut.Parallel.Build()
+	require.EqualValues(t, n, ut.Parallel.Trie.Root.SubtreeCount, msg)
 }
 
 func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
@@ -1010,11 +652,11 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 	ut.Reset()
 
 	require.Equal(t, uint64(0), ut.Size())
-	require.NotNil(t, ut.parallel, "Reset must not release parallel field")
-	require.NotNil(t, ut.parallel.trie)
-	require.NotNil(t, ut.parallel.trie.root, "trie root must be re-allocated after Reset")
-	require.EqualValues(t, 0, ut.parallel.trie.root.subtreeCount, "trie counts cleared after Reset")
-	require.EqualValues(t, 0, ut.parallel.trie.root.bitmap, "trie bitmap cleared after Reset")
+	require.NotNil(t, ut.Parallel, "Reset must not release parallel field")
+	require.NotNil(t, ut.Parallel.Trie)
+	require.NotNil(t, ut.Parallel.Trie.Root, "trie root must be re-allocated after Reset")
+	require.EqualValues(t, 0, ut.Parallel.Trie.Root.SubtreeCount, "trie counts cleared after Reset")
+	require.EqualValues(t, 0, ut.Parallel.Trie.Root.Bitmap, "trie bitmap cleared after Reset")
 
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
@@ -1030,7 +672,7 @@ func TestUpdatesModeParallel_Close(t *testing.T) {
 	ut.TouchPlainKey(string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f")), []byte("v"), ut.TouchStorage)
 
 	ut.Close()
-	require.Nil(t, ut.parallel, "Close must release parallel field")
+	require.Nil(t, ut.Parallel, "Close must release parallel field")
 }
 
 func TestUpdatesModeParallel_SetMode(t *testing.T) {
@@ -1038,50 +680,16 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 
 	ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
-	require.Nil(t, ut.parallel)
+	require.Nil(t, ut.Parallel)
 
 	ut.SetMode(ModeParallel)
 	require.Equal(t, ModeParallel, ut.mode)
-	require.NotNil(t, ut.parallel)
+	require.NotNil(t, ut.Parallel)
 	require.Equal(t, uint64(0), ut.Size())
 
-	prev := ut.parallel
+	prev := ut.Parallel
 	ut.SetMode(ModeParallel)
-	require.Same(t, prev, ut.parallel)
-}
-
-func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name         string
-		variant      TrieVariant
-		wantType     any
-		wantMode     Mode
-		wantParallel bool
-	}{
-		{"parallel", VariantParallelHexPatricia, (*ParallelPatriciaHashed)(nil), ModeParallel, true},
-		{"hex unchanged", VariantHexPatriciaTrie, (*HexPatriciaHashed)(nil), ModeDirect, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := DefaultTrieConfig()
-			cfg.Variant = tc.variant
-			trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-			defer upd.Close()
-			defer trie.Release()
-
-			require.IsType(t, tc.wantType, trie)
-			require.Equal(t, tc.variant, trie.Variant())
-			require.Equal(t, tc.wantMode, upd.Mode())
-			if tc.wantParallel {
-				require.NotNil(t, upd.parallel)
-			} else {
-				require.Nil(t, upd.parallel)
-			}
-		})
-	}
+	require.Same(t, prev, ut.Parallel)
 }
 
 // reuseBytes is what makes the pooled buffers reusable; sync.Pool itself guarantees
@@ -1105,59 +713,59 @@ func TestReuseBytes(t *testing.T) {
 }
 
 // prev is cloned rather than recycled precisely so its nil-ness follows the input; this
-// fails if it is ever switched to a pooled buffer. putDeferredUpdate clears prev, so a
+// fails if it is ever switched to a pooled buffer. PutDeferredUpdate clears prev, so a
 // warm buffer has to be seeded through the pool rather than by a Put/Get round trip.
 func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
-	seed := &DeferredBranchUpdate{prev: make([]byte, 0, 32)}
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
+	seed := &DeferredBranchUpdate{Prev: make([]byte, 0, 32)}
+	saved := DeferredUpdatePool
+	DeferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { DeferredUpdatePool = saved })
 
-	upd := getDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
-	defer putDeferredUpdate(upd)
+	upd := GetDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
+	defer PutDeferredUpdate(upd)
 	require.Same(t, seed, upd)
-	require.Nil(t, upd.prev)
+	require.Nil(t, upd.Prev)
 }
 
 // Pins the production path, not the helper: sync.Pool may hand back a fresh object, so the
 // pool is swapped for one that always yields a known object with known backing arrays.
 func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
 	seed := &DeferredBranchUpdate{
-		prefix: make([]byte, 0, 32),
-		raw:    make([]byte, 0, 32),
-		prev:   make([]byte, 0, 32),
+		Prefix: make([]byte, 0, 32),
+		Raw:    make([]byte, 0, 32),
+		Prev:   make([]byte, 0, 32),
 	}
-	prefixArr, rawArr := &seed.prefix[:1][0], &seed.raw[:1][0]
+	prefixArr, rawArr := &seed.Prefix[:1][0], &seed.Raw[:1][0]
 
-	saved := deferredUpdatePool
-	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
-	t.Cleanup(func() { deferredUpdatePool = saved })
+	saved := DeferredUpdatePool
+	DeferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { DeferredUpdatePool = saved })
 
-	upd := getDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
+	upd := GetDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
 	require.Same(t, seed, upd)
-	require.Same(t, prefixArr, &upd.prefix[0], "prefix must be written into the pooled array")
-	require.Same(t, rawArr, &upd.raw[0], "raw must be written into the pooled array")
+	require.Same(t, prefixArr, &upd.Prefix[0], "prefix must be written into the pooled array")
+	require.Same(t, rawArr, &upd.Raw[0], "raw must be written into the pooled array")
 }
 
 func TestCapLen(t *testing.T) {
 	t.Parallel()
-	require.Nil(t, capLen(nil))
+	require.Nil(t, CapLen(nil))
 	big := make([]byte, 3, 64)
-	require.Equal(t, 3, cap(capLen(big)))
-	require.Equal(t, 0, cap(capLen(big[:0])))
+	require.Equal(t, 3, cap(CapLen(big)))
+	require.Equal(t, 0, cap(CapLen(big[:0])))
 }
 
 // A callback must not see capacity left over from whichever update used the object before.
-// Driven through ApplyDeferredBranchUpdates rather than capLen, so dropping the clip at
+// Driven through ApplyDeferredBranchUpdates rather than CapLen, so dropping the clip at
 // either the serial or the parallel call site fails here.
 func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 	t.Parallel()
 
 	upd := func(prefix, raw byte) *DeferredBranchUpdate {
 		return &DeferredBranchUpdate{
-			prefix: append(make([]byte, 0, 64), prefix),
-			raw:    append(make(BranchData, 0, 64), raw),
-			prev:   make([]byte, 0, 64),
+			Prefix: append(make([]byte, 0, 64), prefix),
+			Raw:    append(make(branch.BranchData, 0, 64), raw),
+			Prev:   make([]byte, 0, 64),
 		}
 	}
 	deferred := func(n int) []*DeferredBranchUpdate {
@@ -1194,28 +802,6 @@ func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 	}
 }
 
-// The encoder sits inside a HexPatriciaHashed that Release() parks in a pool,
-// so a reslice would leave a branch's buffers reachable from there.
-func TestClearDeferredDropsUpdatesItReslicesPast(t *testing.T) {
-	t.Parallel()
-
-	row, bm := generateCellRow(t, 8)
-	cells := generateCellEncodeDataRow(t, row, bm)
-
-	ctx := &recordingCtx{}
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, 0xAA}, bm, bm, bm, &cells, nil))
-	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xBB, 0xBB}, bm, bm, bm, &cells, nil))
-	require.Len(t, be.deferred, 2)
-
-	be.ClearDeferred()
-
-	for i, upd := range be.deferred[:cap(be.deferred)] {
-		require.Nil(t, upd, "deferred[%d] still pins a DeferredBranchUpdate after ClearDeferred", i)
-	}
-}
-
 // More keys than one batch, so the mid-loop truncation runs too, not just the
 // trailing one.
 func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
@@ -1230,152 +816,123 @@ func TestHashSortLeavesNoBatchSlabEntriesBehind(t *testing.T) {
 
 	require.NotZero(t, cap(upd.batchSlab), "no batch ran, so the test proves nothing")
 	for i, ku := range upd.batchSlab[:cap(upd.batchSlab)] {
-		require.Nil(t, ku.update, "batchSlab[%d] still pins an Update after HashSort", i)
-		require.Nil(t, ku.hashedKey, "batchSlab[%d] still pins a hashed key after HashSort", i)
-		require.Empty(t, ku.plainKey, "batchSlab[%d] still pins a plain key after HashSort", i)
+		require.Nil(t, ku.Update, "batchSlab[%d] still pins an Update after HashSort", i)
+		require.Nil(t, ku.HashedKey, "batchSlab[%d] still pins a hashed key after HashSort", i)
+		require.Empty(t, ku.PlainKey, "batchSlab[%d] still pins a plain key after HashSort", i)
 	}
 }
 
 // Reset recycles the updates into the pool, so it must detach the slice the way
-// every other drain of deferredCombined does.
+// every other drain of DeferredCombined does.
 func TestParallelUpdateResetDetachesDeferred(t *testing.T) {
 	t.Parallel()
 
 	pu := newParallelUpdate()
-	pu.appendDeferred([]*DeferredBranchUpdate{
-		getDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
-		getDeferredUpdate([]byte{2}, make([]byte, 4096), nil),
+	pu.AppendDeferred([]*DeferredBranchUpdate{
+		GetDeferredUpdate([]byte{1}, make([]byte, 4096), nil),
+		GetDeferredUpdate([]byte{2}, make([]byte, 4096), nil),
 	})
 
 	pu.Reset()
 
-	require.Nil(t, pu.deferredCombined, "Reset still pins the recycled updates")
+	require.Nil(t, pu.DeferredCombined, "Reset still pins the recycled updates")
 }
 
-func TestCollectDeferredUpdate_CallerOwnedIgnoresCapacityLimit(t *testing.T) {
+func TestUpdate_EncodeDecode(t *testing.T) {
 	t.Parallel()
-	row, bm := generateCellRow(t, 4)
-	cells := generateCellEncodeDataRow(t, row, bm)
 
-	ctx := &recordingCtx{}
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-	be.callerOwnsDeferred = true
-	be.maxDeferredUpdates = 2
-
-	for i := range 5 {
-		require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, byte(i)}, bm, bm, bm, &cells, nil))
+	updates := []Update{
+		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
+		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+		{
+			Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+			CodeHash: common.Hash{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
+		},
+		{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 	}
 
-	require.Zero(t, len(ctx.puts), "caller owns the output, so nothing may reach the domain before it validates the root")
-	require.Len(t, be.deferred, 5, "every record must still be pending")
+	var numBuf [10]byte
+	for i, update := range updates {
+		encoded := update.Encode(nil, numBuf[:])
+
+		decoded := Update{}
+		n, err := decoded.Decode(encoded, 0)
+		require.NoError(t, err, i)
+		require.Equal(t, len(encoded), n, i)
+
+		require.Equal(t, update.Flags, decoded.Flags, i)
+		require.Equal(t, update.Balance, decoded.Balance, i)
+		require.Equal(t, update.Nonce, decoded.Nonce, i)
+		require.Equal(t, update.CodeHash, decoded.CodeHash, i)
+		require.Equal(t, update.Storage, decoded.Storage, i)
+		require.Equal(t, update.StorageLen, decoded.StorageLen, i)
+	}
 }
 
-func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
-	t.Parallel()
-	row, bm := generateCellRow(t, 4)
-	cells := generateCellEncodeDataRow(t, row, bm)
-
-	ctx := &recordingCtx{}
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-	be.maxDeferredUpdates = 2
-
-	for i := range 3 {
-		require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, byte(i)}, bm, bm, bm, &cells, nil))
+func TestUpdate_Merge(t *testing.T) {
+	type tcase struct {
+		a, b, e Update
 	}
 
-	require.Len(t, ctx.puts, 2, "inline collection still bounds its buffer by writing the batch through")
-	require.Len(t, be.deferred, 1)
-}
-
-func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
-	t.Parallel()
-	row, bm := generateCellRow(t, 4)
-	cells := generateCellEncodeDataRow(t, row, bm)
-
-	be := NewBranchEncoder(1024)
-	be.setDeferUpdates(true)
-	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
-	require.Len(t, be.deferred, 1)
-	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
-	require.Empty(t, be.deferred[0].prev)
-	be.ClearDeferred()
-}
-
-func shardedFlushTestBranch(tb testing.TB, be *BranchEncoder, row []*cell, bm uint16) BranchData {
-	tb.Helper()
-	cellData := generateCellEncodeDataRow(tb, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(tb, err)
-	return BranchData(bytes.Clone(enc))
-}
-
-type countingFlushCtx struct {
-	PatriciaContext
-	mu      *sync.Mutex
-	written map[string][]byte
-	prev    map[string][]byte
-	calls   *atomic.Int64
-}
-
-func (c *countingFlushCtx) PutBranch(prefix, data, prevData []byte) error {
-	c.calls.Add(1)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, dup := c.written[string(prefix)]; dup {
-		return fmt.Errorf("prefix %x written twice", prefix)
+	updates := []tcase{
+		{
+			a: Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
+			b: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+			e: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: empty.CodeHash},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: empty.CodeHash},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: empty.CodeHash},
+			b: Update{
+				Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
+				CodeHash: common.Hash{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				},
+			},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: common.Hash{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			}},
+		},
+		{
+			a: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+		},
+		{
+			a: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			b: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			e: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		},
 	}
-	c.written[string(prefix)] = bytes.Clone(data)
-	c.prev[string(prefix)] = bytes.Clone(prevData)
-	return nil
+
+	var numBuf [10]byte
+	for i, tc := range updates {
+		tc.a.Merge(&tc.b)
+		encA := tc.a.Encode(nil, numBuf[:])
+		encE := tc.e.Encode(nil, numBuf[:])
+		require.Equal(t, encE, encA, i)
+	}
 }
 
-func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testing.T) {
-	row, bm, _ := encodeCellRow(t, 16)
-	be := NewBranchEncoder(1024)
-	raw := shardedFlushTestBranch(t, be, row, bm>>4)
-	prev := shardedFlushTestBranch(t, be, row, bm)
-	same := shardedFlushTestBranch(t, be, row, bm>>8)
-
-	wantMerged, err := NewHexBranchMerger(1024).Merge(prev, raw)
-	require.NoError(t, err)
-	wantMerged = bytes.Clone(wantMerged)
-
-	for _, workers := range []int{1, 4, 16} {
-		t.Run("workers"+strconv.Itoa(workers), func(t *testing.T) {
-			var mu sync.Mutex
-			var calls, made atomic.Int64
-			written, prevSeen := map[string][]byte{}, map[string][]byte{}
-			factory := func(context.Context) (PatriciaContext, func()) {
-				made.Add(1)
-				return &countingFlushCtx{mu: &mu, written: written, prev: prevSeen, calls: &calls}, func() {}
-			}
-
-			pu := &parallelUpdate{}
-			pu.deferredCombined = append(pu.deferredCombined,
-				getDeferredUpdate([]byte{0x01}, raw, prev),
-				getDeferredUpdate([]byte{0x02}, raw, nil),
-				getDeferredUpdate([]byte{0x03}, same, same))
-			for i := range (workers - 1) * deferredWritesPerWorker {
-				pu.deferredCombined = append(pu.deferredCombined,
-					getDeferredUpdate([]byte{0x10, byte(i >> 8), byte(i)}, raw, prev))
-			}
-			wantWrites := int64(len(pu.deferredCombined) - 1)
-
-			p := NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
-			p.SetNumWorkers(workers)
-			require.NoError(t, p.applyDeferredUpdates(context.Background(), pu))
-
-			require.Equal(t, wantWrites, calls.Load(), "every record but the unchanged one is written exactly once")
-			require.Len(t, written, int(wantWrites))
-			require.Equal(t, []byte(wantMerged), written[string([]byte{0x01})],
-				"a sharded worker merges its own record against prev")
-			require.Equal(t, []byte(prev), prevSeen[string([]byte{0x01})],
-				"prev must survive the merge for the changeset undo record")
-			require.Equal(t, []byte(raw), written[string([]byte{0x02})], "an empty prev encodes as raw")
-			require.NotContains(t, written, string([]byte{0x03}), "prev==raw stays a skipped write")
-			require.Equal(t, int64(workers), made.Load(), "one trie context per flush worker, none shared")
-		})
-	}
+func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
+	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
+	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
+	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
+	assert.Equal(t, VariantCommitmentV3, ParseTrieVariant("v3"))
 }

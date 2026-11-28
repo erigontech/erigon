@@ -118,7 +118,7 @@ func (p *partitioner) done() (storage []storageTask, accounts []accountEntry) {
 
 func hashAddressPath(path []byte) [32]byte {
 	var addrHash [32]byte
-	packPath(path, addrHash[:0])
+	PackPath(path, addrHash[:0])
 	return addrHash
 }
 
@@ -130,7 +130,7 @@ func runStorageTaskWithPlan(runCtx context.Context, ctx commitment.PatriciaConte
 	if ctx == nil {
 		return [32]byte{}, nil, errors.New("commitment v3: nil phase A context")
 	}
-	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
+	g := graph{plane: PlaneStorage, addrHash: task.addrHash[:]}
 	if task.wipe {
 		records, err := enumerateStorageRecords(runCtx, ctx, task.addrHash)
 		if err != nil {

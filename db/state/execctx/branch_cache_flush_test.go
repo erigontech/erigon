@@ -31,7 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	_ "github.com/erigontech/erigon/execution/commitment/v3"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 )
 
 type commitmentWrite struct {
@@ -97,7 +98,7 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20)
 		require.NoError(t, err)
 	} else {
-		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+		trieState, err := v2.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
 		require.NoError(t, err)
 		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
 		require.NoError(t, err)
@@ -148,7 +149,7 @@ func TestLegalStagedUnwindReadsMergedCommitmentFile(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -172,7 +173,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -199,7 +200,7 @@ func TestBoundedGetLatestIgnoresBranchCache(t *testing.T) {
 			roTx, err := db.BeginTemporalRo(t.Context())
 			require.NoError(t, err)
 			defer roTx.Rollback()
-			branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+			branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 			if source == "read_fill" {
 				branchCache.Clear()
 				_, _, err = roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
@@ -227,7 +228,7 @@ func TestSnapshotBranchReadNeedsRefillAfterUnwind(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -297,7 +298,7 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithLocalCacheUnwind())
 	require.NoError(t, err)
@@ -314,7 +315,7 @@ func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := rwTx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branchCache.Clear()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
@@ -407,7 +408,7 @@ func TestBranchCacheRejectsFillFromViewOpenedBeforeUnwind(t *testing.T) {
 	defer newTx.Rollback()
 	_, _, err = newTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
 	require.NoError(t, err)
-	got, _, ok := newTx.AggTx().(commitment.BranchCacheProvider).BranchCache().Get(key)
+	got, _, ok := newTx.AggTx().(branchcache.BranchCacheProvider).BranchCache().Get(key)
 	require.True(t, ok, "a view opened after the unwind commit must still fill")
 	require.Equal(t, stepOneValue, got)
 }

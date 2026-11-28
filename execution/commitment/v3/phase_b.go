@@ -66,7 +66,7 @@ func accountLeafAt(n *node, path []byte) (value []byte, found, stored bool) {
 	}
 	if n.leafMask&bit != 0 {
 		suffix, value := n.leafAt(nib)
-		if !packedMatches(suffix, path[len(n.path)+1:]) {
+		if !PackedMatches(suffix, path[len(n.path)+1:]) {
 			return nil, false, false
 		}
 		return value, true, false
