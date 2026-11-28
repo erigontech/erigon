@@ -229,8 +229,7 @@ func TestResetCaplinDryRun(t *testing.T) {
 		os.Stdout = stdout
 	}()
 
-	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(t.Context(), []string{"erigon", "snapshots", "reset", "--datadir", dirs.DataDir, "--caplin", "--dry-run"}))
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin", "--dry-run"))
 	data, err := os.ReadFile(report.Name())
 	require.NoError(t, err)
 	require.Contains(t, string(data), "caplin reset plan")
@@ -251,10 +250,21 @@ func TestResetWithoutCaplinKeepsExistingRemoval(t *testing.T) {
 	writeChainMetadata(t, t.Context(), chainDB, "mainnet", 1)
 	chainDB.Close()
 
-	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(t.Context(), []string{"erigon", "snapshots", "reset", "--datadir", dirs.DataDir, "--preverified", "local"}))
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--preverified", "local"))
 	require.NoFileExists(t, filepath.Join(dirs.Snap, block))
 	require.NoFileExists(t, dirs.PreverifiedPath())
+}
+
+func runSnapshotsReset(t *testing.T, args ...string) error {
+	t.Helper()
+	for _, command := range snapshotCommand.Commands {
+		if command.Name == "reset" {
+			app := &cli.Command{Name: "erigon", Commands: []*cli.Command{{Name: "reset", Action: command.Action, Flags: command.Flags}}}
+			return app.Run(t.Context(), append([]string{"erigon", "reset"}, args...))
+		}
+	}
+	t.Fatal("snapshots reset command not found")
+	return nil
 }
 
 func resetReviewDatadir(t *testing.T) datadir.Dirs {
@@ -285,8 +295,7 @@ func TestResetCaplinRefreshesLockOnRestart(t *testing.T) {
 	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), local, 0o600))
 	require.NoError(t, os.WriteFile(source, remote, 0o600))
 	t.Setenv(snapcfg.RemotePreverifiedEnvKey, source)
-	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(t.Context(), []string{"erigon", "snapshots", "reset", "--datadir", dirs.DataDir, "--caplin"}))
+	require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin"))
 	restart := func(d datadir.Dirs) (bool, string, int) {
 		require.NoError(t, downloadercfg.LoadSnapshotsHashes(t.Context(), d, "mainnet", ""))
 		cfg, ok := snapcfg.KnownCfg("mainnet")
@@ -319,8 +328,7 @@ func TestResetCaplinUsesELManifest(t *testing.T) {
 			require.NoError(t, snapcfg.SetToml("mainnet", []byte{}, false))
 			path := filepath.Join(dirs.Snap, "erigondb.toml")
 			require.NoError(t, os.WriteFile(path, []byte("step_size = 32\n"), 0o600))
-			app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-			require.NoError(t, app.Run(t.Context(), []string{"erigon", "snapshots", "reset", "--datadir", dirs.DataDir, "--caplin", "--preverified", "remote"}))
+			require.NoError(t, runSnapshotsReset(t, "--datadir", dirs.DataDir, "--caplin", "--preverified", "remote"))
 			_, err := os.Stat(path)
 			if os.IsNotExist(err) {
 				t.Fatal("remote-listed EL file erigondb.toml was deleted")
@@ -339,8 +347,7 @@ func TestResetSkipsUnplannedCaplinStateFile(t *testing.T) {
 	plan, err := reset.BuildCaplinResetPlan(t.Context(), dirs, nil, nil, true, log.New())
 	require.NoError(t, err)
 	require.Empty(t, plan.Files)
-	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(t.Context(), []string{"erigon", "snapshots", "reset", "--caplin", "--datadir", dirs.DataDir}))
+	require.NoError(t, runSnapshotsReset(t, "--caplin", "--datadir", dirs.DataDir))
 	_, err = os.Stat(path)
 	if os.IsNotExist(err) {
 		t.Fatal("Caplin plan listed 0 files, EL pass deleted caplin/" + name)
