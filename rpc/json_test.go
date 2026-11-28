@@ -336,9 +336,10 @@ func TestParsePositionalArgumentsPrefersValidJSONDecoder(t *testing.T) {
 	for _, typ := range []reflect.Type{reflect.TypeFor[trustingDecoder](), reflect.TypeFor[*trustingDecoder]()} {
 		got, err := parsePositionalArguments(json.RawMessage(`[{}]`), []reflect.Type{typ})
 		require.NoError(t, err)
-		d, ok := got[0].Interface().(trustingDecoder)
+		d, ok := reflect.TypeAssert[trustingDecoder](got[0])
 		if !ok {
-			d = *got[0].Interface().(*trustingDecoder)
+			p, _ := reflect.TypeAssert[*trustingDecoder](got[0])
+			d = *p
 		}
 		require.Equal(t, "valid", d.via, typ.String())
 	}
