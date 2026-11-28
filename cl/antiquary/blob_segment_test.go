@@ -17,10 +17,12 @@
 package antiquary
 
 import (
+	"context"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -28,14 +30,19 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -145,4 +152,153 @@ func TestAntiquateBlobsWaitsForALostSidecarFile(t *testing.T) {
 	count, err := storage.KzgCommitmentsCount(t.Context(), root)
 	require.NoError(t, err)
 	require.Zero(t, count, "the retired sidecars are pruned from the store")
+}
+
+func TestNodeBlobRetirementChecksDBWhenCaughtUp(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	cfg := &clparams.MainnetBeaconConfig
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, cfg, dirs, log.New())
+	defer sn.Close()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	a := NewAntiquary(ctx, nil, nil, nil, cfg, dirs, nil, db, nil, sn, nil, nil, log.New(), false, true, true, true, nil)
+	require.ErrorIs(t, a.antiquateBlobs(), context.Canceled, "the pre-extraction call reports cancellation on an empty range")
+}
+
+func TestNodeBlobRetirementDoesNotSweepPublishedSegments(t *testing.T) {
+	const limit = uint64(snaptype.CaplinMergeLimit)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	writeBlobSweepSegment(t, dirs, 3*limit, 4*limit, logger)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	storage := blob_storage_mock_services.NewMockBlobStorage(gomock.NewController(t))
+	a := NewAntiquary(t.Context(), storage, nil, nil, &cfg, dirs, nil, db, nil, sn, nil, nil, logger, false, false, true, true, nil)
+	require.NoError(t, a.antiquateBlobs())
+}
+
+func TestNodeBlobRetirementPrunesOnlyDumpedRange(t *testing.T) {
+	const limit = uint64(snaptype.CaplinMergeLimit)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, 2*limit, logger)
+	writeBlobSweepSegment(t, dirs, 0, limit, logger)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	root := common.Hash{1}
+	baseStorage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 0, root)
+	}))
+	sidecar := &cltypes.BlobSidecar{
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 0}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+	require.NoError(t, baseStorage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	storage := &countingBlobStorage{BlobStorage: baseStorage}
+	a := NewAntiquary(t.Context(), storage, nil, nil, &cfg, dirs, nil, db, nil, sn, tests.NewMockBlockReader(), nil, logger, false, false, true, true, nil)
+	require.NoError(t, a.antiquateBlobs())
+	require.Equal(t, 3*int(limit), storage.kzgCalls)
+	require.Zero(t, storage.removedCalls)
+}
+
+type countingBlobStorage struct {
+	blob_storage.BlobStorage
+	kzgCalls     int
+	removedCalls int
+}
+
+func (s *countingBlobStorage) KzgCommitmentsCount(ctx context.Context, root common.Hash) (uint32, error) {
+	s.kzgCalls++
+	return s.BlobStorage.KzgCommitmentsCount(ctx, root)
+}
+
+func (s *countingBlobStorage) RemoveBlobSidecars(ctx context.Context, slot uint64, root common.Hash) error {
+	s.removedCalls++
+	return s.BlobStorage.RemoveBlobSidecars(ctx, slot, root)
+}
+
+func TestBlobRetirementPruneSweepStartsAtHotSidecars(t *testing.T) {
+	const limit = uint64(snaptype.CaplinMergeLimit)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	for from := uint64(0); from < 3*limit; from += limit {
+		writeBlobSweepSegment(t, dirs, from, from+limit, logger)
+	}
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	view := sn.View()
+	require.Len(t, view.BlobSidecars(), 3)
+	view.Close()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	storage := blob_storage_mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().EarliestStoredSlot().Return(2*limit, true, nil)
+	var visited uint64
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash) (uint32, error) {
+		visited++
+		return 0, nil
+	}).Times(int(limit))
+	removed, err := PrunePublishedBlobSidecars(t.Context(), db, storage, sn, nil)
+	require.NoError(t, err)
+	require.Zero(t, removed)
+	require.Equal(t, limit, visited)
+}
+
+func TestBlobRetirementDoesNotPruneHotSidecarsBelowVisibleSegments(t *testing.T) {
+	const limit = uint64(snaptype.CaplinMergeLimit)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	writeBlobSweepSegment(t, dirs, 3*limit, 4*limit, logger)
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &cfg, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	view := sn.View()
+	require.Len(t, view.BlobSidecars(), 1)
+	view.Close()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	root := common.Hash{1}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 0, root)
+	}))
+	storage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	sidecar := &cltypes.BlobSidecar{
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 0}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+
+	_, err := PrunePublishedBlobSidecars(t.Context(), db, storage, sn, nil)
+	require.NoError(t, err)
+	count, err := storage.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), count)
+}
+
+func writeBlobSweepSegment(t *testing.T, dirs datadir.Dirs, from, to uint64, logger log.Logger) {
+	t.Helper()
+	name := snaptype.BlobSidecars.FileName(version.ZeroVersion, from, to)
+	file, _, ok := snaptype.ParseFileName(dirs.Snap, name)
+	require.True(t, ok)
+	compressor, err := seg.NewCompressor(t.Context(), "blob sweep", file.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	for slot := from; slot < to; slot++ {
+		require.NoError(t, compressor.AddWord(nil))
+	}
+	require.NoError(t, compressor.Compress())
+	compressor.Close()
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), file, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, logger))
 }

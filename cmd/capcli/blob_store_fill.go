@@ -114,7 +114,7 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 		return fmt.Errorf("open the beacon index: %w", err)
 	}
 	defer db.Close()
-	blobStore, closeBlobs, err := b.openBlobStore(ctx, dirs)
+	blobStore, closeBlobs, err := openCaplinBlobStore(ctx, dirs, b.DryRun)
 	if err != nil {
 		return err
 	}
@@ -134,11 +134,9 @@ func openCaplinDB(ctx context.Context, path string, readonly bool) (kv.RwDB, err
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Open(ctx)
 }
 
-// openBlobStore opens the blob store for writing, or read-only for a dry run, where a missing
-// store reads as empty.
-func (b *BlobArchiveStoreFill) openBlobStore(ctx context.Context, dirs datadir.Dirs) (blob_storage.BlobStorage, func(), error) {
+func openCaplinBlobStore(ctx context.Context, dirs datadir.Dirs, dryRun bool) (blob_storage.BlobStorage, func(), error) {
 	path := filepath.Join(dirs.CaplinBlobs, "chaindata")
-	if b.DryRun {
+	if dryRun {
 		// A directory without its data file is a store nothing was ever written to.
 		if _, err := os.Stat(filepath.Join(path, "mdbx.dat")); errors.Is(err, os.ErrNotExist) {
 			return emptyBlobStore{}, func() {}, nil
@@ -146,7 +144,7 @@ func (b *BlobArchiveStoreFill) openBlobStore(ctx context.Context, dirs datadir.D
 	} else if err := os.MkdirAll(path, 0o700); err != nil {
 		return nil, nil, err
 	}
-	db, err := openCaplinDB(ctx, path, b.DryRun)
+	db, err := openCaplinDB(ctx, path, dryRun)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open the blob store: %w", err)
 	}

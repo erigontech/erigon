@@ -126,7 +126,7 @@ func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 			logger.Warn("[compact] can't read db page usage", "db", db.path, "err", err)
 			continue
 		}
-		if free <= bloatRatio*data || free < autoCompactMinFree {
+		if !shouldCompact(data, free) {
 			continue
 		}
 		logger.Info("[compact] auto-compact", "db", db.path, "data", data.HR(), "free", free.HR())
@@ -163,6 +163,18 @@ func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 	data = datasize.ByteSize(st.BranchPages+st.LeafPages+st.OverflowPages) * pageSize
 	used := datasize.ByteSize(info.MiLastPgNo+1) * pageSize
 	return data, used - min(used, data), nil
+}
+
+func NeedsCompaction(dbDir string) (bool, error) {
+	data, free, err := pageUsage(dbDir)
+	if err != nil {
+		return false, err
+	}
+	return shouldCompact(data, free), nil
+}
+
+func shouldCompact(data, free datasize.ByteSize) bool {
+	return free > bloatRatio*data && free >= autoCompactMinFree
 }
 
 // CompactDatadir compacts every mdbx db of the datadir in place. It takes the

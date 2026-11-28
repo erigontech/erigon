@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/execution/chain"
 )
 
 const (
@@ -202,7 +201,7 @@ func (s *Antiquary) Loop() error {
 	log.Info("[Caplin] Stat", "blocks-static", s.sn.BlocksAvailable(), "states-static", stateBlocksAvailable, "blobs-static", s.sn.FrozenBlobs(),
 		"state-history-enabled", s.states, "block-history-enabled", s.blocks, "blob-history-enabled", s.blobs, "snapgen", s.snapgen)
 
-	if err := pruneBeaconBlocksAndWriteProgress(s.ctx, s.mainDB, indexedTo, indexedTo, snaptype.CaplinMergeLimit); err != nil {
+	if _, err := pruneBeaconBlocksAndWriteProgress(s.ctx, s.mainDB, indexedTo, indexedTo, snaptype.CaplinMergeLimit); err != nil {
 		return err
 	}
 
@@ -374,7 +373,7 @@ func indexBeaconSnapshotBatch(tx kv.RwTx, from, to uint64, readHeader readBeacon
 	return nil
 }
 
-func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo, progress, batchLimit uint64) error {
+func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo, progress, batchLimit uint64) (int, error) {
 	if batchLimit == 0 {
 		batchLimit = snaptype.CaplinMergeLimit
 	}
@@ -397,7 +396,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 			return beacon_indicies.WriteLastBeaconSnapshot(tx, progress)
 		}); err != nil {
 			mxAntiquaryPruneBatchSeconds.ObserveDuration(start)
-			return err
+			return 0, err
 		}
 		mxAntiquaryPruneBatchSeconds.ObserveDuration(start)
 		mxAntiquaryPruneBatchBlocks.SetInt(pruned)
@@ -405,7 +404,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 			mxAntiquaryPrunedBlocks.AddInt(pruned)
 		}
 		if !hasMore {
-			return nil
+			return pruned, nil
 		}
 	}
 }
@@ -419,105 +418,27 @@ func (s *Antiquary) antiquate() error {
 	if !s.snapgen {
 		return nil
 	}
-
-	var from, to, canonicalHead uint64
-
-	if err := s.mainDB.View(s.ctx, func(roTx kv.Tx) error {
-		// read the last beacon snapshots
-		from = s.sn.BlocksAvailable() + 1
-		// read the finalized head
-		highest, err := beacon_indicies.ReadHighestFinalized(roTx)
-		if err != nil {
-			return err
-		}
-		to = highest
-		canonicalHead, _, err = beacon_indicies.ReadCanonicalHead(roTx)
-		return err
-	}); err != nil {
-		return err
+	seed, remove := s.downloaderFileCallbacks(s.ctx)
+	result, err := RetireBeaconBlocks(s.ctx, s.mainDB, s.sn, s.dirs, s.logger, seed, remove)
+	if result.UncappedTo > max(result.From, result.To) {
+		s.reportCanonicalHeadCap(result.CanonicalHead, result.UncappedTo, time.Now())
 	}
-
-	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	to -= min(to, safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-	uncapped := to
-	to = min(to, canonicalHead+1)
-	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
-		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
-			to = min(to, segFrom)
-			uncapped = min(uncapped, segFrom)
-			return false
-		}
-		return true
-	})
-	uncapped = (uncapped / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	if uncapped > max(from, to) {
-		s.reportCanonicalHeadCap(canonicalHead, uncapped, time.Now())
-	}
-
-	if from >= to || to-from < snaptype.CaplinMergeLimit {
-		return nil
-	}
-	// if s.snBuildSema != nil {
-	// 	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-	// 		return nil
-	// 	}
-	// 	defer s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
-	// }
-
-	s.logger.Info("[Antiquary] Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(s.ctx, s.mainDB, from, to, s.sn.Salt, s.dirs, 1, log.LvlDebug, s.logger); err != nil {
-		return err
-	}
-	if err := s.sn.OpenFolder(); err != nil {
-		return err
-	}
-	if err := pruneBeaconBlocksAndWriteProgress(s.ctx, s.mainDB, to, to-1, snaptype.CaplinMergeLimit); err != nil {
-		return err
-	}
-	if err := s.sn.OpenFolder(); err != nil {
-		return err
-	}
-	s.removeBlockOverlaps()
-
-	paths := s.sn.SegFileNames(from, to)
-	if s.downloader != nil {
-		// Notify bittorent to seed the new snapshots
-		if err := s.downloader.Seed(s.ctx, paths); err != nil {
-			s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
-		}
-	}
-
-	return nil
+	return err
 }
 
 func (s *Antiquary) mergeBlocks() error {
 	if !s.snapgen {
 		return nil
 	}
-	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
-	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
-	if len(ranges) == 0 {
-		return nil
-	}
-	var onMerge func([]string) error
-	var onDelete func(context.Context, []string) error
-	if s.downloader != nil {
-		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
-		onDelete = s.downloader.Delete
-	}
-	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
-		return err
-	}
-	s.removeBlockOverlaps()
-	return nil
+	seed, remove := s.downloaderFileCallbacks(s.ctx)
+	_, err := MergeBeaconBlocks(s.ctx, s.sn, s.dirs.Tmp, s.logger, seed, remove, func(err error) {
+		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
+	})
+	return err
 }
 
 func (s *Antiquary) removeBlockOverlaps() {
-	var onDelete func(l []string) error
-	if s.downloader != nil {
-		onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
-	}
+	_, onDelete := s.downloaderFileCallbacks(s.ctx)
 	if err := s.sn.RemoveOverlaps(onDelete); err != nil {
 		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
 	}
@@ -538,10 +459,7 @@ func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
 	if s == nil || s.sn == nil {
 		return nil
 	}
-	var onDelete func([]string) error
-	if s.downloader != nil {
-		onDelete = func(paths []string) error { return s.downloader.Delete(s.ctx, paths) }
-	}
+	_, onDelete := s.downloaderFileCallbacks(s.ctx)
 	_, err := s.sn.RetireBlobsBelow(floor, onDelete)
 	return err
 }
@@ -600,40 +518,6 @@ func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig
 
 const blobRetirementGapLogInterval = 10 * time.Minute
 
-// blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
-// segments below it are still complete.
-func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
-	start := max(from, s.blobCheckedTo)
-	for slot := start; slot < to; slot++ {
-		want, skipped, err := blobCount(tx, slot)
-		if err != nil {
-			return false, err
-		}
-		if skipped {
-			continue
-		}
-		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-		if err != nil {
-			return false, err
-		}
-		stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
-		if err != nil {
-			return false, err
-		}
-		if !stored {
-			s.blobCheckedTo = slot
-			s.reportBlobRetirementGap(from, slot, time.Now())
-			return false, nil
-		}
-	}
-	if start > from {
-		s.blobCheckedTo = from
-		return s.blobSegmentComplete(tx, from, to, blobCount)
-	}
-	mxBlobRetirementGapSlot.SetUint64(0)
-	return true, nil
-}
-
 const canonicalHeadCapLogInterval = 10 * time.Minute
 
 func (s *Antiquary) reportCanonicalHeadCap(canonicalHead, to uint64, now time.Time) {
@@ -653,86 +537,35 @@ func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {
 	s.logger.Info("[Antiquary] Blob retirement waits for a missing blob slot", "segmentFrom", from, "gapSlot", gap)
 }
 
+func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
+	complete, _, err := blobSegmentComplete(s.ctx, tx, s.blobStorage, from, to, &s.blobCheckedTo, blobCount, func(from, gap uint64) {
+		s.reportBlobRetirementGap(from, gap, time.Now())
+	})
+	return complete, err
+}
+
 func (s *Antiquary) antiquateBlobs() error {
 	if !s.snapgen {
 		return nil
 	}
-	// if s.snBuildSema != nil {
-	// 	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
-	// 		return nil
-	// 	}
-	// 	defer s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
-	// }
-	roTx, err := s.mainDB.BeginRo(s.ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
-	// perform blob antiquation if it is time to.
-	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(s.sn, s.cfg)
-	if !ok {
-		return nil
-	}
-	blobCount := freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader)
-	complete, err := s.blobSegmentComplete(roTx, currentBlobsProgress, to, blobCount)
-	if err != nil || !complete {
-		return err
-	}
-	roTx.Rollback()
-	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
-	// now, we need to retire the blobs
-	// The build slot is held for the compression only: opening the folder, seeding and pruning
-	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
-	if err := func() error {
-		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
-		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCount, log.LvlDebug, s.logger)
-	}(); err != nil {
-		return err
-	}
-	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	s.logger.Info("[Antiquary] Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
-	if err := s.sn.OpenFolder(); err != nil {
-		return err
-	}
-	s.removeBlockOverlaps()
+	seed, remove := s.downloaderFileCallbacks(s.ctx)
+	_, err := RetireBlobSidecars(s.ctx, s.mainDB, s.blobStorage, s.sn, s.snReader, s.cfg, s.dirs, s.sn.Salt, s.logger, BlobRetireHooks{
+		CheckedTo:          &s.blobCheckedTo,
+		ReportGap:          func(from, gap uint64) { s.reportBlobRetirementGap(from, gap, time.Now()) },
+		CompressionWorkers: s.blobCompressWorkers,
+		Seed:               seed,
+		RemoveOverlaps:     remove,
+		PruneError: func(err error) {
+			s.logger.Warn("[Antiquary] Failed to remove blob sidecars", "err", err)
+		},
+	})
+	return err
+}
 
-	paths := s.sn.SegFileNames(currentBlobsProgress, to)
-	if s.downloader != nil {
-		// Notify bittorent to seed the new snapshots
-		if err := s.downloader.Seed(s.ctx, paths); err != nil {
-			s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
-		}
+func (s *Antiquary) downloaderFileCallbacks(ctx context.Context) (func([]string) error, func([]string) error) {
+	if s.downloader == nil {
+		return nil, nil
 	}
-
-	roTx, err = s.mainDB.BeginRo(s.ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
-	// now prune blobs from the database
-	var removeFailures uint64
-	var firstFailedSlot uint64
-	var firstRemoveErr error
-	for i := currentBlobsProgress; i < to; i++ {
-		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, i)
-		if err != nil {
-			return err
-		}
-		if err := s.blobStorage.RemoveBlobSidecars(s.ctx, i, blockRoot); err != nil {
-			if s.ctx.Err() != nil {
-				return s.ctx.Err()
-			}
-			removeFailures++
-			if firstRemoveErr == nil {
-				firstFailedSlot, firstRemoveErr = i, err
-			}
-		}
-	}
-	if removeFailures > 0 {
-		// The loop spans at least CaplinMergeLimit slots and a storage fault hits every
-		// one of them, so the failures are aggregated rather than warned per slot.
-		s.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slots", removeFailures, "firstSlot", firstFailedSlot, "err", firstRemoveErr)
-	}
-	return nil
+	return func(paths []string) error { return s.downloader.Seed(ctx, paths) },
+		func(paths []string) error { return s.downloader.Delete(ctx, paths) }
 }

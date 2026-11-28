@@ -20,9 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -30,17 +33,25 @@ import (
 
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	cliutils "github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func segCommand() *cli.Command {
@@ -48,8 +59,399 @@ func segCommand() *cli.Command {
 		Name:        "seg",
 		Usage:       "inspect and manage snapshot segments",
 		Description: "Read and manage Caplin snapshot files and retention metadata. Read-only commands do not take the datadir lock; commands that write segments, the index, or the stored regime take it.",
-		Commands:    []*cli.Command{caplinDuCommand()},
+		Commands:    []*cli.Command{caplinDuCommand(), caplinRetireCommand()},
 	}
+}
+
+func caplinRetireCommand() *cli.Command {
+	chainFlag := cli.StringFlag{Name: cliutils.ChainFlag.Name, Usage: cliutils.ChainFlag.Usage}
+	return &cli.Command{
+		Name:        "retire",
+		Usage:       "retire Caplin snapshots; reads and writes files and the index with the datadir lock",
+		Description: "Retires Caplin block, blob, and state data and may compact the Caplin index. It takes the datadir lock for the full operation.",
+		Flags: []cli.Flag{
+			&chainFlag,
+			&cliutils.DataDirFlag,
+			&cli.BoolFlag{Name: "no-compact", Usage: "skip Caplin database compaction"},
+		},
+		Action: runCaplinRetire,
+	}
+}
+
+func runCaplinRetire(ctx context.Context, cmd *cli.Command) error {
+	folder := outputFolder{}
+	if err := folder.fromCmd(cmd); err != nil {
+		return err
+	}
+	dirs, unlock, err := lockCaplinDirs(folder.Datadir, true)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	chainName, beaconConfig, err := caplinDuChainConfig(ctx, cmd, dirs)
+	if err != nil {
+		return err
+	}
+	if beaconConfig == nil {
+		return nil
+	}
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = chainName
+	snapshots := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := snapshots.OpenFolder(); err != nil {
+		return err
+	}
+	defer snapshots.Close()
+	probe, err := antiquary.OpenCaplinDuIndexDB(ctx, dirs.CaplinIndexing, log.Root())
+	if err != nil {
+		return err
+	}
+	if probe == nil {
+		return nil
+	}
+	var indexProgress uint64
+	if err := probe.View(ctx, func(tx kv.Tx) error {
+		var err error
+		indexProgress, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
+		return err
+	}); err != nil {
+		probe.Close()
+		return err
+	}
+	if indexProgress < snapshots.BlocksAvailable() {
+		probe.Close()
+		return fmt.Errorf("snapshot index progress %d is below snapshot coverage %d; start the node until its index pass completes", indexProgress, snapshots.BlocksAvailable())
+	}
+	needsWrite, err := caplinRetireNeedsWrite(ctx, probe, snapshots)
+	probe.Close()
+	if err != nil {
+		return err
+	}
+	if !needsWrite {
+		needsWrite, err = caplinBlobDataPresent(ctx, dirs)
+		if err != nil {
+			return err
+		}
+	}
+	writer := cmd.Writer
+	if !needsWrite {
+		return compactCaplinDatabase(ctx, dirs, writer, cmd.Bool("no-compact"), false)
+	}
+	db, err := caplin1.OpenCaplinIndexDb(ctx, dirs.CaplinIndexing)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blobStorage, closeBlobStorage, err := openCaplinBlobStore(ctx, dirs, false)
+	if err != nil {
+		return err
+	}
+	defer closeBlobStorage()
+
+	databaseChanged := false
+	view := snapshots.View()
+	hasBlockSegments := len(view.BeaconBlocks()) != 0
+	hasFrozenBlockSegments := hasBlockSegments
+	coveredTo := snapshots.BlocksAvailable()
+	view.Close()
+	if !hasBlockSegments {
+		var firstSlot uint64
+		var found bool
+		err = db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			firstSlot, found, err = antiquary.CaplinBeaconBlocksFirstSlot(tx)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		if !found || firstSlot > coveredTo+1 {
+			if found {
+				fmt.Fprintf(writer, "skip blocks: hot beacon blocks start at %d, frozen range starts at %d\n", firstSlot, coveredTo+1)
+			} else {
+				fmt.Fprintf(writer, "skip blocks: no hot beacon blocks at frozen range start %d\n", coveredTo+1)
+			}
+		} else {
+			hasBlockSegments = true
+		}
+	}
+	if hasBlockSegments {
+		linked, gap, err := caplinFrozenBlockLink(ctx, db, snapshots, hasFrozenBlockSegments)
+		if err != nil {
+			return err
+		}
+		if !linked {
+			fmt.Fprintf(writer, "skip blocks: backfill gap at %d after frozen range ending %d\n", gap, coveredTo)
+			hasBlockSegments = false
+		}
+	}
+	for hasBlockSegments {
+		result, err := antiquary.RetireBeaconBlocks(ctx, db, snapshots, dirs, log.Root(), nil, nil)
+		if err != nil {
+			return err
+		}
+		databaseChanged = databaseChanged || result.RowsPruned != 0
+		if result.Files == 0 {
+			break
+		}
+		fmt.Fprintf(writer, "freeze blocks %d..%d %d files\n", result.From, result.To, result.Files)
+	}
+	for {
+		result, err := antiquary.MergeBeaconBlocks(ctx, snapshots, dirs.Tmp, log.Root(), nil, nil, nil)
+		if err != nil {
+			return err
+		}
+		if result.From == result.To {
+			break
+		}
+		fmt.Fprintf(writer, "merge blocks %d..%d %d files\n", result.From, result.To, result.Files)
+	}
+	if err := snapshots.RemoveOverlaps(nil); err != nil {
+		return err
+	}
+	removed, err := antiquary.PrunePublishedBlobSidecars(ctx, db, blobStorage, snapshots, nil)
+	if err != nil {
+		return err
+	}
+	databaseChanged = databaseChanged || removed != 0
+	reader := freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconConfig)
+	var checkedTo uint64
+	for {
+		result, err := antiquary.RetireBlobSidecars(ctx, db, blobStorage, snapshots, reader, beaconConfig, dirs, snapshots.Salt, log.Root(), antiquary.BlobRetireHooks{CheckedTo: &checkedTo})
+		if err != nil {
+			return err
+		}
+		databaseChanged = databaseChanged || result.SidecarsRemoved != 0
+		if result.Blocked {
+			fmt.Fprintf(writer, "blob gap slot %d\n", result.Gap)
+			break
+		}
+		if result.From == result.To {
+			break
+		}
+		fmt.Fprintf(writer, "retire blob sidecars %d..%d %d files\n", result.From, result.To, result.Files)
+	}
+	view = snapshots.View()
+	hasBlockSegments = len(view.BeaconBlocks()) != 0
+	view.Close()
+	if hasBlockSegments {
+		if err := checkSnapshots(ctx, db, snapshots); err != nil {
+			return err
+		}
+	}
+	if err := checkBlobsSnapshots(ctx, db, blobStorage, snapshots, beaconConfig); err != nil {
+		return err
+	}
+	var stateProgress uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		stateProgress, err = state_accessors.GetStateProcessingProgress(tx)
+		return err
+	}); err != nil {
+		return err
+	}
+	if stateProgress != 0 {
+		stateTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db, beaconConfig)
+		stateSnapshots := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, stateTypes, log.Root())
+		if err := stateSnapshots.OpenFolder(); err != nil {
+			return err
+		}
+		defer stateSnapshots.Close()
+		for {
+			result, err := antiquary.RetireCaplinState(ctx, db, stateSnapshots, stateProgress, snapshots.Salt, dirs, runtime.NumCPU(), log.Root(), antiquary.StateRetireHooks{})
+			if err != nil {
+				return err
+			}
+			databaseChanged = databaseChanged || result.DatabaseChanged
+			if result.IncompleteTable != "" {
+				fmt.Fprintf(writer, "incomplete state table %s at slot %d\n", result.IncompleteTable, result.IncompleteSlot)
+				break
+			}
+			if result.From == result.To {
+				break
+			}
+			fmt.Fprintf(writer, "retire state %d..%d %d files\n", result.From, result.To, result.Files)
+		}
+	}
+	db.Close()
+	return compactCaplinDatabase(ctx, dirs, writer, cmd.Bool("no-compact"), databaseChanged)
+}
+
+func compactCaplinDatabase(ctx context.Context, dirs datadir.Dirs, writer io.Writer, noCompact, databaseChanged bool) error {
+	if noCompact {
+		return nil
+	}
+	if !databaseChanged {
+		compact, err := caplinNeedsCompaction(dirs.CaplinIndexing)
+		if err != nil {
+			return err
+		}
+		if !compact {
+			return nil
+		}
+	}
+	dataPath := filepath.Join(dirs.CaplinIndexing, "mdbx.dat")
+	before, err := os.Stat(dataPath)
+	if err != nil {
+		return err
+	}
+	if err := backup.CompactInPlace(ctx, dirs.CaplinIndexing, dbcfg.CaplinDB, log.Root()); err != nil {
+		return err
+	}
+	after, err := os.Stat(dataPath)
+	if err != nil {
+		return err
+	}
+	reclaimed := int64(before.Size()) - int64(after.Size())
+	fmt.Fprintf(writer, "compact caplin mdbx %d -> %d bytes, %d bytes reclaimed\n", before.Size(), after.Size(), reclaimed)
+	return nil
+}
+
+var caplinNeedsCompaction = backup.NeedsCompaction
+
+func caplinFrozenBlockLink(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, hasFrozenSegments bool) (bool, uint64, error) {
+	coveredTo := snapshots.BlocksAvailable()
+	var frozenRoot common.Hash
+	var foundFrozen bool
+	if hasFrozenSegments {
+		view := snapshots.View()
+		segments := view.BeaconBlocks()
+		lastSlot := segments[len(segments)-1].To()
+		view.Close()
+		for lastSlot > 0 {
+			lastSlot--
+			lastFrozen, _, _, err := snapshots.ReadHeader(lastSlot, nil)
+			if err != nil {
+				return false, coveredTo + 1, err
+			}
+			if lastFrozen == nil {
+				continue
+			}
+			frozenRoot, err = lastFrozen.Header.HashSSZ()
+			if err != nil {
+				return false, coveredTo + 1, err
+			}
+			foundFrozen = true
+			break
+		}
+		if !foundFrozen {
+			return false, coveredTo + 1, nil
+		}
+	}
+	var linked bool
+	gap := coveredTo + 1
+	err := db.View(ctx, func(tx kv.Tx) error {
+		from, to, err := antiquary.CaplinBlockRetireRange(tx, snapshots)
+		if err != nil {
+			return err
+		}
+		if from == to {
+			linked = true
+			return nil
+		}
+		cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		key, value, err := cursor.Seek(base_encoding.Encode64ToBytes4(from))
+		if err != nil {
+			return err
+		}
+		previous := frozenRoot
+		hasPrevious := hasFrozenSegments
+		for ; key != nil; key, value, err = cursor.Next() {
+			if err != nil {
+				return err
+			}
+			if len(key) != 4 {
+				continue
+			}
+			slot := base_encoding.Decode64FromBytes4(key)
+			root := common.BytesToHash(value)
+			if !hasPrevious {
+				previous = root
+				hasPrevious = true
+				if slot >= to {
+					break
+				}
+				continue
+			}
+			parent, err := beacon_indicies.ReadParentBlockRoot(tx, root)
+			if err != nil {
+				return err
+			}
+			if parent != previous {
+				gap = slot
+				return nil
+			}
+			if slot >= to {
+				break
+			}
+			previous = root
+		}
+		linked = true
+		return nil
+	})
+	return linked, gap, err
+}
+
+func caplinRetireNeedsWrite(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots) (bool, error) {
+	needsWrite := false
+	err := db.View(ctx, func(tx kv.Tx) error {
+		from, to, err := antiquary.CaplinBlockRetireRange(tx, snapshots)
+		if err != nil {
+			return err
+		}
+		needsWrite = from != to
+		if needsWrite {
+			return nil
+		}
+		coveredTo := snapshots.BlocksAvailable()
+		needsWrite, err = antiquary.CaplinBeaconBlocksBelow(tx, coveredTo+1)
+		if err != nil || needsWrite {
+			return err
+		}
+		progress, err := state_accessors.GetStateProcessingProgress(tx)
+		needsWrite = progress != 0
+		return err
+	})
+	if err != nil || needsWrite {
+		return needsWrite, err
+	}
+	view := snapshots.View()
+	needsWrite = len(view.BlobSidecars()) != 0
+	view.Close()
+	return needsWrite, nil
+}
+
+func caplinBlobDataPresent(ctx context.Context, dirs datadir.Dirs) (bool, error) {
+	path := filepath.Join(dirs.CaplinBlobs, "chaindata")
+	if !fileExists(filepath.Join(path, "mdbx.dat")) {
+		return false, nil
+	}
+	db, err := antiquary.OpenCaplinDuIndexDB(ctx, path, log.Root())
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	var present bool
+	err = db.View(ctx, func(tx kv.Tx) error {
+		names, err := tx.ListTables()
+		if err != nil {
+			return err
+		}
+		if slices.Contains(names, kv.BlockRootToKzgCommitments) {
+			hasRows, err := caplinDuTableHasRows(tx, kv.BlockRootToKzgCommitments)
+			if err != nil {
+				return err
+			}
+			present = hasRows
+		}
+		return nil
+	})
+	return present, err
 }
 
 func caplinDuCommand() *cli.Command {
@@ -278,4 +680,16 @@ func caplinDuCompletedFiles(root string) bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func lockCaplinDirs(path string, create bool) (datadir.Dirs, func(), error) {
+	dirs := datadir.Open(path)
+	unlock, err := dirs.TryFlock()
+	if err != nil {
+		return dirs, func() {}, err
+	}
+	if create {
+		dirs = datadir.New(path)
+	}
+	return dirs, unlock, nil
 }

@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -123,9 +124,17 @@ func (s *Antiquary) floorStatePruneMarkers(ctx context.Context, replayFrom uint6
 // batchLimit-sized transactions with the per-table marker persisted in the same
 // transaction. ctx is checked only between transactions; on expiry the current
 // table index is returned as nextStartIdx so the next call resumes there.
-func pruneStateTables(ctx context.Context, db kv.RwDB, tables []string, boundaryFn func(table string) uint64, startIdx, batchLimit int, logger log.Logger) (nextStartIdx int, err error) {
+func pruneStateTables(ctx context.Context, db kv.RwDB, tables []string, boundaryFn func(table string) uint64, startIdx, batchLimit int, logger log.Logger) (int, error) {
+	next, _, err := pruneStateTablesWithProgress(ctx, db, tables, boundaryFn, startIdx, batchLimit, logger)
+	if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		err = nil
+	}
+	return next, err
+}
+
+func pruneStateTablesWithProgress(ctx context.Context, db kv.RwDB, tables []string, boundaryFn func(table string) uint64, startIdx, batchLimit int, logger log.Logger) (nextStartIdx int, changed bool, err error) {
 	if len(tables) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	if startIdx < 0 || startIdx >= len(tables) {
 		startIdx = 0
@@ -134,7 +143,7 @@ func pruneStateTables(ctx context.Context, db kv.RwDB, tables []string, boundary
 		idx := (startIdx + i) % len(tables)
 		table := tables[idx]
 		if ctx.Err() != nil {
-			return idx, nil
+			return idx, false, ctx.Err()
 		}
 		boundary := boundaryFn(table)
 		if boundary == 0 {
@@ -147,9 +156,9 @@ func pruneStateTables(ctx context.Context, db kv.RwDB, tables []string, boundary
 			return err
 		}); err != nil {
 			if ctx.Err() != nil {
-				return idx, nil
+				return idx, false, ctx.Err()
 			}
-			return idx, err
+			return idx, false, err
 		}
 		if marker >= boundary {
 			continue
@@ -160,19 +169,20 @@ func pruneStateTables(ctx context.Context, db kv.RwDB, tables []string, boundary
 			deleted, newMarker, err := pruneStateBatch(ctx, db, table, marker, boundary, batchLimit, logger)
 			if err != nil {
 				if ctx.Err() != nil {
-					return idx, nil
+					return idx, changed, ctx.Err()
 				}
-				return idx, err
+				return idx, changed, err
 			}
+			changed = changed || marker != newMarker
 			totalDeleted += deleted
 			marker = newMarker
 			if marker < boundary && ctx.Err() != nil {
-				return idx, nil
+				return idx, changed, ctx.Err()
 			}
 		}
 		logger.Info("[Antiquary] Pruned state table to boundary", "table", table, "from", pruneFrom, "boundary", boundary, "deleted", totalDeleted)
 	}
-	return startIdx, nil
+	return startIdx, changed, nil
 }
 
 func pruneStateBatch(ctx context.Context, db kv.RwDB, table string, marker, boundary uint64, batchLimit int, logger log.Logger) (deleted int, newMarker uint64, err error) {

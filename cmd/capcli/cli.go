@@ -458,19 +458,6 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	defer db.Close()
-	var to uint64
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	to, err = beacon_indicies.ReadHighestFinalized(tx)
-	if err != nil {
-		return err
-	}
-
-	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
@@ -479,6 +466,21 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	defer csn.Close()
+	return checkSnapshots(ctx, db, csn)
+}
+
+func checkSnapshots(ctx context.Context, db kv.RoDB, csn *freezeblocks.CaplinSnapshots) error {
+	var to uint64
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	genesisHeader, _, _, err := csn.ReadHeader(0, nil)
 	if err != nil {
@@ -1336,11 +1338,6 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	defer db.Close()
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
@@ -1349,6 +1346,15 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	defer csn.Close()
+	return checkBlobsSnapshots(ctx, db, blobStorage, csn, beaconConfig)
+}
+
+func checkBlobsSnapshots(ctx context.Context, db kv.RoDB, blobStorage blob_storage.BlobStorage, csn *freezeblocks.CaplinSnapshots, beaconConfig *clparams.BeaconChainConfig) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	to := csn.FrozenBlobs()
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
@@ -1361,13 +1367,19 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 			return err
 		}
 
-		haveSds, _, err := blobStorage.ReadBlobSidecars(ctx, i, blockRoot)
+		haveSds, found, err := blobStorage.ReadBlobSidecars(ctx, i, blockRoot)
 		if err != nil {
 			return err
 		}
-		for i, sd := range sds {
-			if sd.Blob != haveSds[i].Blob {
-				return fmt.Errorf("slot %d: blob %d mismatch", i, i)
+		if !found {
+			continue
+		}
+		for index, sd := range sds {
+			if index >= len(haveSds) {
+				return fmt.Errorf("slot %d: blob %d missing", i, index)
+			}
+			if sd.Blob != haveSds[index].Blob {
+				return fmt.Errorf("slot %d: blob %d mismatch", i, index)
 			}
 		}
 		if i%2000 == 0 {

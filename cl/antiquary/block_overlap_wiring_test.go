@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -466,4 +467,125 @@ func TestAntiquateKeepsTheSafetyMarginOnAYoungChain(t *testing.T) {
 		require.NoError(t, a.antiquate())
 		require.Equal(t, tc.available, a.sn.BlocksAvailable(), "finalized %d", tc.finalized)
 	}
+}
+
+func TestAntiquateNotifiesDownloaderOfRemovedBlockOverlap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	small := writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit/2, logger)
+	require.NoError(t, dir.RemoveFile(strings.TrimSuffix(small, ".seg")+".idx"))
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var parent common.Hash
+		for slot := uint64(0); slot <= 3*limit; slot += 500 {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = parent
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			parent = root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, 3*limit+safetyMargin)
+	}))
+
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	d := &recordingDownloader{}
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, d, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+	require.NoError(t, a.antiquate())
+	require.Contains(t, d.deletedNames(), filepath.Base(small))
+}
+
+func TestAntiquateWaitsUntilForkChoiceMarksTheRangeTailWithDownloader(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const head, tail = limit - 2, limit - 1
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	var slots []uint64
+	for slot := uint64(0); slot < head; slot += 500 {
+		slots = append(slots, slot)
+	}
+	slots = append(slots, head, tail, limit)
+	roots := make(map[uint64]common.Hash)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for _, slot := range slots {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			block.Block.Slot = slot
+			block.Block.ParentRoot = prevRoot
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, slot <= head); err != nil {
+				return err
+			}
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			roots[slot], prevRoot = root, root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, limit+safetyMargin)
+	}))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+
+	require.NoError(t, a.antiquate())
+	require.Zero(t, sn.BlocksAvailable(), "a range must not freeze before fork choice marks its tail canonical")
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(tail, roots[tail]))
+		if err != nil {
+			return err
+		}
+		require.NotEmpty(t, body, "the block at slot %d must stay in the database", tail)
+		return nil
+	}))
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, tail, roots[tail])
+	}))
+	require.NoError(t, a.antiquate())
+	require.Equal(t, uint64(limit-1), sn.BlocksAvailable())
+	view := sn.View()
+	defer view.Close()
+	segment, ok := view.BeaconBlocksSegment(tail)
+	require.True(t, ok)
+	word, err := segment.Get(tail)
+	require.NoError(t, err)
+	require.NotEmpty(t, word, "the block at slot %d must be frozen", tail)
+}
+
+type failOverlapDelete struct {
+	recordingDownloader
+	name string
+}
+
+func (d *failOverlapDelete) Delete(ctx context.Context, names []string) error {
+	for _, name := range names {
+		if filepath.Base(name) == d.name {
+			return errors.New("offline during overlap cleanup")
+		}
+	}
+	return d.recordingDownloader.Delete(ctx, names)
+}
+
+func TestNodeMergeWarnsOnOverlapFailure(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, _ := antiquaryWithBlockSegments(t, 0, tier)
+	writeStateFixture(t, a.dirs.Snap, "beaconblocks", 2*tier, 2*tier+20_000, log.New())
+	sub := writeStateFixture(t, a.dirs.Snap, "beaconblocks", 2*tier, 2*tier+10_000, log.New())
+	require.NoError(t, a.sn.OpenFolder())
+	a.downloader = &failOverlapDelete{name: filepath.Base(sub)}
+	err := a.mergeBlocks()
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	require.NoError(t, err, "the merge is committed and the node only warns on overlap cleanup failure")
 }
