@@ -71,7 +71,7 @@ func NewHistoricalStatesReader(
 	}
 }
 
-func (r *HistoricalStatesReader) ArchiveStates() bool {
+func (r *HistoricalStatesReader) StateHistoryEnabled() bool {
 	return r.validatorTable.ReplayEnabled()
 }
 
@@ -577,7 +577,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	if len(compressed) == 0 {
-		return nil, fmt.Errorf("dump not found for slot %d", dumpSlot)
+		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
 
 	// Read the diff file
@@ -659,7 +659,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	}
 
 	if len(compressed) == 0 {
-		return nil, fmt.Errorf("dump not found for slot %d", dumpSlot)
+		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
 	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
