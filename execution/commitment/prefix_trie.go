@@ -34,19 +34,19 @@ const (
 	prefixExtChunkMax = 64 * 1024
 )
 
-type prefixNode struct {
-	// ext is arena-backed: it stays valid only until the owning trie's Reset, which
+type PrefixNode struct {
+	// Ext is arena-backed: it stays valid only until the owning trie's Reset, which
 	// recycles the chunk in place. A reader that must outlive the batch copies it.
-	ext          []byte
-	children     []*prefixNode
-	plainKey     []byte
-	update       *Update
-	subtreeCount uint32
-	bitmap       uint16
+	Ext          []byte
+	Children     []*PrefixNode
+	PlainKey     []byte
+	Update       *Update
+	SubtreeCount uint32
+	Bitmap       uint16
 }
 
 type prefixArena struct {
-	slabs       [][]prefixNode
+	slabs       [][]PrefixNode
 	slabIdx     int
 	nextIdx     int
 	priorNodes  int // nodes held by slabs[:slabIdx], so nodeCount stays O(1)
@@ -55,23 +55,23 @@ type prefixArena struct {
 }
 
 func newPrefixArena() *prefixArena {
-	return &prefixArena{slabs: [][]prefixNode{make([]prefixNode, prefixSlabMin)}}
+	return &prefixArena{slabs: [][]PrefixNode{make([]PrefixNode, prefixSlabMin)}}
 }
 
-func (a *prefixArena) allocNode() *prefixNode {
+func (a *prefixArena) allocNode() *PrefixNode {
 	slab := a.slabs[a.slabIdx]
 	if a.nextIdx >= len(slab) {
 		a.priorNodes += len(slab)
 		a.slabIdx++
 		if a.slabIdx >= len(a.slabs) {
-			a.slabs = append(a.slabs, make([]prefixNode, min(len(slab)*2, prefixSlabMax)))
+			a.slabs = append(a.slabs, make([]PrefixNode, min(len(slab)*2, prefixSlabMax)))
 		}
 		slab = a.slabs[a.slabIdx]
 		a.nextIdx = 0
 	}
 	n := &slab[a.nextIdx]
 	a.nextIdx++
-	*n = prefixNode{}
+	*n = PrefixNode{}
 	return n
 }
 
@@ -141,21 +141,21 @@ func (a *prefixArena) nodeCount() int {
 	return a.priorNodes + a.nextIdx
 }
 
-func childIndex(n *prefixNode, nib byte) (int, bool) {
+func childIndex(n *PrefixNode, nib byte) (int, bool) {
 	mask := uint16(1) << nib
-	idx := bits.OnesCount16(n.bitmap & (mask - 1))
-	return idx, n.bitmap&mask != 0
+	idx := bits.OnesCount16(n.Bitmap & (mask - 1))
+	return idx, n.Bitmap&mask != 0
 }
 
 type prefixTrie struct {
-	root    *prefixNode
+	Root    *PrefixNode
 	arena   *prefixArena
-	visited []*prefixNode
+	visited []*PrefixNode
 }
 
 func newPrefixTrie() *prefixTrie {
 	a := newPrefixArena()
-	return &prefixTrie{root: a.allocNode(), arena: a}
+	return &prefixTrie{Root: a.allocNode(), arena: a}
 }
 
 func (t *prefixTrie) Reset() {
@@ -164,65 +164,65 @@ func (t *prefixTrie) Reset() {
 	clear(t.visited[:cap(t.visited)])
 	t.visited = t.visited[:0]
 	t.arena.resetArena()
-	t.root = t.arena.allocNode()
+	t.Root = t.arena.allocNode()
 }
 
 func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew bool) {
-	node := t.root
+	node := t.Root
 	keyOffset := 0
 	t.visited = t.visited[:0]
 	bumpPath := func() {
 		for _, n := range t.visited {
-			n.subtreeCount++
+			n.SubtreeCount++
 		}
 	}
 	for {
 		t.visited = append(t.visited, node)
 
 		remain := hashedKey[keyOffset:]
-		m := nibbles.CommonPrefixLen(remain, node.ext)
+		m := nibbles.CommonPrefixLen(remain, node.Ext)
 
-		if m < len(node.ext) {
-			oldExt := node.ext
-			oldBitmap := node.bitmap
-			oldChildren := node.children
-			oldSubtreeCount := node.subtreeCount
+		if m < len(node.Ext) {
+			oldExt := node.Ext
+			oldBitmap := node.Bitmap
+			oldChildren := node.Children
+			oldSubtreeCount := node.SubtreeCount
 
 			oldChild := t.arena.allocNode()
-			oldChild.ext = oldExt[m+1:]
-			oldChild.bitmap = oldBitmap
-			oldChild.children = oldChildren
-			oldChild.subtreeCount = oldSubtreeCount
+			oldChild.Ext = oldExt[m+1:]
+			oldChild.Bitmap = oldBitmap
+			oldChild.Children = oldChildren
+			oldChild.SubtreeCount = oldSubtreeCount
 			// A terminator on the split node belonged to a longer key; move it to oldChild.
-			oldChild.plainKey = node.plainKey
-			oldChild.update = node.update
-			node.plainKey = nil
-			node.update = nil
+			oldChild.PlainKey = node.PlainKey
+			oldChild.Update = node.Update
+			node.PlainKey = nil
+			node.Update = nil
 
-			node.ext = oldExt[:m:m]
+			node.Ext = oldExt[:m:m]
 
 			if m == len(remain) {
-				node.bitmap = uint16(1) << oldExt[m]
-				node.children = []*prefixNode{oldChild}
-				node.plainKey = plainKey
-				node.update = update
+				node.Bitmap = uint16(1) << oldExt[m]
+				node.Children = []*PrefixNode{oldChild}
+				node.PlainKey = plainKey
+				node.Update = update
 				bumpPath()
 				return true
 			}
 
 			newLeaf := t.arena.allocNode()
 			newNib := remain[m]
-			newLeaf.ext = t.arena.allocExt(remain[m+1:])
-			newLeaf.subtreeCount = 1
-			newLeaf.plainKey = plainKey
-			newLeaf.update = update
+			newLeaf.Ext = t.arena.allocExt(remain[m+1:])
+			newLeaf.SubtreeCount = 1
+			newLeaf.PlainKey = plainKey
+			newLeaf.Update = update
 
 			oldNib := oldExt[m]
-			node.bitmap = (uint16(1) << oldNib) | (uint16(1) << newNib)
+			node.Bitmap = (uint16(1) << oldNib) | (uint16(1) << newNib)
 			if oldNib < newNib {
-				node.children = []*prefixNode{oldChild, newLeaf}
+				node.Children = []*PrefixNode{oldChild, newLeaf}
 			} else {
-				node.children = []*prefixNode{newLeaf, oldChild}
+				node.Children = []*PrefixNode{newLeaf, oldChild}
 			}
 			bumpPath()
 			return true
@@ -230,21 +230,21 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 
 		keyOffset += m
 		if keyOffset == len(hashedKey) {
-			if node.plainKey != nil {
+			if node.PlainKey != nil {
 				if update != nil {
 					merged := &Update{}
-					if node.update != nil {
-						*merged = *node.update
+					if node.Update != nil {
+						*merged = *node.Update
 						merged.Merge(update)
 					} else {
 						*merged = *update
 					}
-					node.update = merged
+					node.Update = merged
 				}
 				return false
 			}
-			node.plainKey = plainKey
-			node.update = update
+			node.PlainKey = plainKey
+			node.Update = update
 			bumpPath()
 			return true
 		}
@@ -253,18 +253,18 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		idx, ok := childIndex(node, nib)
 		if !ok {
 			newLeaf := t.arena.allocNode()
-			newLeaf.ext = t.arena.allocExt(hashedKey[keyOffset+1:])
-			newLeaf.subtreeCount = 1
-			newLeaf.plainKey = plainKey
-			newLeaf.update = update
-			node.bitmap |= uint16(1) << nib
-			node.children = append(node.children, nil)
-			copy(node.children[idx+1:], node.children[idx:])
-			node.children[idx] = newLeaf
+			newLeaf.Ext = t.arena.allocExt(hashedKey[keyOffset+1:])
+			newLeaf.SubtreeCount = 1
+			newLeaf.PlainKey = plainKey
+			newLeaf.Update = update
+			node.Bitmap |= uint16(1) << nib
+			node.Children = append(node.Children, nil)
+			copy(node.Children[idx+1:], node.Children[idx:])
+			node.Children[idx] = newLeaf
 			bumpPath()
 			return true
 		}
 		keyOffset++
-		node = node.children[idx]
+		node = node.Children[idx]
 	}
 }

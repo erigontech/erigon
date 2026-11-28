@@ -49,6 +49,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -398,7 +400,7 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 		if commitment.IsCommitmentStateKey(k) {
 			continue
 		}
-		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
+		require.NoError(t, v2.VerifyBranchHashes(k, branch.BranchData(v), accountValues, storageValues),
 			"branch %x at the step edge disagrees with the account domain written through that step", k)
 		checked++
 	}
@@ -1787,7 +1789,7 @@ func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
 		if !ok {
 			continue
 		}
-		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
+		require.NoError(t, v2.VerifyBranchHashes(k, branch.BranchData(v), accountValues, storageValues),
 			"checkpoint branch %x at the step edge must hash the pre-edge value of the rewritten key", k)
 		checked++
 	}

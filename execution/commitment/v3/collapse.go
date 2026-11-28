@@ -111,7 +111,7 @@ func walkDeletedNode(ctx commitment.PatriciaContext, g graph, n *node, deletes [
 }
 
 func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib int, path []byte) ([]byte, error) {
-	if g.plane != planeAccount || n.leafMask&(uint16(1)<<nib) == 0 {
+	if g.plane != PlaneAccount || n.leafMask&(uint16(1)<<nib) == 0 {
 		return path, nil
 	}
 	_, payload := n.leafAt(nib)
@@ -120,7 +120,7 @@ func collapseSurvivorPath(ctx commitment.PatriciaContext, g graph, n *node, nib 
 		return path, nil
 	}
 	addrHash := hashAddressPath(path)
-	storage := graph{plane: planeStorage, addrHash: addrHash[:]}
+	storage := graph{plane: PlaneStorage, addrHash: addrHash[:]}
 	root, err := storage.loadRoot(ctx)
 	if err != nil || root.childMask == 0 {
 		return path, err
@@ -153,10 +153,10 @@ func deleteRange(deletes [][]byte, prefix []byte) [][]byte {
 
 func splitPrefix(prefix []byte) (plane byte, addrHash, path []byte) {
 	if len(prefix) < 64 {
-		return planeAccount, nil, prefix
+		return PlaneAccount, nil, prefix
 	}
 	addr := hashAddressPath(prefix[:64])
-	return planeStorage, addr[:], prefix[64:]
+	return PlaneStorage, addr[:], prefix[64:]
 }
 
 func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), prefix []byte) (*node, error) {

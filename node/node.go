@@ -47,7 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
-	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -335,7 +335,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
 			config.Http.DBReadConcurrency,
 			execWorkerCount(config),
-			commitment.ParallelCommitmentReadTxs(),
+			v2.ParallelCommitmentReadTxs(),
 			dbg.BALCommitmentWarmupReaders(),
 			dbg.ReadAheadWorkerReaders(),
 		))

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 )
 
 func TestDefaultTrieConfig(t *testing.T) {
@@ -49,29 +48,5 @@ func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {
 
 	if got := (TrieConfig{}).WarmupNumWorkersOrDefault(); got != 0 {
 		t.Errorf("explicit TIP_TRIE_WARMUPERS=0 must propagate as 0 (warmup disabled), got %d", got)
-	}
-}
-
-func TestTrieConfig_PropagationToHPH(t *testing.T) {
-	cfg := TrieConfig{
-		DeferBranchUpdates:     false,
-		LeaveDeferredForCaller: true,
-		MemoizationOff:         true,
-	}
-
-	hph := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	defer hph.Release()
-
-	if hph.cfg != cfg {
-		t.Error("stored cfg should match what was passed")
-	}
-	if hph.branchEncoder.deferUpdates {
-		t.Error("branchEncoder.deferUpdates should be false")
-	}
-	if !hph.branchEncoder.callerOwnsDeferred {
-		t.Error("branchEncoder.callerOwnsDeferred should be true")
-	}
-	if !hph.memoizationOff {
-		t.Error("memoizationOff should be true")
 	}
 }

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 )
 
 func TestCachesRepeatedUnwind(t *testing.T) {
@@ -54,7 +54,7 @@ func TestCachesRepeatedUnwind(t *testing.T) {
 			}
 			if domain == kv.CommitmentDomain {
 				require.NoError(t, db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-					branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+					branches := tx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 					require.NotNil(t, branches)
 					cached = func() bool {
 						_, _, hit := branches.Get(key)
