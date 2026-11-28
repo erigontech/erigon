@@ -1035,7 +1035,8 @@ func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
 	}
 }
 
-func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
+// Superseded segments under the floor go with the visible ones, so no hidden copy shows up again.
+func TestRetireBlobsBelowRetiresSupersededSegments(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 	dirs := datadir.New(t.TempDir())
 	writeEmptyBlobSidecarsSegment(t, dirs, 0, limit)
@@ -1046,12 +1047,20 @@ func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	retired, err := sn.RetireBlobsBelow(10*limit, func([]string) error {
-		t.Fatal("no file may be handed to the seeder while superseded segments remain")
+	var deleted []string
+	retired, err := sn.RetireBlobsBelow(10*limit, func(paths []string) error {
+		deleted = append(deleted, paths...)
 		return nil
 	})
 	require.NoError(t, err)
-	require.False(t, retired)
+	require.True(t, retired)
+	require.Contains(t, deleted, snaptype.BlobSidecars.FileName(version.ZeroVersion, 0, limit))
+	require.NoError(t, sn.OpenFolder())
+	view := sn.View()
+	defer view.Close()
+	segs := view.BlobSidecars()
+	require.Len(t, segs, 1)
+	require.Equal(t, uint64(2*limit), segs[0].From())
 	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
 }
 

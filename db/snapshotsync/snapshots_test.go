@@ -847,7 +847,7 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 
 // Retire selects over visible files, so a subsumed (dirty-but-not-visible) segment below
 // the cutoff is left to the merge clean-up, not retired here.
-func TestRetireFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
+func TestRetireFilesBelowRetiresDirtyButNotVisible(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -865,11 +865,12 @@ func TestRetireFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 	require.False(visibleHas(s, txEnum, 0, mergeLimit), "the merge-sized subsumed segment is dirty but not visible")
 
-	// The subsumed merge-sized segment is below cutoff but invisible -> must not be retired.
+	// The subsumed segment ends below the cutoff, so it is retired although it is not visible.
 	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
 	require.NoError(err)
-	require.False(retired, "invisible subsumed file must not be retired")
-	require.Equal(2, s.dirty[txEnum].Len())
+	require.True(retired)
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 2*mergeLimit))
 }
 
 // A blockTo past the visible tip would wipe every file. That happens benignly when transactions
@@ -2475,4 +2476,53 @@ func TestRetireFilesAboveRetiresAHiddenMergedFile(t *testing.T) {
 			require.LessOrEqual(t, r.To(), uint64(50_000), typ.Name())
 		}
 	}
+}
+
+func TestRetireFilesBelowRetiresAHiddenMergedFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 200_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var deleted []string
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 150_000, func(l []string) error { deleted = append(deleted, l...); return nil })
+	require.NoError(t, err)
+	require.True(t, retired)
+	require.Contains(t, deleted, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Transactions.Enum()))
+	require.NoError(t, s.OpenFolder())
+	for _, r := range visibleRanges(s, snaptype2.Transactions) {
+		require.GreaterOrEqual(t, r.From(), uint64(140_000))
+	}
+}
+
+// The transactions range has no headers or bodies files inside it, so it is not merged.
+func TestMergeRangeUnderALargerHeadersAndBodiesFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createTestSegmentFile(t, 0, 200_000, typ.Enum(), dir, version.V1_0, logger)
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	createTestSegmentFile(t, 100_000, 200_000, snaptype2.Transactions.Enum(), dir, snaptype2.Transactions.Versions().Current, logger)
+	for from := uint64(100_000); from < 200_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	before := visibleRanges(s, snaptype2.Transactions)
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	require.Equal(t, before, visibleRanges(s, snaptype2.Transactions))
+	require.NoFileExists(t, filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Headers.Versions().Current, 100_000, 200_000, snaptype2.Headers.Enum())))
 }

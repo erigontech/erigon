@@ -90,6 +90,18 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
+// everyTypeTiles reports whether the visible files of every type lie inside r and cover it. The visible
+// layouts of the types can differ, so a range taken from one type can cut through another type's file.
+func (m *Merger) everyTypeTiles(v *View, snapTypes []snaptype.Type, r Range) bool {
+	for _, t := range snapTypes {
+		files := m.filesByRangeOfType(v, r.From(), r.To(), t)
+		if len(files) == 0 || files[0].from != r.From() || files[len(files)-1].to != r.To() {
+			return false
+		}
+	}
+	return true
+}
+
 // removeMergedFiles removes a merge output's files. A same-range input with an older segment version resolves to the
 // output's index names, so its index is kept unless the output's index was built: that replaced the file.
 func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment, indexBuilt bool) {
@@ -174,6 +186,7 @@ func (m *Merger) Merge(
 	v := snapshots.View()
 	defer v.Close()
 
+	mergeRanges = slices.DeleteFunc(slices.Clone(mergeRanges), func(r Range) bool { return !m.everyTypeTiles(v, snapTypes, r) })
 	if len(mergeRanges) == 0 {
 		return nil
 	}
