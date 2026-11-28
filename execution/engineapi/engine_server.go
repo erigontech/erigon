@@ -17,6 +17,8 @@
 package engineapi
 
 import (
+	"strings"
+
 	"context"
 	"encoding/hex"
 	"errors"
@@ -28,6 +30,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	"golang.org/x/sync/errgroup"
 
@@ -371,10 +375,15 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	npMem0 := [3]uint64{npMem[0].Value.Uint64(), npMem[1].Value.Uint64(), npMem[2].Value.Uint64()}
 	npGcCPU0 := npMem[3].Value.Float64()
 	var npBal, npTx, npHash, npQuick, npLock time.Time
+	npDur0 := [5]int64{dbg.NpSenderRecovers.Load(), dbg.NpAuthRecovers.Load(), dbg.NpRwBegins.Load(), dbg.NpRwCommits.Load(), dbg.NpRwCommitNs.Load()}
+	dbg.NpWindow.Store(true)
 	defer func() {
+		dbg.NpWindow.Store(false)
 		if req == nil {
 			return
 		}
+		e.logger.Info("[np-dur] np", "blk", req.BlockNumber.Uint64(), "txs", len(req.Transactions), "senderRecovers", dbg.NpSenderRecovers.Load()-npDur0[0], "authRecovers", dbg.NpAuthRecovers.Load()-npDur0[1],
+			"rwBegins", dbg.NpRwBegins.Load()-npDur0[2], "rwCommits", dbg.NpRwCommits.Load()-npDur0[3], "rwCommitUs", (dbg.NpRwCommitNs.Load()-npDur0[4])/1000, "totalUs", time.Since(npT0).Microseconds(), "callers", strings.Join(dbg.NpTakeCallers(), " | "))
 		metrics.Read(npMem)
 		e.logger.Info("[np-alloc] np", "blk", req.BlockNumber.Uint64(), "objs", npMem[0].Value.Uint64()-npMem0[0], "bytes", npMem[1].Value.Uint64()-npMem0[1], "gcs", npMem[2].Value.Uint64()-npMem0[2], "gcCpuMs", (npMem[3].Value.Float64()-npGcCPU0)*1000)
 		e.logger.Info("[np-split] np", "blk", req.BlockNumber.Uint64(), "entryUs", npT0.UnixMicro(), "endUs", time.Now().UnixMicro(), "bal", npSince(npT0, npBal), "txdec", npSince(npBal, npTx), "hash", npSince(npTx, npHash), "checks", npSince(npHash, npQuick), "lock", npSince(npQuick, npLock), "total", time.Since(npT0))

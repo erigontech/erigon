@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/dbg"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -133,6 +135,7 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 }
 
 func recoverSignerFromHash(hash common.Hash, yParity uint8, r uint256.Int, s uint256.Int) (common.Address, error) {
+	dbg.NpAuthRecovers.Add(1)
 	var sig [65]byte
 	r.PutUint256(sig[:32])
 	s.PutUint256(sig[32:64])

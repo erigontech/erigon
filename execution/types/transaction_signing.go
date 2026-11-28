@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/secp256k1"
@@ -369,6 +371,7 @@ func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {
 }
 
 func recoverPlain(context *secp256k1.Context, sighash common.Hash, r, s, vb *uint256.Int, homestead bool) (accounts.Address, error) {
+	dbg.NpSenderRecovers.Add(1)
 	if vb.BitLen() > 8 {
 		return accounts.NilAddress, ErrInvalidSig
 	}

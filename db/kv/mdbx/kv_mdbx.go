@@ -924,6 +924,7 @@ func (db *MdbxKV) BeginRwTry(ctx context.Context) (kv.RwTx, error) {
 }
 
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
+	dbg.NpRwBegins.Add(1)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -1460,7 +1461,11 @@ func (tx *MdbxTx) Commit() error {
 
 	tx.CollectMetrics()
 
+	npCommitStart := time.Now()
 	latency, err := tx.tx.Commit()
+	if !tx.readOnly {
+		dbg.NpRwCommitDone(npCommitStart)
+	}
 	if err != nil {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
