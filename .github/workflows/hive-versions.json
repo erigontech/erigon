@@ -1,6 +1,10 @@
 {
   "hive_repository": "ethereum/hive",
   "hive_ref": "4ab0d3234a300d84f41f68b874c641e0ba5fb8db",
+  "wirex_consumer_ref": {
+    "eest_stable": "f877e85ae6fd6047d68b08f5eb2022c78047cfbc",
+    "eest_devnet": "a74f8e6df5d1666073d9e2f14e974ece43a79340"
+  },
   "devp2p_geth_ref": "157c94647241b260d19e5a8e01a08e439591e504",
   "execution_apis_ref": "981aa66d79364be8322a9c358aaf0a571cca0873"
 }
