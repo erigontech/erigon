@@ -40,6 +40,13 @@ datadir/
 - `history.go` - Historical value tracking
 - `inverted_index.go` - Time-travel indices (key → [txNums])
 
+## Dirty vs visible files (`state/`)
+- **Dirty files**: every state file on disk, merged or not. They can overlap and have holes. Merge, retire, prune, step rebase and `snapshots index` work on dirty files.
+- **Visible files**: the subset that readers use. They are built in one place, `Aggregator.recalcVisibleFiles`: each list's `calcVisibleFiles`, then all lists are cut to end at the same txNum. A file without its accessors is never visible.
+- Readers use visible files only. A tool that rebuilds or reorganizes dirty files does not depend on visible files or on checks about them.
+- A check about what readers see, such as the files/DB gap check, belongs where readers start, not in code every tool runs.
+- Every reader creates `aggregatorVisible`: a new field on it needs a reason in the PR.
+
 ## Four Domains
 
 | Domain | Purpose | Content |
