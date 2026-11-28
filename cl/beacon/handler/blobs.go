@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -103,6 +106,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
+	tx.Rollback()
 
 	out, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
@@ -110,6 +114,12 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	}
 
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if !found && version >= clparams.FuluVersion && version < clparams.GloasVersion {
+		if out, err = a.blobSidecarsFromColumns(ctx, *slot, blockRoot, selectedIndices); err != nil {
+			return nil, err
+		}
+		found = len(out) != 0
+	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	isFinalized := canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()
 
@@ -141,6 +151,31 @@ func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoo
 		return sidecars, len(sidecars) != 0, nil
 	}
 	return a.blobStoage.ReadBlobSidecars(ctx, slot, blockRoot)
+}
+
+func (a *ApiHandler) blobSidecarsFromColumns(ctx context.Context, slot uint64, blockRoot common.Hash, selected map[uint64]struct{}) ([]*cltypes.BlobSidecar, error) {
+	var indices []uint64
+	if selected != nil {
+		indices = slices.Sorted(maps.Keys(selected))
+	}
+	_, sidecars, err := a.peerDas.BlobsFromColumns(ctx, slot, blockRoot, indices, true)
+	switch {
+	case err == nil:
+		return sidecars, nil
+	case errors.Is(err, das.ErrColumnsNotKept):
+		return nil, nil
+	}
+	return nil, blobsFromColumnsError(err)
+}
+
+func blobsFromColumnsError(err error) error {
+	switch {
+	case errors.Is(err, das.ErrBlobsUnavailable):
+		return beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("blob data not available, retry later"))
+	case errors.Is(err, das.ErrReconstructionBusy):
+		return beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("blob reconstruction busy, retry later"))
+	}
+	return beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 }
 
 func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -293,6 +328,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		})
 		indicies = filtered
 	}
+	tx.Rollback()
 
 	// collect the blobs
 	blobs := solid.NewStaticListSSZ[*cltypes.Blob](int(a.beaconChainCfg.MaxBlobCommittmentsPerBlock), int(cltypes.BYTES_PER_BLOB))
@@ -301,6 +337,18 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	if !found {
+		if reqVersion >= clparams.FuluVersion && len(indicies) > 0 {
+			columnBlobs, _, err := a.peerDas.BlobsFromColumns(ctx, *slot, blockRoot, indicies, false)
+			if err != nil && !errors.Is(err, das.ErrColumnsNotKept) {
+				return nil, blobsFromColumnsError(err)
+			}
+			if err == nil && len(columnBlobs) == 0 && reqVersion < clparams.GloasVersion {
+				return nil, blobsFromColumnsError(das.ErrBlobsUnavailable)
+			}
+			for _, blob := range columnBlobs {
+				blobs.Append(blob)
+			}
+		}
 		return beaconhttp.NewBeaconResponse(blobs).
 			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
 			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil

@@ -35,6 +35,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -93,20 +94,37 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	// workers below only ever read it.
 	statecfg.EnableHistoricalCommitment()
 
-	files, err := collectFiles(path)
-	if err != nil {
-		return err
-	}
-	witnesses, err := loadZkevmWitnesses(files)
-	if err != nil {
-		return err
-	}
-	results, err := runZkevmTestsParallel(path, files, re, witnesses, workers)
+	results, err := runZkevmTests(path, re, workers)
 	if err != nil {
 		return err
 	}
 	report(ctx, results)
 	return nil
+}
+
+func runZkevmTests(path string, re *regexp.Regexp, workers uint64) ([]testResult, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	// Both passes below read the input, and a pipe can be read only once.
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		spooled, err := spoolToTempFile(path)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = dir.RemoveFile(spooled) }()
+		path = spooled
+	}
+	files, err := collectFiles(path)
+	if err != nil {
+		return nil, err
+	}
+	witnesses, err := loadZkevmWitnesses(files)
+	if err != nil {
+		return nil, err
+	}
+	return runZkevmTestsParallel(path, files, re, witnesses, workers)
 }
 
 // newZkevmFailMatcher mirrors the expected-failure set the go-test witness suite
@@ -307,6 +325,27 @@ func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevm
 	}
 	slices.SortFunc(results, func(a, b testResult) int { return strings.Compare(a.Name, b.Name) })
 	return results, nil
+}
+
+func spoolToTempFile(path string) (string, error) {
+	in, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	out, err := os.CreateTemp("", "zkevmtest-*.json")
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = dir.RemoveFile(out.Name())
+		return "", err
+	}
+	return out.Name(), nil
 }
 
 // decodeFixtures streams the fixtures of fname to fn one at a time: some

@@ -787,17 +787,17 @@ func (db *DB) MaxPrunableStepsBacklog() uint64 {
 	return db.stateFiles.MaxPrunableStepsBacklog()
 }
 
-func (db *DB) BuildFiles(toTxNum, irreversibleTxNum uint64) error {
-	return db.stateFiles.BuildFiles(db, toTxNum, irreversibleTxNum)
+func (db *DB) BuildFiles(toTxNum, collateToTxNum uint64) error {
+	return db.stateFiles.BuildFiles(db, toTxNum, collateToTxNum)
 }
 
-func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, irreversibleTxNum uint64, doMerge bool) error {
-	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, irreversibleTxNum, doMerge)
+func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, collateToTxNum uint64, doMerge bool) error {
+	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, collateToTxNum, doMerge)
 }
 
-func (db *DB) BuildFilesInBackground(irreversibleTxNum uint64) chan struct{} {
+func (db *DB) BuildFilesInBackground(collateToTxNum uint64) chan struct{} {
 	toTxNum := db.stateFiles.EndTxNumMinimax() + db.stateFiles.StepSize()
-	return db.stateFiles.BuildFilesInBackground(db, toTxNum, irreversibleTxNum)
+	return db.stateFiles.BuildFilesInBackground(db, toTxNum, collateToTxNum)
 }
 
 func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (uint64, error)) (bool, <-chan struct{}, error) {

@@ -58,7 +58,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(db, uint64(txCount), allIrreversible)
+	err := agg.BuildFiles(db, uint64(txCount), collateAll)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -553,7 +553,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 			require.NoError(t, domains.Flush(ctx, rwTx))
 			domains.Close()
 			require.NoError(t, rwTx.Commit())
-			require.NoError(t, agg.BuildFiles(db, txNum, allIrreversible))
+			require.NoError(t, agg.BuildFiles(db, txNum, collateAll))
 			rwTx, err = db.BeginTemporalRw(ctx) //nolint:gocritic
 			require.NoError(t, err)
 			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
@@ -565,7 +565,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
 	if txNum < filesBoundary {
-		require.NoError(t, agg.BuildFiles(db, txNum, allIrreversible))
+		require.NoError(t, agg.BuildFiles(db, txNum, collateAll))
 	}
 
 	dirs := agg.Dirs()
@@ -601,7 +601,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 
 		logger, flushes := log.New(), &flushRecorder{}
 		logger.SetHandler(flushes)
-		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, allIrreversible, logger, false)
+		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, collateAll, logger, false)
 		require.NoError(t, err)
 		require.Equal(t, roots[toBlock], common.Hash(root))
 		return flushes.direct
@@ -881,7 +881,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, allIrreversible)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -1099,7 +1099,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Build files
 	t.Logf("Building files for %d txs...", totalTxs)
-	err = agg.BuildFiles(db, totalTxs, allIrreversible)
+	err = agg.BuildFiles(db, totalTxs, collateAll)
 	require.NoError(t, err)
 
 	// Validate

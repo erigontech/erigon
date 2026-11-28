@@ -18,4 +18,4 @@ package state
 
 import "math"
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
