@@ -362,13 +362,17 @@ func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
 
 // DropTxMaps replaces the maps that clear keeps at their largest size, so a state
 // kept across blocks does not pay its largest transaction's clear cost on every later one.
-// It also drops an oversized journal, which Reset keeps at its peak.
+// It also drops an oversized journal and output buffer, which Reset keeps at their peak.
 func (ibs *IntraBlockState) DropTxMaps() {
 	ibs.accessList = accessList{addresses: make(map[accounts.Address]int)}
 	ibs.sdProbe = nil
 	ibs.committedBase = nil
+	ibs.journal.dirties = make(map[accounts.Address]int)
 	if cap(ibs.journal.entries) > maxKeptJournalEntries {
 		ibs.journal.entries = nil
+	}
+	if cap(ibs.txOutput) > maxKeptTxOutput {
+		ibs.txOutput = nil
 	}
 }
 

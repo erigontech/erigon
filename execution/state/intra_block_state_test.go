@@ -1277,6 +1277,16 @@ func TestDropTxMapsReleasesAnOversizedJournal(t *testing.T) {
 	require.Equal(t, 1, ibs.journal.length())
 }
 
+func TestDropTxMapsReleasesAnOversizedTxOutput(t *testing.T) {
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.txOutput = make([]byte, 0, maxKeptTxOutput+1)
+
+	ibs.DropTxMaps()
+
+	require.Zero(t, cap(ibs.txOutput))
+}
+
 func TestDropTxMapsReleasesWhatATransactionGrew(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())

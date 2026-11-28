@@ -156,6 +156,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
+	evm.returnData = nil
 
 	evm.abort.Store(false)
 }

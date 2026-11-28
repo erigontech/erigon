@@ -330,3 +330,25 @@ func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
 	_, balanceRead := reads.GetBalance(callee)
 	require.False(t, balanceRead, "a zero-value call to an account with code depends on no balance")
 }
+
+func TestResetDropsTheLastNestedReturnData(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	callee := accounts.InternAddress(common.HexToAddress("0x2000"))
+	call := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x20, 0x00, byte(GAS), byte(CALL), byte(POP)}
+	require.NoError(t, ibs.SetCode(caller, call, tracing.CodeChangeUnspecified))
+	// RETURN(0, 64 KiB)
+	require.NoError(t, ibs.SetCode(callee, []byte{byte(PUSH3), 0x01, 0x00, 0x00, byte(PUSH0), byte(RETURN)}, tracing.CodeChangeUnspecified))
+
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, evm.returnData, 1<<16, "the outer frame keeps its last CALL's return data")
+
+	evm.Reset(evmtypes.TxContext{}, ibs)
+
+	require.Zero(t, cap(evm.returnData))
+}

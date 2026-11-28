@@ -213,6 +213,7 @@ func (rw *WorkerContext) Park() {
 	rw.flushCollector()
 	rw.ibs.ResetReader(nil)
 	rw.ibs.DropTxMaps()
+	rw.evm.Reset(evmtypes.TxContext{}, rw.ibs)
 	rw.rs, rw.stateReader, rw.historyMode, rw.prevBlockReg, rw.chain = nil, nil, false, nil, nil
 }
 
