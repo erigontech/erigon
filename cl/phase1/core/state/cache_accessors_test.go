@@ -161,3 +161,12 @@ func TestGetActiveValidatorsIndicesIsExactLengthAndCounted(t *testing.T) {
 	require.Equal(t, len(got), cap(got))
 	require.Equal(t, before+1, shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64())
 }
+
+func TestGetActiveValidatorsIndicesDoesNotCountEmptyRegistry(t *testing.T) {
+	before := shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64()
+	s := state.New(&clparams.MainnetBeaconConfig)
+	require.Empty(t, s.GetActiveValidatorsIndices(1))
+	_, err := s.Copy()
+	require.NoError(t, err)
+	require.Equal(t, before, shuffling_metrics.ActiveValidatorsIndicesComputed.GetValueUint64())
+}
