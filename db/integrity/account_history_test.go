@@ -166,23 +166,25 @@ func buildDestroyedContract(t *testing.T, wipeAt, writeAt uint64) kv.TemporalRwD
 	defer domains.Close()
 
 	contract, neighbour, filler := common.HexToAddress("0xff"), common.HexToAddress("0x0100"), common.HexToAddress("0xf0")
-	h := common.BytesToHash([]byte{1})
-	slot := append(contract[:], h[:]...)
+	slot := func(i byte) []byte {
+		h := common.BytesToHash([]byte{i})
+		return append(contract[:], h[:]...)
+	}
 	account := func(nonce uint64) []byte {
 		return accounts.SerialiseV3(&accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash})
 	}
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, contract[:], account(1), 1, nil))
-	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{7}, 1, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot(1), []byte{7}, 1, nil))
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, neighbour[:], account(1), 1, nil))
-	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(neighbour[:], h[:]...), []byte{7}, 1, nil))
+	neighbourSlot := common.BytesToHash([]byte{1})
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(neighbour[:], neighbourSlot[:]...), []byte{7}, 1, nil))
 	if wipeAt > 0 {
 		require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, contract[:], wipeAt))
 	}
 	require.NoError(t, domains.DomainDel(kv.AccountsDomain, tx, contract[:], 15, nil))
 	if writeAt > 0 {
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{8}, writeAt, nil))
-		h2 := common.BytesToHash([]byte{2})
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(contract[:], h2[:]...), []byte{9}, writeAt, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot(1), []byte{8}, writeAt, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot(2), []byte{9}, writeAt, nil))
 	}
 	for txNum := uint64(30); txNum < txs; txNum++ {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, filler[:], account(txNum), txNum, nil))

@@ -42,7 +42,7 @@ import (
 // destroying tx, and that every account with storage in the latest state exists.
 func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	var probs problems
-	err := walkAccountHistory(ctx, sc, db, fromStep, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
+	if err := walkAccountHistory(ctx, sc, db, fromStep, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
 		asOf, state := txNum, "absent before"
 		switch {
 		case len(before) == 0:
@@ -57,11 +57,10 @@ func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.Tempo
 		}
 		return probs.report(failFast, fmt.Errorf("%w: %s: account %x is %s txNum %d, but its slot %x is set",
 			ErrIntegrity, StorageOfAbsentAccount, addr, state, txNum, slot))
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	err = walkLatest(ctx, sc, db, kv.StorageDomain, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, k, _ []byte) error {
+	if err := walkLatest(ctx, sc, db, kv.StorageDomain, logger, StorageOfAbsentAccount, func(tx kv.TemporalTx, k, _ []byte) error {
 		addr := k[:length.Addr]
 		acc, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 		if err != nil || len(acc) > 0 {
@@ -69,8 +68,7 @@ func CheckStorageOfAbsentAccount(ctx context.Context, sc SamplerCfg, db kv.Tempo
 		}
 		return probs.report(failFast, fmt.Errorf("%w: %s: account %x is absent in the latest state, but its slot %x is set",
 			ErrIntegrity, StorageOfAbsentAccount, addr, k[length.Addr:]))
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	return probs.verdict(string(StorageOfAbsentAccount))
@@ -99,7 +97,7 @@ func firstStorageAsOf(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, erro
 // the latest state, and after every code hash change in the accounts history.
 func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
 	var probs problems
-	err := walkAccountHistory(ctx, sc, db, fromStep, logger, CodeHash, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
+	if err := walkAccountHistory(ctx, sc, db, fromStep, logger, CodeHash, func(tx kv.TemporalTx, addr []byte, txNum uint64, before, after []byte) error {
 		codeHash := accounts.DeserialiseV3CodeHash(after)
 		if bytes.Equal(accounts.DeserialiseV3CodeHash(before), codeHash) {
 			return nil
@@ -109,18 +107,16 @@ func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failF
 			return err
 		}
 		return reportCodeMismatch(&probs, failFast, addr, codeHash, code, fmt.Sprintf("after txNum %d", txNum))
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	err = walkLatest(ctx, sc, db, kv.CodeDomain, logger, CodeHash, func(tx kv.TemporalTx, addr, code []byte) error {
+	if err := walkLatest(ctx, sc, db, kv.CodeDomain, logger, CodeHash, func(tx kv.TemporalTx, addr, code []byte) error {
 		acc, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 		if err != nil {
 			return err
 		}
 		return reportCodeMismatch(&probs, failFast, addr, accounts.DeserialiseV3CodeHash(acc), code, "in the latest state")
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	return probs.verdict(string(CodeHash))
@@ -206,9 +202,9 @@ type accountChanges struct {
 // history files, with the account before and after the change. Each file is scanned by one
 // goroutine, and the sampled accounts are visited by a pool of workers.
 func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, fromStep uint64, logger log.Logger, check Check, visit accountChangeVisitor) error {
-	files, err := accountHistoryFiles(ctx, db, fromStep)
-	if err != nil {
-		return err
+	files, filesErr := accountHistoryFiles(ctx, db, fromStep)
+	if filesErr != nil {
+		return filesErr
 	}
 	start := time.Now()
 	var scanned, changes atomic.Uint64
@@ -258,7 +254,7 @@ func walkAccountHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 			return nil
 		})
 	}
-	err = g.Wait()
+	err := g.Wait()
 	logger.Info(fmt.Sprintf("[integrity] %s: history walked", check), "files", len(files), "changes", common.PrettyCounter(changes.Load()), "took", time.Since(start))
 	return err
 }
