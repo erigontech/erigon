@@ -353,6 +353,26 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
+// ResetReader is Reset over another committed-base reader. It also replaces the maps
+// that clear keeps at their largest size and drops an oversized journal and output
+// buffer, so a state kept across blocks does not keep its largest transaction's memory.
+func (ibs *IntraBlockState) ResetReader(stateReader StateReader) {
+	ibs.Reset()
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	ibs.accessList = accessList{addresses: make(map[accounts.Address]int)}
+	ibs.sdProbe = nil
+	ibs.committedBase = nil
+	ibs.journal.dirties = make(map[accounts.Address]int)
+	ibs.transientStorage = newTransientStorage()
+	if cap(ibs.journal.entries) > maxKeptJournalEntries {
+		ibs.journal.entries = nil
+	}
+	if cap(ibs.txOutput) > maxKeptTxOutput {
+		ibs.txOutput = nil
+	}
+}
+
 // statePool is sync.Pool's surface, so a test can substitute one that keeps
 // what it is given: sync.Pool may discard any item.
 type statePool interface {
@@ -461,6 +481,9 @@ func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
 
 // maxKeptTxOutput bounds the output buffer one transaction leaves to the next.
 const maxKeptTxOutput = int(datasize.MB)
+
+// maxKeptJournalEntries bounds the journal a kept state carries to its next block: about 1 MB.
+const maxKeptJournalEntries = 1 << 14
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
