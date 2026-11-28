@@ -256,8 +256,10 @@ type ApiHandler struct {
 	syncMessagePool           sync_contribution_pool.SyncContributionPool
 	committeeSub              committee_subscription.CommitteeSubscribe
 	attestationProducer       attestation_producer.AttestationDataProducer
-	attestationDataImportWait time.Duration
+	importWait                time.Duration
+	// Each endpoint that waits for an import has its own per-slot budget, so a caller of one does not cut the wait of the other.
 	attestationDataWaitedSlot atomic.Uint64
+	headRootWaitedSlot        atomic.Uint64
 	aggregatePool             aggregation.AggregationPool
 
 	// services
@@ -394,7 +396,7 @@ func NewApiHandler(
 		columnStorage:                      columnStorage,
 		caplinSnapshots:                    blobSnapshots,
 		attestationProducer:                attestationProducer,
-		attestationDataImportWait:          defaultAttestationDataImportWait,
+		importWait:                         defaultImportWait,
 		blobBundles:                        blobBundles,
 		engine:                             engine,
 		syncMessagePool:                    syncMessagePool,
