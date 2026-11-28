@@ -537,6 +537,11 @@ func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
 }
 
+// BlobBackfilled reports whether the blob backfill has been marked complete.
+func (s *Antiquary) BlobBackfilled() bool {
+	return s.blobBackfilled.Load()
+}
+
 // RetireBlobSnapshotsBelow drops blob snapshot segments that hold nothing at or above floor
 // and stops seeding them.
 func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
