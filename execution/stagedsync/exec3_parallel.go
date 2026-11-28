@@ -3197,12 +3197,12 @@ func (be *blockExecutor) staleReadSet(txIdx int, rs state.ReadSet) (stale bool, 
 			stale = true
 			// A same-writer re-publication (same TxIndex, new incarnation) names no
 			// blocker: parking would wait on a writer that will just re-publish, so
-			// re-execute at once — the new value is already published. Only a different
-			// writer that moved the version is a blocker to wait for.
+			// re-execute at once — the new value is already published. Only a version
+			// moved by a different writer names a blocker: the higher of the two writers.
 			// Invariant: a read can only be invalidated by a PREDECESSOR write.
 			// A blocker >= this task is a forward dependency (a future write
 			// invalidating a past read) — impossible in Block-STM; fail loud.
-			if b := be.taskIndexOf(wv.TxIndex); (rv.TxIndex != wv.TxIndex || wv.Incarnation == -1) && b > blocker {
+			if b := max(be.taskIndexOf(rv.TxIndex), be.taskIndexOf(wv.TxIndex)); (rv.TxIndex != wv.TxIndex || wv.Incarnation == -1) && b > blocker {
 				if b >= tx {
 					panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency",
 						be.blockNum, tx, txIdx, b, wv.TxIndex))

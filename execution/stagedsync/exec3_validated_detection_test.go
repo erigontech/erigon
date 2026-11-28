@@ -658,3 +658,22 @@ func TestValidateNowWaitsForPredecessorWhenAnUnnamedCheckFails(t *testing.T) {
 	require.False(t, valid)
 	require.Equal(t, 2, blocker, "a scan stopped by a check that names no writer must fall back to tx-1")
 }
+
+func TestValidateNowWaitsForTheWriterThatDroppedTheRead(t *testing.T) {
+	_, be := newPoolUnit(t, 4)
+	be.blockIO = &state.VersionedIO{}
+	be.versionMap = state.NewVersionMap(nil)
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addrB, state.StoragePath, key, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 2}})
+	be.blockIO.RecordReads(state.Version{TxIndex: 3}, reads)
+	low := newWS().stor(addrB, key, state.Version{TxIndex: 0}, *uint256.NewInt(5)).build()
+	be.blockIO.RecordWrites(state.Version{TxIndex: 0}, low)
+	be.versionMap.FlushWrites(low, false)
+	be.versionMap.MarkWritesValidated(low, nil)
+
+	valid, blocker := be.validateNow(3)
+	require.False(t, valid)
+	require.Equal(t, 2, blocker, "a read whose writer dropped the write must wait for that writer")
+}
