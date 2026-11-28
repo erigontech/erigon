@@ -2196,13 +2196,15 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 
 func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		typ   snaptype.Type
-		index int // -1 for the segment
+		name         string
+		typ          snaptype.Type
+		index        int // -1 for the segment
+		removedLater bool
 	}{
-		{"segment", snaptype2.Headers, -1},
-		{"index", snaptype2.Headers, 0},
-		{"second transactions index", snaptype2.Transactions, 1},
+		{"segment", snaptype2.Headers, -1, false},
+		{"index", snaptype2.Headers, 0, false},
+		{"second transactions index", snaptype2.Transactions, 1, false},
+		{"removed while the merge builds", snaptype2.Transactions, -1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := log.New()
@@ -2214,21 +2216,31 @@ func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
 					createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
 				}
 			}
-			createTestSegmentFile(t, 0, 100_000, tc.typ.Enum(), dir, tc.typ.Versions().Current, logger)
+			segVersion := tc.typ.Versions().Current
+			createTestSegmentFile(t, 0, 100_000, tc.typ.Enum(), dir, segVersion, logger)
+			for _, idx := range tc.typ.Indexes() { // a real index has its own version
+				require.NoError(t, os.Rename(filepath.Join(dir, snaptype.IdxFileName(segVersion, 0, 100_000, idx.Name)),
+					filepath.Join(dir, snaptype.IdxFileName(idx.Version.Current, 0, 100_000, idx.Name))))
+			}
 			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 			defer s.Close()
 			require.NoError(t, s.OpenFolder())
 
 			missing := tc.typ.FileInfo(dir, 0, 100_000).Name()
-			if tc.index >= 0 { // createTestSegmentFile names the indexes with the segment version
-				missing = snaptype.IdxFileName(tc.typ.Versions().Current, 0, 100_000, tc.typ.Indexes()[tc.index].Name)
+			if tc.index >= 0 {
+				idx := tc.typ.Indexes()[tc.index]
+				missing = snaptype.IdxFileName(idx.Version.Current, 0, 100_000, idx.Name)
 			}
 			require.FileExists(t, filepath.Join(dir, missing))
 			exist := fileExist
 			defer func() { fileExist = exist }()
+			checks := 0
 			fileExist = func(path string) (bool, error) {
 				if path == filepath.Join(dir, missing) {
-					return false, nil
+					checks++
+					if !tc.removedLater || checks > 1 {
+						return false, nil
+					}
 				}
 				return exist(path)
 			}
@@ -2242,11 +2254,15 @@ func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
 			onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
 			err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
 			require.ErrorContains(t, err, missing)
+			if !tc.removedLater {
+				require.Empty(t, deleted, "nothing is built when an output is missing before the merge")
+			}
 			for _, f := range deleted {
 				require.NotContains(t, before, filepath.Base(f), "only outputs of the failed range are deleted")
 			}
 
 			require.Equal(t, before, fileNames(t, dir), "every input file stays on disk")
+			requireOneVisibleLayout(t, s, small)
 			require.NoError(t, s.OpenFolder())
 			requireOneVisibleLayout(t, s, small)
 		})

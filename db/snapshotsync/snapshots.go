@@ -770,20 +770,15 @@ func truncateAtGap(segments VisibleSegments) VisibleSegments {
 }
 
 // indexedDirtyFilePaths returns the files of the indexed dirty segment named like path, relative to snapDir, or nil.
-func (s *BaseRoSnapshots) indexedDirtyFilePaths(t snaptype.Enum, path, snapDir string) (paths []string) {
+func (s *BaseRoSnapshots) indexedDirtyFilePaths(t snaptype.Enum, path, snapDir string) []string {
 	name := filepath.Base(path)
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
-	s.dirty[t].Walk(func(segments []*DirtySegment) bool {
-		i := slices.IndexFunc(segments, func(sn *DirtySegment) bool {
-			return sn.Decompressor != nil && sn.IsIndexed() && sn.FileName() == name
-		})
-		if i >= 0 {
-			paths = segments[i].FilePaths(snapDir)
-		}
-		return i < 0
-	})
-	return paths
+	sn, ok := findOpenSegment(s.dirty[t], func(sn *DirtySegment) bool { return sn.IsIndexed() && sn.FileName() == name })
+	if !ok {
+		return nil
+	}
+	return sn.FilePaths(snapDir)
 }
 
 // mergedFilesNotInEveryType returns the indexed segments that other types lack and that have smaller segments of
