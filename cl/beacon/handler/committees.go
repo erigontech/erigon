@@ -140,7 +140,11 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	if slotFilter != nil && !(epoch*a.beaconChainCfg.SlotsPerEpoch <= *slotFilter && *slotFilter < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot %d is not in epoch %d", *slotFilter, epoch))
 	}
-	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	isFinalized := canonicalRoot == blockRoot && slot <= a.forkchoiceStore.FinalizedSlot()
 	// s, cn := a.syncedData.HeadState()
 	// defer cn()
 

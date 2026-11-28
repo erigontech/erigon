@@ -63,6 +63,9 @@ func TestGetCommitteesSideBranchStateUsesBranchRandao(t *testing.T) {
 		return nil
 	}))
 	fcu.StateAtBlockRootVal = map[common.Hash]*state.CachingBeaconState{sideRoot: side}
+	lowestAvailable := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowestAvailable
+	fcu.FinalizedSlotVal = head.Slot()
 
 	want := committeesOf(t, side, epoch, cfg.SlotsPerEpoch)
 	headCommittees := committeesOf(t, head, epoch, cfg.SlotsPerEpoch)
@@ -73,10 +76,12 @@ func TestGetCommitteesSideBranchStateUsesBranchRandao(t *testing.T) {
 	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var body struct {
-		Data []committeeResponse `json:"data"`
+		Data      []committeeResponse `json:"data"`
+		Finalized bool                `json:"finalized"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, want, body.Data, "committees must come from the requested side-branch state")
+	require.False(t, body.Finalized)
 
 	delete(fcu.StateAtBlockRootVal, sideRoot)
 	rec = httptest.NewRecorder()
@@ -98,6 +103,7 @@ func TestGetCommitteesSideBranchStateUsesBranchRandao(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, committeesOf(t, side, epoch, cfg.SlotsPerEpoch), body.Data)
+	require.True(t, body.Finalized)
 }
 
 func committeesOf(t *testing.T, s *state.CachingBeaconState, epoch, slotsPerEpoch uint64) []committeeResponse {
