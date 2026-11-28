@@ -35,20 +35,17 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// The pool never shrinks: all entries a transaction may emit would park 13MB
-	// per arena, while a tenth still holds the ~1700 logs of a p99 block that a
-	// caller resetting per block pools in one go. Arena holds one txn's logs, not a block's.
-	maxPooledLogEntries = maxLogsPerTxn / 10
+	// Entries the pool keeps between transactions: all a transaction can emit.
+	maxPooledLogEntries = maxLogsPerTxn
 	maxPooledLogBytes   = maxLogBytesPerTxn
 
 	// One large log must not take the whole budget and starve the small entries
 	// real traffic is made of.
 	maxPooledLogDataCap = maxPooledLogBytes / 2
 
-	// Slots the arena keeps between resets. The run is a block for a caller that
-	// resets per block, so this is bounded by the memory it costs rather than by
-	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
-	maxRetainedLogSlots = 32 * 1024 / 8
+	// Slots the arena keeps between resets: all a transaction can emit, so one
+	// that fills its budget allocates nothing the next time.
+	maxRetainedLogSlots = maxLogsPerTxn
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
@@ -65,7 +62,10 @@ type logArena struct {
 // the entry; callers must copy it before retaining it across a reset or truncate.
 func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	logIdx := len(a.entries)
-	entries := slices.Grow(a.entries, 1)[:logIdx+1]
+	if logIdx == cap(a.entries) {
+		a.grow()
+	}
+	entries := a.entries[:logIdx+1]
 	a.entries = entries
 
 	// Always take: reset and truncate empty a slot before shrinking past it, so
@@ -84,6 +84,16 @@ func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) 
 	lp.Index = hexutil.Uint(a.indexInBlock)
 	a.indexInBlock++
 	return lp
+}
+
+// grow doubles the run but stops once at maxRetainedLogSlots, so a transaction
+// that fills its log budget leaves a run that reset keeps.
+func (a *logArena) grow() {
+	n := max(2*cap(a.entries), 1)
+	if cap(a.entries) < maxRetainedLogSlots {
+		n = min(n, maxRetainedLogSlots)
+	}
+	a.entries = append(make(types.Logs, 0, n), a.entries...)
 }
 
 // take returns a pooled entry, Topics and Data included for alloc to grow into.

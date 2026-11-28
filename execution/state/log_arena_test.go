@@ -573,5 +573,5 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
 
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
-	require.Less(t, held, 4<<20, "an arena holds %dKB after mixed traffic", held/1024)
+	require.Less(t, held, 16<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
