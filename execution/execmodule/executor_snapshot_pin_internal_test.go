@@ -28,11 +28,13 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -48,6 +50,39 @@ type pinTestBlockReader struct {
 func (pinTestBlockReader) FrozenBlocks() uint64 { return 0 }
 
 func (pinTestBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
+
+type startupWriterTestDB struct {
+	*temporal.DB
+	t *testing.T
+}
+
+func (db startupWriterTestDB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
+	tx, err := db.DB.BeginTemporalRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// A leaked writer would otherwise hang database cleanup on a failing test.
+	db.t.Cleanup(tx.Rollback)
+	return tx, nil
+}
+
+func TestProcessFrozenBlocksReleasesWriterOnCycleInitError(t *testing.T) {
+	pe, hook, _ := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+		if sd == nil {
+			return nil
+		}
+		// Commit execution ahead of the block index so opening the next cycle fails.
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
+		return &stagedsync.ErrLoopExhausted{From: 1, To: 1}
+	})
+	db := startupWriterTestDB{pe.db.(*temporal.DB), t}
+	pe.db = db
+	require.ErrorIs(t, pe.ProcessFrozenBlocks(t.Context(), hook, false), commitmentdb.ErrBehindCommitment)
+
+	next, err := db.BeginTemporalRwTry(t.Context())
+	require.NoError(t, err, "the next writer must be able to acquire the database immediately")
+	next.Rollback()
+}
 
 // newPinTestExecutor wires a PipelineExecutor around a single-stage Sync whose
 // Snapshots-stage Forward func is controlled by the test, so ProcessFrozenBlocks'

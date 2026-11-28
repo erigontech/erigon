@@ -315,11 +315,16 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err != nil {
 				return nil, nil, err
 			}
-			tx = newTx
 			newSD, err := execctx.NewSharedDomains(ctx, newTx, pe.logger)
 			if err != nil {
+				// RunLoop returns the previous cycle on error, so release the new pair here.
+				if newSD != nil {
+					newSD.Close()
+				}
+				newTx.Rollback()
 				return nil, nil, err
 			}
+			tx = newTx
 			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},
