@@ -61,8 +61,9 @@ func init() {
 	bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 }
 
-// regexpMatchTimeout bounds how long a trace can run past its deadline inside one regexp2 match:
-// regexp2 has no per-match cancel, so it cannot use the deadline of each trace.
+// regexpMatchTimeout bounds, to about one second, how long a trace can run past its deadline inside one
+// regexp2 match: regexp2 has no per-match cancel, adds its clock period to the deadline and checks it
+// from time to time, so it cannot use the deadline of each trace.
 const regexpMatchTimeout = time.Second
 
 // bigIntProgram is compiled once and the exported function mostly invoked to convert
@@ -475,15 +476,15 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
-	switch res.(type) {
-	case *goja.Object, *goja.Symbol:
+	if goja.IsString(res) {
+		// A long concatenation is a Go struct that json.Marshal does not encode as a string.
+		return json.Marshal(res.String())
+	}
+	if !goja.IsBigInt(res) {
 		return json.Marshal(res)
 	}
-	if goja.IsUndefined(res) || goja.IsNull(res) {
-		return json.Marshal(res)
-	}
-	// A primitive is stringified as the "" property of an object without a prototype, as JSON.stringify
-	// does: no toJSON hook of a string, number or boolean runs, and a BigInt hook gets the key "".
+	// A BigInt is stringified as the "" property of an object without a prototype, as JSON.stringify
+	// does, so its toJSON hook gets the key "".
 	holder := vm.NewObject()
 	if err := holder.SetPrototype(nil); err != nil {
 		return nil, err

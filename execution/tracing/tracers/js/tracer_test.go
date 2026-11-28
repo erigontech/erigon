@@ -556,6 +556,18 @@ func TestTopLevelPrimitiveResults(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `"to=0x0000000000000000000000000000000000000000"`, string(res))
 
+	res, err = run(`'é ' + '😀'`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"é 😀"`, string(res), "a non-ASCII string is a JSON string")
+
+	for _, nonFinite := range []string{`NaN`, `Infinity`, `-Infinity`} {
+		_, err = run(nonFinite)
+		require.Error(t, err, "%s has no JSON encoding", nonFinite)
+	}
+	res, err = run(`-0`)
+	require.NoError(t, err)
+	require.Equal(t, `-0`, string(res))
+
 	res, err = run(`(String.prototype.toJSON = function() { return 'changed'; }, 'original')`)
 	require.NoError(t, err)
 	require.JSONEq(t, `"original"`, string(res), "JSON.stringify reads no toJSON hook of a primitive")
