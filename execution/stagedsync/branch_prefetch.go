@@ -112,9 +112,12 @@ func (p *branchPrefetcher) close() {
 		default:
 			close(p.stop)
 			p.wg.Wait()
-			if cap(p.work) == branchPrefetchQueue {
+			// A nil queue makes a late add drop its item instead of reaching the next prefetcher.
+			queue := p.work
+			p.work = nil
+			if cap(queue) == branchPrefetchQueue {
 				select {
-				case spareQueue <- p.work:
+				case spareQueue <- queue:
 				default:
 				}
 			}

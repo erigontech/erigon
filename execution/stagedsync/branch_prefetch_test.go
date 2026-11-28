@@ -266,8 +266,17 @@ func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
 
 func TestBranchPrefetcherReusesTheQueueOfAClosedOne(t *testing.T) {
 	first := newBranchPrefetcher(context.Background(), nil)
+	queue := first.work
 	first.close()
 	second := newBranchPrefetcher(context.Background(), nil)
 	defer second.close()
-	require.True(t, first.work == second.work, "a new prefetcher must take the queue of a closed one instead of allocating a new one")
+	require.True(t, queue == second.work, "a new prefetcher must take the queue of a closed one instead of allocating a new one")
+}
+
+func TestClosedBranchPrefetcherDoesNotQueueOnTheReusedQueue(t *testing.T) {
+	first := newBranchPrefetcher(context.Background(), nil)
+	first.close()
+	queue := <-spareQueue
+	first.add(prefetchItem{account: common.Hash{1}})
+	require.Zero(t, len(queue), "an item added after close must not reach the queue the next prefetcher takes")
 }
