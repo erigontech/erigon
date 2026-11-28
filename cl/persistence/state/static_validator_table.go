@@ -273,9 +273,11 @@ type staticValidatorField[V any] struct {
 // StaticValidatorTable is a structure to manage a collection of StaticValidators.
 // It is used for tracking multiple validators and their state changes.
 type StaticValidatorTable struct {
-	validatorTable []*StaticValidator
-	slot           uint64
-	sync           sync.RWMutex // Mutex for safe concurrent access.
+	validatorTable        []*StaticValidator
+	slot                  uint64
+	replayDisabled        bool
+	archiveStatesDisabled bool
+	sync                  sync.RWMutex // Mutex for safe concurrent access.
 }
 
 // NewStaticValidatorTable creates a new instance of StaticValidatorTable.
@@ -283,6 +285,14 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 	return &StaticValidatorTable{
 		validatorTable: make([]*StaticValidator, 0, 2400), // Preallocating memory for efficiency.
 	}
+}
+
+func (s *StaticValidatorTable) SetReplayEnabled(enabled bool) {
+	s.replayDisabled = !enabled
+}
+
+func (s *StaticValidatorTable) ReplayEnabled() bool {
+	return !s.replayDisabled
 }
 
 func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
@@ -377,6 +387,27 @@ func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64,
 	}
 	s.validatorTable[validatorIndex].AddWithdrawableEpoch(slot, withdrawableEpoch)
 	return nil
+}
+
+var (
+	ErrValidatorTableBehind    = errors.New("static validator table is still replaying")
+	ErrValidatorTableTruncated = errors.New("static validator table is truncated")
+)
+
+func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit int) (*solid.ValidatorSet, error) {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	if !s.replayDisabled && slot > s.slot {
+		return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
+	}
+	if !s.archiveStatesDisabled && uint64(len(s.validatorTable)) < length {
+		return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
+	}
+	out := solid.NewValidatorSetWithLength(limit, int(length))
+	for i, validator := range s.validatorTable[:min(uint64(len(s.validatorTable)), length)] {
+		validator.ToValidator(out.Get(i), slot)
+	}
+	return out, nil
 }
 
 func (s *StaticValidatorTable) ForEach(fn func(validatorIndex uint64, validator *StaticValidator) bool) {

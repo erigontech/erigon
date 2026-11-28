@@ -71,6 +71,10 @@ func NewHistoricalStatesReader(
 	}
 }
 
+func (r *HistoricalStatesReader) StateHistoryEnabled() bool {
+	return r.validatorTable.ReplayEnabled()
+}
+
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	var snapshotView *snapshotsync.CaplinStateView
 	if r.stateSn != nil {
@@ -557,27 +561,20 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_access
 }
 
 func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
-	// Read the file
-	remainder := slot % clparams.SlotsPerDump
-	freshDumpSlot := slot - remainder
-
-	midpoint := uint64(clparams.SlotsPerDump / 2)
-	var compressed []byte
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
 	}
-	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
-	if forward {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
-		if err != nil {
-			return nil, err
-		}
+	remainder := slot % clparams.SlotsPerDump
+	freshDumpSlot := slot - remainder
+	forward := remainder <= clparams.SlotsPerDump/2 || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	dumpSlot := freshDumpSlot
+	if !forward {
+		dumpSlot += clparams.SlotsPerDump
+	}
+	compressed, err := kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(dumpSlot))
+	if err != nil {
+		return nil, err
 	}
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
@@ -589,30 +586,23 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	currentList := make([]byte, validatorSetLength*8)
-	_, err = io.ReadFull(zstdReader, currentList)
+	readBytes, err := io.ReadFull(zstdReader, currentList)
 	base_encoding.PutZstdReader(zstdReader)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err != nil && (!errors.Is(err, io.ErrUnexpectedEOF) || dumpSlot >= slot || readBytes%8 != 0) {
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("%w: %w", state_accessors.ErrHistoryRebuildRequired, err)
+		}
 		return nil, err
 	}
 
-	highestSlotAvailable, err := r.highestSlotInSnapshotsAndDB(tx, diffBucket)
-	if err != nil {
-		return nil, err
-	}
 	if forward {
-		for currSlot := freshDumpSlot; currSlot <= slot && currSlot <= highestSlotAvailable; currSlot++ {
+		for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
 			key := base_encoding.Encode64ToBytes4(currSlot)
 			v, err := kvGetter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
 			if len(v) == 0 {
-				continue
-			}
-			if len(key) != 4 {
-				return nil, fmt.Errorf("invalid key %x", key)
-			}
-			if currSlot == freshDumpSlot {
 				continue
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
@@ -640,7 +630,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		}
 	}
 	currentList = currentList[:validatorSetLength*8]
-	return currentList, err
+	return currentList, nil
 }
 
 func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
@@ -654,13 +644,15 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	}
 	midpoint := uint64(clparams.SlotsPerDump / 2)
 	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	dumpSlot := freshDumpSlot
 	if forward {
 		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		dumpSlot += clparams.SlotsPerDump
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(dumpSlot))
 		if err != nil {
 			return nil, err
 		}
@@ -769,6 +761,10 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 	return out.DecodeSSZ(currentList, 0)
 }
 
+func (r *HistoricalStatesReader) ValidatorTableCovers(slot uint64) bool {
+	return slot <= r.validatorTable.Slot()
+}
+
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
 	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
@@ -781,15 +777,11 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGe
 	}
 	validatorSetLength := sd.ValidatorLength
 
-	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
-	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if validatorIndex >= validatorSetLength {
-			return false
-		}
-		validator.ToValidator(out.Get(int(validatorIndex)), slot)
-		return true
-	})
+	out, err := r.validatorTable.CopyValidatorsAtSlot(slot, validatorSetLength, int(r.cfg.ValidatorRegistryLimit))
+	if err != nil {
+		return nil, err
+	}
 	// Read the balances
 
 	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, kvGetter, validatorSetLength, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)

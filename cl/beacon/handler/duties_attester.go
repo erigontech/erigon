@@ -25,12 +25,14 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 )
 
 const maxEpochsLookaheadForDuties = 32
@@ -69,7 +71,7 @@ func (a *ApiHandler) getDependentRoot(getBlockRootAtSlot func(uint64) (common.Ha
 	}
 	root, err := getBlockRootAtSlot(dependentRootSlot)
 	if err != nil {
-		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root not found for epoch %d", epoch))
 	}
 	return root, nil
 }
@@ -88,7 +90,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -116,7 +118,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -222,18 +224,21 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 	defer tx.Rollback()
 
-	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
+	view := a.caplinStateSnapshots.View()
+	defer view.Close()
+	readiness, err := newHistoricalReadiness(tx, view)
 	if err != nil {
 		return nil, err
 	}
-	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+	if a.stateReader.StateHistoryEnabled() {
+		stateGetter, err = historicalDutiesStateGetter(tx, readiness, a.beaconChainCfg)
+		if err != nil {
+			return nil, err
+		}
+	} else if expectedSlot >= readiness.progress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
-
-	snRoTx := a.caplinStateSnapshots.View()
-	defer snRoTx.Close()
-
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	dependentRoot, err = a.getHistoricalAttesterDependentRoot(tx, stateGetter, epoch)
 	if err != nil {
@@ -244,23 +249,23 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 
 	// finality case
-	activeIdxs, err := state_accessors.ReadActiveIndicies(
-		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch,
-	)
+	activeIdxs, err := state_accessors.ReadActiveIndicies(stateGetter, expectedSlot)
 	if err != nil {
 		return nil, err
+	}
+	if activeIdxs == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("active validator indices not found for slot %d", expectedSlot))
 	}
 
 	committeesPerSlot := max(min(a.beaconChainCfg.MaxCommitteesPerSlot, uint64(len(activeIdxs))/a.beaconChainCfg.SlotsPerEpoch/a.beaconChainCfg.TargetCommitteeSize), 1)
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, expectedSlot, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, fmt.Errorf("could not read randao mix: %w", err)
 	}
 
-	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+	for currSlot := expectedSlot; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 		for committeeIndex := range committeesPerSlot {
 			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch
@@ -291,4 +296,63 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		}
 	}
 	return newBeaconResponse(resp).WithOptimistic(optimistic).With("dependent_root", dependentRoot), nil
+}
+
+type historicalReadiness struct {
+	progress      uint64
+	reconstructed bool
+	view          *snapshotsync.CaplinStateView
+}
+
+func newHistoricalReadiness(tx kv.Tx, view *snapshotsync.CaplinStateView) (historicalReadiness, error) {
+	progressBytes, err := tx.GetOne(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+	if err != nil {
+		return historicalReadiness{}, err
+	}
+	r := historicalReadiness{reconstructed: len(progressBytes) != 0, view: view}
+	if r.reconstructed {
+		r.progress = base_encoding.Decode64FromBytes4(progressBytes)
+	}
+	return r, nil
+}
+
+func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) error {
+	if r.reconstructed && writeSlot <= r.progress {
+		return nil
+	}
+	if r.view != nil {
+		if _, ok := r.view.VisibleSegment(rowSlot, table); ok {
+			return nil
+		}
+	}
+	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
+}
+
+func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
+	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
+	return func(table string, key []byte) ([]byte, error) {
+		rowSlot := base_encoding.Decode64FromBytes4(key)
+		writeSlot := rowSlot
+		switch table {
+		case kv.RandaoMixes:
+			writeSlot += cfg.SlotsPerEpoch
+		case kv.BlockRoot:
+			if rowSlot != cfg.GenesisSlot {
+				writeSlot++
+			}
+		}
+		if err := readiness.check(rowSlot, writeSlot, table); err != nil {
+			if table == kv.BlockRoot {
+				root, rootErr := beacon_indicies.ReadCanonicalBlockRoot(tx, rowSlot)
+				if rootErr != nil {
+					return nil, rootErr
+				}
+				if root != (common.Hash{}) {
+					return root[:], nil
+				}
+			}
+			return nil, err
+		}
+		return get(table, key)
+	}, nil
 }

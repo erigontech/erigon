@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
@@ -65,7 +66,7 @@ func WrapEndpointError(err error) *EndpointError {
 		return NewEndpointError(http.StatusNotFound, ErrorCantFindBeaconState)
 	}
 	// A node without a head state is transiently unavailable, not faulty.
-	if errors.Is(err, synced_data.ErrNotSynced) {
+	if errors.Is(err, synced_data.ErrNotSynced) || errors.Is(err, state_accessors.ErrValidatorTableBehind) {
 		return NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	return NewEndpointError(http.StatusInternalServerError, err)

@@ -1,0 +1,1165 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package handler
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/node/ethconfig"
+)
+
+func dumpDutiesSnapshots(t *testing.T, dirs datadir.Dirs, types snapshotsync.SnapshotTypes, dumpEnd, width uint64, logger log.Logger) *snapshotsync.CaplinStateSnapshots {
+	t.Helper()
+	s := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+	t.Cleanup(s.Close)
+	require.NoError(t, s.DumpCaplinState(t.Context(), dumpEnd, width, 0, dirs, 1, log.LvlDebug, logger))
+	require.NoError(t, s.OpenFolder())
+	return s
+}
+
+func dutiesSpecStatusRequest(t *testing.T, handler *ApiHandler, method, path, body string) (int, string) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body)))
+	return recorder.Code, recorder.Body.String()
+}
+
+func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
+	setProgress := func(t *testing.T, db kv.RwDB, slot uint64) {
+		t.Helper()
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return state_accessors.SetStateProcessingProgress(tx, slot)
+		}))
+	}
+	removeProposerRoots := func(t *testing.T, db kv.RwDB) {
+		t.Helper()
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for slot := uint64(0); slot <= 95; slot++ {
+				if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+					return err
+				}
+				if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
+	setupMissingProposerRoot := func(t *testing.T) *ApiHandler {
+		t.Helper()
+		db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+		fcu.FinalizedSlotVal = 127
+		removeProposerRoots(t, db)
+		return handler
+	}
+	setupProposerValidatorTable := func(t *testing.T, tableSlot uint64, partial bool) *ApiHandler {
+		t.Helper()
+		db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+		fcu.FinalizedSlotVal = 127
+		setProgress(t, db, 96)
+		validatorTable := state_accessors.NewStaticValidatorTable()
+		if partial {
+			validator, err := preState.ValidatorForValidatorIndex(0)
+			require.NoError(t, err)
+			require.True(t, validator.Active(3))
+			require.NoError(t, validatorTable.AddValidator(validator, 0, 0))
+			require.Greater(t, preState.ValidatorLength(), validatorTable.Length())
+		}
+		validatorTable.SetSlot(tableSlot)
+		handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, nil, handler.syncedData)
+		return handler
+	}
+
+	// proposer duties v1/v2 and attester duties list 200, 400, 500 and 503 only; none of
+	// these failure modes may answer 404.
+	cases := []struct {
+		name        string
+		setup       func(t *testing.T) *ApiHandler
+		method      string
+		path        string
+		body        string
+		wantStatus  int
+		wantMessage string
+	}{
+		{
+			name: "proposer genesis reconstruction pending",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+				}))
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/0",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "historical state for slot 0 is not yet reconstructed",
+		},
+		{
+			name: "proposer genesis block not found",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				setProgress(t, db, 0)
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/0",
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "genesis block not found",
+		},
+		{
+			name: "proposer reconstruction pending with missing root",
+			setup: func(t *testing.T) *ApiHandler {
+				handler := setupMissingProposerRoot(t)
+				setProgress(t, handler.indiciesDB, 95)
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "historical state for slot 96 is not yet reconstructed",
+		},
+		{
+			name: "proposer reconstruction pending with available root",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				fcu.FinalizedSlotVal = 127
+				setProgress(t, db, 95)
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "historical state for slot 96 is not yet reconstructed",
+		},
+		{
+			name: "proposer dependent root not found",
+			setup: func(t *testing.T) *ApiHandler {
+				handler := setupMissingProposerRoot(t)
+				setProgress(t, handler.indiciesDB, 96)
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "dependent root not found for epoch 3",
+		},
+		{
+			name: "proposer genesis state not found",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, preState, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				setProgress(t, db, 0)
+				genesisRoot, err := preState.GetBlockRootAtSlot(0)
+				require.NoError(t, err)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(0), genesisRoot[:])
+				}))
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/0",
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "state not found for slot 0",
+		},
+		{
+			name: "proposer validators not found",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				fcu.FinalizedSlotVal = 127
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+				}))
+				return handler
+			},
+			method:     http.MethodGet,
+			path:       "/eth/v1/validator/duties/proposer/3",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "proposer validator table empty during replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 0, false)
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "static validator table does not yet cover slot 96",
+		},
+		{
+			name: "proposer validator table partial during replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 0, true)
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "static validator table does not yet cover slot 96",
+		},
+		{
+			name: "proposer validator replay pending with missing root",
+			setup: func(t *testing.T) *ApiHandler {
+				handler := setupProposerValidatorTable(t, 0, true)
+				removeProposerRoots(t, handler.indiciesDB)
+				return handler
+			},
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "static validator table does not yet cover slot 96",
+		},
+		{
+			name: "proposer validator table truncated after replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 96, true)
+			},
+			method:     http.MethodGet,
+			path:       "/eth/v1/validator/duties/proposer/3",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "proposer validator table empty after replay",
+			setup: func(t *testing.T) *ApiHandler {
+				return setupProposerValidatorTable(t, 96, false)
+			},
+			method:     http.MethodGet,
+			path:       "/eth/v1/validator/duties/proposer/3",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "attester head dependent root not found at genesis slot",
+			setup: func(t *testing.T) *ApiHandler {
+				_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				craftedHead, err := postState.Copy()
+				require.NoError(t, err)
+				require.NoError(t, craftedHead.SetSlot(262145))
+				manager, ok := syncedData.(*synced_data.SyncedDataManager)
+				require.True(t, ok)
+				headRoot, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+				require.NoError(t, err)
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(craftedHead, headRoot))
+				return handler
+			},
+			method:     http.MethodPost,
+			path:       "/eth/v1/validator/duties/attester/0",
+			body:       `["0"]`,
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "attester head dependent root not found",
+			setup: func(t *testing.T) *ApiHandler {
+				_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				craftedHead, err := postState.Copy()
+				require.NoError(t, err)
+				require.NoError(t, craftedHead.SetSlot(264224))
+				manager, ok := syncedData.(*synced_data.SyncedDataManager)
+				require.True(t, ok)
+				headRoot, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+				require.NoError(t, err)
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(craftedHead, headRoot))
+				return handler
+			},
+			method:     http.MethodPost,
+			path:       "/eth/v1/validator/duties/attester/66",
+			body:       `["0"]`,
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "attester historical genesis reconstruction pending",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(33)
+				fcu.LowestAvailableSlotVal = &lowest
+				setProgress(t, db, 31)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return beacon_indicies.MarkRootCanonical(tx, 0, common.Hash{1})
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/1",
+			body:        `["0"]`,
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "historical state for slot 32 is not yet reconstructed",
+		},
+		{
+			name: "attester historical genesis block not found",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(33)
+				fcu.LowestAvailableSlotVal = &lowest
+				setProgress(t, db, 32)
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/1",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "genesis block not found",
+		},
+		{
+			name: "attester historical reconstruction pending",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(97)
+				fcu.LowestAvailableSlotVal = &lowest
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					if err := beacon_indicies.MarkRootCanonical(tx, 31, common.Hash{1}); err != nil {
+						return err
+					}
+					return state_accessors.SetStateProcessingProgress(tx, 63)
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/2",
+			body:        `["0"]`,
+			wantStatus:  http.StatusServiceUnavailable,
+			wantMessage: "historical state for slot 64 is not yet reconstructed",
+		},
+		{
+			name: "attester historical dependent root not found",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(97)
+				fcu.LowestAvailableSlotVal = &lowest
+				setProgress(t, db, 64)
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/2",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "dependent root not found for epoch 2",
+		},
+		{
+			name: "attester historical dependent root row missing after reconstruction",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(129)
+				fcu.LowestAvailableSlotVal = &lowest
+				removeProposerRoots(t, db)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return state_accessors.SetStateProcessingProgress(tx, 100)
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/4",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "dependent root not found for epoch 4",
+		},
+		{
+			name: "attester active indices missing after reconstruction",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(97)
+				fcu.LowestAvailableSlotVal = &lowest
+				setProgress(t, db, 64)
+				genesisRoot, err := preState.GetBlockRootAtSlot(0)
+				require.NoError(t, err)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					if err := beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot); err != nil {
+						return err
+					}
+					getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+					_, err := handler.stateReader.ReadRandaoMixBySlotAndIndex(getter, 64, 0)
+					require.NoError(t, err)
+					indices, err := state_accessors.ReadActiveIndicies(getter, 64)
+					require.NoError(t, err)
+					require.Contains(t, indices, uint64(0))
+					return tx.Delete(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/2",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "active validator indices not found for slot 64",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := tc.setup(t)
+			status, body := dutiesSpecStatusRequest(t, handler, tc.method, tc.path, tc.body)
+			require.Equal(t, tc.wantStatus, status, body)
+			if tc.wantMessage != "" {
+				var response beaconhttp.EndpointError
+				require.NoError(t, json.Unmarshal([]byte(body), &response))
+				require.Equal(t, tc.wantMessage, response.Message)
+			}
+		})
+	}
+}
+
+func TestProposerDutiesWithZeroRandaoMix(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 95
+	require.Equal(t, uint64(64), preState.Slot())
+	require.NotEqual(t, common.Hash{}, preState.GetRandaoMix(0))
+	require.NoError(t, preState.SetRandaoMixAt(0, common.Hash{}))
+	genesisRoot, err := preState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot) }))
+	response := getProposerDutiesForEpoch(t, handler, 2)
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	require.Len(t, response.Data, int(slotsPerEpoch))
+	for i, duty := range response.Data {
+		require.Equal(t, 2*slotsPerEpoch+uint64(i), duty.Slot)
+	}
+}
+
+func TestHistoricalDutiesUseSnapshotCoverage(t *testing.T) {
+	logger := log.New()
+	db, _, _, preState, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	genesisRoot, err := preState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 63)
+	}))
+	fcu.FinalizedSlotVal = 127
+
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{
+		kv.StateEvents:               types.KeyValueGetters[kv.StateEvents],
+		kv.ActiveValidatorIndicies:   types.KeyValueGetters[kv.ActiveValidatorIndicies],
+		kv.SlotData:                  types.KeyValueGetters[kv.SlotData],
+		kv.ValidatorEffectiveBalance: types.KeyValueGetters[kv.ValidatorEffectiveBalance],
+	}
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	require.Equal(t, uint64(999), snapshots.BlocksAvailable())
+	handler.caplinStateSnapshots = snapshots
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+	}))
+
+	t.Run("attester state from snapshots", func(t *testing.T) {
+		status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`)
+		require.Equal(t, http.StatusOK, status, body)
+		var response struct {
+			Data []attesterDutyResponse
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &response))
+		require.Len(t, response.Data, 1)
+		require.Equal(t, uint64(0), response.Data[0].ValidatorIndex)
+		require.Equal(t, uint64(2), response.Data[0].Slot/handler.beaconChainCfg.SlotsPerEpoch)
+	})
+
+	t.Run("proposer validator coverage after replay", func(t *testing.T) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96)); err != nil {
+				return err
+			}
+			return state_accessors.SetStateProcessingProgress(tx, 95)
+		}))
+		validatorTable := state_accessors.NewStaticValidatorTable()
+		refilled, err := antiquary.FillStaticValidatorsTableIfNeeded(logger, snapshots, validatorTable)
+		require.NoError(t, err)
+		require.True(t, refilled)
+		require.Equal(t, snapshots.BlocksAvailable(), validatorTable.Slot())
+		handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+		status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+		require.Equal(t, http.StatusOK, status, body)
+	})
+}
+
+func TestHistoricalAttesterDutiesSnapshotStartsAfterRequestedSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	lowest := uint64(33)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 0, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 31)
+	}))
+
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.SnapshotTypes{
+		KeyValueGetters: map[string]snapshotsync.KeyValueGetter{
+			kv.ActiveValidatorIndicies: func(uint64) ([]byte, []byte, error) { return nil, nil, nil },
+		},
+	}
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 100_000, 50_000, logger)
+	files := snapshots.SegFileNames(50_000, 100_000)
+	require.Len(t, files, 1)
+	require.NoError(t, snapshots.OpenList([]string{filepath.Base(files[0])}, false))
+	require.Equal(t, uint64(99_999), snapshots.BlocksAvailable())
+	handler.caplinStateSnapshots = snapshots
+
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/1", `["0"]`)
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalProposerDutiesValidatorTableRewind(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	validatorTable := state_accessors.NewStaticValidatorTable()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, state_accessors.ReadValidatorsTable(tx, validatorTable))
+	require.GreaterOrEqual(t, validatorTable.Slot(), uint64(96))
+	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, nil, handler.syncedData)
+
+	getter := func(table string, key []byte) ([]byte, error) {
+		if table == kv.SlotData {
+			validatorTable.SetSlot(95)
+		}
+		return tx.GetOne(table, key)
+	}
+	duties, err := handler.getHistoricalProposerDuties(t.Context(), tx, getter, 3, 96)
+	require.Equal(t, uint64(95), validatorTable.Slot())
+	require.Error(t, err, "returned %d proposer duties after rewind", len(duties))
+	require.ErrorIs(t, err, state_accessors.ErrValidatorTableBehind)
+	endpointErr := beaconhttp.WrapEndpointError(err)
+	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
+	require.Contains(t, endpointErr.Message, "slot 96")
+}
+
+func TestHistoricalAttesterRandaoPendingAtWriteSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	lowest := uint64(129)
+	fcu.LowestAvailableSlotVal = &lowest
+	var active []byte
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		indices, err := tx.GetOne(kv.ActiveValidatorIndicies, base_encoding.Encode64ToBytes4(64))
+		if err != nil {
+			return err
+		}
+		active = append([]byte(nil), indices...)
+		if err := tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 64)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{
+		kv.BlockRoot: func(uint64) ([]byte, []byte, error) { return nil, make([]byte, 32), nil },
+		kv.ActiveValidatorIndicies: func(slot uint64) ([]byte, []byte, error) {
+			if slot == 128 {
+				return nil, active, nil
+			}
+			return nil, nil, nil
+		},
+	}}
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	handler.caplinStateSnapshots = snapshots
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/4", `["0"]`)
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalAttesterCanonicalRootBeforeSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		canonicalSlot uint64
+		progress      uint64
+		status        int
+	}{
+		{"exact canonical root", 31, 0, http.StatusOK},
+		{"earlier canonical root while indexing is pending", 30, 0, http.StatusServiceUnavailable},
+		{"block root row written at the next slot", 30, 31, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+			lowest := uint64(65)
+			fcu.LowestAvailableSlotVal = &lowest
+			root := common.Hash{1}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.MarkRootCanonical(tx, tc.canonicalSlot, root); err != nil {
+					return err
+				}
+				if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(31)); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
+			}))
+			dirs := datadir.New(t.TempDir())
+			getter := func(uint64) ([]byte, []byte, error) { return nil, nil, nil }
+			active := dumpDutiesSnapshots(t, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter}}, 100_000, 50_000, logger)
+			activeFiles := active.SegFileNames(0, 50_000)
+			require.Len(t, activeFiles, 1)
+			rootGetter := func(uint64) ([]byte, []byte, error) { return nil, root[:], nil }
+			roots := dumpDutiesSnapshots(t, dirs, snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.BlockRoot: rootGetter}}, 100_000, 50_000, logger)
+			rootFiles := roots.SegFileNames(50_000, 100_000)
+			require.Len(t, rootFiles, 1)
+			types := snapshotsync.SnapshotTypes{KeyValueGetters: map[string]snapshotsync.KeyValueGetter{kv.ActiveValidatorIndicies: getter, kv.BlockRoot: getter}}
+			snapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, types, logger)
+			defer snapshots.Close()
+			require.NoError(t, snapshots.OpenList([]string{filepath.Base(activeFiles[0]), filepath.Base(rootFiles[0])}, false))
+			handler.caplinStateSnapshots = snapshots
+			status, body := dutiesSpecStatusRequest(t, handler, http.MethodPost, "/eth/v1/validator/duties/attester/2", `[]`)
+			require.Equal(t, tc.status, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerBalancesPendingBeforeRoot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= 95; slot++ {
+			if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	handler.caplinStateSnapshots = snapshots
+	require.True(t, handler.stateReader.ValidatorTableCovers(96))
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalProposerRandaoPendingAtWriteSlot(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	fcu.FinalizedSlotVal = 160
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		data, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+		if err != nil {
+			return err
+		}
+		if err := tx.Put(kv.SlotData, base_encoding.Encode64ToBytes4(128), data); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(127), make([]byte, 32)); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 64)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+	delete(types.KeyValueGetters, kv.RandaoMixes)
+	snapshots := dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	handler.caplinStateSnapshots = snapshots
+	require.True(t, handler.stateReader.ValidatorTableCovers(128))
+	status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/4", "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+}
+
+func TestHistoricalProposerDutiesAtBalanceDumpBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		dumpReady bool
+		want      int
+	}{
+		{"dump ready", true, http.StatusOK},
+		{"dump pending", false, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			db, _, _, preState, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+			slot := uint64(clparams.SlotsPerDump)
+			fcu.FinalizedSlotVal = slot + 32
+			head, err := postState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, head.SetSlot(slot+32))
+			manager := syncedData.(*synced_data.SyncedDataManager)
+			root, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+			require.NoError(t, err)
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, root))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				for _, row := range []struct {
+					table    string
+					from, to uint64
+				}{
+					{kv.SlotData, 96, slot},
+					{kv.EffectiveBalancesDump, 0, slot},
+					{kv.RandaoMixes, 64, slot - 64},
+				} {
+					data, err := tx.GetOne(row.table, base_encoding.Encode64ToBytes4(row.from))
+					if err != nil {
+						return err
+					}
+					if len(data) == 0 {
+						t.Fatalf("missing %s at %d", row.table, row.from)
+					}
+					if err := tx.Put(row.table, base_encoding.Encode64ToBytes4(row.to), data); err != nil {
+						return err
+					}
+				}
+				if err := beacon_indicies.MarkRootCanonical(tx, slot-1, common.Hash{1}); err != nil {
+					return err
+				}
+				if !tc.dumpReady {
+					if err := tx.Delete(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+				}
+				return state_accessors.SetStateProcessingProgress(tx, slot-1)
+			}))
+			dirs := datadir.New(t.TempDir())
+			types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, handler.beaconChainCfg)
+			getters := map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+			if tc.dumpReady {
+				getters[kv.EffectiveBalancesDump] = types.KeyValueGetters[kv.EffectiveBalancesDump]
+			}
+			types.KeyValueGetters = getters
+			snapshots := dumpDutiesSnapshots(t, dirs, types, 2000, 2000, logger)
+			handler.caplinStateSnapshots = snapshots
+			view := snapshots.View()
+			_, slotCovered := view.VisibleSegment(slot, kv.SlotData)
+			_, dumpCovered := view.VisibleSegment(slot, kv.EffectiveBalancesDump)
+			_, diffCovered := view.VisibleSegment(slot, kv.ValidatorEffectiveBalance)
+			view.Close()
+			require.True(t, slotCovered)
+			require.Equal(t, tc.dumpReady, dumpCovered)
+			require.False(t, diffCovered)
+			validatorTable := state_accessors.NewStaticValidatorTable()
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, validatorTable) }))
+			validatorTable.SetSlot(slot)
+			handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, validatorTable, preState, snapshots, handler.syncedData)
+			status, body := dutiesSpecStatusRequest(t, handler, http.MethodGet, "/eth/v1/validator/duties/proposer/48", "")
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerShortBalanceDump(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		slot, dumpSlot, progress uint64
+		want                     int
+	}{
+		{"exact", 1536, 1536, 1536, http.StatusInternalServerError},
+		{"backward", 2560, 3072, 3073, http.StatusInternalServerError},
+		{"forward", 1568, 1536, 1568, http.StatusOK},
+		{"partial forward", 1568, 1536, 1568, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, postState, h, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.FinalizedSlotVal = tc.slot + 32
+			head, err := postState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, head.SetSlot(tc.slot+32))
+			root, err := postState.GetBlockRootAtSlot(postState.Slot() - 1)
+			require.NoError(t, err)
+			require.NoError(t, syncedData.(*synced_data.SyncedDataManager).OnHeadStateWithBlockRoot(head, root))
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				data, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+				if err != nil {
+					return err
+				}
+				if err := tx.Put(kv.SlotData, base_encoding.Encode64ToBytes4(tc.slot), data); err != nil {
+					return err
+				}
+				mix, err := tx.GetOne(kv.RandaoMixes, base_encoding.Encode64ToBytes4(64))
+				if err != nil {
+					return err
+				}
+				if err := tx.Put(kv.RandaoMixes, base_encoding.Encode64ToBytes4(tc.slot-64), mix); err != nil {
+					return err
+				}
+				dump, err := tx.GetOne(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(0))
+				if err != nil {
+					return err
+				}
+				decoder, err := zstd.NewReader(nil)
+				if err != nil {
+					return err
+				}
+				full, err := decoder.DecodeAll(dump, nil)
+				decoder.Close()
+				if err != nil {
+					return err
+				}
+				require.Greater(t, len(full), 8)
+				short := full[:len(full)-8]
+				if tc.name == "partial forward" {
+					short = full[:9]
+				}
+				encoder, err := zstd.NewWriter(nil)
+				if err != nil {
+					return err
+				}
+				encoded := encoder.EncodeAll(short, nil)
+				encoder.Close()
+				if err := tx.Put(kv.EffectiveBalancesDump, base_encoding.Encode64ToBytes4(tc.dumpSlot), encoded); err != nil {
+					return err
+				}
+				if tc.name == "forward" {
+					var diff bytes.Buffer
+					if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(&diff, short, full); err != nil {
+						return err
+					}
+					if err := tx.Put(kv.ValidatorEffectiveBalance, base_encoding.Encode64ToBytes4(tc.slot), diff.Bytes()); err != nil {
+						return err
+					}
+				}
+				if err := beacon_indicies.MarkRootCanonical(tx, tc.slot-1, common.Hash{1}); err != nil {
+					return err
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
+			}))
+			table := state_accessors.NewStaticValidatorTable()
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, table) }))
+			table.SetSlot(tc.slot)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			status, _ := dutiesSpecStatusRequest(t, h, http.MethodGet, fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", tc.slot/32), "")
+			require.Equal(t, tc.want, status)
+			if tc.name == "forward" {
+				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+					validators, err := h.stateReader.ReadValidatorsForHistoricalState(tx, state_accessors.GetValFnTxAndSnapshot(tx, nil), tc.slot)
+					require.NoError(t, err)
+					last := validators.Length() - 1
+					validator, err := preState.ValidatorForValidatorIndex(last)
+					require.NoError(t, err)
+					require.Equal(t, validator.EffectiveBalance(), validators.Get(last).EffectiveBalance())
+					return nil
+				}))
+			}
+		})
+	}
+}
+
+func TestHistoricalDutiesWithoutArchive(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, body string
+		root                     bool
+		progress                 uint64
+		want                     int
+	}{
+		{"attester", http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`, false, 0, http.StatusBadRequest},
+		{"attester missing genesis root", http.MethodPost, "/eth/v1/validator/duties/attester/0", `["0"]`, false, 128, http.StatusBadRequest},
+		{"attester missing root", http.MethodPost, "/eth/v1/validator/duties/attester/3", `["0"]`, false, 128, http.StatusBadRequest},
+		{"proposer missing genesis root", http.MethodGet, "/eth/v1/validator/duties/proposer/0", "", false, 0, http.StatusBadRequest},
+		{"proposer v2 missing genesis root", http.MethodGet, "/eth/v2/validator/duties/proposer/0", "", false, 0, http.StatusBadRequest},
+		{"proposer missing root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", false, 0, http.StatusBadRequest},
+		{"proposer v2 missing root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", false, 0, http.StatusBadRequest},
+		{"proposer with root", http.MethodGet, "/eth/v1/validator/duties/proposer/3", "", true, 0, http.StatusBadRequest},
+		{"proposer v2 with root", http.MethodGet, "/eth/v2/validator/duties/proposer/3", "", true, 0, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			table := state_accessors.NewStaticValidatorTable()
+			table.SetReplayEnabled(false)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			fcu.FinalizedSlotVal = 127
+			lowest := uint64(97)
+			fcu.LowestAvailableSlotVal = &lowest
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey); err != nil {
+					return err
+				}
+				if tc.progress != 0 {
+					if err := state_accessors.SetStateProcessingProgress(tx, tc.progress); err != nil {
+						return err
+					}
+				}
+				for slot := uint64(0); slot <= 95; slot++ {
+					if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+					if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+				}
+				if tc.root {
+					return beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1})
+				}
+				return nil
+			}))
+			status, body := dutiesSpecStatusRequest(t, h, tc.method, tc.path, tc.body)
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerWithoutArchiveRetainedProgress(t *testing.T) {
+	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 96)
+	}))
+	table := state_accessors.NewStaticValidatorTable()
+	table.SetReplayEnabled(false)
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusBadRequest, status, body)
+}
+
+func TestHistoricalProposerBalanceDiffPending(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, h.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+	h.caplinStateSnapshots = dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/v1/validator/duties/proposer/3", "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 96")
+}
+
+func TestHistoricalDutiesWithArchiveWithoutProgress(t *testing.T) {
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	lowest := uint64(97)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+	}))
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`},
+		{http.MethodGet, "/eth/v1/validator/duties/proposer/3", ""},
+		{http.MethodGet, "/eth/v2/validator/duties/proposer/3", ""},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, tc.method, tc.path, tc.body)
+			require.Equal(t, http.StatusServiceUnavailable, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerMissingCoveredRootBeforePendingBalance(t *testing.T) {
+	logger := log.New()
+	db, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, logger, true)
+	h.beaconChainCfg.CapellaForkEpoch = 0
+	h.beaconChainCfg.DenebForkEpoch = 0
+	h.beaconChainCfg.ElectraForkEpoch = 0
+	h.beaconChainCfg.FuluForkEpoch = 0
+	fcu.FinalizedSlotVal = 127
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= 63; slot++ {
+			if err := tx.Delete(kv.BlockRoot, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot)); err != nil {
+				return err
+			}
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 95)
+	}))
+	dirs := datadir.New(t.TempDir())
+	types := snapshotsync.MakeCaplinStateSnapshotsTypes(db, h.beaconChainCfg)
+	types.KeyValueGetters = map[string]snapshotsync.KeyValueGetter{kv.SlotData: types.KeyValueGetters[kv.SlotData]}
+	h.caplinStateSnapshots = dumpDutiesSnapshots(t, dirs, types, 1000, 1000, logger)
+	path := "/eth/v2/validator/duties/proposer/3"
+	status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
+	require.Equal(t, http.StatusInternalServerError, status, body)
+	require.Contains(t, body, "dependent root not found")
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 63, common.Hash{1})
+	}))
+	status, body = dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 96")
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(63)); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 63)
+	}))
+	status, body = dutiesSpecStatusRequest(t, h, http.MethodGet, path, "")
+	require.Equal(t, http.StatusServiceUnavailable, status, body)
+	require.Contains(t, body, "slot 64")
+}
+
+func TestHistoricalAttesterStateHistoryEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		blocks, custom bool
+		want           int
+	}{
+		{"supported archive", true, false, http.StatusServiceUnavailable},
+		{"block archive disabled", false, false, http.StatusBadRequest},
+		{"custom network", true, true, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := clparams.CaplinConfig{ArchiveStates: true, ArchiveBlocks: tc.blocks}
+			if tc.custom {
+				h.beaconChainCfg.DepositNetworkID = ^uint64(0)
+			}
+			table := state_accessors.NewStaticValidatorTable()
+			table.SetReplayEnabled(antiquary.StateHistoryEnabled(cfg.ArchiveStates, cfg.ArchiveBlocks, h.beaconChainCfg))
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			lowest := uint64(97)
+			fcu.LowestAvailableSlotVal = &lowest
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Delete(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+			}))
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodPost, "/eth/v1/validator/duties/attester/2", `["0"]`)
+			require.Equal(t, tc.want, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerRetainedTableWithoutReplay(t *testing.T) {
+	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	lowest := uint64(97)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 96)
+	}))
+	var table *state_accessors.StaticValidatorTable
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		table, err = state_accessors.LoadStaticValidatorTable(tx, true, antiquary.StateHistoryEnabled(true, false, h.beaconChainCfg))
+		return err
+	}))
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+			require.Equal(t, http.StatusOK, status, body)
+		})
+	}
+}
+
+func TestHistoricalProposerTruncatedTableWithoutReplay(t *testing.T) {
+	db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = 127
+	lowest := uint64(97)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, index := range []uint64{0, 2} {
+			row, err := tx.GetOne(kv.StaticValidators, base_encoding.Encode64ToBytes4(index))
+			if err != nil {
+				return err
+			}
+			require.NotEmpty(t, row)
+		}
+		if err := tx.Delete(kv.StaticValidators, base_encoding.Encode64ToBytes4(1)); err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, 95, common.Hash{1}); err != nil {
+			return err
+		}
+		return state_accessors.SetStateProcessingProgress(tx, 96)
+	}))
+	var table *state_accessors.StaticValidatorTable
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		table, err = state_accessors.LoadStaticValidatorTable(tx, true, antiquary.StateHistoryEnabled(true, false, h.beaconChainCfg))
+		return err
+	}))
+	require.False(t, table.ReplayEnabled())
+	require.Equal(t, uint64(96), table.Slot())
+	require.Equal(t, 1, table.Length())
+	h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+			require.Equal(t, http.StatusInternalServerError, status, body)
+			require.Contains(t, body, state_accessors.ErrValidatorTableTruncated.Error())
+		})
+	}
+}
+
+func TestHistoricalFuluMissingEpochDataStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		progress uint64
+		archive  bool
+		want     int
+	}{
+		{"pending", 95, true, http.StatusServiceUnavailable},
+		{"completed", 96, true, http.StatusInternalServerError},
+		{"without archive", 96, false, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.FinalizedSlotVal = 127
+			cfg := h.beaconChainCfg
+			cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 2, 2, 2, 2
+			cfg.InitializeForkSchedule()
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Delete(kv.EpochData, base_encoding.Encode64ToBytes4(96)); err != nil {
+					return err
+				}
+				for _, slot := range []uint64{63, 95} {
+					if err := beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{1}); err != nil {
+						return err
+					}
+				}
+				return state_accessors.SetStateProcessingProgress(tx, tc.progress)
+			}))
+			if !tc.archive {
+				table := state_accessors.NewStaticValidatorTable()
+				table.SetReplayEnabled(false)
+				table.SetSlot(96)
+				h.stateReader = historical_states_reader.NewHistoricalStatesReader(cfg, nil, table, preState, nil, h.syncedData)
+			}
+			for _, version := range []string{"v1", "v2"} {
+				t.Run(version, func(t *testing.T) {
+					status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+					require.Equal(t, tc.want, status, body)
+					if tc.progress == 96 {
+						require.Contains(t, body, "epoch data not found")
+					}
+				})
+			}
+		})
+	}
+}

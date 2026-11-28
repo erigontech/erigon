@@ -595,12 +595,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
-	vTables := state_accessors.NewStaticValidatorTable()
-	// Read the current table
-	if config.ArchiveStates {
-		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
-			return err
-		}
+	vTables, err := state_accessors.LoadStaticValidatorTable(tx, config.ArchiveStates, antiquary.StateHistoryEnabled(config.ArchiveStates, config.ArchiveBlocks, beaconConfig))
+	if err != nil {
+		return err
 	}
 	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)

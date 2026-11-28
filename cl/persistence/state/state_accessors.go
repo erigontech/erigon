@@ -19,6 +19,7 @@ package state_accessors
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -158,6 +159,12 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 
 	var buf bytes.Buffer
 	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+		if len(k) != 4 {
+			return fmt.Errorf("%w at index %d", ErrValidatorTableTruncated, len(out.validatorTable))
+		}
+		if base_encoding.Decode64FromBytes4(k) != uint64(len(out.validatorTable)) {
+			break
+		}
 		staticValidator := &StaticValidator{}
 		buf.Reset()
 		if _, err := buf.Write(v); err != nil {
@@ -189,5 +196,17 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 		return nil, nil
 	}
 	buf := bytes.NewBuffer(v)
-	return base_encoding.ReadRabbits(nil, buf)
+	return base_encoding.ReadRabbits([]uint64{}, buf)
+}
+
+func LoadStaticValidatorTable(tx kv.Tx, archiveStates, replayEnabled bool) (*StaticValidatorTable, error) {
+	table := NewStaticValidatorTable()
+	table.archiveStatesDisabled = !archiveStates
+	table.SetReplayEnabled(replayEnabled)
+	if archiveStates {
+		if err := ReadValidatorsTable(tx, table); err != nil {
+			return nil, err
+		}
+	}
+	return table, nil
 }

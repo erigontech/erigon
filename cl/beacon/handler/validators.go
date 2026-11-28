@@ -348,7 +348,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
 		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		} else if validatorSet == nil {
 			beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found for slot %v", *slot)).WriteTo(w)
@@ -952,7 +952,7 @@ func (a *ApiHandler) validatorIdentities(r *http.Request, ids []string) (*beacon
 			// If the slot is less than the lowest available slot, we need to read the validators from the historical state
 			validators, err = a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
 			if err != nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+				return nil, err
 			}
 		} else {
 			validators, err = a.forkchoiceStore.GetValidatorSet(blockRoot)

@@ -96,6 +96,10 @@ type Antiquary struct {
 	statePruneBoundaryFn func(table string) uint64
 }
 
+func StateHistoryEnabled(states, blocks bool, cfg *clparams.BeaconChainConfig) bool {
+	return states && blocks && clparams.SupportBackfilling(cfg.DepositNetworkID)
+}
+
 func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloaderClient dbservices.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}

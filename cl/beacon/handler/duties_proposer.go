@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/snapshotsync"
 )
 
 type proposerDuties struct {
@@ -117,16 +116,36 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 			return nil, err
 		}
 		defer tx.Rollback()
-		var view *snapshotsync.CaplinStateView
-		if a.caplinStateSnapshots != nil {
-			view = a.caplinStateSnapshots.View()
-			defer view.Close()
+		view := a.caplinStateSnapshots.View()
+		defer view.Close()
+		usesLookahead := expectedSlot != a.beaconChainCfg.GenesisSlot && targetVersion >= clparams.FuluVersion && epoch > a.beaconChainCfg.FuluForkEpoch
+		readiness, err := newHistoricalReadiness(tx, view)
+		if err != nil {
+			return nil, err
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+		if a.stateReader.StateHistoryEnabled() {
+			stateGetter, err = historicalDutiesStateGetter(tx, readiness, a.beaconChainCfg)
+			if err != nil {
+				return nil, err
+			}
+			if expectedSlot != a.beaconChainCfg.GenesisSlot && !usesLookahead && !a.stateReader.ValidatorTableCovers(expectedSlot) {
+				return nil, validatorReplayPending(expectedSlot)
+			}
+		}
 
 		dependentRoot, err = a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
 			return nil, err
+		}
+		if !a.stateReader.StateHistoryEnabled() {
+			progress := readiness.progress
+			if a.caplinStateSnapshots != nil {
+				progress = max(progress, a.caplinStateSnapshots.BlocksAvailable())
+			}
+			if expectedSlot > progress || (expectedSlot != a.beaconChainCfg.GenesisSlot && !usesLookahead && !a.stateReader.ValidatorTableCovers(expectedSlot)) {
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
+			}
 		}
 		duties, err = a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
 		if err != nil {
@@ -240,7 +259,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -272,28 +291,28 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
+}
+
+func (a *ApiHandler) historicalDutiesMissingDataStatus() int {
+	if !a.stateReader.StateHistoryEnabled() {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
+func validatorReplayPending(slot uint64) error {
+	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("static validator table does not yet cover slot %d", slot))
 }
 
 func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, stateGetter state_accessors.GetValFn, epoch, expectedSlot uint64) ([]proposerDuties, error) {
-	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
-	if err != nil {
-		return nil, err
-	}
-	if a.caplinStateSnapshots != nil {
-		stageStateProgress = max(stageStateProgress, a.caplinStateSnapshots.BlocksAvailable())
-	}
-	if expectedSlot > stageStateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
-	}
-
 	if expectedSlot == a.beaconChainCfg.GenesisSlot {
 		genesisState, err := a.stateReader.ReadHistoricalState(ctx, tx, expectedSlot)
 		if err != nil {
 			return nil, err
 		}
 		if genesisState == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found for slot %d", expectedSlot))
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("state not found for slot %d", expectedSlot))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		if err := fillProposerDutiesFromState(duties, genesisState, epoch, expectedSlot); err != nil {
@@ -308,7 +327,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 			return nil, err
 		}
 		if epochData == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
+			return nil, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("epoch data not found for slot %d", expectedSlot))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := range duties {
@@ -327,7 +346,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
@@ -339,19 +358,15 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return true
 	})
 	if len(activeIndices) == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active validators not found for slot %d", expectedSlot))
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("active validators not found for slot %d", expectedSlot))
 	}
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 		a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, expectedSlot, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, fmt.Errorf("could not read randao mix: %w", err)
 	}
-	if mix == (common.Hash{}) {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
-	}
-
 	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
 	if epoch == a.beaconChainCfg.FuluForkEpoch && historicalState.Version() >= clparams.FuluVersion {
