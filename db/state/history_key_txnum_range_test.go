@@ -236,7 +236,7 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 	})
 	t.Run("small_values_prefix_keys", func(t *testing.T) {
 		require := require.New(t)
-		db, h := testDbAndHistory(t, false, logger)
+		db, h := testDbAndHistory(t, false)
 		rwTx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()
