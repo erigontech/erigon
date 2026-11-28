@@ -237,8 +237,12 @@ func (g *PagedReader) NextPage() {
 
 func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64) {
 	if g.pageSize <= 1 {
-		buf, pageOffset = g.file.Next(buf)
-		return nil, buf, buf, pageOffset
+		compressed := g.file.nextIsCompressed()
+		v, pageOffset = g.file.Next(buf)
+		if compressed { // an uncompressed word is a slice of the mapping, never a scratch buffer
+			buf = v
+		}
+		return nil, v, buf, pageOffset
 	}
 
 	if g.page.HasNext() {

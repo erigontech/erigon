@@ -22,7 +22,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
 )
@@ -37,7 +39,12 @@ type Reader struct {
 	Buf []byte // reusable buffer for callers (e.g. BpsTree binary search)
 }
 
+// NewReader creates a Reader for the given Getter.
+// When the file header records the word-level compression, it is used instead of c.
 func NewReader(g *Getter, c FileCompression) *Reader {
+	if fc, ok := g.d.WordLevelCompression(); ok {
+		c = fc
+	}
 	return &Reader{Getter: g, c: c}
 }
 
@@ -95,16 +102,21 @@ func (g *Reader) MadvSequential() MadvDisabler {
 }
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
-func (g *Reader) Next(buf []byte) ([]byte, uint64) {
-	fl := CompressKeys
-	if g.nextValue {
-		fl = CompressVals
-		g.nextValue = false
-	} else {
-		g.nextValue = true
-	}
 
-	if g.c.Has(fl) {
+// Compression is the word-level compression Next applies: the file header's when it has one.
+func (g *Reader) Compression() FileCompression { return g.c }
+
+func (g *Reader) nextIsCompressed() bool {
+	if g.nextValue {
+		return g.c.Has(CompressVals)
+	}
+	return g.c.Has(CompressKeys)
+}
+
+func (g *Reader) Next(buf []byte) ([]byte, uint64) {
+	compressed := g.nextIsCompressed()
+	g.nextValue = !g.nextValue
+	if compressed {
 		return g.Getter.Next(buf)
 	}
 	return g.Getter.NextUncompressed()
@@ -116,40 +128,56 @@ func (g *Reader) Reset(offset uint64) {
 }
 
 func (g *Reader) Skip() (uint64, int) {
-	fl := CompressKeys
-	if g.nextValue {
-		fl = CompressVals
-		g.nextValue = false
-	} else {
-		g.nextValue = true
-	}
-
-	if g.c.Has(fl) {
+	compressed := g.nextIsCompressed()
+	g.nextValue = !g.nextValue
+	if compressed {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
 }
 
+// Writer compresses each word as its caller asked: a word at an even position in the
+// file is a key, at an odd position a value. The header may record more compression than that, which reads
+// correctly; older releases ignore the header and read with the caller's compression.
 type Writer struct {
 	*Compressor
-	keyWritten bool
-	c          FileCompression
+	c FileCompression
+}
+
+// CompressionForFile returns fc as readers of the file at path need it. Only .kv readers
+// always start at a key; readers of other files Reset to any word, which then reads
+// with the key flag, so those files get both flags or none.
+func CompressionForFile(path string, fc FileCompression) FileCompression {
+	name := filepath.Base(path)
+	isKV := strings.HasSuffix(name, ".kv") || strings.Contains(name, ".kv.") // .kv.<staging suffix>, as squeeze writes
+	if !fc.Has(CompressKeys) && !fc.Has(CompressVals) || isKV {
+		return fc
+	}
+	return CompressKeys | CompressVals
 }
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
-	return &Writer{kv, false, compress}
+	header := CompressionForFile(kv.outputFile, compress)
+	bitmask := kv.featureFlagBitmask&^FeatureFlagBitmask(WordLevelKeyCompressionEnabled|WordLevelValCompressionEnabled) | FeatureFlagBitmask(WordLevelCompressionKnown)
+	if header.Has(CompressKeys) {
+		bitmask.Set(WordLevelKeyCompressionEnabled)
+	}
+	if header.Has(CompressVals) {
+		bitmask.Set(WordLevelValCompressionEnabled)
+	}
+	if (kv.Count() > 0 || kv.featureFlagBitmask.Has(WordLevelCompressionKnown)) && bitmask != kv.featureFlagBitmask {
+		panic("seg.NewWriter: the Compressor already has words or a Writer with other compression")
+	}
+	kv.featureFlagBitmask = bitmask
+	return &Writer{kv, compress}
 }
 
 func (c *Writer) Write(word []byte) (n int, err error) {
 	fl := CompressKeys
-	if c.keyWritten {
+	if c.Count()%2 == 1 {
 		fl = CompressVals
-		c.keyWritten = false
-	} else {
-		c.keyWritten = true
 	}
-
-	if c.c&fl != 0 {
+	if c.c.Has(fl) {
 		return len(word), c.Compressor.AddWord(word)
 	}
 	return len(word), c.Compressor.AddUncompressedWord(word)

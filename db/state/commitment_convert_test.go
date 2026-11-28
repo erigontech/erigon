@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -633,4 +635,33 @@ func readFileBytesForTest(t *testing.T, path string) []byte {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return data
+}
+
+func TestReadOwnedFollowsHeaderCompression(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.0-commitment.0-16.kv")
+	cfg := seg.DefaultCfg
+	cfg.Workers = 1
+	c, err := seg.NewCompressor(context.Background(), t.Name(), path, t.TempDir(), cfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	w := seg.NewWriter(c, seg.CompressNone)
+	var want [][]byte
+	for i := range 64 {
+		word := bytes.Repeat([]byte{byte(i)}, 8+i)
+		want = append(want, word)
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	reader := seg.NewReader(d.MakeGetter(), seg.CompressKeys|seg.CompressVals)
+	batch := &kvBatch{}
+	var got [][]byte
+	for reader.HasNext() {
+		got = append(got, readOwned(reader, batch, true), readOwned(reader, batch, false))
+	}
+	require.Equal(t, want, got)
 }

@@ -277,10 +277,17 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 	if d.version == FileCompressionFormatV1 {
 		// 1st byte: version,
 		// 2nd byte: defines how exactly the file is compressed
-		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		// 3rd byte (optional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
 		dataFileOffset += 2
+	} else if d.version != FileCompressionFormatV0 {
+		// A real headerless V0 file starts with the zero MSB of wordsCount, so any
+		// other non-zero version byte is a future/unsupported format, not V0.
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason:   fmt.Sprintf("unsupported compression format version %d", d.version),
+		}
 	}
 
 	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
@@ -580,6 +587,24 @@ func (s *Stats) Add(d *Decompressor) {
 }
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
+
+// WordLevelCompression returns the word-level key/val compression flags from the file header.
+// ok=false means the header does not carry this information.
+func (d *Decompressor) WordLevelCompression() (c FileCompression, ok bool) {
+	if !d.featureFlagBitmask.Has(WordLevelCompressionKnown) {
+		return CompressNone, false
+	}
+	if d.featureFlagBitmask.Has(WordLevelKeyCompressionEnabled) {
+		c |= CompressKeys
+	}
+	if d.featureFlagBitmask.Has(WordLevelValCompressionEnabled) {
+		c |= CompressVals
+	}
+	if c == 0 {
+		c = CompressNone
+	}
+	return c, true
+}
 
 func (d *Decompressor) Size() int64 {
 	return d.size

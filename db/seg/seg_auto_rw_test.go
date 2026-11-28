@@ -18,6 +18,7 @@ package seg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,110 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+// makeTestFileCompressed writes key-value pairs using NewWriter with the given
+// compression flags and returns the path to the completed file.
+func makeTestFileCompressed(t *testing.T, compress FileCompression) string {
+	t.Helper()
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "test.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	w := NewWriter(c, compress)
+	defer w.Close()
+	pairs := [][2]string{
+		{"key1", "val1"},
+		{"key2", "val2"},
+		{"key3", "val3"},
+	}
+	for _, kv := range pairs {
+		_, err = w.Write([]byte(kv[0]))
+		require.NoError(t, err)
+		_, err = w.Write([]byte(kv[1]))
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Compressor.Compress())
+	return file
+}
+
+// TestNewWriterSetsWordLevelFlags verifies that NewWriter keeps the V1 version byte,
+// which older readers understand, and records the key/val compression in the bitmask.
+func TestNewWriterSetsWordLevelFlags(t *testing.T) {
+	cases := []struct {
+		name        string
+		compress    FileCompression
+		wantKeyFlag bool
+		wantValFlag bool
+	}{
+		{"CompressNone", CompressNone, false, false},
+		{"CompressKeys", CompressKeys, true, false},
+		{"CompressVals", CompressVals, false, true},
+		{"CompressKeysAndVals", CompressKeys | CompressVals, true, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := makeTestFileCompressed(t, tc.compress)
+			d, err := NewDecompressor(file)
+			require.NoError(t, err)
+			defer d.Close()
+
+			require.Equal(t, FileCompressionFormatV1, d.CompressionFormatVersion())
+
+			fc, ok := d.WordLevelCompression()
+			require.True(t, ok)
+			require.Equal(t, tc.wantKeyFlag, fc.Has(CompressKeys), "CompressKeys flag mismatch")
+			require.Equal(t, tc.wantValFlag, fc.Has(CompressVals), "CompressVals flag mismatch")
+		})
+	}
+}
+
+// TestNewReaderUsesHeader verifies that NewReader ignores the caller-supplied
+// fallback and routes purely from the header.
+//
+// A wrong fallback for CompressNone files would call Next() (huffman) on
+// uncompressed data → crash.  The test passes iff the header overrides the fallback.
+func TestNewReaderUsesHeader(t *testing.T) {
+	pairs := [][2]string{
+		{"key1", "val1"},
+		{"key2", "val2"},
+		{"key3", "val3"},
+	}
+
+	// Only test CompressNone: wrong fallback (CompressKeys|CompressVals) would
+	// panic if used, so a clean read proves the header was read instead.
+	// CompressKeys/CompressVals files with a wrong fallback would also panic,
+	// but that requires a guaranteed-non-empty huffman dict to be reliable.
+	t.Run("CompressNone_wrong_fallback", func(t *testing.T) {
+		file := makeTestFileCompressed(t, CompressNone)
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		defer d.Close()
+
+		// the header says no word-level compression; passing wrong fallback
+		// (CompressKeys|CompressVals) must be ignored.
+		g := d.MakeGetter()
+		r := NewReader(g, CompressKeys|CompressVals)
+		require.Equal(t, CompressNone, r.Compression())
+		r.Reset(0)
+
+		for i, want := range pairs {
+			require.True(t, r.HasNext(), "pair %d: expected key", i)
+			key, _ := r.Next(nil) // pass nil to avoid reusing mmap-backed slices
+			require.Equal(t, want[0], string(key), "pair %d: key mismatch", i)
+
+			require.True(t, r.HasNext(), "pair %d: expected val", i)
+			val, _ := r.Next(nil)
+			require.Equal(t, want[1], string(val), "pair %d: val mismatch", i)
+		}
+		require.False(t, r.HasNext(), "no more words expected")
+	})
+}
 
 // writeKVFile builds a key/value seg file under the given compression and
 // returns its path.
@@ -149,4 +254,131 @@ func TestFileCompressionFromString(t *testing.T) {
 	}
 	var c FileCompression
 	require.Error(t, c.FromString("nope"))
+}
+
+func repetitiveWords(n int) [][]byte {
+	words := make([][]byte, n)
+	for i := range words {
+		words[i] = []byte(fmt.Sprintf("0xf90211a0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-word-%d", i%26))
+	}
+	return words
+}
+
+func readAllWords(t *testing.T, file string) [][]byte {
+	t.Helper()
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	r := NewReader(d.MakeGetter(), CompressNone)
+	var got [][]byte
+	for r.HasNext() {
+		w, _ := r.Next(nil)
+		got = append(got, bytes.Clone(w))
+	}
+	return got
+}
+
+func newTestCompressor(t *testing.T, name string) (*Compressor, string) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), name)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	c, err := NewCompressor(t.Context(), t.Name(), file, t.TempDir(), cfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	return c, file
+}
+
+// legacyReadWords reads like older releases: with the caller's compression, ignoring the header.
+func legacyReadWords(t *testing.T, file string, fc FileCompression) [][]byte {
+	t.Helper()
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+	var got [][]byte
+	for i := 0; g.HasNext(); i++ {
+		var w []byte
+		if (i%2 == 0 && fc.Has(CompressKeys)) || (i%2 == 1 && fc.Has(CompressVals)) {
+			w, _ = g.Next(nil)
+		} else {
+			w, _ = g.NextUncompressed()
+		}
+		got = append(got, bytes.Clone(w))
+	}
+	return got
+}
+
+func TestNewWriterKeepsWordsAsCallerAsks(t *testing.T) {
+	c, file := newTestCompressor(t, "v1.0-logaddrs.0-1024.ef")
+	words := repetitiveWords(200)
+	w := NewWriter(c, CompressVals)
+	for _, word := range words {
+		_, err := w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	require.Equal(t, words, legacyReadWords(t, file, CompressVals), "older releases read with the caller's compression")
+	require.Equal(t, words, readAllWords(t, file))
+}
+
+func TestNewWriterKeepsParityAfterOddCount(t *testing.T) {
+	c, file := newTestCompressor(t, "v1.0-storage.0-1024.kv")
+	words := repetitiveWords(200)
+	_, err := NewWriter(c, CompressKeys).Write(words[0])
+	require.NoError(t, err)
+	w := NewWriter(c, CompressKeys) // the next word is a value
+	for _, word := range words[1:] {
+		_, err := w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.Compress())
+	require.Equal(t, words, legacyReadWords(t, file, CompressKeys))
+	require.Equal(t, words, readAllWords(t, file))
+}
+
+func TestSecondWriterWithOtherCompressionPanics(t *testing.T) {
+	c, _ := newTestCompressor(t, "test.seg")
+	NewWriter(c, CompressKeys|CompressVals)
+	require.NotPanics(t, func() { NewWriter(c, CompressKeys|CompressVals) })
+	require.Panics(t, func() { NewWriter(c, CompressNone) })
+}
+
+func TestPagedReaderNext2KeepsHeapBuffer(t *testing.T) {
+	file := writeKVFile(t, CompressNone, repetitiveWords(10))
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	r := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 1, false)
+	buf := make([]byte, 0, 256)
+	_, v, bufOut, _ := r.Next2(buf)
+	require.NotEmpty(t, v)
+	require.Equal(t, &buf[:1][0], &bufOut[:1][0], "an uncompressed word is a slice of the mapping, so it must not come back as the scratch buffer")
+}
+
+func TestNewWriterOneSidedOnlyForKV(t *testing.T) {
+	for name, want := range map[string]FileCompression{
+		"v1.0-code.0-1024.kv":              CompressVals,
+		"v1.0-code.0-1024.kv.squeezed.tmp": CompressVals,                // a staging name of a .kv file
+		"v1.0-code.0-1024.v":               CompressKeys | CompressVals, // history reads a value as the first word after Reset
+		"v1.0-code.0-1024.ef":              CompressKeys | CompressVals,
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), name)
+			c, err := NewCompressor(t.Context(), t.Name(), file, t.TempDir(), DefaultCfg, log.LvlError, log.New())
+			require.NoError(t, err)
+			defer c.Close()
+			_, err = NewWriter(c, CompressVals).Write([]byte("word"))
+			require.NoError(t, err)
+			require.NoError(t, c.Compress())
+
+			d, err := NewDecompressor(file)
+			require.NoError(t, err)
+			defer d.Close()
+			fc, ok := d.WordLevelCompression()
+			require.True(t, ok)
+			require.Equal(t, want, fc)
+		})
+	}
 }
