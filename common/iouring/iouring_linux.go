@@ -16,10 +16,7 @@
 
 //go:build linux
 
-// Package iouring is a minimal hand-rolled io_uring facility for blocking file
-// reads that do not hold the goroutine's P. Waiting in io_uring_enter uses the
-// syscall path, so the Go runtime releases the P. It is not a general async
-// reactor: BlockingBatchRead submits a batch and waits for all of it.
+// Package iouring provides blocking file IO through io_uring without holding the goroutine's P.
 package iouring
 
 import (
@@ -33,8 +30,12 @@ import (
 )
 
 const (
-	opRead                 = 22 // IORING_OP_READ
-	enterGetevents         = 1  // IORING_ENTER_GETEVENTS
+	opRead                 = 22
+	opWrite                = 23
+	opFsync                = 3
+	sqeIODrain             = 1 << 1
+	sqeIOLink              = 1 << 2
+	enterGetevents         = 1 // IORING_ENTER_GETEVENTS
 	offSQRing      uintptr = 0
 	offCQRing      uintptr = 0x8000000
 	offSQEs        uintptr = 0x10000000
@@ -42,6 +43,11 @@ const (
 	sqeSize = 64
 	cqeSize = 16
 )
+
+var ioUringEnter = func(fd int, toSubmit, minComplete, flags uint32) (uintptr, unix.Errno) {
+	taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(fd), uintptr(toSubmit), uintptr(minComplete), uintptr(flags), 0, 0)
+	return taken, errno
+}
 
 // io_uring_params layout (Linux). Only the fields we read are named precisely.
 type params struct {
@@ -184,6 +190,41 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 	*(*uint64)(unsafe.Add(base, 32)) = userData                                 // user_data @32
 }
 
+func (r *Ring) complete(count int, process func(uint64, int32) error) error {
+	submitted, reaped := 0, 0
+	for reaped < count {
+		head := atomic.LoadUint32(r.cqHead)
+		tail := atomic.LoadUint32(r.cqTail)
+		for head != tail && reaped < count {
+			cqe := r.cqes + (head&r.cqMask)*cqeSize
+			id := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
+			res := int32(*p32(r.cqRing, cqe+8))
+			if err := process(id, res); err != nil {
+				return err
+			}
+			head++
+			reaped++
+		}
+		atomic.StoreUint32(r.cqHead, head)
+		if reaped == count {
+			break
+		}
+		taken, errno := ioUringEnter(r.fd, uint32(count-submitted), uint32(count-reaped), enterGetevents)
+		if errno == unix.EINTR {
+			continue
+		}
+		if errno != 0 {
+			if submitted == reaped {
+				r.reset()
+				return errors.Join(ErrRingReset, errno)
+			}
+			return errno
+		}
+		submitted += int(taken)
+	}
+	return nil
+}
+
 // ErrReadFailed marks a read that completed with an error; the ring itself still works.
 var ErrReadFailed = errors.New("io_uring read failed")
 
@@ -212,39 +253,14 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 		// visible to the kernel before it observes the advanced tail.
 		atomic.StoreUint32(r.sqTail, tail)
 
-		// The kernel may take only part of the wave and then returns without waiting, so each
-		// wait also submits what is still queued.
-		submitted, reaped := 0, 0
 		var failed error
-		for reaped < wave {
-			ch := atomic.LoadUint32(r.cqHead)
-			ct := atomic.LoadUint32(r.cqTail)
-			for ch != ct {
-				// A failed read leaves its page cold; report it once the wave is drained so the caller stops.
-				cqe := r.cqes + (ch&r.cqMask)*cqeSize
-				if res := int32(*p32(r.cqRing, cqe+8)); res < 0 && failed == nil {
-					i := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
-					failed = fmt.Errorf("%w: request %d: %w", ErrReadFailed, i, unix.Errno(-res))
-				}
-				ch++
-				reaped++
+		if err := r.complete(wave, func(id uint64, res int32) error {
+			if res < 0 && failed == nil {
+				failed = fmt.Errorf("%w: request %d: %w", ErrReadFailed, id, unix.Errno(-res))
 			}
-			atomic.StoreUint32(r.cqHead, ch)
-			if reaped == wave {
-				break
-			}
-			taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(wave-submitted), uintptr(wave-reaped), enterGetevents, 0, 0)
-			if errno == unix.EINTR {
-				continue
-			}
-			if errno != 0 {
-				if submitted == reaped { // a failed enter submits nothing, so no read is in flight
-					r.reset()
-					return fmt.Errorf("io_uring_enter: %w: %w", ErrRingReset, errno)
-				}
-				return fmt.Errorf("io_uring_enter: %w", errno)
-			}
-			submitted += int(taken)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("io_uring_enter: %w", err)
 		}
 		if failed != nil {
 			return failed
