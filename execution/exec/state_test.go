@@ -225,11 +225,11 @@ func TestWorkerGetHashFailsOnAMissingHeader(t *testing.T) {
 	require.Equal(t, 1, reader.calls)
 }
 
-var _ regionHitsResetter = (*dbstate.AggregatorRoTx)(nil)
+var _ interface{ ResetRegionHits(blockNum uint64) } = (*dbstate.AggregatorRoTx)(nil)
 
-type regionHitsRecorder struct{ resets int }
+type regionHitsRecorder struct{ blocks []uint64 }
 
-func (r *regionHitsRecorder) ResetRegionHits() { r.resets++ }
+func (r *regionHitsRecorder) ResetRegionHits(blockNum uint64) { r.blocks = append(r.blocks, blockNum) }
 
 type aggTxOnly struct {
 	kv.TemporalTx
@@ -251,5 +251,5 @@ func TestWorkerResetsRegionHitsPerTask(t *testing.T) {
 		})
 		require.NoError(t, result.Err)
 	}
-	require.Equal(t, 3, rec.resets)
+	require.Equal(t, []uint64{1, 2, 3}, rec.blocks)
 }

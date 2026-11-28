@@ -1299,7 +1299,7 @@ func TestBlocksReadAheadResetsRegionHitsPerBlock(t *testing.T) {
 	for n := range uint64(3) {
 		require.NoError(t, blocksReadAheadFunc(t.Context(), tx, n+1, authorOnlyEngine{}, oneBlockReader{}))
 	}
-	require.Equal(t, 3, rec.resets)
+	require.Equal(t, []uint64{1, 2, 3}, rec.blocks)
 }
 
 func TestBALHexTrieWarmupsByVariant(t *testing.T) {

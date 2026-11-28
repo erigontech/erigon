@@ -362,14 +362,16 @@ func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
 
-type regionHitsResetter interface{ ResetRegionHits() }
+func resetRegionHits(tx kv.TemporalTx, blockNum uint64) {
+	type resettable interface {
+		ResetRegionHits(blockNum uint64)
+	}
 
-func resetRegionHits(tx kv.TemporalTx) {
 	if tx == nil {
 		return
 	}
-	if r, ok := tx.AggTx().(regionHitsResetter); ok {
-		r.ResetRegionHits()
+	if r, ok := tx.AggTx().(resettable); ok {
+		r.ResetRegionHits(blockNum)
 	}
 }
 
@@ -402,7 +404,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	rw.resetTxNum(txTask.Version().TxNum)
-	resetRegionHits(rw.chainTx)
+	resetRegionHits(rw.chainTx, txTask.Version().BlockNum)
 
 	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &TxResult{

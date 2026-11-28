@@ -74,7 +74,7 @@ func contractRegion(t *testing.T, dt *DomainRoTx, addr byte) [2]uint64 {
 
 func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 	dt := storageDomainTxWithContracts(t, 3, 200)
-	dt.resetRegionHits()
+	dt.resetRegionHits(1)
 	advised := recordRegionAdvise(t)
 	read := func(addr byte, from, to int) {
 		for slot := from; slot < to; slot++ {
@@ -111,7 +111,7 @@ func TestRegionAheadAdvisesAContractOnceAfterEnoughFileHits(t *testing.T) {
 func TestRegionAheadAdvisesARegionOnceWhenTheHitTableFills(t *testing.T) {
 	dt := storageDomainTxWithContracts(t, 1, 200)
 	advised := recordRegionAdvise(t)
-	dt.resetRegionHits()
+	dt.resetRegionHits(1)
 	hit := func(file, n int) {
 		for range n {
 			dt.regionAhead(file, regionSlotKey(1, 0))
@@ -132,11 +132,11 @@ func TestRegionAheadSkipsARegionOverTheCap(t *testing.T) {
 	region := contractRegion(t, dt, 1)
 	orig := regionAheadMaxBytes
 	t.Cleanup(func() { regionAheadMaxBytes = orig })
-	for _, c := range []struct {
+	for i, c := range []struct {
 		maxBytes uint64
 		want     int
 	}{{region[1] - region[0] - 1, 0}, {region[1] - region[0], 1}} {
-		dt.resetRegionHits()
+		dt.resetRegionHits(uint64(i))
 		*advised = nil
 		regionAheadMaxBytes = c.maxBytes
 		for range regionAheadHits {
@@ -176,13 +176,30 @@ func TestRegionAheadCountsHitsPerTx(t *testing.T) {
 			dt.regionAhead(0, regionSlotKey(1, 0))
 		}
 	}
-	dt.resetRegionHits()
+	dt.resetRegionHits(1)
 	hit(regionAheadHits - 1)
-	dt.resetRegionHits()
+	dt.resetRegionHits(1)
 	hit(1)
 	require.Empty(t, *advised, "hits before the reset must not count")
 	hit(regionAheadHits - 1)
 	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
+}
+
+func TestRegionAheadAdvisesARegionOncePerBlock(t *testing.T) {
+	dt := storageDomainTxWithContracts(t, 1, 200)
+	advised := recordRegionAdvise(t)
+	region := contractRegion(t, dt, 1)
+	tx := func(blockNum uint64) {
+		dt.resetRegionHits(blockNum)
+		for range regionAheadHits {
+			dt.regionAhead(0, regionSlotKey(1, 0))
+		}
+	}
+	tx(1)
+	tx(1)
+	require.Equal(t, [][2]uint64{region}, *advised)
+	tx(2)
+	require.Equal(t, [][2]uint64{region, region}, *advised)
 }
 
 func TestRegionAheadIsOffUntilTheReaderResetsHits(t *testing.T) {
@@ -198,7 +215,7 @@ func TestRegionAheadIsOffUntilTheReaderResetsHits(t *testing.T) {
 	read()
 	require.Empty(t, *advised, "a reader that never reset its hits must not read ahead")
 	require.Nil(t, dt.regionHits)
-	dt.resetRegionHits()
+	dt.resetRegionHits(1)
 	read()
 	require.Equal(t, [][2]uint64{contractRegion(t, dt, 1)}, *advised)
 }
