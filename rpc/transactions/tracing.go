@@ -79,7 +79,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		}
 	}
 
-	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb := state.New(reader)
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)

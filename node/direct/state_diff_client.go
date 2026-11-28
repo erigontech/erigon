@@ -109,22 +109,14 @@ func (s *StateDiffStreamS) NotifySubscribed() {
 }
 
 func (s *StateDiffStreamS) Send(m *remoteproto.StateChangeBatch) error {
-	select {
-	case s.ch <- &stateDiffReply{r: m}:
-		return nil
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	}
+	return sendOrDone(s.ctx, s.ch, &stateDiffReply{r: m})
 }
 func (s *StateDiffStreamS) Context() context.Context { return s.ctx }
 func (s *StateDiffStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	select {
-	case s.ch <- &stateDiffReply{err: err}:
-	case <-s.ctx.Done():
-	}
+	_ = sendOrDone(s.ctx, s.ch, &stateDiffReply{err: err})
 }
 
 // -- end StateChanges

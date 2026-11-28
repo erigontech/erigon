@@ -2234,8 +2234,8 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 The blob backfill can also ask a beacon API endpoint first, which is much faster than peers and covers slots that peers no longer serve:
 
-- `--caplin.blobs-backfill-endpoint <url>`: Beacon API endpoint asked for a block's blobs before peers; repeat it for fallback endpoints. The blobs are verified against the block before they are stored, so the endpoint does not need to be trusted. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, slots older than that need an archive-capable endpoint. An endpoint that does not serve several slots in a row is not asked for older slots until the next backfill pass, and one that keeps failing (down, timing out or rate-limiting) is paused for 5 minutes; peers fill what the endpoints do not. From Fulu on, a beacon node builds blob sidecars from data columns and can serve them only when it keeps at least half of the columns (a supernode or semi-supernode); Nimbus does not serve the `blob_sidecars` API.
-- `--caplin.blobs-backfill-endpoint-workers <n>`: KZG proofs the backfill computes at a time, one CPU each, for fetched blobs whose proof the endpoint left out; up to twice as many blocks are fetched at a time. Verifying the fetched blobs runs outside this limit and costs about 2% of computing their proofs. The default picks a quarter of the CPUs the process may use, at least 1 (4 on a 16-core machine). In a container this follows the CPU limit (`--cpus` or a Kubernetes CPU limit), as `GOMAXPROCS` does; set `GOMAXPROCS` or this flag where the limit is not detected, for example under Windows job objects. Each worker keeps about one CPU busy, so a node with validators can set a lower value to leave the CPU to attestation and block processing, and a dedicated archive node can set a higher one, for example `8` on a 16-core machine. At startup the node logs the endpoints (host only), the worker count and the number of CPU cores, and warns when there are more workers than cores.
+- `--caplin.blobs-backfill-endpoint <url>`: Beacon API endpoint asked for a block's blobs before peers; repeat it for fallback endpoints. The blobs are verified against the block before they are stored, so the endpoint does not need to be trusted. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, slots older than that need an archive-capable endpoint. An endpoint that does not serve several slots in a row is not asked for older slots until the next backfill pass, and one that keeps failing (down, timing out or rate-limiting) is paused for 5 minutes; peers fill what the endpoints do not. From Fulu on, a beacon node builds blob sidecars from data columns and can serve them only when it keeps at least half of the columns (a supernode or semi-supernode). Before Gloas the backfill asks for `blob_sidecars` first, because verifying the proofs an endpoint serves costs much less than computing them; an endpoint that does not serve that API, such as Nimbus, is asked for `blobs` instead, and the backfill computes the KZG proofs of those blobs.
+- `--caplin.blobs-backfill-endpoint-workers <n>`: KZG proofs the backfill computes at a time, one CPU each, for fetched blobs that come without a proof (as from the `blobs` API) or whose proof the endpoint left out; up to twice as many blocks are fetched at a time. Verifying the fetched blobs runs outside this limit and costs about 2% of computing their proofs. The default picks a quarter of the CPUs the process may use, at least 1 (4 on a 16-core machine). In a container this follows the CPU limit (`--cpus` or a Kubernetes CPU limit), as `GOMAXPROCS` does; set `GOMAXPROCS` or this flag where the limit is not detected, for example under Windows job objects. Each worker keeps about one CPU busy, so a node with validators can set a lower value to leave the CPU to attestation and block processing, and a dedicated archive node can set a higher one, for example `8` on a 16-core machine. At startup the node logs the endpoints (host only), the worker count and the number of CPU cores, and warns when there are more workers than cores.
 
 With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
 
@@ -2243,7 +2243,19 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-- `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for data availability (DA) oracle or rollup nodes that require a longer column history.
+- `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for data availability (DA) oracle or rollup nodes that require a longer column history. On a supernode, a non-zero value also turns off [lazy blob mode](https://docs.erigon.tech/fundamentals/caplin#lazy-blob-mode).
+
+### Lazy Blob Mode
+
+From Fulu on, a supernode (a node that has every data column in custody) can rebuild the blobs of a block from its columns, so it does not need to store the blob sidecars as well. In lazy mode Caplin stores the columns of a block but no blob sidecars, and the blob endpoints build the blobs from the columns when they are requested: `/eth/v1/beacon/blobs` for every block from Fulu on, and `/eth/v1/beacon/blob_sidecars` for Fulu blocks only.
+
+A supernode uses lazy mode for the blocks from the slot at which it became a supernode, when all of these hold:
+
+- none of `--caplin.blobs-archive`, `--caplin.blobs-archive-from-slot`, `--caplin.blobs-immediate-backfill` and `--caplin.blobs-no-pruning` is set,
+- `--caplin.columns-keep-slots` is `0`,
+- the retention windows of the data columns and of the blocks cover the blob retention window (they do on Ethereum mainnet).
+
+Setting `--caplin.columns-keep-slots` to a non-zero value, `--caplin.blobs-no-pruning`, `--caplin.blobs-archive`, `--caplin.blobs-archive-from-slot` or `--caplin.blobs-immediate-backfill` turns lazy mode off, and Caplin stores blob sidecars again. The blobs of the period in which the node ran in lazy mode have no sidecars: the node serves them from their columns, until those columns are pruned. An Erigon binary without lazy mode finds no blob sidecars for that period.
 
 Caplin can also be used for [block production](https://docs.erigon.tech/staking/caplin), aka **staking**.
 
@@ -6653,7 +6665,7 @@ The trace settings object accepts the following members. Member names are matche
 Members of the object used by the `debug_trace*` methods, such as `timeout` or `noRefunds`, are accepted and ignored.
 
 :::warning
-State overrides must be wrapped in the trace settings object: `{"stateOverrides": {"0x…": {"balance": "0x…"}}}`. An address-keyed override map passed directly as the fourth parameter of `trace_call` (or the third of `trace_callMany`) is read as a trace settings object with no known members, so the overrides are silently ignored. The replay, block and filter methods also accept `stateOverrides` without applying it.
+`trace_call` and `trace_callMany` take state overrides in two forms: wrapped in the trace settings object, `{"stateOverrides": {"0x…": {"balance": "0x…"}}}`, or as an address-keyed map passed directly as the fourth parameter of `trace_call` (the third of `trace_callMany`). An object that mixes account addresses with settings members is rejected with `-32602`. The replay, block and filter methods accept `stateOverrides` without applying it.
 :::
 
 ## Precompile frames
@@ -8367,7 +8379,7 @@ The only way to override the default is per block, through the Beacon API: a val
 
 ### 3.4. Block Production Response Time
 
-A block production request (`GET /eth/v3/validator/blocks/{slot}` before the Gloas fork, `POST /eth/v4/validator/blocks/{slot}` from Gloas on) returns only after Caplin has collected the execution payload. Caplin gives the execution layer time to build the payload and stops polling for it before the attestation deadline, aiming to keep the last quarter of the time up to the deadline for block processing, signing and gossip. With 12-second slots, the polling targets are, counted from the start of the slot:
+A block production request (`GET /eth/v3/validator/blocks/{slot}` before the Gloas fork, `POST /eth/v4/validator/blocks/{slot}` from Gloas on) waits until Caplin has collected the execution payload. From Gloas, if local collection fails, Caplin can still return a block with a valid external builder bid. Caplin gives the execution layer time to build the payload and stops polling for it before the attestation deadline, aiming to keep the last quarter of the time up to the deadline for block processing, signing and gossip. With 12-second slots, the polling targets are, counted from the start of the slot:
 
 | Payload | Before Gloas (attestation deadline at 4 s) | Gloas (attestation deadline at 3 s) |
 | --- | --- | --- |
@@ -8376,7 +8388,7 @@ A block production request (`GET /eth/v3/validator/blocks/{slot}` before the Glo
 
 A prepared payload is usually ready at the first poll, so the response comes soon after it. A production that starts late gets up to 500 ms of build time, but polling still stops at the prepared limit, so a very late start gets less. A request that arrives after polling has stopped is polled once, right away. These are targets, not hard limits: polling does not interrupt a call already sent to the execution layer, so a slow execution layer can delay the response past them. The deadlines are shares of the slot (one third before Gloas, one quarter from Gloas), so on networks with shorter slots, such as Gnosis Chain and Chiado, all these times are shorter.
 
-Set the validator client's block production timeout well above these times, with headroom for a slow execution layer. A client that gives up earlier cancels the request and misses the proposal. Each production logs `BlockProduction: ForkChoiceUpdate&GetPayload took` with the time spent on the payload, and `BlockProduction: Block produced` when the block is ready.
+Set the validator client's block production timeout well above these times, with headroom for a slow execution layer. A client that gives up earlier cancels the request and misses the proposal. Each production logs `BlockProduction: ForkChoiceUpdate&GetPayload took` with the time spent on the payload, and `BlockProduction: Block produced` when the block is ready. The metrics endpoint exposes `caplin_block_production_payload_collected_seconds{window=~"prepared|unprepared"}`, the time from the slot start until the payload was collected, and `caplin_block_production_payload_poll_failures_total{reason=~"busy|unknown_payload|canceled|other"}` for payload polls that failed.
 
 ---
 

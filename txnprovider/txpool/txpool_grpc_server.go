@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -149,7 +148,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
-			RlpTx:   bytes.Clone(rlp),
+			RlpTx:   rlp,
 		})
 	}, tx)
 	return reply, nil
@@ -276,7 +275,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.NonceTooLow:
 		return txpoolproto.ImportResult_STALE
-	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.ReplacedByHigherTip, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,

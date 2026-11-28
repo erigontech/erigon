@@ -6,3 +6,5 @@ go.sum text eol=lf
 *.sol linguist-language=Solidity
 
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+# Keep the embedded KZG trusted setup byte-identical on every OS; its sha256 is pinned in a test.
+common/crypto/kzg/trusted_setup.json text eol=lf

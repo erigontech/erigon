@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
@@ -93,9 +94,8 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 	b.header.Nonce = nonce
 }
 
-// SetDifficulty sets the difficulty field of the generated block. This method is
-// useful for tests where the difficulty does not depend on time. For the ethash
-// tests, please use OffsetTime, which implicitly recalculates the diff.
+// SetDifficulty sets the difficulty field of the generated block. For Ethash,
+// use GenerateChainWithTimeOffsets to calculate difficulty from the timestamp.
 func (b *BlockGen) SetDifficulty(diff uint64) {
 	b.header.Difficulty.SetUint64(diff)
 }
@@ -134,7 +134,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	// Clear any stale versioned reads/writes accumulated between transactions
 	// (e.g. from TxNonce calls in the gen callback). These reads were recorded
 	// with the previous tx's txIndex and must not pollute the next tx's read set.
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -150,10 +150,10 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
-	b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+	b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 	b.blockIO.RecordWrites(txVersion, writes)
-	b.versionMap.FlushVersionedWrites(writes, true)
-	b.ibs.ResetVersionedIO()
+	b.versionMap.FlushWrites(writes, true)
+	b.ibs.ResetIO()
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -173,7 +173,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.ResetVersionedIO()
+	b.ibs.ResetIO()
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
@@ -190,10 +190,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		if err != nil {
 			panic(err)
 		}
-		b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+		b.blockIO.RecordReads(txVersion, b.ibs.Reads())
 		b.blockIO.RecordWrites(txVersion, writes)
-		b.versionMap.FlushVersionedWrites(writes, true)
-		b.ibs.ResetVersionedIO()
+		b.versionMap.FlushWrites(writes, true)
+		b.ibs.ResetIO()
 	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -267,28 +267,6 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 		return b.parent
 	}
 	return b.chain[index]
-}
-
-// OffsetTime modifies the time instance of a block, implicitly changing its
-// associated difficulty. It's useful to test scenarios where forking is not
-// tied to chain length directly.
-func (b *BlockGen) OffsetTime(seconds int64) {
-	b.header.Time += uint64(seconds)
-	parent := b.parent
-	if b.header.Time <= parent.Time() {
-		panic("block time out of range")
-	}
-	chainreader := &FakeChainReader{Cfg: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(
-		chainreader,
-		b.header.Time,
-		parent.Time(),
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
-	)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -412,22 +390,29 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	return domains.Commit(ctx, tx)
 }
 
-// GenerateChain creates a chain of n blocks. The first block's
-// parent will be the provided parent. db is used to store
-// intermediate states and should contain the parent's state trie.
+// GenerateChain builds n blocks on top of parent. It reads the parent's state
+// from db and carries changes between generated blocks in a temporary overlay.
 //
 // The generator function is called with a new block generator for
 // every block. Any transactions and uncles added to the generator
-// become part of the block. If gen is nil, the blocks will be empty
-// and their coinbase will be the zero address.
+// become part of the block. If gen is nil, each block has no transactions
+// or uncles and inherits its parent's coinbase.
 //
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+	return GenerateChainWithTimeOffsets(config, parent, engine, db, make([]int64, n), gen)
+}
+
+// GenerateChainWithTimeOffsets generates one block per offset. Each offset adds
+// signed seconds to the usual ten-second interval from that block's parent.
+// The header and fork transitions use the resulting timestamp before gen runs.
+func GenerateChainWithTimeOffsets(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, timeOffsets []int64, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.AllProtocolChanges
 	}
+	n := len(timeOffsets)
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
@@ -436,6 +421,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainreader.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		for _, header := range headers {
+			if header != nil && header.Number.Uint64() == number && header.Hash() == hash {
+				return header
+			}
+		}
+		return rawdb.ReadHeader(tx, hash, number)
+	}
 	logger := log.New("generate-chain", config.ChainName)
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -457,7 +450,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	txNumIncrement := func() {
 		txNum++
 	}
-	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
+	genblock := func(i int, parent *types.Block, timestamp uint64, ibs *state.IntraBlockState, stateReader state.StateReader) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 		versionMap := ibs.VersionMap()
 
@@ -477,10 +470,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
-		if chainreader.Config().IsShanghai(parent.Time()) {
+		if config.IsShanghai(timestamp) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, b.engine)
+		b.header = makeHeader(chainreader, parent.HeaderNoCopy(), b.engine, timestamp)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit.
 		b.blockIO = &state.VersionedIO{}
@@ -500,7 +493,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.SetTxContext(b.header.Number.Uint64(), -1)
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, logger, nil)
 			if err != nil {
@@ -512,10 +505,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(initVersion, ibs.Reads())
 			b.blockIO.RecordWrites(initVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -528,11 +521,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// uses floor(txIdx-1).
 			b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			ibs.StartAccessRecording()
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
+				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{}, protocol.GetHashFnFromChain(b.header, chainreader))
 			}
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
 			if err != nil {
@@ -544,15 +537,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if err != nil {
 				return nil, nil, err
 			}
-			b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+			b.blockIO.RecordReads(finalizeVersion, ibs.Reads())
 			b.blockIO.RecordWrites(finalizeVersion, writes)
-			b.versionMap.FlushVersionedWrites(writes, true)
-			ibs.ResetVersionedIO()
+			b.versionMap.FlushWrites(writes, true)
+			ibs.ResetIO()
 
-			// Write state changes to db
-			// Commit from the versionMap write-set via ApplyWrites, the same domain apply
-			// the executor uses, so generation matches import. Each recorded phase
-			// (init txIdx=-1, txs, finalize) is applied in order.
+			// Apply initialization, transaction, and finalization writes to the overlay
+			// in execution order so the state root matches the one computed at import.
 			blockNum := b.header.Number.Uint64()
 			for _, ws := range b.blockIO.Outputs() {
 				if ws == nil || ws.IsEmpty() {
@@ -586,14 +577,20 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
-	for i := range n {
+	const defaultBlockInterval = 10
+	for i, offset := range timeOffsets {
+		timestamp := parent.Time() + defaultBlockInterval + uint64(offset)
+		if offset <= -defaultBlockInterval || timestamp <= parent.Time() {
+			return nil, fmt.Errorf("block %d time offset %d out of range for parent timestamp %d", parent.NumberU64()+1, offset, parent.Time())
+		}
+		chainreader.current = parent
 		// Versioned without the stateObject cache, which would let a reused state serve stale account
 		// state across txs and give a header the executor's cache-free run disagrees with.
-		ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}
-		block, receipt, err := genblock(i, parent, ibs, stateReader)
+		block, receipt, err := genblock(i, parent, timestamp, ibs, stateReader)
 		ibs.SetTrace(false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -604,41 +601,35 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: parent}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine) *types.Header {
-	var time uint64
-	if parent.Time() == 0 {
-		time = 10
-	} else {
-		time = parent.Time() + 10 // block time is fixed at 10 seconds
-	}
-
-	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
-	if chain.Config().IsAmsterdam(time) {
+func makeHeader(chain rules.ChainReader, parent *types.Header, engine rules.Engine, timestamp uint64) *types.Header {
+	header := builder.MakeEmptyHeader(parent, chain.Config(), timestamp, nil)
+	if chain.Config().IsAmsterdam(timestamp) {
 		// Real slot numbers come from the consensus layer. Synthetic chains use
 		// the block number as a deterministic stand-in.
 		slotNumber := header.Number.Uint64()
 		header.SlotNumber = &slotNumber
 	}
-	header.Coinbase = parent.Coinbase()
+	header.Coinbase = parent.Coinbase
 	header.Difficulty = engine.CalcDifficulty(
-		chain, time,
-		time-10,
-		parent.Difficulty(),
-		parent.NumberU64(),
-		parent.Hash(),
-		parent.UncleHash(),
-		parent.Header().AuRaStep,
+		chain, timestamp,
+		parent.Time,
+		parent.Difficulty,
+		parent.Number.Uint64(),
+		header.ParentHash,
+		parent.UncleHash,
+		parent.AuRaStep,
 	)
 
 	return header
 }
 
 type FakeChainReader struct {
-	Cfg     *chain.Config
-	current *types.Block
+	Cfg       *chain.Config
+	current   *types.Block
+	getHeader func(common.Hash, uint64) *types.Header
 }
 
 // Config returns the chain configuration.
@@ -654,10 +645,18 @@ func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
 func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
-func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
-func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
-func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
-func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
-func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header  { return nil }
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header { return nil }
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.current != nil && cr.current.NumberU64() == number && cr.current.Hash() == hash {
+		return cr.current.Header()
+	}
+	if cr.getHeader != nil {
+		return cr.getHeader(hash, number)
+	}
+	return nil
+}
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block { return nil }
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool         { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int    { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                  { return 0 }

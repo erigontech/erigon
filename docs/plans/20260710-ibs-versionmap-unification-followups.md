@@ -114,9 +114,9 @@ a cheap, lock-free resident hit. Iterate toward that:
 - Measure each iteration against geth/reth per-op cost; keep iterating until the
   warm family is geth-comparable (Gap A) and chip at the Go-vs-Rust ceiling (Gap B).
 
-Mind intern costs: `accounts.Address`/`CodeHash` are `unique.Handle`; `unique.Make`
-is a global intern-map + GC-weak-handle op per call (the CALL family re-interns per
-op) — geth/reth don't pay this; the resident view should key on the interned handle.
+Mind intern costs: `accounts.CodeHash` is a `unique.Handle`, and `unique.Make` is a
+global intern-map + GC-weak-handle op per call; `accounts.Address` goes through the
+intern cache and the canon table (the CALL family re-interns per op) — geth/reth don't pay this; the resident view should key on the interned handle.
 
 ## Follow-up 6 — solidify the transitional model; retire legacy-path reliance
 

@@ -21,7 +21,6 @@ package protocol
 
 import (
 	"fmt"
-	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
@@ -110,6 +109,15 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
+func GetHashFnFromChain(header *types.Header, reader rules.ChainHeaderReader) func(uint64) (common.Hash, error) {
+	if reader == nil {
+		return GetHashFn(header, nil)
+	}
+	return GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		return reader.GetHeader(hash, number), nil
+	})
+}
+
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
 	blockNumber := ref.Number.Uint64()
@@ -120,15 +128,12 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 	// lru.New only returns err on -ve size
 	hashLookupCache, _ := lru.New[uint64, common.Hash](8192)
-	hashLookupCacheLock := sync.Mutex{}
 	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
 		if n >= blockNumber {
 			return common.Hash{}, nil
 		}
-		hashLookupCacheLock.Lock()
-		defer hashLookupCacheLock.Unlock()
 
 		if n == lastKnownNumber {
 			//fmt.Println("GH-LN", n, refHash)
@@ -143,6 +148,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		if hash, ok := hashLookupCache.Get(n); ok {
 			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
+		}
+
+		if getHeader == nil {
+			return common.Hash{}, fmt.Errorf("header reader unavailable for block %d", n)
 		}
 
 		if n > lastKnownNumber {
@@ -167,11 +176,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			}
 
 			hash, num := lastKnownHash, lastKnownNumber
-			header, err := func() (*types.Header, error) {
-				hashLookupCacheLock.Unlock()
-				defer hashLookupCacheLock.Lock()
-				return getHeader(hash, num)
-			}()
+			header, err := getHeader(hash, num)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -198,7 +203,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
 
-	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Value()) {
 		amount := amount   // avoid capture allocation unless we're tracing
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {

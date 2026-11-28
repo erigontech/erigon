@@ -1343,6 +1343,96 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 	})
 }
 
+func TestProductionUsesLocalPayloadWhenBuilderBidSignatureIsInvalid(t *testing.T) {
+	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
+		header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+		header.Data.Message.Value = "1000000"
+		signBuilderHeaderForTest(t, postState, header)
+		header.Data.Signature[0] ^= 0x01
+		builderClient := relayClient(ctrl)
+		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+		handler.builderClient = builderClient
+	})
+}
+
+func TestGetBuilderPayloadRejectsInvalidBidSignature(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*builder.ExecutionHeader)
+	}{
+		{name: "unsigned", mutate: func(*builder.ExecutionHeader) {}},
+		{name: "value changed after signing", mutate: func(header *builder.ExecutionHeader) {
+			signBuilderHeaderForTest(t, postState, header)
+			header.Data.Message.Value = "2"
+		}},
+		{name: "pubkey replaced after signing", mutate: func(header *builder.ExecutionHeader) {
+			signBuilderHeaderForTest(t, postState, header)
+			pubKey, err := postState.ValidatorPublicKey(0)
+			require.NoError(t, err)
+			header.Data.Message.PubKey = pubKey
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
+			tc.mutate(header)
+			builderClient := relayClient(ctrl)
+			builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+			handler.builderClient = builderClient
+
+			got, value, err := handler.getBuilderPayload(t.Context(), postState, targetSlot)
+
+			require.ErrorIs(t, err, builder.ErrInvalidBidSignature)
+			require.Nil(t, got)
+			require.Nil(t, value)
+		})
+	}
+}
+
+// TestGetBuilderPayloadVerifiesBidAtForkBoundary covers a head state in Capella with the target slot at the first Deneb
+// slot. Block production advances the state to the target slot before getBuilderPayload, so the bid must be verified
+// with the Deneb BuilderBid layout, which includes blob_kzg_commitments. Verifying it against the head's Capella
+// layout would reject a valid bid.
+func TestGetBuilderPayloadVerifiesBidAtForkBoundary(t *testing.T) {
+	_, _, _, _, headState, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), false)
+	cfg := handler.beaconChainCfg
+	targetSlot := (state.Epoch(headState) + 1) * cfg.SlotsPerEpoch
+	cfg.DenebForkEpoch = targetSlot / cfg.SlotsPerEpoch
+	cfg.InitializeForkSchedule()
+
+	baseState := state.New(cfg)
+	require.NoError(t, headState.CopyInto(baseState))
+	require.Equal(t, clparams.CapellaVersion, baseState.Version())
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(baseState, targetSlot))
+	require.Equal(t, clparams.DenebVersion, baseState.Version())
+
+	parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
+	header := validBuilderHeaderForTest(t, baseState, targetSlot, parentHash)
+	header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0xc0})
+	signBuilderHeaderForTest(t, baseState, header)
+
+	denebRoot, err := header.SigningRoot(cfg, clparams.DenebVersion)
+	require.NoError(t, err)
+	capellaRoot, err := header.SigningRoot(cfg, clparams.CapellaVersion)
+	require.NoError(t, err)
+	require.NotEqual(t, denebRoot, capellaRoot)
+	require.ErrorIs(t, header.VerifySignature(cfg, clparams.CapellaVersion), builder.ErrInvalidBidSignature)
+
+	builderClient := relayClient(gomock.NewController(t))
+	builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+	handler.builderClient = builderClient
+
+	got, value, err := handler.getBuilderPayload(t.Context(), baseState, targetSlot)
+
+	require.NoError(t, err)
+	require.Same(t, header, got)
+	require.Equal(t, header.Data.Message.Value, value.String())
+}
+
 func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
 	blocks, s, _ := tests.GetCapellaRandom()
 	block := blocks[0].Block
@@ -1370,6 +1460,7 @@ func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
 		require.NotEmpty(t, expected.Withdrawals)
 		header = validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
 		header.Data.Message.Value = "1000000"
+		signBuilderHeaderForTest(t, postState, header)
 		builderClient := relayClient(ctrl)
 		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 		handler.builderClient = builderClient
@@ -1483,6 +1574,16 @@ func validBuilderHeaderForTest(
 	}
 }
 
+func signBuilderHeaderForTest(t *testing.T, baseState *state.CachingBeaconState, header *builder.ExecutionHeader) {
+	t.Helper()
+	key, err := bls.NewPrivateKeyFromIKM(bytes.Repeat([]byte{0x42}, 32))
+	require.NoError(t, err)
+	copy(header.Data.Message.PubKey[:], bls.CompressPublicKey(key.PublicKey()))
+	root, err := header.SigningRoot(baseState.BeaconConfig(), baseState.Version())
+	require.NoError(t, err)
+	copy(header.Data.Signature[:], key.Sign(root[:]).Bytes())
+}
+
 func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.ElectraVersion} {
 		t.Run(version.String(), func(t *testing.T) {
@@ -1526,6 +1627,7 @@ func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 							case "zero":
 								header.Data.Message.Header.WithdrawalsRoot = common.Hash{}
 							}
+							signBuilderHeaderForTest(t, baseState, header)
 							builderClient := relayClient(ctrl)
 							builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 							handler := &ApiHandler{
@@ -1727,6 +1829,7 @@ func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
 						header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 					}
 					header.Data.Message.Value = new(big.Int).Lsh(big.NewInt(1), 128).String()
+					signBuilderHeaderForTest(t, postState, header)
 					builderClient := relayClient(ctrl)
 					builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 					handler.builderClient = builderClient
@@ -6328,7 +6431,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 		clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
 		handler.ethClock = clock
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		produceCalls := 0
 		handler.attestationProducer = cachedAttestationDataProducer{
 			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
@@ -6393,7 +6496,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			handler, fcu, slot, produceCalls := setup(t)
-			handler.attestationDataImportWait = defaultAttestationDataImportWait
+			handler.importWait = defaultImportWait
 			var attempts atomic.Int64
 			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
 				return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
@@ -6407,8 +6510,8 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 			elapsed := time.Since(start)
 			require.Equal(t, http.StatusOK, status)
 			require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-			require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-			require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+			require.GreaterOrEqual(t, elapsed, 2*importPollInterval)
+			require.Less(t, elapsed, defaultImportWait/2)
 			require.Zero(t, *produceCalls)
 		})
 	})
@@ -6568,7 +6671,7 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
 			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 			handler.aggregatePool = nil
-			handler.attestationDataImportWait = 0
+			handler.importWait = 0
 			slot := headState.Slot()
 			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
 			targetSlot := handler.beaconChainCfg.RoundSlotToEpoch(slot)
@@ -6660,7 +6763,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
 			const importWait = time.Second
-			handler.attestationDataImportWait = importWait
+			handler.importWait = importWait
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -6752,7 +6855,7 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot + 1).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6790,7 +6893,7 @@ func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) 
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 	handler.ethClock = clock
-	handler.attestationDataImportWait = waitCap
+	handler.importWait = waitCap
 	calls := 0
 	handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 	fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -6870,7 +6973,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-			handler.attestationDataImportWait = 20 * time.Millisecond
+			handler.importWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
 			cfg.InitializeForkSchedule()
@@ -6987,7 +7090,7 @@ func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T)
 	setup := func(t *testing.T) (*ApiHandler, *forkchoice_mock.ForkChoiceStorageMock, func(), *atomic.Int32) {
 		t.Helper()
 		_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-		handler.attestationDataImportWait = waitCap
+		handler.importWait = waitCap
 		handler.aggregatePool = nil
 		cfg := handler.beaconChainCfg
 		cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0

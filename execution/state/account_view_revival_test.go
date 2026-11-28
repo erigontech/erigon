@@ -66,7 +66,7 @@ func TestCreditAfterADestructReadsAFreshNonce(t *testing.T) {
 			}
 			removal := &WriteSet{}
 			removal.SetContractRemoval(x, Version{TxIndex: 1})
-			vm.FlushVersionedWrites(removal, true)
+			vm.FlushWrites(removal, true)
 
 			credit := NewWithVersionMap(reader, vm)
 			defer credit.Close()
@@ -76,8 +76,8 @@ func TestCreditAfterADestructReadsAFreshNonce(t *testing.T) {
 			require.NoError(t, err)
 			require.Zero(t, ownNonce)
 			credit.EndTransaction()
-			require.Equal(t, VersionValid, vm.ValidateReadSet(2, credit.VersionedReads(), validateEqualVersion, false, ""))
-			vm.FlushVersionedWrites(credit.VersionedWrites(), true)
+			require.Equal(t, VersionValid, vm.ValidateReadSet(2, credit.Reads(), validateEqualVersion, false, ""))
+			vm.FlushWrites(credit.Writes(), true)
 
 			ibs := NewWithVersionMap(reader, vm)
 			defer ibs.Close()
@@ -85,7 +85,7 @@ func TestCreditAfterADestructReadsAFreshNonce(t *testing.T) {
 			nonce, err := ibs.GetNonce(x)
 			require.NoError(t, err)
 			require.Zero(t, nonce)
-			require.Equal(t, VersionValid, vm.ValidateReadSet(3, ibs.VersionedReads(), validateEqualVersion, false, ""))
+			require.Equal(t, VersionValid, vm.ValidateReadSet(3, ibs.Reads(), validateEqualVersion, false, ""))
 			acc, ok, _ := vm.ViewAtTxIndex(3, reader).GetAccount(x)
 			require.True(t, ok)
 			require.Zero(t, acc.Nonce)
@@ -130,7 +130,7 @@ func TestCreationWritesDoNotDependOnANonceCellBelow(t *testing.T) {
 				}
 				removal := &WriteSet{}
 				removal.SetContractRemoval(x, Version{TxIndex: 1})
-				vm.FlushVersionedWrites(removal, true)
+				vm.FlushWrites(removal, true)
 
 				ibs := NewWithVersionMap(reader, vm)
 				defer ibs.Close()
@@ -138,7 +138,7 @@ func TestCreationWritesDoNotDependOnANonceCellBelow(t *testing.T) {
 				require.NoError(t, tc.recreate(ibs, x))
 				ibs.EndTransaction()
 				var paths []AccountPath
-				for h := range ibs.VersionedWrites().AllHeaders() {
+				for h := range ibs.Writes().AllHeaders() {
 					if h.Address == x {
 						paths = append(paths, h.Path)
 					}

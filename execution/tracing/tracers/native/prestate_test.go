@@ -191,7 +191,7 @@ func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
 	_, err = ibs.Selfdestruct(contract, false)
 	require.NoError(t, err)
 	tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, executionstate.NewNoopWriter()))
+	ibs.EndTransaction()
 	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)
@@ -216,7 +216,6 @@ func TestPrestateTracerRetainedBalance(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ibs := executionstate.New(executionstate.NewNoopReader())
-			ibs.SetVersionMap(nil)
 			t.Cleanup(ibs.Close)
 			from := accounts.InternAddress(common.HexToAddress("0x1000"))
 			contract := accounts.InternAddress(common.HexToAddress("0x2000"))

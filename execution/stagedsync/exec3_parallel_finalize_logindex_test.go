@@ -23,9 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -267,7 +269,7 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 		WriteHeader: state.WriteHeader{Address: created, Path: state.NoncePath, Version: regular.Version()},
 		Val:         1,
 	})
-	be.versionMap.FlushVersionedWrites(workerWrites, false)
+	be.versionMap.FlushWrites(workerWrites, false)
 
 	be.execTasks.setInProgress(0)
 	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
@@ -295,4 +297,55 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
 	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
+}
+
+func TestParallelFinalizeSystemCallReadsOverlayHeader(t *testing.T) {
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Nonce = 1
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		if err := putter.DomainPut(kv.CodeDomain, logIndexContract[:], code, 0, nil); err != nil {
+			return err
+		}
+		return putter.DomainPut(kv.AccountsDomain, logIndexContract[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	require.NoError(t, domains.InitBlockOverlay(rwTx))
+	ancestor := &types.Header{Number: *uint256.NewInt(1)}
+	parent := &types.Header{Number: *uint256.NewInt(2), ParentHash: ancestor.Hash()}
+	require.NoError(t, rawdb.WriteHeader(domains.BlockOverlay(), parent))
+	pe := newParallelLogIndexTestExec(db, domains, 1)
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	for _, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.Header.Number = *uint256.NewInt(3)
+		txTask.Header.ParentHash = parent.Hash()
+		txTask.EvmBlockContext.BlockNumber = 3
+	}
+	be, _ := newLogIndexTestBlock(tasks)
+	for i, task := range be.tasks {
+		be.execTasks.setInProgress(i)
+		version := task.Version()
+		version.Incarnation = 1
+		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{Task: &taskVersion{execTask: task, version: version}}, rwTx)
+		require.NoError(t, err)
+		if i == len(be.tasks)-1 {
+			require.NotNil(t, res)
+			require.NoError(t, res.Err)
+		}
+	}
+	var got *uint256.Int
+	for _, account := range be.blockIO.AsBlockAccessList() {
+		if account.Address == logIndexContract {
+			for _, slot := range account.StorageChanges {
+				if slot.Slot == accounts.ZeroKey && len(slot.Changes) > 0 {
+					got = &slot.Changes[0].Value
+				}
+			}
+		}
+	}
+	require.NotNil(t, got)
+	require.Equal(t, ancestor.Hash().U256(), *got)
 }

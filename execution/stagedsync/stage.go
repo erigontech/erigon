@@ -182,7 +182,7 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
-	FinalityCtx     kv.FinalityContext
+	RetireToBlock   uint64 // the last block that files may hold; see execfinality.RetireToBlock
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }

@@ -443,7 +443,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s, plus %s", integrity.FastChecks, integrity.TorrentPieces)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after the 1st problem, or WARN and keep checking (a torrent piece-hash mismatch still fails the run)"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
-				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
+				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (disabled when TorrentPieces is skipped; speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; the run fails if it ends before every check has finished. 0 (default) means no limit"},
@@ -1570,6 +1570,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	var cache *integrity.IntegrityCache
 	// A torrent-verification failure must survive whatever the checks below return,
@@ -1581,24 +1582,21 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
-		var err error
-		cache, err = integrity.LoadIntegrityCache(cachePath)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if err := cache.Save(); err != nil {
-				logger.Warn("[integrity] failed to save cache", "err", err)
+		if _, skip := skipSet[integrity.TorrentPieces]; skip {
+			logger.Info("[integrity] cache disabled", "reason", "TorrentPieces skipped")
+		} else {
+			var err error
+			// When using cache, verify torrent piece hashes first.
+			cache, err = integrity.PrepareIntegrityCache(ctx, cachePath, dirs.Snap, failFast, logger)
+			if cache != nil {
+				defer func() {
+					if err := cache.Save(); err != nil {
+						logger.Warn("[integrity] failed to save cache", "err", err)
+					}
+				}()
 			}
-		}()
-
-		// When using cache, verify torrent piece hashes first (unless skipped)
-		if _, skip := skipSet[integrity.TorrentPieces]; !skip {
-			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
-			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				err = fmt.Errorf("torrent verification failed: %w", err)
-				if failFast {
+			if err != nil {
+				if cache == nil || failFast {
 					return err
 				}
 				// failFast=false means "warn and keep checking", so the run still has to
@@ -1626,7 +1624,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 
 	logger.Info("[integrity] starting", "seed", sc.Seed, "sampleRatio", sc.SampleRatio, "checks", requestedChecks)
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
@@ -3522,8 +3519,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false, blockReader.TxnumReader())
-	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
+	retireToBlock := execfinality.RetireToBlock(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	if err := br.BuildFiles(ctx, blocksInSnapshots, retireToBlock, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3567,17 +3564,23 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	txNumsReader := blockReader.TxnumReader()
-	var lastTxNum uint64
+	var lastTxNum, collateToTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress); err != nil {
+			return err
+		}
+		collateToTxNum, err = execfinality.CollateToTxNum(ctx, tx, txNumsReader, retireToBlock)
 		return err
 	}); err != nil {
 		return err
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := temporalDb.BuildFiles(lastTxNum, finalityCtx); err != nil {
+	if err := temporalDb.BuildFiles(lastTxNum, collateToTxNum); err != nil {
 		return err
 	}
 
@@ -3764,6 +3767,9 @@ type duFileInfo struct {
 func duClassifyFile(dir, name string) string {
 	lname := strings.ToLower(name)
 	ldir := strings.ToLower(dir)
+	if ldir == datadir.SnapCaplinDir {
+		return duCatCaplin
+	}
 
 	// rcache files live in domain/, history/, or idx/
 	if strings.Contains(lname, "rcache") {
@@ -3786,29 +3792,21 @@ func duClassifyFile(dir, name string) string {
 		return duCatInvIdx
 	case "accessor":
 		return duCatAccessors
-	case "caplin":
-		return duCatCaplin
 	}
 
 	// Files directly under snapshots/ — only known segment extensions are block segments.
 	switch {
 	case strings.HasSuffix(lname, ".seg"), strings.HasSuffix(lname, ".idx"), strings.HasSuffix(lname, ".dat"):
-		if duIsCaplinSegment(lname) {
+		// A segment in the top-level snapshots dir can hold consensus-layer data. Caplin writes
+		// these alongside the execution block segments, but they are retained by the
+		// --caplin.*-archive flags rather than --prune.mode.
+		if snaptype.IsCaplinBlockOrBlobFile(lname) {
 			return duCatCaplin
 		}
 		return duCatBlocks
 	default:
 		return duCatOther
 	}
-}
-
-// duIsCaplinSegment reports whether a segment in the top-level snapshots dir holds
-// consensus-layer data. Caplin writes these alongside the execution block segments,
-// but they are retained by the --caplin.*-archive flags rather than --prune.mode.
-func duIsCaplinSegment(lname string) bool {
-	return strings.Contains(lname, "beaconblocks") ||
-		strings.Contains(lname, "blobsidecars") ||
-		strings.Contains(lname, "blocksidecars")
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
@@ -3862,6 +3860,8 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 			if ok {
 				fi.From = parsed.From
 				fi.To = parsed.To
+				fi.Subcategory = parsed.TypeString
+			} else if sd.path == dirs.SnapCaplin {
 				fi.Subcategory = parsed.TypeString
 			}
 
