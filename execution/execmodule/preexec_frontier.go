@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types"
@@ -453,10 +454,22 @@ func (f *preExecFrontier) SealActive(oldHash, newHash common.Hash, number uint64
 	if ov == nil {
 		return nil
 	}
-	if err := rawdb.WriteHeadHeaderHash(ov, newHash); err != nil {
+	return pointCanonicalAt(ov, newHash, number)
+}
+
+// pointCanonicalAt makes hash the head and the canonical block at number, and rebuilds that height's txNum span from the
+// body hash names: a round that was dropped after its insert left the span of a longer body behind.
+func pointCanonicalAt(tx kv.RwTx, hash common.Hash, number uint64) error {
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err
 	}
-	return rawdb.WriteCanonicalHash(ov, newHash, number)
+	if err := rawdb.WriteCanonicalHash(tx, hash, number); err != nil {
+		return err
+	}
+	if err := rawdbv3.TxNums.Truncate(tx, number); err != nil {
+		return err
+	}
+	return rawdb.AppendCanonicalTxNums(tx, number)
 }
 
 // RecordTxHashes records the tx hashes executed into the ACTIVE generation so the next round can detect

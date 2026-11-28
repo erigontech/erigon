@@ -1160,11 +1160,8 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	// Read the row THIS overlay holds, not through the block reader: it is the row itself that went stale,
 	// and a reader that can fall through to snapshots would hide that.
 	canonBefore, _ := rawdb.ReadCanonicalHash(sd.BlockOverlay(), num)
-	if err := rawdb.WriteHeadHeaderHash(sd.BlockOverlay(), hash); err != nil {
-		return fmt.Errorf("restampWithdrawals: head header hash num=%d: %w", num, err)
-	}
-	if err := rawdb.WriteCanonicalHash(sd.BlockOverlay(), hash, num); err != nil {
-		return fmt.Errorf("restampWithdrawals: canonical hash num=%d: %w", num, err)
+	if err := pointCanonicalAt(sd.BlockOverlay(), hash, num); err != nil {
+		return fmt.Errorf("restampWithdrawals: canonical num=%d: %w", num, err)
 	}
 	canonAfter, _ := rawdb.ReadCanonicalHash(sd.BlockOverlay(), num)
 	// Two things are still unexplained live and this is where they would show: 221 re-stamps produced no
