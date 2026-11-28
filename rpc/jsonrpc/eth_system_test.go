@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -734,6 +735,36 @@ func TestBlobBaseFee(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 	})
+
+	// The head's own excess blob gas is priced with the blob schedule at the head's timestamp, also when BPO1 starts in
+	// the next slot. The head carries three blobs, so the next block's value differs from these expected values:
+	// fake_exponential(1, 80_000_000, fraction) with the Osaka and the BPO1 update fraction.
+	const headTime, excessBlobGas = 1_000_000, 80_000_000
+	for _, c := range []struct {
+		name     string
+		bpo1Time uint64
+		want     uint64
+	}{
+		{"BPO1 starts in the next slot", headTime + 12, 8_669_718},
+		{"BPO1 starts at the head", headTime, 14_547},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			config := *chain.TestChainOsakaConfig
+			config.Bpo1Time = common.NewUint64(c.bpo1Time)
+			config.BlobSchedule = map[string]*params.BlobConfig{"bpo1": {Target: 10, Max: 15, BaseFeeUpdateFraction: 8346193}}
+			excess, blobGasUsed := uint64(excessBlobGas), uint64(3*params.GasPerBlob)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: &config, Timestamp: headTime, ExcessBlobGas: &excess, BlobGasUsed: &blobGasUsed,
+				Alloc: types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+			}), execmoduletester.WithKey(key))
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			result, err := api.BlobBaseFee(context.Background())
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, c.want, result.ToInt().Uint64())
+		})
+	}
 }
 
 func createGasPriceTestKV(t testing.TB, config *chain.Config, chainSize int) *execmoduletester.ExecModuleTester {
