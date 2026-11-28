@@ -5,10 +5,10 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -22,14 +22,12 @@ import (
 
 func contractGenesis(t *testing.T, cfg *chain.Config, contract common.Address, account types.GenesisAccount) (*execmoduletester.ExecModuleTester, common.Address) {
 	t.Helper()
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
+	bankAddr := testAddr
 	alloc := types.GenesisAlloc{
 		bankAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
 		contract: account,
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(bankKey))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(testKey))
 	chainPack, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
@@ -150,5 +148,163 @@ func TestSimulateV1EmptyFullStateOverrideClearsStorage(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// Every way a simulation removes all of a contract's stored slots counts against one bound: an emptied contract
+// that a call touches (EIP-161), a contract created over it, and a "state" override.
+func TestSimulateV1BoundsTheStorageItRemoves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	// The bank's first CREATE lands on the contract.
+	contract := types.CreateAddress(testAddr, 0)
+	zero := hexutil.Uint64(0)
+	empty := hexutil.Bytes{}
+	noBalance := hexutil.U256{}
+	noBalancePtr := &noBalance
+	// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+	readSlot1 := hexutil.Bytes{byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
+	gas := hexutil.Uint64(100_000)
+	removals := []struct {
+		name  string
+		block func(bank common.Address) SimulatedBlock
+	}{
+		{"deleted", func(bank common.Address) SimulatedBlock {
+			return SimulatedBlock{
+				StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Nonce: &zero, Code: &empty, Balance: &noBalancePtr}},
+				Calls:          []ethapi.CallArgs{{From: &bank, To: &contract, Gas: &gas}},
+			}
+		}},
+		{"created over", func(bank common.Address) SimulatedBlock {
+			return SimulatedBlock{
+				StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Nonce: &zero, Code: &empty}, accounts.InternAddress(bank): {Nonce: &zero}},
+				Calls:          []ethapi.CallArgs{{From: &bank, Gas: &gas, Input: &empty}},
+			}
+		}},
+		{"state override", func(common.Address) SimulatedBlock {
+			return SimulatedBlock{StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {State: &map[common.Hash]common.Hash{}}}}
+		}},
+	}
+	for _, size := range []struct {
+		name  string
+		slots int
+		fails bool
+	}{
+		{"at the bound", maxSimRemovedSlots, false},
+		{"above the bound", maxSimRemovedSlots + 1, true},
+	} {
+		storage := make(map[common.Hash]common.Hash, size.slots)
+		for i := range size.slots {
+			storage[common.BigToHash(big.NewInt(int64(i+1)))] = common.Hash{31: 1}
+		}
+		for _, cfg := range simulateOverrideConfigs {
+			// SimulateV1 does not write to the database, so the subtests share one chain.
+			m, bankAddr := contractGenesis(t, cfg.cfg, contract, types.GenesisAccount{Nonce: 1, Balance: big.NewInt(1), Code: []byte{0x00}, Storage: storage})
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			for _, removal := range removals {
+				for _, base := range simulateBases {
+					t.Run(removal.name+"/"+size.name+"/"+cfg.name+"/"+base.name, func(t *testing.T) {
+						result, err := api.SimulateV1(context.Background(), SimulationRequest{
+							BlockStateCalls: []SimulatedBlock{
+								removal.block(bankAddr),
+								{
+									StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Code: &readSlot1}},
+									Calls:          []ethapi.CallArgs{{From: &bankAddr, To: &contract, Gas: &gas}},
+								},
+							},
+						}, base.base)
+						if !size.fails {
+							require.NoError(t, err)
+							require.Len(t, result, 2)
+							for _, c := range result[0].Calls {
+								require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(c.Status), "%v", c.Error)
+							}
+							require.Equal(t, hexutil.Encode(make([]byte, 32)), result[1].Calls[0].ReturnData, "slot 1 after the removal")
+							return
+						}
+						require.ErrorContains(t, err, "the simulation removes more than 100000 storage slots")
+						var rpcErr rpc.Error
+						require.ErrorAs(t, err, &rpcErr)
+						require.Equal(t, rpc.ErrCodeClientLimitExceeded, rpcErr.ErrorCode())
+					})
+				}
+			}
+		}
+	}
+}
+
+// On a historical base, deploying at the real address of a contract that is created after the base block, and holds
+// more slots than the bound at the head, removes nothing, and so does deleting it again in its constructor: it is
+// not refused, the later slots read as empty, and the state roots are the ones of the same simulation on a chain that
+// ends at the base block.
+func TestSimulateV1HistoricalDeployIgnoresLaterStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = nil // the transaction that fills the contract needs more gas than the EIP-7825 cap
+	newChain := func() *execmoduletester.ExecModuleTester {
+		return execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: cfg, GasLimit: 3_000_000_000,
+			Alloc: types.GenesisAlloc{testAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)}},
+		}), execmoduletester.WithKey(testKey))
+	}
+	contract := types.CreateAddress(testAddr, 0)
+	slots := maxSimRemovedSlots + 1
+	// PUSH3 slots; loop: PUSH1 1 DUP2 SSTORE PUSH1 1 SWAP1 SUB DUP1 PUSH1 4 JUMPI; STOP
+	fill := []byte{
+		byte(vm.PUSH3), byte(slots >> 16), byte(slots >> 8), byte(slots), byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 1, byte(vm.DUP2), byte(vm.SSTORE), byte(vm.PUSH1), 1, byte(vm.SWAP1), byte(vm.SUB),
+		byte(vm.DUP1), byte(vm.PUSH1), 4, byte(vm.JUMPI), byte(vm.STOP),
+	}
+	later := newChain()
+	pack, err := later.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i != 0 {
+			return
+		}
+		txn, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 2_400_000_000, uint256.NewInt(1_000_000_000), fill), *types.LatestSigner(later.ChainConfig), testKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, later.InsertChain(pack))
+	require.Equal(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+	require.Equal(t, contract, pack.Receipts[0][0].ContractAddress)
+
+	// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN, deployed by its init code.
+	readSlot1 := []byte{byte(vm.PUSH1), 1, byte(vm.SLOAD), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	deploy := hexutil.Bytes(append(append([]byte{byte(vm.PUSH11)}, readSlot1...), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 11, byte(vm.PUSH1), 21, byte(vm.RETURN)))
+	// PUSH0 SELFDESTRUCT: created and destroyed in one transaction, so the account is deleted (EIP-6780).
+	selfDestruct := hexutil.Bytes{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)}
+	gas := hexutil.Uint64(1_000_000)
+	laterApi := newEthApiForTest(newBaseApiForTest(later), later.DB, nil, nil)
+	base := newChain()
+	baseApi := newEthApiForTest(newBaseApiForTest(base), base.DB, nil, nil)
+	for _, tc := range []struct {
+		name     string
+		initCode *hexutil.Bytes
+	}{
+		{"deploy", &deploy},
+		{"deploy and self-destruct", &selfDestruct},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := SimulationRequest{BlockStateCalls: []SimulatedBlock{
+				{Calls: []ethapi.CallArgs{{From: &testAddr, Gas: &gas, Input: tc.initCode}}},
+				{Calls: []ethapi.CallArgs{{From: &testAddr, To: &contract, Gas: &gas}}},
+			}}
+			got, err := laterApi.SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(0))
+			require.NoError(t, err)
+			require.Len(t, got, 2)
+			require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(got[0].Calls[0].Status), "%v", got[0].Calls[0].Error)
+
+			want, err := baseApi.SimulateV1(context.Background(), req, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			for i := range want {
+				require.NotEqual(t, common.Hash{}, want[i].StateRoot, "block %d", i)
+				require.Equal(t, want[i].StateRoot, got[i].StateRoot, "block %d", i)
+				require.Equal(t, want[i].Calls[0].ReturnData, got[i].Calls[0].ReturnData, "block %d", i)
+			}
+		})
 	}
 }
