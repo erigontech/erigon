@@ -126,8 +126,9 @@ func CheckCodeHash(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failF
 	return probs.verdict(string(CodeHash))
 }
 
-// walkLatest calls visit for the sampled keys of the domain's latest state, with one
-// goroutine per first key byte.
+// walkLatest calls visit for the first key of each sampled account in the domain's latest
+// state, with one goroutine per first key byte. Sampling by account, not by key, keeps an
+// account with many storage slots from being checked more often than one with few.
 func walkLatest(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, d kv.Domain, logger log.Logger, check Check, visit func(tx kv.TemporalTx, k, v []byte) error) error {
 	start := time.Now()
 	var done atomic.Uint64
@@ -151,11 +152,17 @@ func walkLatest(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, d kv.Dom
 			}
 			defer it.Close()
 			sampler := sc.NewWindowSampler(uint64(first))
+			var prev common.Address
+			seen := false
 			for it.HasNext() {
 				k, v, err := it.Next()
 				if err != nil {
 					return err
 				}
+				if seen && bytes.Equal(k[:length.Addr], prev[:]) {
+					continue
+				}
+				prev, seen = common.Address(k[:length.Addr]), true
 				if sampler.CanSkip() {
 					continue
 				}

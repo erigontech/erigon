@@ -141,11 +141,17 @@ func TestCheckCodeHash(t *testing.T) {
 		require.ErrorIs(t, err, integrity.ErrIntegrity)
 		require.ErrorContains(t, err, "latest")
 	})
+	t.Run("never wiped, one problem per account", func(t *testing.T) {
+		db := buildDestroyedContract(t, 15, 20)
+		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, false, 0, log.New())
+		require.ErrorIs(t, err, integrity.ErrIntegrity)
+		require.ErrorContains(t, err, "found 1 problem(s)")
+	})
 }
 
 // buildDestroyedContract writes a contract with one storage slot at txNum 1 and destroys it
 // at txNum 15 without re-creating it. wipeAt is where the storage wipe is written (0: never),
-// and writeAt is where the slot is written again after the destroy (0: never). The contract
+// and writeAt is where two slots are written after the destroy (0: never). The contract
 // address ends in 0xff, and its NextSubtree neighbour is a live account with storage.
 func buildDestroyedContract(t *testing.T, wipeAt, writeAt uint64) kv.TemporalRwDB {
 	t.Helper()
@@ -175,6 +181,8 @@ func buildDestroyedContract(t *testing.T, wipeAt, writeAt uint64) kv.TemporalRwD
 	require.NoError(t, domains.DomainDel(kv.AccountsDomain, tx, contract[:], 15, nil))
 	if writeAt > 0 {
 		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{8}, writeAt, nil))
+		h2 := common.BytesToHash([]byte{2})
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(contract[:], h2[:]...), []byte{9}, writeAt, nil))
 	}
 	for txNum := uint64(30); txNum < txs; txNum++ {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, filler[:], account(txNum), txNum, nil))
@@ -210,5 +218,11 @@ func TestStorageKeptAfterDestroyNotRecreated(t *testing.T) {
 		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, true, 0, log.New())
 		require.ErrorIs(t, err, integrity.ErrIntegrity)
 		require.ErrorContains(t, err, "latest")
+	})
+	t.Run("never wiped, one problem per account", func(t *testing.T) {
+		db := buildDestroyedContract(t, 15, 20)
+		err := integrity.CheckStorageOfAbsentAccount(t.Context(), sc, db, false, 0, log.New())
+		require.ErrorIs(t, err, integrity.ErrIntegrity)
+		require.ErrorContains(t, err, "found 1 problem(s)")
 	})
 }
