@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -126,7 +126,7 @@ func forEachCommitmentBranch(t *testing.T, path string, fn func(prefix, val []by
 // branchKeyKindsVal counts plain vs short (referenced) keys in a single branch value.
 func branchKeyKindsVal(t *testing.T, v []byte) (plain, short int) {
 	t.Helper()
-	_, err := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	_, err := branch.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		full := length.Addr
 		if isStorage {
 			full = length.Addr + length.Hash

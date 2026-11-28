@@ -174,7 +174,7 @@ Serving semantics in head-capture mode:
   `verifyWitnessStateless`, the `{0x80}` append.
 - **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
   `execution/commitment/v3.Trie.WitnessNodes` on v3; the frozen HPH fallback uses
-  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` and
+  `execution/commitment/v2/hex_patricia_hashed.go` `WitnessesByHash` and
   `trie.WitnessNodesForKeysByHash`.
 - **Collapse** — `execution/commitment/v3/collapse.go` walks pre-state records and reports deletes-only siblings: the
   survivor, or the last child of a branch that keeps none; account sibling paths continue through a single-path

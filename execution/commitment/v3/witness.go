@@ -99,7 +99,7 @@ func (t *Trie) runWitnessWalk(ctx context.Context, updates *commitment.Updates, 
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
 		}
-		if err := w.walkPlane(planeAccount, nil, key, key, want); err != nil {
+		if err := w.walkPlane(PlaneAccount, nil, key, key, want); err != nil {
 			return nil, nil, nil, fmt.Errorf("witness key %x: %w", key, err)
 		}
 	}
@@ -118,7 +118,7 @@ func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
 }
 
 func (w *witnessWalk) load(plane byte, addrHash, path []byte) (*witnessNode, error) {
-	w.kbuf = nodeKey(plane, addrHash, path, w.kbuf[:0])
+	w.kbuf = NodeKey(plane, addrHash, path, w.kbuf[:0])
 	if wn, ok := w.nodes[string(w.kbuf)]; ok {
 		return wn, nil
 	}
@@ -211,7 +211,7 @@ func (w *witnessWalk) walkPlane(plane byte, addrHash, fullKey, k []byte, want []
 		return w.descend(plane, addrHash, fullKey, r.branch.n, k)
 	}
 	if !bytes.HasPrefix(k, r.n.path) {
-		if w.exclusion && plane == planeStorage {
+		if w.exclusion && plane == PlaneStorage {
 			w.emit(r.branch.rlp, r.branch.hash)
 		}
 		return nil
@@ -275,7 +275,7 @@ func (w *witnessWalk) leaf(plane byte, fullKey, k, leafKey, payload []byte) erro
 		return nil
 	}
 	rest := k[len(leafKey):]
-	if plane != planeAccount || len(rest) == 0 {
+	if plane != PlaneAccount || len(rest) == 0 {
 		return nil
 	}
 	_, _, _, storageRoot, err := decodeAccountLeaf(payload)
@@ -286,7 +286,7 @@ func (w *witnessWalk) leaf(plane byte, fullKey, k, leafKey, payload []byte) erro
 		return nil
 	}
 	addrHash := hashAddressPath(fullKey[:64])
-	return w.walkPlane(planeStorage, addrHash[:], fullKey, rest, storageRoot)
+	return w.walkPlane(PlaneStorage, addrHash[:], fullKey, rest, storageRoot)
 }
 
 func branchRLP(n *node) ([]byte, error) {
@@ -303,7 +303,7 @@ func leafRLP(n *node, nib int, includeNib bool) (rlp, leafKey, payload []byte, e
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if n.plane != planeAccount {
+	if n.plane != PlaneAccount {
 		return appendStorageLeafRLP(nil, compact, payload), leafKey, payload, nil
 	}
 	return appendLeafRLP(nil, compact, encodedPayload), leafKey, payload, nil

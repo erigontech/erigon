@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -138,7 +139,8 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
-	return res, nil
+	// The code may reference transaction-scoped mmap memory, so detach before rollback.
+	return bytes.Clone(res), nil
 }
 
 // GetStorageValues implements eth_getStorageValues. Returns the values of multiple

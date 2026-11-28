@@ -55,6 +55,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1449,7 +1451,7 @@ func testGetProofIgnoresNewerSharedBranchCache(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	provider, ok := roTx.AggTx().(branchcache.BranchCacheProvider)
 	require.True(t, ok)
 	branchCache := provider.BranchCache()
 	require.NotNil(t, branchCache)
@@ -1459,7 +1461,7 @@ func testGetProofIgnoresNewerSharedBranchCache(t *testing.T, v3 bool) {
 	rootKey := nibbles.HexToCompact(nil)
 	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
 	require.NoError(t, err)
-	newerRootBranch := make(commitment.BranchData, 4)
+	newerRootBranch := make(branch.BranchData, 4)
 	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
 	cachedRootBranch, _, ok := branchCache.Get(rootKey)
 	require.True(t, ok)

@@ -33,7 +33,7 @@ import (
 )
 
 // accountStorageBranch builds a single-cell BranchData carrying an account-addr key and a
-// storage-addr key: touchMap=afterMap=1, fieldBits=fieldAccountAddr|fieldStorageAddr(6), then
+// storage-addr key: touchMap=afterMap=1, fieldBits=FieldAccountAddr|FieldStorageAddr(6), then
 // uvarint(len)+key for each.
 func accountStorageBranch(addr, storageKey []byte) []byte {
 	b := []byte{0, 1, 0, 1, 0x06}

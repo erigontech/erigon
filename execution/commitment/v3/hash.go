@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	planeAccount = tagAccountNode
-	planeStorage = tagStorageNode
+	PlaneAccount = tagAccountNode
+	PlaneStorage = tagStorageNode
 
 	refScratch = 3 + 16*33 + 1
 

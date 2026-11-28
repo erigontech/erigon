@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -289,7 +289,7 @@ func crashRecoveryLiveCommitment(t *testing.T, entries map[string]string) map[st
 			continue
 		}
 		require.GreaterOrEqual(t, len(data), 4, "commitment branch %s", key)
-		if commitment.BranchData(data).ChildCount() == 0 {
+		if branch.BranchData(data).ChildCount() == 0 {
 			require.Len(t, data, 4, "an empty branch must not contain cell data")
 			delete(entries, key)
 		}

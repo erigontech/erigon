@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -108,10 +109,10 @@ func (tx *commitmentBranchLookupTx) AggTx() any {
 func (*commitmentBranchLookupTx) Rollback() {}
 
 type commitmentBranchCacheProvider struct {
-	cache *commitment.BranchCache
+	cache *branchcache.BranchCache
 }
 
-func (p commitmentBranchCacheProvider) BranchCache() *commitment.BranchCache {
+func (p commitmentBranchCacheProvider) BranchCache() *branchcache.BranchCache {
 	return p.cache
 }
 
@@ -264,9 +265,9 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 		{name: "cache miss", cacheAvailable: true, wantData: "database", wantStep: 9, wantCalls: 1, wantBranchCacheOpt: true, wantMisses: 1, wantFillRequests: 1, wantCallbackMisses: 1},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			var cache *commitment.BranchCache
+			var cache *branchcache.BranchCache
 			if testCase.cacheAvailable {
-				cache = commitment.NewBranchCache(100)
+				cache = branchcache.NewBranchCache(100)
 				defer cache.Close()
 				if testCase.cacheHit {
 					cache.Put(key, []byte("cached"), 7, 0)
@@ -295,7 +296,7 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 }
 
 func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
-	cache := commitment.NewBranchCache(100)
+	cache := branchcache.NewBranchCache(100)
 	defer cache.Close()
 	tx := &commitmentBranchLookupTx{
 		data:  []byte("database"),
@@ -314,7 +315,7 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 }
 
 func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
-	cache := commitment.NewBranchCache(100)
+	cache := branchcache.NewBranchCache(100)
 	defer cache.Close()
 	tx := &commitmentBranchLookupTx{
 		data:  []byte("database"),

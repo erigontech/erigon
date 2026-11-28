@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -392,7 +394,7 @@ func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) ([]collapse
 	bed := newWitnessBed(t, pre)
 	bed.hphMem.Apply(batch)
 	reader, _ := bed.hphMem.Open(t.Context())
-	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
 	require.NoError(t, hph.SetState(bed.hphState))
 	events := make([]collapseTestEvent, 0)
 	hph.SetCollapseTracer(func(sibling, prefix []byte) {
@@ -403,7 +405,7 @@ func collapseHphEvents(t *testing.T, pre, batch []commitmenttest.Op) ([]collapse
 	childCount := func(prefix []byte) int {
 		data, _, err := bed.hphMem.Branch(nibbles.HexToCompact(prefix))
 		require.NoError(t, err)
-		return commitment.BranchData(data).ChildCount()
+		return branch.BranchData(data).ChildCount()
 	}
 	return events, childCount
 }
@@ -429,11 +431,11 @@ func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []col
 	state.Apply(pre)
 	state.Apply(batch)
 	index := func(ops []commitmenttest.Op) map[byte]map[string]struct{} {
-		out := map[byte]map[string]struct{}{planeAccount: {}, planeStorage: {}}
+		out := map[byte]map[string]struct{}{PlaneAccount: {}, PlaneStorage: {}}
 		for _, op := range ops {
-			plane := planeAccount
+			plane := PlaneAccount
 			if len(op.Key) > length.Addr {
-				plane = planeStorage
+				plane = PlaneStorage
 			}
 			out[plane][string(commitment.KeyToHexNibbleHash(op.Key))] = struct{}{}
 		}
@@ -441,23 +443,23 @@ func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []col
 	}
 	live, deletes := index(state.Ops()), index(batch)
 	groups := make(map[string][][]byte)
-	for key := range deletes[planeAccount] {
+	for key := range deletes[PlaneAccount] {
 		groups[""] = append(groups[""], []byte(key))
 	}
-	for key := range deletes[planeStorage] {
+	for key := range deletes[PlaneStorage] {
 		path := []byte(key)
-		if _, deleted := deletes[planeAccount][string(path[:64])]; deleted {
+		if _, deleted := deletes[PlaneAccount][string(path[:64])]; deleted {
 			continue
 		}
 		groups[string(path[:64])] = append(groups[string(path[:64])], path[64:])
 	}
 	var result []collapseTestEvent
 	for ownerKey, dels := range groups {
-		plane := planeAccount
+		plane := PlaneAccount
 		owner := []byte(nil)
 		ownerPath := []byte(nil)
 		if ownerKey != "" {
-			plane = planeStorage
+			plane = PlaneStorage
 			ownerPath = []byte(ownerKey)
 			packed := hashAddressPath(ownerPath)
 			owner = packed[:]
@@ -470,7 +472,7 @@ func referenceCollapseEvents(t *testing.T, pre, batch []commitmenttest.Op) []col
 		}
 		require.NoError(t, loadAllCollapseNodes(ctx, &g, root))
 		planeLive := live[plane]
-		if plane == planeStorage {
+		if plane == PlaneStorage {
 			planeLive = make(map[string]struct{})
 			for key := range live[plane] {
 				if bytes.HasPrefix([]byte(key), ownerPath) {

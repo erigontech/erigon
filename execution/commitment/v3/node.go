@@ -129,7 +129,7 @@ func (n *node) appendChildExt(out []byte, nib int) []byte {
 	ext := n.childExtAt(nib)
 	out = append(out, byte(len(ext)))
 	var extScratch [32]byte
-	return append(out, packPath(ext, extScratch[:0])...)
+	return append(out, PackPath(ext, extScratch[:0])...)
 }
 
 func (n *node) leafAt(nib int) (suffix, value []byte) {
