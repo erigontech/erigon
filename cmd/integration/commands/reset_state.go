@@ -17,9 +17,7 @@
 package commands
 
 import (
-	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -42,49 +40,37 @@ import (
 )
 
 var cmdResetState = &cobra.Command{
-	Use:   "reset_state",
-	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "reset_state",
+	Short:        "Reset StateStages (5,6,7,8,9,10) and buckets",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
 		sn, _, err := allSnapshots(ctx, db, logger)
 		if err != nil {
-			logger.Error("Opening snapshots", "error", err)
-			return
+			return fmt.Errorf("opening snapshots: %w", err)
 		}
 
 		defer sn.Close()
 
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
+			return err
 		}
 
 		dirs := datadir.New(datadirCli)
 		br, _ := blocksIO(db, logger)
 		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
+			return err
 		}
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) })
 	},
 }
 

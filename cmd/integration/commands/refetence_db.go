@@ -46,55 +46,40 @@ var stateBuckets = []string{
 }
 
 var cmdMdbxTopDup = &cobra.Command{
-	Use: "mdbx_top_dup",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "mdbx_top_dup",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		err := mdbxTopDup(ctx, chaindata, bucket, logger)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return mdbxTopDup(ctx, chaindata, bucket, logger)
 	},
 }
 
 var cmdCompareBucket = &cobra.Command{
-	Use:   "compare_bucket",
-	Short: "compare bucket to the same bucket in '--chaindata.reference'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "compare_bucket",
+	Short:        "compare bucket to the same bucket in '--chaindata.reference'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "integration")
+		_ = debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
-		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
 	},
 }
 
 var cmdCompareStates = &cobra.Command{
-	Use:   "compare_states",
-	Short: "compare state buckets to buckets in '--chaindata.reference'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "compare_states",
+	Short:        "compare state buckets to buckets in '--chaindata.reference'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "integration")
+		_ = debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
-		err := compareStates(ctx, chaindata, referenceChaindata)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return compareStates(ctx, chaindata, referenceChaindata)
 	},
 }
 
@@ -110,27 +95,18 @@ var cmdMdbxToMdbx = &cobra.Command{
 			return errors.New("--chaindata.to is required: it names the db to copy --chaindata into")
 		}
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-		err := backup.Kv2kv(ctx, from, to, nil, logger)
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return err
+		return backup.Kv2kv(ctx, from, to, nil, logger)
 	},
 }
 
 var cmdFToMdbx = &cobra.Command{
-	Use:   "f_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "f_to_mdbx",
+	Short:        "copy data from '--chaindata' to '--chaindata.to'",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		err := fToMdbx(ctx, logger, toChaindata)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return fToMdbx(ctx, logger, toChaindata)
 	},
 }
 
@@ -170,7 +146,10 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
-	db := dbOpts.MustOpen()
+	db, err := dbOpts.Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
 	cnt := map[string]int{}
@@ -209,10 +188,16 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
-	db := mdbx2.MustOpen(chaindata)
+	db, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
-	refDB := mdbx2.MustOpen(referenceChaindata)
+	refDB, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(referenceChaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -236,10 +221,16 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 }
 
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
-	db := mdbx2.MustOpen(chaindata)
+	db, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
-	refDB := mdbx2.MustOpen(referenceChaindata)
+	refDB, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(referenceChaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -333,12 +324,16 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	file, err := os.Open(file)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer file.Close()
 
 	dstOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(to).WriteMap(dbWriteMap)
-	dst := dstOpts.MustOpen()
+	dst, err := dstOpts.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
