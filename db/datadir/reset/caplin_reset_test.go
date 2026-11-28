@@ -68,7 +68,7 @@ func TestCaplinResetPlanCoverageAndOnlyCopies(t *testing.T) {
 	items.Sort()
 	plan, err := BuildCaplinResetPlan(context.Background(), dirs, items, nil, true, log.New())
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{blockLocal, blockReplacement, blobLocal, filepath.Join("caplin", stateLocal), filepath.Join("caplin", stateOnlyCopy)}, caplinResetNames(plan.Files))
+	require.ElementsMatch(t, []string{blockLocal, blockReplacement, blobLocal, "caplin/" + stateLocal, "caplin/" + stateOnlyCopy}, caplinResetNames(plan.Files))
 	require.Contains(t, plan.Files, CaplinResetFile{Name: blockReplacement, Path: filepath.Join(dirs.Snap, badTorrent), Family: "blocks", From: 0, To: 200, Torrent: true})
 	require.ElementsMatch(t, []string{"sidecars 200..300", "state/StateRoot 0..100"}, caplinResetOnlyCopyNames(plan.OnlyCopies))
 	require.NotContains(t, caplinResetNames(plan.Files), unknown)
