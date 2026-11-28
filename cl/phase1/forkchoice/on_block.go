@@ -283,7 +283,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// Validate parent payload status path early (before expensive operations)
 	isGloas := blockVersion >= clparams.GloasVersion
-	headBeforeBlock := common.Hash{}
+	gloasHeadBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointStateLocked)
@@ -294,7 +294,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return err
 		}
-		headBeforeBlock = head.Root
+		gloasHeadBeforeBlock = head.Root
 	}
 
 	// Pre-GLOAS execution payload processing.
@@ -366,6 +366,16 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			var join func()
 			if overlap != nil {
 				join = overlap.join
+			}
+			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot); warm {
+				// Build the justified state for the head before the block while f.mu is released.
+				joinOverlap := join
+				join = func() {
+					_, _ = f.getCheckpointState(justifiedCheckpoint)
+					if joinOverlap != nil {
+						joinOverlap()
+					}
+				}
 			}
 			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
@@ -562,7 +572,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	pendingEnvelopeFound, err := f.applyBlockImportLocked(
 		importedBlock,
 		blockRoot,
-		headBeforeBlock,
+		gloasHeadBeforeBlock,
 		storeTimeMs,
 		lastProcessedState,
 		prepared,

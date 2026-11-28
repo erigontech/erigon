@@ -185,13 +185,17 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			break
 		}
 
+		getHash := protocol.GetHashFnFromChain(header, rw.chain)
 		// Block initialisation
 		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
+			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg, getHash)
 			return ret, err
 		}
 		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
+		if result.Err == nil {
+			result.Err = ibs.StateReadError()
+		}
 		if result.Err == nil {
 			ibs.EndTransaction()
 		}
@@ -392,6 +396,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
+				var stateErr error
 				func() {
 					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 					// End of block transaction in a block
@@ -400,18 +405,24 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					defer ibs.Close()
 					ibs.SetNoConflictDetection()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+					getHash := protocol.GetHashFnFromChain(txTask.Header, chainReader)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
+						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, cfg.Engine, false /* constCall */, vm.Config{}, getHash)
 					}
 
 					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+					if stateErr = ibs.StateReadError(); stateErr != nil {
+						return
+					}
 					if err != nil {
 						result.Err = err
 						return
 					}
-
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 				}()
+				if stateErr != nil {
+					return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, stateErr)
+				}
 			}
 
 			p.blockResult.Complete = true
