@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
 
 func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	t.Helper()
@@ -110,7 +110,7 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(db, txs, allIrreversible)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -246,7 +246,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(db, 400, allIrreversible)
+	err = agg.BuildFiles(db, 400, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()

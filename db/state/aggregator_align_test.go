@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -541,9 +540,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	tx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx := beginRo(t, db)
 
 	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
 	require.False(t, ok, "a dependency-clamped values view has no exact frontier")

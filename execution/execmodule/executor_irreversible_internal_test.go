@@ -40,11 +40,11 @@ import (
 
 type buildRecordingDB struct {
 	kv.TemporalRwDB
-	irreversibleTxNums []uint64
+	collateToTxNums []uint64
 }
 
-func (db *buildRecordingDB) BuildFilesInBackground(irreversibleTxNum uint64) chan struct{} {
-	db.irreversibleTxNums = append(db.irreversibleTxNums, irreversibleTxNum)
+func (db *buildRecordingDB) BuildFilesInBackground(collateToTxNum uint64) chan struct{} {
+	db.collateToTxNums = append(db.collateToTxNums, collateToTxNum)
 	done := make(chan struct{})
 	close(done)
 	return done
@@ -89,12 +89,12 @@ func TestProcessFrozenBlocksBuildsNoFilesOverBatchChangesets(t *testing.T) {
 
 	require.NoError(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
 
-	require.NotEmpty(t, db.irreversibleTxNums)
+	require.NotEmpty(t, db.collateToTxNums)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), lowest, "the batch flushed the changesets of blocks 1-10")
-		for _, txNum := range db.irreversibleTxNums {
+		for _, txNum := range db.collateToTxNums {
 			require.Equal(t, uint64(9), txNum, "files may hold only block 0, which ends at txnum 9")
 		}
 		return nil

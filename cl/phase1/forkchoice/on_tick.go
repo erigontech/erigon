@@ -65,15 +65,26 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
-		// Only promote unrealized checkpoints when the node is synced (processing
-		// blocks at the chain tip).  During forward sync, the highest-seen slot lags
-		// far behind the wall clock.  Promoting unrealized finalization at that point
-		// can jump the realized finalized checkpoint ahead of the blocks the fork
-		// graph actually contains, causing Ancestor() to fail with
-		// ErrNotFinalizedDescendant for subsequent blocks.
-		if f.nearChainTip(currentSlot) {
-			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
-		}
+		f.promoteUnrealizedCheckpoints(f.computeEpochAtSlot(currentSlot))
+	}
+}
+
+// promoteUnrealizedCheckpoints runs the epoch-start promotion of the unrealized checkpoints at most
+// once per epoch.
+func (f *ForkChoiceStore) promoteUnrealizedCheckpoints(epoch uint64) {
+	if epoch <= f.checkpointPromotionEpoch {
+		return
+	}
+	f.checkpointPromotionEpoch = epoch
+	// Only promote unrealized checkpoints when the node is synced (processing
+	// blocks at the chain tip).  During forward sync, the highest-seen slot lags
+	// far behind the wall clock.  Promoting unrealized finalization at that point
+	// can jump the realized finalized checkpoint ahead of the blocks the fork
+	// graph actually contains, causing Ancestor() to fail with
+	// ErrNotFinalizedDescendant for subsequent blocks.
+	if f.nearChainTip(f.computeStartSlotAtEpoch(epoch)) {
+		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
+		f.invalidateCachedHead()
 	}
 }
 
@@ -90,4 +101,5 @@ func (f *ForkChoiceStore) SetTimeForSpecTest(timeMs uint64) {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
+	f.checkpointPromotionEpoch = f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
 }

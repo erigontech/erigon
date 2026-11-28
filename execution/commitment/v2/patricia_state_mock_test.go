@@ -156,7 +156,6 @@ func (ms *MockState) Storage(plainKey []byte) (*commitment.Update, error) {
 		ms.mu.RUnlock()
 	}
 	if !ok {
-		ms.t.Logf("GetStorage not found key [%x]", plainKey)
 		u := new(commitment.Update)
 		u.Flags = commitment.DeleteUpdate
 		return u, nil

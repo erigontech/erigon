@@ -130,18 +130,10 @@ func IsStateFileV2(name string) bool {
 	return StateFileRegex.MatchString(name)
 }
 
-func IsCaplin(dir string, fileName string) bool {
-	if strings.Contains(fileName, "caplin") || strings.Contains(dir, "caplin") {
-		return true
-	}
-	return false
-}
-
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res.Path = filepath.Join(dir, fileName)
 	res.Ext = filepath.Ext(fileName)
 	res.name = fileName
-	caplin := IsCaplin(dir, fileName)
 
 	fileName = filepath.Base(fileName)
 
@@ -224,16 +216,12 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		default: // smallest number in file name is > 1_000, so we represent it as /1000
 			multiplier = 1_000
 		}
-		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString, typeString
+		res.From, res.To, res.TypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString
 		res.Type, ok = ParseFileType(typeString)
-		if ok {
-			res.CaplinTypeString = res.Type.Name()
-		} else if !caplin {
-			return res, isStateFile, false
+		if !ok {
+			return res, false, false
 		}
-	}
-	if caplin {
-		return res, isStateFile, true
+		res.CaplinTypeString = res.Type.Name()
 	}
 	return res, isStateFile, true
 }
@@ -326,7 +314,7 @@ type FileInfo struct {
 	name, Path, Ext string
 	Type            Type
 
-	CaplinTypeString string // part of file-name - without version, range, ext
+	CaplinTypeString string // canonical parsed type name, or "salt" for salt files
 	TypeString       string
 }
 
