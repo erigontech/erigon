@@ -303,7 +303,7 @@ func (m *Merger) Merge(
 		}
 		// The inputs are deleted after the builds, so a reused output must be on disk before and after them.
 		if err := filesOnDisk(snapDir, reusedFiles); err != nil {
-			return fmt.Errorf("merger.Merge: %w", err)
+			return merged, fmt.Errorf("merger.Merge: %w", err)
 		}
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
@@ -343,7 +343,7 @@ func (m *Merger) Merge(
 
 		if err := filesOnDisk(snapDir, reusedFiles); err != nil {
 			abort()
-			return fmt.Errorf("merger.Merge: %w", err)
+			return merged, fmt.Errorf("merger.Merge: %w", err)
 		}
 
 		snapshots.LogStat("merge")

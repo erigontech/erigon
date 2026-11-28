@@ -2253,7 +2253,7 @@ func TestMergeFailsWhenAReusedOutputIsMissingFromDisk(t *testing.T) {
 			require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
 			var deleted []string
 			onDelete := func(_ context.Context, files []string) error { deleted = append(deleted, files...); return nil }
-			err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
+			_, err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, onDelete)
 			require.ErrorContains(t, err, missing)
 			if !tc.removedLater {
 				require.Empty(t, deleted, "nothing is built when an output is missing before the merge")
