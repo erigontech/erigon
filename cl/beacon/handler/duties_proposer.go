@@ -44,11 +44,6 @@ type proposerDuties struct {
 	Slot           uint64         `json:"slot,string"`
 }
 
-// isProposerDutyInLookaheadVector checks if the proposer duty is within the lookahead vector.
-func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState, epoch uint64) bool {
-	return s.Version() >= clparams.FuluVersion && epoch >= state.Epoch(s) && epoch <= state.Epoch(s)+a.beaconChainCfg.MinSeedLookahead
-}
-
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	return a.getDutiesProposerForVersion(r, false)
 }
@@ -68,16 +63,55 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
+	if currentEpoch := a.ethClock.GetCurrentEpoch(); epoch > currentEpoch+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is more than one epoch beyond clock epoch %d", epoch, currentEpoch))
+	}
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
-	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
-	}
-	isAvailableInHeadState := epoch >= headEpoch || (!isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot())
+	lowestAvailableSlot := a.forkchoiceStore.LowestAvailableSlot()
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	var (
+		dependentRoot  common.Hash
+		recentRoot     common.Hash
+		duties         []proposerDuties
+		optimistic     bool
+		useHistory     bool
+		stateToAdvance *state.CachingBeaconState
+	)
 
-	if !isAvailableInHeadState {
+	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		stateEpoch := state.Epoch(s)
+		if epoch > stateEpoch+maxEpochsLookaheadForDuties {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+		}
+		useHistory = epoch < stateEpoch && (isFinalized || expectedSlot < lowestAvailableSlot)
+		if useHistory {
+			return nil
+		}
+		dependentRoot, err = a.getDependentRoot(s.GetBlockRootAtSlot, headRoot, headSlot, epoch, v2 && targetVersion >= clparams.FuluVersion)
+		if err != nil {
+			return err
+		}
+		optimistic = !isFinalized && a.forkchoiceStore.IsRootOptimistic(headRoot)
+		duties = make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+		if epoch < stateEpoch {
+			recentRoot, err = s.GetBlockRootAtSlot(expectedSlot + a.beaconChainCfg.SlotsPerEpoch - 1)
+			if err != nil {
+				return err
+			}
+			if recentRoot == (common.Hash{}) {
+				return fmt.Errorf("canonical block root not found for epoch %d", epoch)
+			}
+			return nil
+		}
+		stateToAdvance, err = a.prepareProposerDutiesForTarget(duties, s, targetVersion, epoch, expectedSlot, false)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+
+	if useHistory {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -90,112 +124,66 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
 
-		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
+		dependentRoot, err = a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
 			return nil, err
 		}
-		duties, err := a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
+		duties, err = a.getHistoricalProposerDuties(r.Context(), tx, stateGetter, epoch, expectedSlot)
 		if err != nil {
 			return nil, err
 		}
-		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(targetVersion).With("dependent_root", dependentRoot), nil
 	}
 
-	dependentRoot, err := a.getProposerDependentRoot(epoch, v2)
-	if err != nil {
-		return nil, err
-	}
-
-	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-
-	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
-		if targetVersion.After(s.Version()) {
-			advancedState, copyErr := a.copyHeadStateForDuties(s)
-			if copyErr != nil {
-				return copyErr
-			}
-			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
-				log.Warn("getDutiesProposer: failed to advance state to target fork",
-					"epoch", epoch, "headEpoch", headEpoch, "err", processErr)
-				return processErr
-			}
-			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
-		}
-		if targetVersion.Before(s.Version()) {
-			versionedState, copyErr := a.copyHeadStateForDuties(s)
-			if copyErr != nil {
-				return copyErr
-			}
-			versionedState.SetVersion(targetVersion)
-			s = versionedState
-		}
-
-		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
-		if a.isProposerDutyInLookaheadVector(s, epoch) {
-			lookaheadVector := s.GetProposerLookahead()
-			stateEpoch := state.Epoch(s)
-			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
-			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
-				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
-				var pk common.Bytes48
-				pk, err = s.ValidatorPublicKey(int(proposerIndex))
-				if err != nil {
-					panic(err)
-				}
-				duties[i] = proposerDuties{
-					Pubkey:         pk,
-					ValidatorIndex: proposerIndex,
-					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
-				}
-			}
-			return nil
-		}
-
-		// When the target epoch is beyond the lookahead range (e.g. head is far
-		// behind), we must advance a copy of the state to the target epoch so
-		// that RANDAO mixes and proposer lookahead are correct.
-		if s.Version() >= clparams.FuluVersion && epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
-			advancedState, copyErr := a.copyHeadStateForDuties(s)
-			if copyErr != nil {
-				return copyErr
-			}
-			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
-				log.Warn("getDutiesProposer: failed to advance state for epoch beyond lookahead",
-					"epoch", epoch, "headEpoch", headEpoch, "err", processErr)
-				return processErr
-			}
-			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
-		}
-
-		// Lets do proposer index computation (pre-Fulu or when epoch is within range)
-		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
-			a.beaconChainCfg.EpochsPerHistoricalVector
-
-		mix := s.GetRandaoMix(int(mixPosition))
-
-		input := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
-		seedArray := [32]byte{}
-		copy(seedArray[:], input[:])
-		indices := s.GetActiveValidatorsIndices(epoch)
-		proposerIndices, err := shuffling2.ComputeProposerIndices(s.BeaconState, epoch, seedArray, indices)
-		if err != nil {
+	if recentRoot != (common.Hash{}) {
+		if err := a.forkchoiceStore.ViewStateAtBlockRoot(recentRoot, func(s *state.CachingBeaconState) error {
+			stateToAdvance, err = a.prepareProposerDutiesForTarget(duties, s, targetVersion, epoch, expectedSlot, true)
 			return err
+		}); err != nil {
+			return nil, err
 		}
-		return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
-	}); err != nil {
-		return nil, err
+	}
+
+	if stateToAdvance != nil {
+		stateEpoch := state.Epoch(stateToAdvance)
+		stateVersion := stateToAdvance.Version()
+		if err := transition.DefaultMachine.ProcessSlots(stateToAdvance, expectedSlot); err != nil {
+			log.Warn("getDutiesProposer: failed to advance state", "epoch", epoch, "stateEpoch", stateEpoch, "stateVersion", stateVersion, "targetVersion", targetVersion, "err", err)
+			return nil, err
+		}
+		if err := fillProposerDutiesFromState(duties, stateToAdvance, epoch, expectedSlot); err != nil {
+			return nil, err
+		}
 	}
 
 	return newBeaconResponse(duties).
 		WithFinalized(isFinalized).
-		WithOptimistic(!isFinalized && a.forkchoiceStore.IsHeadOptimistic()).
-		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
+		WithOptimistic(optimistic).
+		WithVersion(targetVersion).
 		With("dependent_root", dependentRoot), nil
 }
 
-// copyHeadStateForDuties copies the head state using the handler's config rather than the
-// state's own config, so the copy picks up fork schedule changes from the handler.
+func (a *ApiHandler) prepareProposerDutiesForTarget(duties []proposerDuties, s *state.CachingBeaconState, targetVersion clparams.StateVersion, epoch, expectedSlot uint64, recent bool) (*state.CachingBeaconState, error) {
+	stateEpoch := state.Epoch(s)
+	if targetVersion.Before(s.Version()) {
+		versionedState, err := a.copyHeadStateForDuties(s)
+		if err != nil {
+			return nil, err
+		}
+		versionedState.SetVersion(targetVersion)
+		s = versionedState
+	}
+
+	if targetVersion.After(s.Version()) || (s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead) || (s.Version() < clparams.FuluVersion && stateEpoch < epoch && (recent || epoch <= stateEpoch+a.beaconChainCfg.MinSeedLookahead+1)) {
+		return a.copyHeadStateForDuties(s)
+	}
+	if !recent && s.Version() < clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+	}
+	return nil, fillProposerDutiesFromState(duties, s, epoch, expectedSlot)
+}
+
+// copyHeadStateForDuties copies a state using the handler's config to pick up fork schedule changes.
 func (a *ApiHandler) copyHeadStateForDuties(s *state.CachingBeaconState) (*state.CachingBeaconState, error) {
 	copied := state.New(a.beaconChainCfg)
 	if err := s.CopyInto(copied); err != nil {
@@ -205,16 +193,25 @@ func (a *ApiHandler) copyHeadStateForDuties(s *state.CachingBeaconState) (*state
 }
 
 func fillProposerDutiesFromState(duties []proposerDuties, s *state.CachingBeaconState, epoch, expectedSlot uint64) error {
+	if s.Version() >= clparams.FuluVersion {
+		if _, ok := s.ProposerIndexFromLookahead(expectedSlot); !ok {
+			return fmt.Errorf("proposer lookahead does not cover epoch %d", epoch)
+		}
+		return fillProposerDuties(duties, s.BeaconState, expectedSlot, func(i int) uint64 {
+			proposerIndex, _ := s.ProposerIndexFromLookahead(expectedSlot + uint64(i))
+			return proposerIndex
+		})
+	}
 	proposerIndices, err := s.GetBeaconProposerIndices(epoch)
 	if err != nil {
 		return err
 	}
-	return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
+	return fillProposerDuties(duties, s.BeaconState, expectedSlot, func(i int) uint64 { return proposerIndices[i] })
 }
 
-func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, proposerIndices []uint64, expectedSlot uint64) error {
-	for i := uint64(0); i < s.BeaconConfig().SlotsPerEpoch; i++ {
-		proposerIndex := proposerIndices[i]
+func fillProposerDuties(duties []proposerDuties, s *raw.BeaconState, expectedSlot uint64, proposerIndexAt func(int) uint64) error {
+	for i := range duties {
+		proposerIndex := proposerIndexAt(i)
 		pk, err := s.ValidatorPublicKey(int(proposerIndex))
 		if err != nil {
 			return err
@@ -222,18 +219,10 @@ func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, 
 		duties[i] = proposerDuties{
 			Pubkey:         pk,
 			ValidatorIndex: proposerIndex,
-			Slot:           expectedSlot + i,
+			Slot:           expectedSlot + uint64(i),
 		}
 	}
 	return nil
-}
-
-func (a *ApiHandler) getProposerDependentRoot(epoch uint64, v2 bool) (common.Hash, error) {
-	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
-	if v2 && targetVersion >= clparams.FuluVersion {
-		return a.getDependentRoot(epoch, true)
-	}
-	return a.getDependentRoot(epoch, false)
 }
 
 func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter state_accessors.GetValFn, epoch uint64, v2 bool) (common.Hash, error) {
@@ -313,6 +302,26 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return duties, nil
 	}
 
+	if a.beaconChainCfg.GetCurrentStateVersion(epoch) >= clparams.FuluVersion && epoch > a.beaconChainCfg.FuluForkEpoch {
+		epochData, err := state_accessors.ReadEpochData(stateGetter, expectedSlot, a.beaconChainCfg)
+		if err != nil {
+			return nil, err
+		}
+		if epochData == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
+		}
+		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+		for i := range duties {
+			index := epochData.ProposerLookahead.Get(i)
+			pubkey, err := a.syncedData.ValidatorPublicKeyByIndex(int(index))
+			if err != nil {
+				return nil, err
+			}
+			duties[i] = proposerDuties{Pubkey: pubkey, ValidatorIndex: index, Slot: expectedSlot + uint64(i)}
+		}
+		return duties, nil
+	}
+
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
 	if err != nil {
 		return nil, err
@@ -320,6 +329,8 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found for slot %d", expectedSlot))
 	}
+	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
+
 	activeIndices := make([]uint64, 0, validatorSet.Length())
 	validatorSet.Range(func(validatorIndex int, validator solid.Validator, _ int) bool {
 		if validator.Active(epoch) {
@@ -343,8 +354,8 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 
 	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
-	if err := historicalState.SetSlot(expectedSlot); err != nil {
-		return nil, err
+	if epoch == a.beaconChainCfg.FuluForkEpoch && historicalState.Version() >= clparams.FuluVersion {
+		historicalState.SetVersion(clparams.FuluVersion)
 	}
 	historicalState.SetValidators(validatorSet)
 
@@ -356,8 +367,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, err
 	}
 
-	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-	if err := fillProposerDutiesFromIndices(duties, historicalState, proposerIndices, expectedSlot); err != nil {
+	if err := fillProposerDuties(duties, historicalState, expectedSlot, func(i int) uint64 { return proposerIndices[i] }); err != nil {
 		return nil, err
 	}
 	return duties, nil
