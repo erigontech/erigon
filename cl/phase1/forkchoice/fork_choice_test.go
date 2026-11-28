@@ -618,3 +618,89 @@ func TestOnBlockWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
 	require.Error(t, err, "OnBlock imported a new block with an invalid proposer-slashing signature")
 	require.ErrorContains(t, err, "signature")
 }
+
+// A VALID forkchoice update for an optimistic head means the EL validated the head and its ancestors.
+func TestHeadPayloadValidatedClearsOptimisticHeadAndAncestors(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	roots := make([]common.Hash, 3)
+	for i := range roots {
+		root, err := blocks[i].Block.HashSSZ()
+		require.NoError(t, err)
+		roots[i] = root
+	}
+	newStore := func(t *testing.T, statuses ...execution_client.PayloadStatus) (*forkchoice.ForkChoiceStore, *execution_client.MockExecutionEngine) {
+		engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+		calls := make([]any, len(statuses))
+		for i, status := range statuses {
+			calls[i] = engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(status, nil)
+		}
+		gomock.InOrder(calls...)
+		store := newBellatrixForkChoiceStore(t, anchorState, engine)
+		for i, block := range blocks[:len(statuses)] {
+			require.NoError(t, store.OnBlock(t.Context(), block, true, true, false), i)
+		}
+		return store, engine
+	}
+	optimisticHead := []execution_client.PayloadStatus{execution_client.PayloadStatusValidated, execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusNotValidated}
+	payloadStatus := func(store *forkchoice.ForkChoiceStore, root common.Hash) execution_client.PayloadStatus {
+		status, _ := store.GetRecentExecutionPayloadStatusByRoot(root)
+		return status
+	}
+
+	t.Run("head payload", func(t *testing.T) {
+		store, _ := newStore(t, optimisticHead...)
+		require.True(t, store.IsRootOptimistic(roots[2]))
+		store.OnHeadPayloadValidated(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
+		for _, root := range roots[1:] {
+			require.False(t, store.IsRootOptimistic(root))
+			require.EqualValues(t, execution_client.PayloadStatusValidated, payloadStatus(store, root))
+		}
+	})
+	t.Run("another payload", func(t *testing.T) {
+		store, _ := newStore(t, optimisticHead...)
+		store.OnHeadPayloadValidated(roots[2], blocks[1].Block.Body.ExecutionPayload.BlockHash)
+		for _, root := range roots[1:] {
+			require.True(t, store.IsRootOptimistic(root))
+			require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, root))
+		}
+	})
+	// A VALID NewPayload marks only its own block, so a validated head can sit above a NotValidated parent.
+	t.Run("validated head above an optimistic parent", func(t *testing.T) {
+		store, _ := newStore(t, execution_client.PayloadStatusValidated, execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusValidated)
+		require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, roots[1]))
+		store.OnHeadPayloadValidated(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
+		require.EqualValues(t, execution_client.PayloadStatusValidated, payloadStatus(store, roots[1]))
+	})
+	// A VALID answer for a head the store holds as INVALIDATED contradicts it, so nothing is promoted.
+	t.Run("invalidated head", func(t *testing.T) {
+		store, _ := newStore(t, optimisticHead...)
+		headHash := blocks[2].Block.Body.ExecutionPayload.BlockHash
+		store.MarkPayloadInvalid(roots[2], headHash)
+		store.OnHeadPayloadValidated(roots[2], headHash)
+		require.True(t, store.IsRootOptimistic(roots[1]))
+		require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, roots[1]))
+	})
+	// Only the head and its ancestors are validated, not a block of another fork with a lower EL block number.
+	t.Run("block of another fork", func(t *testing.T) {
+		store, engine := newStore(t, optimisticHead...)
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil)
+		enc, err := blocks[1].EncodeSSZ(nil)
+		require.NoError(t, err)
+		fork := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), blocks[1].Version())
+		require.NoError(t, fork.DecodeSSZ(enc, int(blocks[1].Version())))
+		fork.Block.Body.Graffiti[0] ^= 0xff
+		forkRoot, err := fork.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, store.OnBlock(t.Context(), fork, true, false, false))
+		require.True(t, store.IsRootOptimistic(forkRoot))
+		store.OnHeadPayloadValidated(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
+		require.False(t, store.IsRootOptimistic(roots[1]))
+		require.True(t, store.IsRootOptimistic(forkRoot))
+		require.EqualValues(t, execution_client.PayloadStatusNotValidated, payloadStatus(store, common.Hash(forkRoot)))
+
+		// The previous VALID head's chain ends the walk only at its ancestors, not at a block of the same slot.
+		store.OnHeadPayloadValidated(forkRoot, fork.Block.Body.ExecutionPayload.BlockHash)
+		require.False(t, store.IsRootOptimistic(forkRoot))
+		require.EqualValues(t, execution_client.PayloadStatusValidated, payloadStatus(store, common.Hash(forkRoot)))
+	})
+}

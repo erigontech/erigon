@@ -79,17 +79,7 @@ func (impl *optimisticStoreImpl) ValidateBlock(blockRoot common.Hash, block *clt
 	blockNum := block.Body.ExecutionPayload.BlockNumber
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
-	curRoot := blockRoot
-	for {
-		if node, ok := impl.optimisticRoots.Load(curRoot); ok {
-			// validate the block
-			// remove the block from the store
-			impl.optimisticRoots.Delete(curRoot)
-			curRoot = node.(*opNode).parent
-		} else {
-			break
-		}
-	}
+	impl.validateChainLocked(blockRoot)
 	// and try to clean up all nodes with block number less than blockNum
 	toRemoves := []common.Hash{}
 	// for root, node := range impl.optimisticRoots {
@@ -110,6 +100,22 @@ func (impl *optimisticStoreImpl) ValidateBlock(blockRoot common.Hash, block *clt
 		impl.optimisticRoots.Delete(root)
 	}
 	return nil
+}
+
+func (impl *optimisticStoreImpl) ValidateChain(blockRoot common.Hash) {
+	impl.opMutex.Lock()
+	defer impl.opMutex.Unlock()
+	impl.validateChainLocked(blockRoot)
+}
+
+func (impl *optimisticStoreImpl) validateChainLocked(blockRoot common.Hash) {
+	for root := blockRoot; ; {
+		node, ok := impl.optimisticRoots.LoadAndDelete(root)
+		if !ok {
+			return
+		}
+		root = node.(*opNode).parent
+	}
 }
 
 func (impl *optimisticStoreImpl) InvalidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error {

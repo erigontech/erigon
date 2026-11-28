@@ -2156,6 +2156,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, s
 	return nil, t.forkChoiceErr
 }
 
+func (t *testExecutionEngine) ForkChoiceUpdateHead(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) (bool, error) {
+	_, err := t.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+	return false, err
+}
+
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
 func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) error {

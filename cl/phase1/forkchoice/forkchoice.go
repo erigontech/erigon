@@ -175,6 +175,9 @@ type ForkChoiceStore struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[common.Hash, common.Hash] // ETH2 root -> ETH1 hash
+	// validatedHead is the head of the last VALID forkchoice update. Its unfinalized ancestors have no
+	// NotValidated payload status left.
+	validatedHead common.Hash
 	// preverifid sizes and other data collection
 	preverifiedSizes    *lru.Cache[common.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[common.Hash, finalityCheckpoints]
@@ -1329,6 +1332,61 @@ func (f *ForkChoiceStore) cacheExecutionPayloadGasLimit(executionBlockHash commo
 
 func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash) {
 	f.MarkPayloadStatus(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+}
+
+// OnHeadPayloadValidated handles a VALID forkchoice update for a pre-Gloas head whose payload has the hash
+// executionHead: the EL has validated the payloads of the head and its ancestors, so none of them is
+// optimistically imported anymore.
+func (f *ForkChoiceStore) OnHeadPayloadValidated(headRoot, executionHead common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if headRoot == f.validatedHead {
+		return
+	}
+	head, ok := f.forkGraph.GetBlock(headRoot)
+	if !ok || head == nil || head.Block.Body.ExecutionPayload == nil || head.Block.Body.ExecutionPayload.BlockHash != executionHead {
+		return
+	}
+	// A VALID answer for a head the store holds as INVALIDATED contradicts it, so it is not acted on.
+	if status, _ := f.payloadStatusAuthority(headRoot); status == execution_client.PayloadStatusInvalidated {
+		return
+	}
+	f.optimisticStore.ValidateChain(headRoot)
+	if f.validateAncestorsLocked(headRoot) {
+		f.validatedHead = headRoot
+	}
+}
+
+// validateAncestorsLocked marks the NotValidated blocks of root and its ancestors Validated. A VALID NewPayload
+// marks only its own block, so a Validated block can sit above NotValidated ones. The walk ends at the finalized
+// slot or on the chain of the previous VALID head, where nothing is NotValidated anymore. It reports false when
+// a block is missing, so that the next VALID update walks that part again.
+func (f *ForkChoiceStore) validateAncestorsLocked(root common.Hash) bool {
+	finalized := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	finalizedSlot := f.computeStartSlotAtEpoch(finalized.Epoch)
+	validatedRoot := f.validatedHead
+	validated, hasValidated := f.forkGraph.GetBlock(validatedRoot)
+	for root != finalized.Root {
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil {
+			return false
+		}
+		if block.Block.Slot < finalizedSlot || block.Block.Body.ExecutionPayload == nil {
+			return true
+		}
+		for hasValidated && validated.Block.Slot > block.Block.Slot {
+			validatedRoot = validated.Block.ParentRoot
+			validated, hasValidated = f.forkGraph.GetBlock(validatedRoot)
+		}
+		if hasValidated && root == validatedRoot {
+			return true
+		}
+		if status, _ := f.payloadStatusAuthority(root); status == execution_client.PayloadStatusNotValidated {
+			f.markPayloadStatusLocked(root, block.Block.Body.ExecutionPayload.BlockHash, execution_client.PayloadStatusValidated)
+		}
+		root = block.Block.ParentRoot
+	}
+	return true
 }
 
 func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
