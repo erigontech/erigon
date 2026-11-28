@@ -845,8 +845,6 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 	require.True(visibleHas(s, txEnum, 10_000, 20_000))
 }
 
-// Retire selects over visible files, so a subsumed (dirty-but-not-visible) segment below
-// the cutoff is left to the merge clean-up, not retired here.
 func TestRetireFilesBelowRetiresDirtyButNotVisible(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -2525,4 +2523,70 @@ func TestMergeRangeUnderALargerHeadersAndBodiesFile(t *testing.T) {
 	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
 	require.Equal(t, before, visibleRanges(s, snaptype2.Transactions))
 	require.NoFileExists(t, filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Headers.Versions().Current, 100_000, 200_000, snaptype2.Headers.Enum())))
+}
+
+// With one type unindexed nothing is visible, so the "would retire every file" guard sees no tip.
+func TestRetireFilesBelowKeepsEveryFileWhenNothingVisible(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, typ.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, typ.Enum(), dir, version.V1_0, logger)
+	}
+	for _, r := range []Range{{0, 10_000}, {10_000, 20_000}} {
+		require.NoError(t, os.Remove(filepath.Join(dir, snaptype.IdxFileName(version.V1_0, r.from, r.to, snaptype2.Headers.Name()))))
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Empty(t, visibleRanges(s, snaptype2.Transactions))
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 30_000, func([]string) error { return nil })
+	require.NoError(t, err)
+	require.False(t, retired, "a cutoff past every file must not retire them all")
+	require.Equal(t, 2, s.dirty[snaptype2.Transactions.Enum()].Len())
+}
+
+// A cutoff retire ignores the range claim an index build holds, so the index written after it is orphaned.
+func TestRetireFilesBelowSkipsSegmentWithIndexBuildInFlight(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for from := uint64(0); from < 30_000; from += 10_000 {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 20_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	idxNames := []string{
+		snaptype.IdxFileName(version.V1_0, 0, 20_000, snaptype2.Transactions.Name()),
+		snaptype.IdxFileName(version.V1_0, 0, 20_000, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	}
+	stash := t.TempDir()
+	for _, n := range idxNames {
+		require.NoError(t, os.Rename(filepath.Join(dir, n), filepath.Join(stash, n)))
+	}
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	jobs := s.claimIndexJobs()
+	require.Len(t, jobs, 1)
+	require.Equal(t, uint64(20_000), jobs[0].to)
+
+	_, err := s.RetireFilesBelow(snaptype2.Transactions, 25_000, func([]string) error { return nil })
+	require.NoError(t, err)
+
+	for _, n := range idxNames { // the index build finishes
+		require.NoError(t, os.Rename(filepath.Join(stash, n), filepath.Join(dir, n)))
+	}
+	s.ReleaseRange(jobs[0].t, jobs[0].from, jobs[0].to)
+	require.NoError(t, s.OpenFolder())
+
+	segPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 20_000, snaptype2.Transactions.Enum()))
+	for _, n := range idxNames {
+		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
+			require.FileExists(t, segPath, "index %s is orphaned: its segment was retired during the build", n)
+		}
+	}
 }

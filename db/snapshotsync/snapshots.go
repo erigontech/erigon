@@ -1804,19 +1804,15 @@ func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...str
 	return nil
 }
 
-// dirtyFilesEndingIf returns the names and file paths of the dirty segments of the given types whose
-// range end matches. Cutoff retires select by range, not by visibility: a hidden file is shown again
-// once the files under it are gone.
+// dirtyFilesEndingIf returns the names and file paths of the indexed dirty segments of the given types
+// whose range end matches. Cutoff retires select by range, not by visibility: a hidden file is shown
+// again once the files under it are gone. An unindexed segment may have its index built off-lock.
 func (s *BaseRoSnapshots) dirtyFilesEndingIf(match func(to uint64) bool, types ...snaptype.Enum) (names, paths []string) {
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
 	for _, t := range types {
-		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if match(sn.to) {
-					names = append(names, sn.FileName())
-					paths = append(paths, sn.FilePaths(s.dir)...)
-				}
+		s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
+			if sn.IsIndexed() && match(sn.to) {
+				names = append(names, sn.FileName())
+				paths = append(paths, sn.FilePaths(s.dir)...)
 			}
 			return true
 		})
@@ -1825,8 +1821,8 @@ func (s *BaseRoSnapshots) dirtyFilesEndingIf(match func(to uint64) bool, types .
 }
 
 // RetireFilesBelow retires every segment of type typ ending below blockTo, visible or not, handing
-// their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for both
-// the read and the deferred off-lock unlink.
+// their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for the
+// deferred off-lock unlink.
 func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
@@ -1836,7 +1832,7 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	defer v.Close()
 	segs := v.Segments(typ)
 
-	wouldRetireEveryFile := len(segs) > 0 && blockTo > segs[len(segs)-1].To()
+	wouldRetireEveryFile := len(segs) == 0 || blockTo > segs[len(segs)-1].To()
 	if wouldRetireEveryFile {
 		return false, nil
 	}
