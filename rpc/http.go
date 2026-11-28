@@ -240,15 +240,46 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 type httpServerConn struct {
 	io.Reader
 	io.Writer
-	r *http.Request
+	r         *http.Request
+	body      io.LimitedReader
+	encodeErr error
 }
 
-func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) ServerCodec {
-	conn := &httpServerConn{Writer: w, r: r}
+// httpRequest holds what ServeHTTP builds for one request, kept in a pool between requests.
+// Nothing that can outlive the request, such as its context, may point into it. The codec is
+// never closed: nothing waits on its closed channel, because an HTTP request takes no subscriptions.
+type httpRequest struct {
+	conn    httpServerConn
+	codec   *jsonCodec
+	handler handler
+	sent    sentWriter
+}
+
+var httpRequests = sync.Pool{New: func() any {
+	req := new(httpRequest)
+	req.codec = newFuncCodec(&req.conn, newJSONEncoder(&req.conn), nil, req.conn.readFrame)
+	return req
+}}
+
+func getHTTPRequest(r *http.Request, w http.ResponseWriter, body io.Reader) *httpRequest {
+	req := httpRequests.Get().(*httpRequest)
+	req.conn.reset(r, w, body)
+	req.codec.remote = r.RemoteAddr
+	return req
+}
+
+func putHTTPRequest(req *httpRequest) {
+	req.conn = httpServerConn{}
+	req.handler = handler{}
+	req.sent = sentWriter{}
+	httpRequests.Put(req)
+}
+
+func (t *httpServerConn) reset(r *http.Request, w http.ResponseWriter, body io.Reader) {
+	*t = httpServerConn{Writer: w, r: r}
 	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
 	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
 	// we however allow for non base64 encoded parameters to be passed
-	var encodeErr error
 	if r.Method == http.MethodGet && r.ContentLength == 0 {
 		// default id 1
 		id := `1`
@@ -263,40 +294,41 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		encodeErr = json.NewEncoder(buf).Encode(jsonrpcMessage{
+		t.encodeErr = json.NewEncoder(buf).Encode(jsonrpcMessage{
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,
 		})
-		conn.Reader = buf
+		t.Reader = buf
 	} else {
 		// it's a post request or whatever, so just process it like normal
-		conn.Reader = io.LimitReader(body, MaxRequestContentLength)
+		t.body = io.LimitedReader{R: body, N: MaxRequestContentLength}
+		t.Reader = &t.body
 	}
-	// The body holds one message, so it can be read in one go and checked once.
-	// ServeHTTP holds the body's budget charge for the whole request.
-	readFrame := func() ([]byte, func(), error) {
-		if encodeErr != nil {
-			return nil, nil, encodeErr
-		}
-		// The hint stops at the uncharged size: a declared size costs the peer nothing
-		// until the bytes arrive, so it must not drive an allocation.
-		hint := 0
-		if r.ContentLength > 0 {
-			hint = int(min(r.ContentLength, smallBodyLimit))
-		}
-		frame, err := readAllBody(conn, hint)
-		if err != nil {
-			return nil, nil, err
-		}
-		if skipJSONSpace(frame, 0) == len(frame) {
-			// An empty body carries no message, which is not an error. The decoder
-			// used to report this as EOF and callers rely on that.
-			return nil, nil, io.EOF
-		}
-		return frame, nil, nil
+}
+
+// readFrame reads the body, which holds one message, so it can be read in one go and checked once.
+// ServeHTTP holds the body's budget charge for the whole request.
+func (t *httpServerConn) readFrame() ([]byte, func(), error) {
+	if t.encodeErr != nil {
+		return nil, nil, t.encodeErr
 	}
-	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
+	// The hint stops at the uncharged size: a declared size costs the peer nothing
+	// until the bytes arrive, so it must not drive an allocation.
+	hint := 0
+	if t.r.ContentLength > 0 {
+		hint = int(min(t.r.ContentLength, smallBodyLimit))
+	}
+	frame, err := readAllBody(t, hint)
+	if err != nil {
+		return nil, nil, err
+	}
+	if skipJSONSpace(frame, 0) == len(frame) {
+		// An empty body carries no message, which is not an error. The decoder
+		// used to report this as EOF and callers rely on that.
+		return nil, nil, io.EOF
+	}
+	return frame, nil, nil
 }
 
 // readAllBody reads r to the end, sizing the buffer from the hint when there is
@@ -322,11 +354,6 @@ func readAllBody(r io.Reader, hint int) ([]byte, error) {
 
 // Close does nothing and always returns nil.
 func (t *httpServerConn) Close() error { return nil }
-
-// RemoteAddr returns the peer address of the underlying connection.
-func (t *httpServerConn) RemoteAddr() string {
-	return t.r.RemoteAddr
-}
 
 // SetWriteDeadline does nothing and always returns nil.
 func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
@@ -408,17 +435,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	codec := newHTTPServerConn(r, w, body)
-	defer codec.Close()
+	req := getHTTPRequest(r, w, body)
+	defer putHTTPRequest(req)
+	codec := req.codec
 	var stream *jsonstream.Stream
-	var sent *sentWriter
+	sent := &req.sent
 	if !s.disableStreaming {
-		sent = &sentWriter{w: w}
+		sent.w = w
 		stream = jsonstream.Get(sent)
 		defer jsonstream.Put(stream)
 	}
 
-	errorMsg := s.serveSingleRequest(ctx, codec, stream)
+	errorMsg := s.serveSingleRequest(ctx, &req.handler, codec, stream)
 	if errorMsg != nil {
 		if *overloaded {
 			w.Header().Set("Retry-After", "1")

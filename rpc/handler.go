@@ -124,6 +124,7 @@ func HandleError(err error, stream *jsonstream.Stream) {
 
 func newHandler(
 	connCtx context.Context,
+	h *handler,
 	conn jsonWriter,
 	idgen func() ID,
 	reg *serviceRegistry,
@@ -136,7 +137,7 @@ func newHandler(
 ) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 
-	h := &handler{
+	*h = handler{
 		reg:            reg,
 		idgen:          idgen,
 		conn:           conn,
@@ -161,12 +162,16 @@ func newHandler(
 // since most single HTTP calls finish without logging anything.
 func (h *handler) log() log.Logger {
 	h.connLoggerOnce.Do(func() {
-		h.connLogger = h.baseLogger
-		if addr := h.conn.remoteAddr(); addr != "" {
-			h.connLogger = h.baseLogger.New("conn", addr)
-		}
+		h.connLogger = connLogger(h.baseLogger, h.conn.remoteAddr())
 	})
 	return h.connLogger
+}
+
+func connLogger(base log.Logger, addr string) log.Logger {
+	if addr == "" {
+		return base
+	}
+	return base.New("conn", addr)
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
@@ -620,8 +625,10 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if h.slowLogThreshold > 0 {
 			doSlowLog = h.isRpcMethodNeedsCheck(msg.Method)
 			if doSlowLog {
+				// The timer can fire after the call, when the handler serves another request.
+				base, addr := h.baseLogger, h.conn.remoteAddr()
 				slowTimer := time.AfterFunc(h.slowLogThreshold, func() {
-					h.log().Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+					connLogger(base, addr).Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 				})
 				defer slowTimer.Stop()
 			}
