@@ -17,7 +17,9 @@
 package rpchelper
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -407,6 +409,121 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 	finalHashes := requestHashes(lastRequest)
 	require.True(t, finalHashes[hash1], "last delivered request lost hash1: %v", finalHashes)
 	require.True(t, finalHashes[hash2], "last delivered request lost hash2: %v", finalHashes)
+}
+
+// connectingBackend opens logs and receipts streams the way the remote backend does: a stream connects when the
+// test allows it, hands its sender to onReady and runs until the test ends it.
+type connectingBackend struct {
+	ApiBackend
+	logs     chan *testStream[remoteproto.LogsFilterRequest]
+	receipts chan *testStream[remoteproto.ReceiptsFilterRequest]
+}
+
+// testStream records the filter requests sent on one stream. ready is closed once onReady returned.
+type testStream[R any] struct {
+	reqs  chan *R
+	ready chan struct{}
+	end   chan struct{}
+}
+
+func newConnectingBackend() connectingBackend {
+	return connectingBackend{
+		logs:     make(chan *testStream[remoteproto.LogsFilterRequest]),
+		receipts: make(chan *testStream[remoteproto.ReceiptsFilterRequest]),
+	}
+}
+
+// runTestStream connects once the test receives the stream, then serves it until the test ends it.
+func runTestStream[R any](ctx context.Context, streams chan *testStream[R], onReady func(func(*R) error)) error {
+	s := &testStream[R]{reqs: make(chan *R, 16), ready: make(chan struct{}), end: make(chan struct{})}
+	select {
+	case streams <- s:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	onReady(func(r *R) error {
+		s.reqs <- r
+		return nil
+	})
+	close(s.ready)
+	select {
+	case <-s.end:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b connectingBackend) Subscribe(ctx context.Context, _ func(*remoteproto.SubscribeReply)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b connectingBackend) SubscribeLogs(ctx context.Context, _ func(*remoteproto.SubscribeLogsReply), onReady func(func(*remoteproto.LogsFilterRequest) error)) error {
+	return runTestStream(ctx, b.logs, onReady)
+}
+
+func (b connectingBackend) SubscribeReceipts(ctx context.Context, _ func(*remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+	return runTestStream(ctx, b.receipts, onReady)
+}
+
+// requireStreamGets waits until s receives a filter request for which has returns true.
+func requireStreamGets[R any](t *testing.T, name string, s *testStream[R], has func(*R) bool) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case r := <-s.reqs:
+			if has(r) {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("the %s stream never got the current filter", name)
+		}
+	}
+}
+
+// TestFilterStreamsSendTheFilterOnEveryConnect checks that each logs and receipts stream gets the current filter
+// when it connects: the server starts every stream with an empty filter, both on the first connect and when the
+// stream connects again after erigon restarts under a standalone rpcdaemon.
+func TestFilterStreamsSendTheFilterOnEveryConnect(t *testing.T) {
+	addr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	hasAddr := func(r *remoteproto.LogsFilterRequest) bool {
+		for _, a := range r.GetAddresses() {
+			if gointerfaces.ConvertH160toAddress(a) == addr {
+				return true
+			}
+		}
+		return false
+	}
+	allReceipts := func(r *remoteproto.ReceiptsFilterRequest) bool { return r.GetAllTransactions() }
+	subscribe := func(t *testing.T, f *Filters) {
+		_, _, err := f.SubscribeLogs(8, filters.FilterCriteria{Addresses: []common.Address{addr}}, ProtocolHTTP)
+		require.NoError(t, err)
+		_, _, err = f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+		require.NoError(t, err)
+	}
+	for _, beforeConnect := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribed before the first connect=%t", beforeConnect), func(t *testing.T) {
+			backend := newConnectingBackend()
+			f := New(t.Context(), DefaultFiltersConfig, backend, nil, nil, func() {}, log.New(), nil)
+			if beforeConnect {
+				subscribe(t, f)
+			}
+			for connect := range 3 {
+				logs, receipts := <-backend.logs, <-backend.receipts
+				if connect == 0 && !beforeConnect {
+					<-logs.ready
+					<-receipts.ready
+					subscribe(t, f)
+				}
+				requireStreamGets(t, fmt.Sprintf("logs (connect %d)", connect), logs, hasAddr)
+				requireStreamGets(t, fmt.Sprintf("receipts (connect %d)", connect), receipts, allReceipts)
+				close(logs.end)
+				close(receipts.end)
+			}
+		})
+	}
 }
 
 // Every subscriber gets the same event object, so the RPC layer encodes it once for all of them.

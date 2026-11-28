@@ -18,7 +18,6 @@ package rpchelper
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -38,7 +37,7 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remoteproto.SubscribeReply)) error
-	SubscribeLogs(ctx context.Context, cb func(*remoteproto.SubscribeLogsReply), requestor *atomic.Value) error
+	SubscribeLogs(ctx context.Context, cb func(*remoteproto.SubscribeLogsReply), onReady func(func(*remoteproto.LogsFilterRequest) error)) error
 	SubscribeReceipts(ctx context.Context, cb func(*remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
