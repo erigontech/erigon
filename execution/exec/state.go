@@ -213,7 +213,9 @@ func (rw *WorkerContext) Park() {
 	rw.flushCollector()
 	rw.ibs.ResetReader(nil)
 	rw.ibs.DropTxMaps()
-	rw.evm.Reset(evmtypes.TxContext{}, rw.ibs)
+	// Back to a new worker's EVM: no tracer, block context, tx context or return data.
+	var blockCtx evmtypes.BlockContext
+	rw.evm.ResetBetweenBlocks(blockCtx, evmtypes.TxContext{}, rw.ibs, vm.Config{}, blockCtx.Rules(rw.chainConfig))
 	rw.rs, rw.stateReader, rw.historyMode, rw.prevBlockReg, rw.chain = nil, nil, false, nil, nil
 }
 

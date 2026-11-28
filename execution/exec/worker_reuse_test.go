@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // keepCancelTask resets like a block-init system task: it keeps the EVM's cancellation.
@@ -96,6 +97,10 @@ func TestParkDropsTheRunBindings(t *testing.T) {
 	require.NoError(t, w.ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	w.ibs.AddRefund(1)
 	w.ibs.AddLog(&types.Log{})
+	callTracer := calltracer.NewCallTracer(nil)
+	txCtx := evmtypes.TxContext{Origin: addr}
+	blockCtx := evmtypes.BlockContext{GetHash: func(uint64) (common.Hash, error) { return common.Hash{}, nil }}
+	w.evm.ResetBetweenBlocks(blockCtx, txCtx, w.ibs, vm.Config{Tracer: callTracer.Tracer().Hooks}, blockCtx.Rules(chain.AllProtocolChanges))
 
 	w.Park()
 
@@ -107,4 +112,7 @@ func TestParkDropsTheRunBindings(t *testing.T) {
 	require.NotSame(t, versionMap, w.ibs.VersionMap(), "a parked worker keeps the run's version map")
 	require.Zero(t, w.ibs.GetRefund())
 	require.Empty(t, w.ibs.Logs())
+	require.Nil(t, w.evm.Config().Tracer, "a parked worker keeps the last tx's tracer")
+	require.Nil(t, w.evm.Context.GetHash, "a parked worker keeps the run's block hash lookup")
+	require.Equal(t, evmtypes.TxContext{}, w.evm.TxContext)
 }
