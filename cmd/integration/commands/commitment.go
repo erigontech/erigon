@@ -68,6 +68,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -79,6 +81,7 @@ var (
 	branchPrefixFlag string
 	txnumFlag        uint64
 	verifyAsOf       []uint
+	verifyHistory    bool
 )
 
 // visualize command flags
@@ -148,6 +151,7 @@ func init() {
 	must(cmdCommitmentVerify.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmdCommitmentVerify.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records just after the first state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
@@ -203,7 +207,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -270,21 +273,19 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	fmt.Printf("Branch data length: %d bytes\n", len(val))
 
 	// Parse and display the branch data in human-readable format
-	branchData := commitment.BranchData(val)
-	fmt.Printf("\nParsed branch data:\n%s\n", branchData.String())
+	branchData := branch.BranchData(val)
+	fmt.Printf("\nParsed branch data:\n%s\n", v2.BranchDataString(branchData))
 
 	return nil
 }
 
 var cmdCommitmentVerify = &cobra.Command{
-	Use:   "verify",
-	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "verify",
+	Short:        "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		if err := commitmentVerify(ctx, logger); err != nil {
-			logger.Error("[commitment verify]", "err", err)
-			os.Exit(1)
-		}
+		return commitmentVerify(ctx, logger)
 	},
 }
 
@@ -311,31 +312,11 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	}
 	defer agg.Close()
 	agg.DisableAllDependencies()
-	points := []uint64{math.MaxUint64}
-	for _, txNum := range verifyAsOf {
-		points = append(points, uint64(txNum))
+	asOf := make([]uint64, len(verifyAsOf))
+	for i, txNum := range verifyAsOf {
+		asOf[i] = uint64(txNum)
 	}
-	historyDisabled := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled
-	for _, asOf := range points {
-		label := "latest"
-		if asOf != math.MaxUint64 {
-			label = strconv.FormatUint(asOf, 10)
-			if historyDisabled {
-				return fmt.Errorf("as of %s: commitment history is disabled", label)
-			}
-		}
-		started := time.Now()
-		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
-		if err != nil {
-			return fmt.Errorf("as of %s: %w", label, err)
-		}
-		if asOf != math.MaxUint64 && c.TxNum >= asOf {
-			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
-		}
-		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
-			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
-	}
-	return nil
+	return dbstate.VerifyCommitmentV3(ctx, agg, asOf, verifyHistory, logger)
 }
 
 var cmdCommitmentRebuild = &cobra.Command{
@@ -344,7 +325,6 @@ var cmdCommitmentRebuild = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		// The rebuild writes a file per shard and per merge; in-memory existence filters and hash indexes of those files grow the heap until the run ends.
 		statecfg.Schema.CommitmentDomain.ExistenceFilter = statecfg.ExistenceFilterRandom
@@ -501,23 +481,18 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 // integration commitment print
 var cmdCommitmentPrint = &cobra.Command{
-	Use:   "print",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
-		if err := printCommitment(db, cmd.Context()); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return printCommitment(db, cmd.Context())
 	},
 }
 
@@ -536,7 +511,7 @@ func commitmentFileState(acRo *dbstate.AggregatorRoTx, maxTxNum uint64) (string,
 		return "no state record", nil
 	}
 	if !v3 {
-		return commitment.HexTrieStateToShortString(record)
+		return v2.HexTrieStateToShortString(record)
 	}
 	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(record)
 	return fmt.Sprintf("block: %d txn: %d rootHash: %x", blockNum, txNum, root), err
@@ -601,11 +576,13 @@ removes the converted files. It is mutually exclusive with --squeeze and
 --nibbles.v2.
 
 --continue resumes a prior interrupted run, re-using complete shards left
-in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
-pass the same --squeeze and --nibbles.v2 values used in the original run; a
-mismatch silently produces mixed-encoding output. Without --continue, a
-mid-run crash discards any in-progress work in snap/rebuild/domain/ and
-Phase 1 restarts from scratch. --continue is mutually exclusive with
+in <datadir>/snap/rebuild/domain/ and converted commitment history files
+whose .v, .vi, .ef and .efi all exist in snap/rebuild/{history,idx,accessor}/,
+and re-doing the rest. The operator MUST pass the same --squeeze and
+--nibbles.v2 values used in the original run; a mismatch silently produces
+mixed-encoding output. Without --continue, a mid-run crash discards any
+in-progress work in snap/rebuild/domain/ and snap/rebuild/{history,idx,accessor}/
+and Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
 For --v3, history is converted when snapshots/history holds commitment .v files; --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first. --no-domain with no commitment .v files, or --no-history with no commitment .kv files, is an error.
@@ -706,7 +683,7 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return err
 	}
-	if opts.TargetV3 && !opts.NoHistory {
+	if opts.TargetV3 {
 		hasHistory, err := dbstate.HasCommitmentHistoryFiles(dirs)
 		if err != nil {
 			return err
@@ -756,7 +733,6 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = debug.SetupCobra(cmd, "integration")
-		defer debug.Exit()
 		return visualizeCommitmentFiles(args)
 	},
 }
@@ -772,16 +748,12 @@ Examples:
   integration commitment bench-lookup --chain=mainnet --datadir ~/data/eth-mainnet
   integration commitment bench-lookup --datadir /path/to/datadir --sample-size 100000
   integration commitment bench-lookup --datadir /path/to/datadir --seed 12345`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx := cmd.Context()
 
-		if err := benchLookup(ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return benchLookup(ctx, logger)
 	},
 }
 
@@ -796,16 +768,12 @@ Examples:
   integration commitment bench-history-lookup --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix 0a1b2c --sample-percentage 5
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx := cmd.Context()
 
-		if err := benchHistoryLookup(ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return benchHistoryLookup(ctx, logger)
 	},
 }
 
@@ -1537,23 +1505,23 @@ func visualizeCommitmentFiles(files []string) error {
 }
 
 type visualizeOverallStat struct {
-	branches   *commitment.BranchStat
-	roots      *commitment.BranchStat
-	prefixes   map[uint64]*commitment.BranchStat
+	branches   *branch.BranchStat
+	roots      *branch.BranchStat
+	prefixes   map[uint64]*branch.BranchStat
 	prefCount  map[uint64]uint64
 	rootsCount uint64
 }
 
 func newVisualizeOverallStat() *visualizeOverallStat {
 	return &visualizeOverallStat{
-		branches:  new(commitment.BranchStat),
-		roots:     new(commitment.BranchStat),
-		prefixes:  make(map[uint64]*commitment.BranchStat),
+		branches:  new(branch.BranchStat),
+		roots:     new(branch.BranchStat),
+		prefixes:  make(map[uint64]*branch.BranchStat),
 		prefCount: make(map[uint64]uint64),
 	}
 }
 
-func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
+func extractKVPairFromCompressed(filename string, keysSink chan branch.BranchStat) error {
 	defer close(keysSink)
 	dec, err := seg.NewDecompressor(filename)
 	if err != nil {
@@ -1586,7 +1554,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		val, afterValPos = getter.Next(val[:0])
 		cpair++
 		if bytes.Equal(key, []byte("state")) {
-			str, err := commitment.HexTrieStateToString(val)
+			str, err := v2.HexTrieStateToString(val)
 			if err != nil {
 				fmt.Printf("[ERR] failed to decode state: %v", err)
 			}
@@ -1602,7 +1570,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if depth > len(key) {
 			continue
 		}
-		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
+		stat := v2.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
 			return fmt.Errorf("failed to decode branch: %x %x", key, val)
 		}
@@ -1615,7 +1583,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 	if v, _ := version.ParseVersion(filepath.Base(fpath)); v.Major >= 3 {
 		return nil, fmt.Errorf("%s holds v3 commitment records; visualize decodes legacy branches only", filepath.Base(fpath))
 	}
-	stats := make(chan commitment.BranchStat, 8)
+	stats := make(chan branch.BranchStat, 8)
 	errch := make(chan error, 1)
 	go func() { errch <- extractKVPairFromCompressed(fpath, stats) }()
 
@@ -1631,7 +1599,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 
 		ps, ok := totals.prefixes[s.KeySize]
 		if !ok {
-			ps = new(commitment.BranchStat)
+			ps = new(branch.BranchStat)
 		}
 		ps.Collect(&s)
 		totals.prefixes[s.KeySize] = ps

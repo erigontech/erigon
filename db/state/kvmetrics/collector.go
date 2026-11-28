@@ -40,7 +40,7 @@ func (s Source) String() string {
 
 // MetricsCollectorProvider is implemented by *state.AggregatorRoTx. SharedDomains
 // fetches the process-level collector through tx.AggTx().(MetricsCollectorProvider)
-// — the same duck-type pattern as commitment.BranchCacheProvider — so the leaf
+// — the same duck-type pattern as branchcache.BranchCacheProvider — so the leaf
 // kvmetrics package need not be imported into a cycle with db/state.
 type MetricsCollectorProvider interface {
 	MetricsCollector() *Collector

@@ -82,11 +82,14 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.New(stateReader)
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 	blockNum := block.NumberU64()
+	if blockHashFunc == nil {
+		blockHashFunc = GetHashFnFromChain(header, chainReader)
+	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	blockRules := blockContext.Rules(chainConfig)
 	_, noopWriter := stateWriter.(*state.NoopWriter)
@@ -103,7 +106,7 @@ func ExecuteBlockEphemerally(
 				return err
 			}
 		}
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 
@@ -127,7 +130,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	ibs.SetTxContext(blockNum, -1)
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer); err != nil {
+	if err := InitializeBlockExecutionWithHash(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer, blockHashFunc); err != nil {
 		return nil, err
 	}
 	if err := endPhase(); err != nil {
@@ -159,7 +162,7 @@ func ExecuteBlockEphemerally(
 			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
-			ibs.ResetVersionedIO()
+			ibs.ResetIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
 			if err := endPhase(); err != nil {
@@ -206,7 +209,7 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		ibs.SetTxContext(blockNum, len(txs))
-		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
+		newBlock, _, err = FinalizeBlockExecutionWithHash(engine, block.Header(), txs, block.Uncles(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, blockHashFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -230,8 +233,8 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg)
+func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config, getHash func(uint64) (common.Hash, error)) (result []byte, err error) {
+	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg, getHash)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
@@ -247,8 +250,11 @@ func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
 // Reuse preserves cancellation but replaces the block and transaction contexts,
 // intra-block state and VM configuration. The EVM must not execute other calls concurrently.
 // A nil EVM or one with a different chainConfig is replaced for this call.
-func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config, getHash func(uint64) (common.Hash, error)) (result []byte, err error) {
+	if getHash == nil {
+		getHash = GetHashFn(header, nil)
+	}
+	blockContext := NewEVMBlockContext(header, getHash, engine, accounts.NilAddress, chainConfig)
 	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
@@ -298,7 +304,10 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
-func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
+func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, getHash func(uint64) (common.Hash, error)) (result []byte, err error) {
+	if getHash == nil {
+		getHash = GetHashFn(header, nil)
+	}
 	msg := types.NewMessage(
 		contract,
 		accounts.NilAddress, // to
@@ -316,7 +325,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
+	blockContext := NewEVMBlockContext(header, getHash, nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
@@ -341,8 +350,12 @@ func FinalizeBlockExecution(
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
+	return FinalizeBlockExecutionWithHash(engine, header, txs, uncles, cc, ibs, receipts, withdrawals, chainReader, isMining, logger, GetHashFnFromChain(header, chainReader))
+}
+
+func FinalizeBlockExecutionWithHash(engine rules.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader, isMining bool, logger log.Logger, getHash func(uint64) (common.Hash, error)) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
+		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{}, getHash)
 		return ret, err
 	}
 
@@ -362,8 +375,12 @@ func FinalizeBlockExecution(
 func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header,
 	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
 ) error {
+	return InitializeBlockExecutionWithHash(engine, chain, header, cc, ibs, logger, tracer, GetHashFnFromChain(header, chain))
+}
+
+func InitializeBlockExecutionWithHash(engine rules.Engine, chain rules.ChainHeaderReader, header *types.Header, cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks, getHash func(uint64) (common.Hash, error)) error {
 	err := engine.Initialize(cc, chain, header, ibs, func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{})
+		ret, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, vm.Config{}, getHash)
 		return ret, err
 	}, logger, tracer)
 	if err != nil {

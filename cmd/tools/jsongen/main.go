@@ -24,9 +24,15 @@
 // cannot: a form it does not know, a json option it does not implement, and a shape that would
 // make it write what encoding/json would not.
 //
+// With -slice it also writes a MarshalFastJSONTo for a slice of pointers to the struct. A field
+// whose ethjson tag carries the shared option is one the consecutive elements of such a slice
+// tend to repeat: each run of shared fields, in output order, is encoded once into a fixed buffer
+// and reused while the next element holds the same values.
+//
 // It runs in the package directory, as go generate does:
 //
 //	//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCLog
+//	//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Log -slice Logs
 package main
 
 import (
@@ -49,6 +55,7 @@ func main() {
 	typeName := flag.String("type", "", "struct to generate for")
 	out := flag.String("out", "", "file to write; default gen_<type>_json.go")
 	computed := flag.String("computed", "", "method to call for fields the struct does not hold")
+	slice := flag.String("slice", "", "slice of pointers to the struct to generate for as well")
 	flag.Parse()
 	if *typeName == "" {
 		flag.Usage()
@@ -57,13 +64,13 @@ func main() {
 	if *out == "" {
 		*out = "gen_" + strings.ToLower(*typeName) + "_json.go"
 	}
-	if err := run(*typeName, *out, *computed); err != nil {
+	if err := run(*typeName, *out, *computed, *slice); err != nil {
 		fmt.Fprintln(os.Stderr, "jsongen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(typeName, out, computed string) error {
+func run(typeName, out, computed, slice string) error {
 	pkg, err := load()
 	if err != nil {
 		return err
@@ -77,18 +84,34 @@ func run(typeName, out, computed string) error {
 		return fmt.Errorf("%s is not a struct", typeName)
 	}
 
-	var body bytes.Buffer
-	if err := writeFields(&body, st, "x", map[string]struct{}{}); err != nil {
+	var fields []field
+	if err := collectFields(&fields, st, "x", map[string]struct{}{}); err != nil {
 		return fmt.Errorf("%s: %w", typeName, err)
 	}
 	// A value the struct does not hold, such as a header's hash, is written by a method the
 	// package declares; the generator only calls it, after the declared fields.
 	if computed != "" {
-		fmt.Fprintf(&body, "\tx.%s(s)\n", computed)
+		fields = append(fields, field{stmt: fmt.Sprintf("\tx.%s(s)\n", computed)})
+	}
+	var body strings.Builder
+	for _, f := range fields {
+		body.WriteString(f.stmt)
 	}
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method, fieldsMethod)
+	if slice == "" {
+		for _, f := range fields {
+			if f.shared != nil {
+				return fmt.Errorf("%s: %q is shared, which only -slice reads", typeName, f.shared.name)
+			}
+		}
+	} else {
+		if err := checkSlice(pkg.Types.Scope(), slice, obj.Type()); err != nil {
+			return err
+		}
+		writeSliceMethod(&file, slice, typeName, fields)
+	}
 	// imports.Process drops what the body does not use and gofmts in one step. The header names
 	// uint256 rather than leaving it to be resolved, because more than one module supplies that
 	// package name and the choice would then follow whoever ran the tool.
@@ -114,8 +137,11 @@ const header = marker + ` DO NOT EDIT.
 package %[1]s
 
 import (
+	"strconv"
+
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -145,7 +171,7 @@ func (x *%[2]s) %[5]s(s *jsonstream.Stream) error {
 // error does, and stops the run rather than generating from types that will not build.
 func load() (*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
-		packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}
+		packages.NeedTypesInfo}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
@@ -154,15 +180,33 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if missingWhatThisWrites(e.Msg) {
-			continue
-		}
-		content, err := os.ReadFile(positionFile(e.Pos))
-		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
+		// Imports come from export data, so go list also compiles this package and reports the
+		// compiler's errors as one, a "pos: msg" line each. An indented line continues the error
+		// above it.
+		if compiled, ok := strings.CutPrefix(e.Msg, "# "+pkgs[0].PkgPath+"\n"); ok && e.Kind == packages.ListError {
+			for line := range strings.Lines(compiled) {
+				if strings.HasPrefix(line, "\t") {
+					continue
+				}
+				pos, msg, _ := strings.Cut(strings.TrimSpace(line), ": ")
+				if !skippable(pos, msg) {
+					return nil, e
+				}
+			}
+		} else if !skippable(e.Pos, e.Msg) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// skippable reports an error that only the output of a past run causes.
+func skippable(pos, msg string) bool {
+	if missingWhatThisWrites(msg) {
+		return true
+	}
+	content, err := os.ReadFile(positionFile(pos))
+	return err == nil && bytes.HasPrefix(content, []byte(marker))
 }
 
 // missingWhatThisWrites reports the compiler's two wordings for the absence of a method this run
@@ -193,10 +237,17 @@ func positionFile(pos string) string {
 	return pos
 }
 
-// writeFields emits one statement per field. An embedded struct is flattened, the way
+// field is the statement that writes one field, and how to encode it into a shared group when
+// its ethjson tag says it is shared.
+type field struct {
+	stmt   string
+	shared *member
+}
+
+// collectFields emits one statement per field. An embedded struct is flattened, the way
 // encoding/json flattens an anonymous field, and a name written twice is an error rather than
 // a silent choice between them.
-func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[string]struct{}) error {
+func collectFields(fields *[]field, st *types.Struct, recv string, written map[string]struct{}) error {
 	for i := range st.NumFields() {
 		f, tag := st.Field(i), reflect.StructTag(st.Tag(i))
 		if f.Embedded() {
@@ -215,7 +266,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 				return fmt.Errorf("embedded %s is not a struct", f.Name())
 			}
 			// Through its own selector, so two promoted names cannot collide.
-			if err := writeFields(w, embedded, recv+"."+f.Name(), written); err != nil {
+			if err := collectFields(fields, embedded, recv+"."+f.Name(), written); err != nil {
 				return err
 			}
 			continue
@@ -258,11 +309,22 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), omitempty, omitzero)
+		form, formOpt, _ := strings.Cut(tag.Get("ethjson"), ",")
+		if formOpt != "" && formOpt != "shared" {
+			return fmt.Errorf("%s: ethjson option %q is not implemented", f.Name(), formOpt)
+		}
+		ref := recv + "." + f.Name()
+		stmt, err := fieldStatement(ref, name, form, f.Type(), omitempty, omitzero)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
-		w.WriteString(stmt)
+		fd := field{stmt: stmt}
+		if formOpt == "shared" {
+			if fd.shared, err = sharedMember(ref, name, form, f.Type(), omitempty || omitzero); err != nil {
+				return fmt.Errorf("%s: %w", f.Name(), err)
+			}
+		}
+		*fields = append(*fields, fd)
 	}
 	return nil
 }

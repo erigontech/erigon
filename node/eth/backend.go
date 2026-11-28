@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -72,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -612,7 +612,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher), execp2p.WithBlockDownloadConfig(config.Sync.BlockDownload))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -844,19 +844,21 @@ func New(
 		}
 	}
 
+	// One worker set for every config that runs ExecV3 over chainDB, blockReader and engine.
+	execWorkers := new(atomic.Pointer[[]*exec.WorkerContext])
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, execWorkers)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, execWorkers)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
-		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
+		validationNotifications, blockReader, blockWriter, logger, backend.readAheader, execWorkers)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -1420,7 +1422,6 @@ func (s *Ethereum) Start() error {
 	}
 
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
-		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
 	}
 

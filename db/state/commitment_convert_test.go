@@ -31,8 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/convert"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
@@ -218,9 +220,8 @@ func TestXform_KeyXform_V2ToV1_ErrorPropagates(t *testing.T) {
 }
 
 func TestXform_BuildValueTransformer_PassThrough(t *testing.T) {
-	// Matching axes return a nil transformer without touching account/storage —
-	// dumpStepRangeToPath treats nil as "value pass-through" and the converter's
-	// pure-key-encoding mode does not require account/storage files to exist.
+	// A conversion that changes only the key encoding can copy values verbatim
+	// even when the matching account and storage files are unavailable.
 	for _, sq := range []bool{false, true} {
 		vt, err := buildValueTransformer(sq, sq, nil, nil, nil, MergeRange{}, 0, 0, 0, 0, "")
 		require.NoError(t, err)
@@ -476,8 +477,8 @@ func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
 func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 	out := make(chan *convertedBatch, 1)
 	sink := convertedSink{ctx: t.Context(), out: out, res: getConvertedBatch()}
-	require.NoError(t, sink.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
-	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect))
+	require.NoError(t, sink.emit([]byte{1}, []byte{2}, convert.LegacyDirect))
+	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, convert.LegacyDirect))
 	full := <-out
 	require.Len(t, full.ents, 1)
 	require.LessOrEqual(t, len(full.buf), commitmentV3BatchBytes)
@@ -485,23 +486,21 @@ func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 }
 
 func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
-	for _, kind := range []v3.LegacyKind{v3.LegacyDirect, v3.LegacySynthesized} {
+	for _, kind := range []convert.LegacyKind{convert.LegacyDirect, convert.LegacySynthesized} {
 		t.Run(fmt.Sprint(kind), func(t *testing.T) {
-			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []v3.LegacyEntry{
+			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []convert.LegacyEntry{
 				{Kind: kind, Value: []byte{1}},
 				{Kind: kind, Value: []byte{2}},
 			})
-			require.ErrorIs(t, err, v3.ErrLegacyConflict)
+			require.ErrorIs(t, err, convert.ErrLegacyConflict)
 		})
 	}
 }
 
 func TestHistoryConvertTxNumLookups(t *testing.T) {
 	const txs, stepSize, keys = 160, 16, 31
-	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys)
+	tx := mdbxtest.BeginRw(t, db)
 	for step := range kv.Step(txs/stepSize - 1) {
 		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
 	}

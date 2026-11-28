@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -132,7 +131,7 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 		stor(a(5), k(3), ver, *uint256.NewInt(7)).
 		build()
 	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
+	vm.FlushWrites(ws, true)
 	view := func() *state.VersionMapView { return vm.View(txIdx+1, nil) }
 
 	plain := &commitmentCalculator{updates: newTestUpdates()}
@@ -222,7 +221,7 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
-	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, -1, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
+	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, cc.asOfReader.dr.StateReaderAt(req.firstTxNum), -1, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
 	require.NoError(t, err)
 	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
 	if wantFeed {

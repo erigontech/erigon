@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
-	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -336,16 +335,21 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	return h
 }
 
-func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
-	if codeHash == accounts.EmptyCodeHash {
+func recordCodeWrite[T any](writes map[common.Hash]T, code accounts.Code, value T) func() {
+	if code.IsEmpty() {
 		return nil
 	}
-	hash := codeHash.Value()
-	if _, exists := s.createdCodeHashes[hash]; exists {
+	hash := code.Hash.Value()
+	// Reverting a duplicate write must keep the code from the first write.
+	if _, exists := writes[hash]; exists {
 		return nil
 	}
-	s.createdCodeHashes[hash] = struct{}{}
-	return func() { delete(s.createdCodeHashes, hash) }
+	writes[hash] = value
+	return func() { delete(writes, hash) }
+}
+
+func (s *RecordingState) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.createdCodeHashes, code, struct{}{})
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -673,7 +677,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{}, blockCtx.GetHash)
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
@@ -714,7 +718,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{}, blockCtx.GetHash)
 	}
 	ibs.SetTxContext(blockNum, len(block.Transactions()))
 
@@ -1103,8 +1107,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context.
-	// Witness generation requires the sequential HexPatriciaHashed (Witness()
-	// type-asserts it); the parallel trie cannot serve it.
+	// Witness generation uses sequential HPH or v3; this option replaces parallel HPH.
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
 	if domains != nil {
 		defer domains.Close()
@@ -1210,7 +1213,7 @@ type accessedState struct {
 	Storage     map[common.Address]map[common.Hash]struct{}
 	CodeAddrs   map[common.Address]struct{}
 	SortedCodes []hexutil.Bytes
-	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+	CodeReads   map[common.Hash][]byte
 	Deleted     map[common.Address]struct{}
 }
 
@@ -1281,7 +1284,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		CodeAddrs:   make(map[common.Address]struct{}),
 		SortedCodes: []hexutil.Bytes{},
 		WitnessKeys: []hexutil.Bytes{},
-		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+		CodeReads:   make(map[common.Hash][]byte),
 		Deleted:     make(map[common.Address]struct{}),
 	}
 	for addr := range rs.DeletedAccounts {
@@ -1412,12 +1415,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
-			codeHash := rs.codeHash(code)
-			addrHash := crypto.Keccak256Hash(addr[:])
-			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
-				Code:     code,
-				CodeHash: accounts.InternCodeHash(codeHash),
-			}
+			out.CodeReads[crypto.Keccak256Hash(addr[:])] = code
 		}
 	}
 
@@ -1714,6 +1712,34 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 
 	log.Debug("[debug_executionWitness] witness verified", "blockNum", block.NumberU64())
 	return nil
+}
+
+func ReplayExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine) (common.Hash, error) {
+	replay := *result
+	replay.headerByNumber = make(map[uint64]*types.Header, len(result.Headers))
+	var parent *types.Header
+	for _, encoded := range result.Headers {
+		header := new(types.Header)
+		if err := rlp.DecodeBytes(encoded, header); err != nil {
+			return common.Hash{}, fmt.Errorf("decode witness header: %w", err)
+		}
+		if parent != nil && header.ParentHash != parent.Hash() {
+			return common.Hash{}, fmt.Errorf("witness header %d does not follow header %d", header.Number.Uint64(), parent.Number.Uint64())
+		}
+		replay.headerByNumber[header.Number.Uint64()] = header
+		parent = header
+	}
+	if parent == nil || parent.Hash() != block.ParentHash() {
+		return common.Hash{}, fmt.Errorf("witness headers do not end at the parent of block %d", block.NumberU64())
+	}
+	replay.State = slices.Clone(result.State)
+	rootIndex := slices.IndexFunc(replay.State, func(node hexutil.Bytes) bool { return crypto.Keccak256Hash(node) == parent.Root })
+	if rootIndex < 0 {
+		return common.Hash{}, fmt.Errorf("witness state has no node for parent root %x", parent.Root)
+	}
+	replay.State[0], replay.State[rootIndex] = replay.State[rootIndex], replay.State[0]
+	root, _, err := execBlockStatelessly(&replay, block, chainConfig, engine)
+	return root, err
 }
 
 // checkWitnessKeysComplete verifies result.Keys carries a preimage for every account
@@ -2069,6 +2095,10 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 	return nil
 }
 
+func (s *witnessStateless) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.codeUpdates, code, code.Bytes)
+}
+
 func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
 	// Keep accountUpdates CodeHash in sync so ReadAccountData returns a
@@ -2242,40 +2272,34 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	return finalHash, nil
 }
 
+// witnessHeaderReader serves only the verified parent during block initialization.
 type witnessHeaderReader struct {
-	config  *chain.Config
-	parent  *types.Header
-	headers map[uint64]*types.Header
+	config *chain.Config
+	parent *types.Header
 }
 
 func (r witnessHeaderReader) Config() *chain.Config                  { return r.config }
 func (r witnessHeaderReader) CurrentHeader() *types.Header           { return r.parent }
 func (r witnessHeaderReader) CurrentFinalizedHeader() *types.Header  { return nil }
 func (r witnessHeaderReader) CurrentSafeHeader() *types.Header       { return nil }
+func (r witnessHeaderReader) GetHeaderByNumber(uint64) *types.Header { return nil }
 func (r witnessHeaderReader) GetTd(common.Hash, uint64) *uint256.Int { return nil }
 func (r witnessHeaderReader) FrozenBlocks() uint64                   { return 0 }
 
-func (r witnessHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	header := r.GetHeaderByNumber(number)
-	if header != nil && header.Hash() == hash {
-		return header
+func matchingParent(parent *types.Header, hash common.Hash, number uint64) *types.Header {
+	if parent != nil && parent.Number.Uint64() == number && parent.Hash() == hash {
+		return parent
 	}
 	return nil
 }
 
-func (r witnessHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	header := r.headers[number]
-	if header != nil && header.Number.Uint64() == number {
-		return header
-	}
-	return nil
+func (r witnessHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return matchingParent(r.parent, hash, number)
 }
 
 func (r witnessHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	for _, header := range r.headers {
-		if header != nil && header.Hash() == hash {
-			return header
-		}
+	if r.parent != nil && r.parent.Hash() == hash {
+		return r.parent
 	}
 	return nil
 }
@@ -2289,7 +2313,6 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return block.Root(), nil, nil
 	}
 
-	// Skip verification if the witness trie is empty
 	if len(result.State) == 0 {
 		return common.Hash{}, nil, fmt.Errorf("empty State field in witness")
 	}
@@ -2318,10 +2341,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
-	chainReader := witnessHeaderReader{config: chainConfig, headers: result.headerByNumber}
-	chainReader.parent = chainReader.GetHeader(header.ParentHash, blockNum-1)
+	parentNumber := blockNum - 1
+	chainReader := witnessHeaderReader{
+		config: chainConfig,
+		parent: matchingParent(result.headerByNumber[parentNumber], header.ParentHash, parentNumber),
+	}
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{}, blockCtx.GetHash)
 	}
 	if err = engine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
@@ -2356,7 +2382,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{}, blockCtx.GetHash)
 	}
 	ibs.SetTxContext(blockNum, len(block.Transactions()))
 	// Collect logs accumulated during transaction execution into a synthetic receipt

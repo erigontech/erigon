@@ -17,6 +17,7 @@
 package graphql
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,9 +37,15 @@ func TestGraphQLQueryBlock(t *testing.T) {
 	if err != nil {
 		t.Skipf("requires a running rpcdaemon with GraphQL at %s: %v", endpoint, err)
 	}
+	var answer struct {
+		Data struct {
+			ChainID string `json:"chainID"`
+		} `json:"data"`
+	}
+	decodeErr := json.NewDecoder(probe.Body).Decode(&answer)
 	_ = probe.Body.Close()
-	if probe.StatusCode != http.StatusOK {
-		t.Skipf("GraphQL at %s not available (status %d)", endpoint, probe.StatusCode)
+	if probe.StatusCode != http.StatusOK || decodeErr != nil || answer.Data.ChainID == "" {
+		t.Skipf("no GraphQL server answers at %s (status %d)", endpoint, probe.StatusCode)
 	}
 
 	for i, tt := range []struct {

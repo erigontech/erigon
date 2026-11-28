@@ -292,7 +292,7 @@ func TestCallManyStateOverridesApplyToEveryCall(t *testing.T) {
 	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000"}`, bankAddr, target)
 	bundle := fmt.Sprintf(`[[%[1]s,["stateDiff"]],[%[1]s,["trace"]],[%[1]s,["stateDiff"]]]`, call)
 
-	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(target): {Code: &returns42},
 		},
@@ -313,7 +313,7 @@ func TestCallManyStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	call := fmt.Sprintf(`{"from":%q,"to":%q,"value":"0x1"}`, bankAddr, recipient)
 	bundle := fmt.Sprintf(`[[%[1]s,["trace"]],[%[1]s,["stateDiff"]]]`, call)
 
-	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(bankAddr): {Balance: &overriddenBalance},
 		},
@@ -350,7 +350,7 @@ func TestCallManyStorageOverrideAppliesToEveryCall(t *testing.T) {
 	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000"}`, bankAddr, target)
 	bundle := fmt.Sprintf(`[[%[1]s,["trace"]],[%[1]s,["stateDiff"]]]`, call)
 
-	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(target): {State: &map[common.Hash]common.Hash{}},
 		},
@@ -389,7 +389,7 @@ func TestCallManyStateOverrideGasDoesNotDependOnTraceType(t *testing.T) {
 	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000"}`, bankAddr, target)
 	gasLeft := func(traceType string) string {
 		bundle := fmt.Sprintf(`[[%s,[%q]]]`, call, traceType)
-		results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+		results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &TraceCallConfig{
 			StateOverrides: &ethapi.StateOverrides{
 				accounts.InternAddress(target): {State: &map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x07")}},
 			},
@@ -410,7 +410,7 @@ func TestCallManyMovedPrecompileAppliesToEveryCall(t *testing.T) {
 	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000","input":"0xdeadbeef"}`, bankAddr, moveTo)
 	bundle := fmt.Sprintf(`[[%[1]s,["stateDiff"]],[%[1]s,["trace"]]]`, call)
 
-	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+	results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
 		},
@@ -580,6 +580,96 @@ func TestReplayTransaction(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+// The code in a replayed transaction's vmTrace and stateDiff stays the code after later writes to the db.
+func TestReplayTransactionKeepsCodeAfterLaterWrites(t *testing.T) {
+	replay := func(t *testing.T, m *execmoduletester.ExecModuleTester, txnHash common.Hash, traceType string) *TraceCallResult {
+		t.Helper()
+		api := NewTraceAPI(newBaseApiReadingCodeFromTx(m), m.DB, &rpccfg.TraceApiConfig{})
+		res, err := api.ReplayTransaction(m.Ctx, txnHash, []string{traceType}, nil)
+		require.NoError(t, err)
+		return res
+	}
+	bankKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	// singleTxChain inserts one block with the transaction newTx signs, and returns its hash.
+	singleTxChain := func(t *testing.T, cfg *chain.Config, alloc types.GenesisAlloc, newTx func(cfg *chain.Config) types.Transaction) (*execmoduletester.ExecModuleTester, common.Hash) {
+		t.Helper()
+		alloc[bank] = types.GenesisAccount{Balance: funds}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc}), execmoduletester.WithKey(bankKey))
+		txn, err := types.SignTx(newTx(cfg), *types.LatestSignerForChainID(cfg.ChainID), bankKey)
+		require.NoError(t, err)
+		pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(pack))
+		return m, txn.Hash()
+	}
+
+	t.Run("vmTrace of a call", func(t *testing.T) {
+		m, _, contractAddr, _ := chainWithDeployedContract(t)
+		var want []byte
+		var txnHash common.Hash
+		require.NoError(t, m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+			code, _, err := tx.GetLatest(kv.CodeDomain, contractAddr[:], kv.GetLatestOptions{})
+			want = bytes.Clone(code)
+			b, err2 := m.BlockReader.BlockByNumber(m.Ctx, tx, 2)
+			txnHash = b.Transactions()[0].Hash()
+			return errors.Join(err, err2)
+		}))
+		res := replay(t, m, txnHash, TraceTypeVmTrace)
+		overwriteFreedCodePages(t, m)
+		require.Equal(t, want, []byte(res.VmTrace.Code))
+	})
+
+	t.Run("stateDiff of a delegation change", func(t *testing.T) {
+		markerA, markerB := common.HexToAddress("0x1002"), common.HexToAddress("0x1003")
+		authorityKey, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+		fromCode := types.AddressToDelegation(accounts.InternAddress(markerA))
+		m, txnHash := singleTxChain(t, chain.TestChainOsakaConfig.Copy(), types.GenesisAlloc{
+			markerA:   {Code: []byte{0x00}},
+			markerB:   {Code: []byte{0x00}},
+			authority: {Balance: big.NewInt(1), Code: fromCode},
+		}, func(cfg *chain.Config) types.Transaction {
+			auth, err := types.SignAuthorization(authorityKey, *cfg.ChainID, markerB, 0)
+			require.NoError(t, err)
+			return &types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{To: &bank, GasLimit: 100_000},
+					ChainID:  *cfg.ChainID,
+					FeeCap:   *uint256.NewInt(100e9),
+				},
+				Authorizations: []types.Authorization{auth},
+			}
+		})
+		res := replay(t, m, txnHash, TraceTypeStateDiff)
+		overwriteFreedCodePages(t, m)
+		codes, ok := res.StateDiff[accounts.InternAddress(authority)].Code.(map[string]*StateDiffCode)
+		require.True(t, ok, "the delegation changes the code")
+		code := codes["*"]
+		require.NotNil(t, code)
+		require.Equal(t, fromCode, []byte(code.From))
+		require.Equal(t, types.AddressToDelegation(accounts.InternAddress(markerB)), []byte(code.To))
+	})
+
+	t.Run("stateDiff of a self-destructed contract", func(t *testing.T) {
+		victim := common.HexToAddress("0x1002")
+		victimCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.SELFDESTRUCT)}
+		m, txnHash := singleTxChain(t, chain.TestChainBerlinConfig.Copy(), types.GenesisAlloc{
+			victim: {Balance: big.NewInt(1), Code: victimCode},
+		}, func(*chain.Config) types.Transaction {
+			return types.NewTransaction(0, victim, new(uint256.Int), 100_000, uint256.NewInt(1_000_000_000), nil)
+		})
+		res := replay(t, m, txnHash, TraceTypeStateDiff)
+		overwriteFreedCodePages(t, m)
+		codes, ok := res.StateDiff[accounts.InternAddress(victim)].Code.(map[string]hexutil.Bytes)
+		require.True(t, ok, "the self-destruct removes the code")
+		require.Equal(t, hexutil.Bytes(victimCode), codes["-"])
+	})
+}
+
 func TestReplayBlockTransactions(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -741,9 +831,9 @@ func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 		require.Len(t, replay.Trace, 1)
 		require.Equal(t, result, replay.Trace[0].Result, "replay transaction %d", i)
 
-		var callConfig *config.TraceConfig
+		var callConfig *TraceCallConfig
 		if i == 1 {
-			callConfig = &config.TraceConfig{StateOverrides: &ethapi.StateOverrides{
+			callConfig = &TraceCallConfig{StateOverrides: &ethapi.StateOverrides{
 				accounts.InternAddress(*call.To): {
 					StateDiff: &map[common.Hash]common.Hash{{}: common.HexToHash("0x1")},
 				},
@@ -1251,7 +1341,7 @@ func TestTraceCallRejectsCustomTracer(t *testing.T) {
 
 	tracer := "callTracer"
 	latest := rpc.LatestBlockNumber
-	_, err := api.Call(context.Background(), TraceCallParam{}, []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
+	_, err := api.Call(context.Background(), TraceCallParam{}, []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &TraceCallConfig{Tracer: &tracer})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "trace_*")
 	require.Contains(t, err.Error(), "debug_*")
@@ -1285,7 +1375,7 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		Gas:                  &gas,
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
-	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
+	}, []string{TraceTypeTrace}, nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
 		},
@@ -1311,7 +1401,7 @@ func TestTraceCallStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 		From:  &bankAddr,
 		To:    &recipient,
 		Value: (*hexutil.U256)(uint256.NewInt(1)),
-	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+	}, []string{TraceTypeStateDiff}, nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(bankAddr): {Balance: &overriddenBalance},
 		},
@@ -1336,7 +1426,7 @@ func TestTraceCallStateDiffIgnoresOverriddenCode(t *testing.T) {
 		From:  &bankAddr,
 		To:    &recipient,
 		Value: (*hexutil.U256)(uint256.NewInt(1)),
-	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+	}, []string{TraceTypeStateDiff}, nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(recipient): {Code: &overriddenCode},
 		},
@@ -1361,7 +1451,7 @@ func TestTraceCallStateDiffStorageBaselineIncludesStateOverrides(t *testing.T) {
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From: &bankAddr,
 		To:   &target,
-	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+	}, []string{TraceTypeStateDiff}, nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(target): {
 				Code:      &sstoreCode,
@@ -1393,7 +1483,7 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 		From:  &bankAddr,
 		To:    &recipient,
 		Value: (*hexutil.U256)(uint256.NewInt(1)),
-	}, []string{TraceTypeStateDiff}, nil, &config.TraceConfig{
+	}, []string{TraceTypeStateDiff}, nil, &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(untouched): {Balance: &untouchedBalance},
 		},
@@ -1465,7 +1555,7 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code, Nonce: &tc.nonce}}
 			maps.Copy(overrides, tc.extra)
 			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 			require.NoError(t, err)
 			require.Len(t, result.Trace, 2)
 			require.Equal(t, tc.frame, result.Trace[1].Type)
@@ -1499,7 +1589,7 @@ func TestTraceCallVmTraceOperationMembers(t *testing.T) {
 		accounts.InternAddress(child):  {Code: &childCode},
 	}
 	result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-		[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+		[]string{TraceTypeVmTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 	require.NoError(t, err)
 	encoded, err := json.Marshal(result.VmTrace)
 	require.NoError(t, err)
@@ -1564,7 +1654,7 @@ func TestTraceCallRevertedFrames(t *testing.T) {
 				accounts.InternAddress(callee): {Code: &calleeCode},
 			}
 			result, err := api.Call(context.Background(), tc.args, []string{TraceTypeTrace}, nil,
-				&config.TraceConfig{StateOverrides: &overrides})
+				&TraceCallConfig{StateOverrides: &overrides})
 			require.NoError(t, err)
 			require.Len(t, result.Trace, tc.frame+1)
 			frame := result.Trace[tc.frame]
@@ -1673,7 +1763,7 @@ func TestTraceCallFailureLabels(t *testing.T) {
 			}
 			maps.Copy(overrides, tc.extra)
 			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target, Gas: new(hexutil.Uint64(1_000_000))},
-				[]string{TraceTypeTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+				[]string{TraceTypeTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 			require.NoError(t, err)
 			require.Len(t, result.Trace, 2)
 			require.Equal(t, tc.error, result.Trace[1].Error)
@@ -1850,7 +1940,7 @@ func TestTraceCallVmTraceExecutedOps(t *testing.T) {
 				overrides[accounts.InternAddress(child)] = ethapi.Account{Code: &childCode}
 			}
 			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-				[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+				[]string{TraceTypeVmTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 			require.NoError(t, err)
 			require.Equal(t, tc.want, vmTraceSteps(result.VmTrace))
 		})
@@ -1861,7 +1951,7 @@ func TestTraceCallVmTraceExecutedOps(t *testing.T) {
 		code := hexutil.Bytes{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.JUMP)}
 		overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
 		result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-			[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			[]string{TraceTypeVmTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 		require.NoError(t, err)
 		steps := vmTraceSteps(result.VmTrace)
 		require.Len(t, steps, 1023*4+2)
@@ -1888,7 +1978,7 @@ func TestTraceCallVmTraceImmediateOpsHalt(t *testing.T) {
 				code := hexutil.Bytes{byte(op), tc.immediate}
 				overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
 				result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-					[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+					[]string{TraceTypeVmTrace}, nil, &TraceCallConfig{StateOverrides: &overrides})
 				require.NoError(t, err)
 				require.Equal(t, []string{"0 " + op.String() + " halted"}, vmTraceSteps(result.VmTrace))
 			})
@@ -1905,7 +1995,7 @@ func TestTraceCallInputField(t *testing.T) {
 	echo := common.HexToAddress("0x00000000000000000000000000000000cafe0003")
 	// CALLDATASIZE, PUSH1 0x00, PUSH1 0x00, CALLDATACOPY, CALLDATASIZE, PUSH1 0x00, RETURN
 	echoCode := hexutil.Bytes{0x36, 0x60, 0x00, 0x60, 0x00, 0x37, 0x36, 0x60, 0x00, 0xf3}
-	traceConfig := &config.TraceConfig{
+	traceConfig := &TraceCallConfig{
 		StateOverrides: &ethapi.StateOverrides{
 			accounts.InternAddress(echo): {Code: &echoCode},
 		},
@@ -2221,7 +2311,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"gas":"0x186a0","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
-	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
+	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, (*TraceCallConfig)(traceConfigWithBaseFeeOverride(uint256.NewInt(10))))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
@@ -2297,7 +2387,7 @@ func TestCallManyBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			api := c.traceAPI()
 
 			calls := fmt.Sprintf(`[[{"from":%q,"to":%q},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
-			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &config.TraceConfig{
+			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &TraceCallConfig{
 				BlockOverrides: tc.override,
 			})
 			require.NoError(t, err)
@@ -2582,7 +2672,7 @@ func TestTraceCallRejectsCustomTracerWithoutTraceType(t *testing.T) {
 	latest := rpc.LatestBlockNumber
 
 	tracer := "callTracer"
-	_, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
+	_, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &TraceCallConfig{Tracer: &tracer})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not support custom tracers")
 }
@@ -3523,4 +3613,59 @@ func TestTraceCallManyZeroesBlobBaseFeePerCall(t *testing.T) {
 	require.Zero(t, readFeeProbe(t, results[0].Output).blobBaseFee.Sign(), "unpriced blobs see a zero BLOBBASEFEE")
 	require.Positive(t, readFeeProbe(t, results[1].Output).blobBaseFee.Sign(), "a call without blobs keeps the block's BLOBBASEFEE")
 	require.Positive(t, readFeeProbe(t, results[2].Output).blobBaseFee.Sign(), "priced blobs keep the block's BLOBBASEFEE")
+}
+
+func TestTraceCallStateOverrideForms(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	const target = "0x00000000000000000000000000000000cafe0001"
+	stateMap := map[string]any{target: map[string]any{"code": hexutil.Bytes(returningByte(42))}}
+	const wantOutput = "0x000000000000000000000000000000000000000000000000000000000000002a"
+	call := map[string]any{"from": bankAddr.Hex(), "to": target, "gas": "0x10000"}
+	traceTypes := []string{TraceTypeTrace}
+
+	for _, tc := range []struct {
+		name      string
+		overrides any
+	}{
+		{name: "positional state map", overrides: stateMap},
+		{name: "configuration wrapper", overrides: map[string]any{"stateOverrides": stateMap}},
+	} {
+		t.Run("trace_call "+tc.name, func(t *testing.T) {
+			var result TraceCallResult
+			require.NoError(t, client.CallContext(t.Context(), &result, "trace_call", call, traceTypes, "latest", tc.overrides))
+			require.Equal(t, wantOutput, result.Output.String())
+		})
+		t.Run("trace_callMany "+tc.name, func(t *testing.T) {
+			var results []TraceCallResult
+			calls := []any{[]any{call, traceTypes}}
+			require.NoError(t, client.CallContext(t.Context(), &results, "trace_callMany", calls, "latest", tc.overrides))
+			require.Len(t, results, 1)
+			require.Equal(t, wantOutput, results[0].Output.String())
+		})
+	}
+
+	t.Run("addresses mixed with configuration fields", func(t *testing.T) {
+		mixed := map[string]any{target: stateMap[target], "stateOverrides": stateMap}
+		requireErrorCode(t, client.CallContext(t.Context(), nil, "trace_call", call, traceTypes, "latest", mixed), -32602)
+		requireErrorCode(t, client.CallContext(t.Context(), nil, "trace_callMany", []any{[]any{call, traceTypes}}, "latest", mixed), -32602)
+	})
+}
+
+func TestTraceCallConfigRejectsMalformedAddressKey(t *testing.T) {
+	for _, in := range []string{
+		`{"0xcafe":{"code":"0x00"}}`,
+		`{"0x00000000000000000000000000000000cafe000g":{"code":"0x00"}}`,
+		`{"0x00000000000000000000000000000000cafe000100":{"code":"0x00"}}`,
+		`{"00000000000000000000000000000000cafe0001":{"code":"0x00"}}`,
+	} {
+		var so ethapi.StateOverrides
+		require.Error(t, json.Unmarshal([]byte(in), &so), "eth_call rejects %s", in)
+		var c TraceCallConfig
+		require.Error(t, json.Unmarshal([]byte(in), &c), "trace_call accepts %s", in)
+	}
 }

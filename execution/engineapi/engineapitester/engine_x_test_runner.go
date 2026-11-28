@@ -148,11 +148,9 @@ type testerGroupKey struct {
 type testerGroup map[string]testerEntry
 
 func (group testerGroup) close() error {
-	var errs []error
+	errs := make([]error, 0, len(group))
 	for key := range group {
-		if err := group[key].close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, group[key].close())
 	}
 	return errors.Join(errs...)
 }
@@ -172,11 +170,9 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.testers = nil
 	extr.mu.Unlock()
 
-	var errs []error
+	errs := make([]error, 0, len(groups))
 	for _, group := range groups {
-		if err := group.close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, group.close())
 	}
 	return errors.Join(errs...)
 }
@@ -388,8 +384,8 @@ func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (En
 	return entry.tester, nil
 }
 
-// createTester builds a fresh EngineApiTester for the test's configuration. The
-// caller is responsible for caching/publishing the result. No locks are taken.
+// createTester starts a tester in its own temporary directory. The caller
+// must either cache the returned entry or close it.
 func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerEntry, error) {
 	fork, preAllocHash := test.Fork, test.PreAllocHash
 	forkConfig, err := test.Config.ChainConfig(fork.String())

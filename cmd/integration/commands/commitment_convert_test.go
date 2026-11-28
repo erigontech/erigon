@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -41,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chaincfg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -164,7 +162,7 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(func() { datadirCli, verifyAsOf = previousDatadir, previousVerifyAsOf })
 
 	db, dirs := dbWithV3State(t)
-	latest, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), math.MaxUint64)
+	checks, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
 	db.Close()
 	var pruned []string
@@ -179,7 +177,7 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 
 	datadirCli = dirs.DataDir
-	for _, asOf := range []uint64{1, latest.TxNum} {
+	for _, asOf := range []uint64{1, checks[0].TxNum} {
 		verifyAsOf = []uint{uint(asOf)}
 		require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), fmt.Sprintf("no commitment history covers txNum %d", asOf))
 	}
@@ -438,7 +436,7 @@ func dbWithV3StateRoots(t *testing.T, addrs uint64, skipCommitment ...uint64) (k
 	require.NoError(t, db.OpenStateSnapshots(t.Context()))
 	t.Cleanup(db.Close)
 	agg, roots := fillAccountState(t, db, 64, addrs, skipCommitment...)
-	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	require.NoError(t, agg.BuildFiles(db, 48, math.MaxUint64))
 	return db, dirs, roots
 }
 

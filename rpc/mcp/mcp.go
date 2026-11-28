@@ -116,8 +116,9 @@ func isLoopbackOrigin(origin string) bool {
 // cancelled. Streamable HTTP is served at /mcp, the legacy SSE pair at
 // /sse + /message.
 func (e *ErigonMCPServer) ListenAndServe(ctx context.Context, addr string) error {
-	sse := server.NewSSEServer(e.mcpServer)
-	streamable := server.NewStreamableHTTPServer(e.mcpServer, server.WithEndpointPath("/mcp"))
+	sse := server.NewSSEServer(e.mcpServer, server.WithSSEMaxRequestBodyBytes(rpc.MaxRequestContentLength))
+	streamable := server.NewStreamableHTTPServer(e.mcpServer, server.WithEndpointPath("/mcp"),
+		server.WithMaxRequestBodyBytes(rpc.MaxRequestContentLength))
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", streamable)
 	mux.Handle("/mcp/", streamable)

@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"maps"
 	"os"
 	"os/exec"
@@ -27,6 +28,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,7 +51,7 @@ func TestOpenRawDBCreatesTableForPendingMigration(t *testing.T) {
 
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
@@ -78,7 +81,7 @@ func TestOpenRawDBCreatesTableAfterUncleanShutdown(t *testing.T) {
 	require.ErrorIs(t, err, mdbxWannaRecovery)
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindataPath), true, logger)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
@@ -115,7 +118,7 @@ func TestOpenRawDBRejectsMissingDatabaseForPendingMigration(t *testing.T) {
 	dataDir := useTestDatadir(t)
 	missingPath := filepath.Join(dataDir, "missing-chaindata")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, missingPath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, missingPath), true, logger)
 	if db != nil {
 		t.Cleanup(db.Close)
 	}
@@ -134,7 +137,7 @@ func TestOpenRawDBRejectsEmptyDatabaseForPendingMigration(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(databasePath, "mdbx.dat"), nil, 0o600))
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, databasePath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, databasePath), true, logger)
 	if db != nil {
 		db.Close()
 	}
@@ -152,7 +155,7 @@ func TestOpenRawDBRejectsNonChaindataForPendingMigration(t *testing.T) {
 	beforeSize := databaseFileSize(t, databasePath)
 	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
 
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, databasePath), true, logger)
+	db, err := openRawDB(t.Context(), dbCfg(dbcfg.ChainDB, databasePath), true, logger)
 	if db != nil {
 		db.Close()
 	}
@@ -255,4 +258,41 @@ func tableNames(t *testing.T, opts kv2.MdbxOpts) []string {
 	}))
 	slices.Sort(names)
 	return names
+}
+
+func TestCommandsReturnErrors(t *testing.T) {
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		assert.Nil(t, cmd.Run, "%q must use RunE so a failure exits non-zero", cmd.CommandPath())
+		for _, sub := range cmd.Commands() {
+			if sub.Name() != "help" {
+				walk(sub)
+			}
+		}
+	}
+	walk(integrationRoot())
+}
+
+func TestFailedCommandReturnsError(t *testing.T) {
+	dataDir := useTestDatadir(t)
+	root := integrationRoot()
+	var stderr bytes.Buffer
+	root.SetErr(&stderr)
+	t.Cleanup(func() { root.SetErr(nil) })
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "print", "--chain", "mainnet", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
+	require.ErrorIs(t, root.ExecuteContext(t.Context()), kv2.ErrDBDoesNotExists)
+	require.Empty(t, stderr.String(), "main prints the error, cobra must not")
+}
+
+func TestAllocRequiresSize(t *testing.T) {
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "alloc"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "accepts 1 arg(s), received 0")
+}
+
+func TestPrintTableSizesReturnsMissingDBError(t *testing.T) {
+	dataDir := useTestDatadir(t)
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "print_table_sizes", "--datadir", dataDir, "--chaindata", filepath.Join(dataDir, "chaindata")})
+	require.ErrorIs(t, root.ExecuteContext(t.Context()), kv2.ErrDBDoesNotExists)
 }

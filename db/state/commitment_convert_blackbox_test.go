@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 )
 
 // pickLargestCommitmentFile returns the commitment file with the largest tx
@@ -171,7 +171,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 	// Aggregator view of snapshots/domain/ must be untouched.
 	for _, vf := range at.Files(kv.CommitmentDomain) {
 		require.NotEqual(t, dstDir, filepath.Dir(vf.Fullpath()),
-			"aggregator view must not include dstDir files (integrate=false)")
+			"aggregator view must not include unpublished dstDir files")
 	}
 
 	// Every non-state key in the new file must decode canonically as V2.
@@ -240,7 +240,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 		if bytes.Equal(newKeys[i], commitmentdb.KeyCommitmentState) || len(v) == 0 {
 			continue
 		}
-		_, perr := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		_, perr := branch.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if len(key) < binary.MaxVarintLen64 {
 				foundShort = true
 			}
@@ -496,7 +496,7 @@ func anyFileHasSqueezedField(t *testing.T, agg *state.Aggregator, paths []string
 				continue
 			}
 			found := false
-			_, perr := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			_, perr := branch.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 				if len(key) < binary.MaxVarintLen64 {
 					found = true
 				}

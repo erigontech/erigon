@@ -21,11 +21,18 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/commitment"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/engineapi"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -97,6 +104,8 @@ func postForkPayloadWitness(ctx context.Context, t *testing.T, eat engineapitest
 func requirePayloadWitness(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload) *jsonrpc.ExecutionWitnessResult {
 	code, body := postPayloadWitness(ctx, t, eat, p)
 	_, witness := requireValidWithWitness(t, code, body, clparams.GloasVersion)
+	requireEngineCommitmentVariant(t, eat, statecfg.ExperimentalCommitmentV3)
+	requirePayloadWitnessParentRoot(ctx, t, eat, p, witness)
 	return witness
 }
 
@@ -110,9 +119,122 @@ func requireValidWithWitness(t *testing.T, code int, body []byte, version clpara
 	return status, witness
 }
 
+func requirePayloadWitnessParentRoot(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload, witness *jsonrpc.ExecutionWitnessResult) {
+	t.Helper()
+	parentHash := p.ExecutionPayload.ParentHash
+	parent, err := eat.ExecutionModule.GetHeader(ctx, &parentHash, nil)
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+	txns := make([][]byte, len(p.ExecutionPayload.Transactions))
+	for i, tx := range p.ExecutionPayload.Transactions {
+		txns[i] = tx
+	}
+	transactions, err := types.DecodeTransactions(txns)
+	require.NoError(t, err)
+	header := engineapitester.MockClPayloadToHeader(p)
+	signer := types.MakeSigner(eat.ChainConfig, header.Number.Uint64(), header.Time)
+	for _, txn := range transactions {
+		sender, err := txn.Sender(*signer)
+		require.NoError(t, err)
+		proof, account, err := payloadWitnessAccountProof(parent, witness, sender.Value())
+		require.NoError(t, err)
+		require.NotEmpty(t, proof)
+		require.NotEmpty(t, account)
+	}
+	block := types.NewBlockFromNetwork(header, &types.Body{Transactions: transactions, Withdrawals: p.ExecutionPayload.Withdrawals}, nil)
+	root, err := jsonrpc.ReplayExecutionWitness(witness, block, eat.ChainConfig, merge.New(ethash.NewFaker()))
+	require.NoError(t, err)
+	require.Equal(t, p.ExecutionPayload.StateRoot, root, "witness post-state root")
+}
+
+func payloadWitnessAccountProof(parent *types.Header, witness *jsonrpc.ExecutionWitnessResult, addr common.Address) ([][]byte, []byte, error) {
+	nodes := make(map[string][]byte, len(witness.State))
+	for _, node := range witness.State {
+		nodes[string(crypto.Keccak256(node))] = node
+	}
+	return witnesstypes.ProofFromNodes(nodes, parent.Root[:], crypto.Keccak256(addr[:]))
+}
+
+func TestEngineWitnessChecksRejectMissingSender(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
+	ctx := t.Context()
+	payload := buildCommittedChangerPayload(ctx, t, eat)
+	code, body := postPayloadWitness(ctx, t, eat, payload)
+	require.Equal(t, http.StatusOK, code, string(body))
+	_, witness, err := engineapi.DecodePayloadStatusWithWitness(body, clparams.GloasVersion)
+	require.NoError(t, err)
+	parent, err := eat.ExecutionModule.GetHeader(ctx, &payload.ExecutionPayload.ParentHash, nil)
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	proof, account, err := payloadWitnessAccountProof(parent, witness, sender)
+	require.NoError(t, err)
+	require.NotEmpty(t, account)
+	require.Greater(t, len(proof), 1)
+	leaf := proof[len(proof)-1]
+	index := bytes.Index(body, leaf)
+	require.NotEqual(t, -1, index)
+	require.Equal(t, 1, bytes.Count(body, leaf))
+	body[index+len(leaf)-1] ^= 1
+	_, changedWitness, err := engineapi.DecodePayloadStatusWithWitness(body, clparams.GloasVersion)
+	require.NoError(t, err)
+	_, _, err = payloadWitnessAccountProof(parent, changedWitness, sender)
+	require.Error(t, err, "changed payload response must fail the sender proof check")
+}
+
+func requireEngineCommitmentVariant(t *testing.T, eat engineapitester.EngineApiTester, wantV3 bool) {
+	t.Helper()
+	tx, err := eat.ChainDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	wantVariant := commitment.VariantHexPatriciaTrie
+	wantKey := commitment.KeyCommitmentState
+	otherKey := commitment.KeyCommitmentV3State
+	if wantV3 {
+		wantVariant = commitment.VariantCommitmentV3
+		wantKey, otherKey = otherKey, wantKey
+	}
+	require.Equal(t, wantVariant, domains.GetCommitmentCtx().Trie().Variant())
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, wantKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, state)
+	otherState, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, otherState)
+	if wantV3 {
+		_, _, _, err = commitment.DecodeCommitmentV3State(state)
+		require.NoError(t, err)
+	}
+}
+
+func runCommitmentVariants(t *testing.T, test func(*testing.T)) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "v3-off", v3: false},
+		{name: "v3-on", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			test(t)
+		})
+	}
+}
+
 // The reference is debug_executionWitness in canonical mode, rebuilt from commitment
 // history after the payload is committed.
 func TestEngineApiPayloadWitness(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitness)
+}
+
+func testEngineApiPayloadWitness(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -149,6 +271,10 @@ func requireDebugExecutionWitness(ctx context.Context, t *testing.T, eat enginea
 // A payload validated by a plain newPayload gets its witness from the held state when it is resubmitted before
 // the forkchoice update.
 func TestEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForValidatedPayload)
+}
+
+func testEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -216,6 +342,10 @@ func buildCommittedChangerPayload(ctx context.Context, t *testing.T, eat enginea
 
 // A payload committed before its witness was requested gets the witness rebuilt from the committed state.
 func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForCommittedPayload)
+}
+
+func testEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
@@ -228,6 +358,10 @@ func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 }
 
 func TestEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory)
+}
+
+func testEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		payload := buildCommittedChangerPayload(ctx, t, eat)
@@ -238,6 +372,10 @@ func TestEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *t
 
 // A resubmitted payload whose cached witness was evicted gets the same witness again.
 func TestEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessAfterCacheEviction)
+}
+
+func testEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		first, _ := buildChangerPayload(ctx, t, eat)
@@ -255,6 +393,10 @@ func TestEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
 }
 
 func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForKnownPayload)
+}
+
+func testEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		payload, _ := buildChangerPayload(ctx, t, eat)
@@ -268,6 +410,10 @@ func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 // A forkchoice update back to the committed head unwinds a payload, which leaves it a known VALID payload with no
 // state and its child a child of an uncommitted payload.
 func TestEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild(t *testing.T) {
+	runCommitmentVariants(t, testEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild)
+}
+
+func testEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,

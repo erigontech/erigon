@@ -58,7 +58,12 @@ func RederiveBlockAccessList(
 ) (*state.VersionedIO, error) {
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
-	hashFn := protocol.GetHashFn(header, getHeader)
+	var hashFn func(uint64) (common.Hash, error)
+	if getHeader != nil {
+		hashFn = protocol.GetHashFn(header, getHeader)
+	} else {
+		hashFn = protocol.GetHashFnFromChain(header, chainReader)
+	}
 	// phaseErr returns the error of the phase that just ran. The node's own
 	// failures come first: the EVM folds failed state reads and header lookups
 	// into failed calls, and the executor recovers panics into errors.
@@ -91,11 +96,11 @@ func RederiveBlockAccessList(
 		}
 		ibs.MergeTxIOInto(balIO, writes)
 		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
+		ibs.ResetIO()
 		return nil
 	}
 	ibs.SetTxContext(blockNum, -1)
-	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, logger, nil)
+	err := protocol.InitializeBlockExecutionWithHash(engine, chainReader, header, cfg, ibs, logger, nil, hashFn)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
@@ -121,8 +126,8 @@ func RederiveBlockAccessList(
 		receipts = append(receipts, receipt)
 	}
 	ibs.SetTxContext(blockNum, len(txns))
-	ibs.ResetVersionedIO()
-	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
+	ibs.ResetIO()
+	_, _, err = protocol.FinalizeBlockExecutionWithHash(engine, header, txns, uncles, cfg, ibs, receipts, withdrawals, chainReader, false, logger, hashFn)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}

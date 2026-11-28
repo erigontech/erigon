@@ -50,12 +50,11 @@ var rootCmd = &cobra.Command{
 			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
-	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		defer debug.Exit()
-	},
 }
 
 func RootCommand() *cobra.Command {
+	cobra.OnFinalize(debug.Exit)
+	rootCmd.SilenceErrors = true
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	return rootCmd
 }
@@ -101,7 +100,7 @@ func checkExistingDB(opts kv2.MdbxOpts) error {
 	})
 }
 
-func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+func openRawDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	migrationDBs := map[kv.Label]bool{
 		dbcfg.ChainDB:     true,
 		dbcfg.ConsensusDB: true,
@@ -131,7 +130,10 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 				return nil, err
 			}
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDBExcl := opts.Accede(false).Exclusive(true).MustOpen()
+			rawDBExcl, err := opts.Accede(false).Exclusive(true).Open(ctx)
+			if err != nil {
+				return nil, err
+			}
 			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
 				rawDBExcl.Close()
 				return nil, err
@@ -139,7 +141,10 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 			rawDBExcl.Close()
 		}
 	}
-	db := opts.MustOpen()
+	db, err := opts.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if applyMigrations && opts.GetLabel() == dbcfg.ChainDB {
 		if err := migrations.NewMigrator(dbcfg.ChainDB).StampVersion(db, ""); err != nil {
 			db.Close()
@@ -161,7 +166,7 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger
 			return nil, err
 		}
 	}
-	rawDB, err := openRawDB(opts, applyMigrations, logger)
+	rawDB, err := openRawDB(ctx, opts, applyMigrations, logger)
 	if err != nil {
 		return nil, err
 	}

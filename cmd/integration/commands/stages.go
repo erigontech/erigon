@@ -114,13 +114,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			go kv.CollectTableSizesPeriodically(ctx, db, dbcfg.ChainDB, logger)
-			if err := stageFn(db, ctx, logger); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil // graceful shutdown
-				}
-				return err
-			}
-			return nil
+			return stageFn(db, ctx, logger)
 		},
 	}
 }
@@ -139,37 +133,39 @@ var (
 )
 
 var cmdAlloc = &cobra.Command{
-	Use:     "alloc",
-	Example: "integration allocates and holds 1Gb (or given size)",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "alloc",
+	Example:      "integration allocates and holds 1Gb (or given size)",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
 		_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		v, err := datasize.ParseString(args[0])
 		if err != nil {
-			panic(err)
+			return err
 		}
 		n := make([]byte, v.Bytes())
 		_ = common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
+		return nil
 	},
 }
 
 var cmdPrintTableSizes = &cobra.Command{
-	Use:   "print_table_sizes",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print_table_sizes",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
 		tableSizes, err := kv.CollectTableSizes(cmd.Context(), db)
 		if err != nil {
-			logger.Error("error while collecting table sizes", "err", err)
-			return
+			return fmt.Errorf("error while collecting table sizes: %w", err)
 		}
 
 		var sb strings.Builder
@@ -186,92 +182,80 @@ var cmdPrintTableSizes = &cobra.Command{
 
 		if outputCsvFile == "" {
 			logger.Info("table sizes", "csv", sb.String())
-			return
+			return nil
 		}
 
 		f, err := os.Create(outputCsvFile)
 		if err != nil {
-			logger.Error("issue creating file", "file", outputCsvFile, "err", err)
-			return
+			return fmt.Errorf("issue creating file %s: %w", outputCsvFile, err)
 		}
 
 		_, err = f.WriteString(sb.String())
 		if err != nil {
-			logger.Error("issue writing output to file", "file", outputCsvFile, "err", err)
-			return
+			return fmt.Errorf("issue writing output to file %s: %w", outputCsvFile, err)
 		}
 
 		logger.Info("wrote table sizes to csv output file", "file", outputCsvFile)
+		return nil
 	},
 }
 
 var cmdPrintMigrations = &cobra.Command{
-	Use:   "print_migrations",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "print_migrations",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
-			return
+			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
-		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return printAppliedMigrations(migrationsDB, cmd.Context(), logger)
 	},
 }
 
 var cmdRemoveMigration = &cobra.Command{
-	Use:   "remove_migration",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "remove_migration",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
-			return
+			return fmt.Errorf("opening migrations DB: %w", err)
 		}
 		defer migrationsDB.Close()
-		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return removeMigration(migrationsDB, cmd.Context())
 	},
 }
 
 var cmdRunMigrations = &cobra.Command{
-	Use:   "run_migrations",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "run_migrations",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		if isDefaultChaindata(chaindata, datadirCli) {
 			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
-				logger.Error("Apply migrations", "error", err)
-				return
+				return fmt.Errorf("apply migrations: %w", err)
 			}
 		}
-		migrateDB := func(label kv.Label, path string) {
-			if err := runMigrationsForDB(label, path, logger); err != nil {
-				logger.Error("Opening DB", "error", err)
-			}
+		if err := runMigrationsForDB(dbcfg.ChainDB, chaindata, logger); err != nil {
+			return fmt.Errorf("opening DB: %w", err)
 		}
-
-		migrateDB(dbcfg.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
-			migrateDB(dbcfg.ConsensusDB, consensus)
+			if err := runMigrationsForDB(dbcfg.ConsensusDB, consensus, logger); err != nil {
+				return fmt.Errorf("opening DB: %w", err)
+			}
 		}
+		return nil
 	},
 }
 
@@ -281,7 +265,7 @@ func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
 	if err := checkExistingDB(cfg); err != nil {
 		return err
 	}
-	db, err := openRawDB(cfg, true, logger)
+	db, err := openRawDB(context.Background(), cfg, true, logger)
 	if err != nil {
 		return err
 	}
@@ -430,8 +414,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	}
 
 	if !(unwind > 0 || reset) {
-		logger.Error("This command only works with --unwind or --reset options")
-		return nil
+		return errors.New("this command only works with --unwind or --reset options")
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -506,6 +489,9 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
 		})
 	}
+	if unwind == 0 {
+		return errors.New("this command only works with --unwind or --reset options")
+	}
 
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
@@ -514,25 +500,21 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, stages.Bodies)
 
-		if unwind > 0 {
-			if unwind > s.BlockNumber {
-				return errors.New("cannot unwind past 0")
-			}
-
-			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
-			cfg := stagedsync.StageBodiesCfg(br, bw)
-			if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
-				return err
-			}
-
-			progress, err := stages.GetStageProgress(tx, stages.Bodies)
-			if err != nil {
-				return fmt.Errorf("re-read Bodies progress: %w", err)
-			}
-			logger.Info("Progress", "bodies", progress)
-			return nil
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
 		}
-		logger.Info("This command only works with --unwind or --reset option")
+
+		u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
+		cfg := stagedsync.StageBodiesCfg(br, bw)
+		if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
+			return err
+		}
+
+		progress, err := stages.GetStageProgress(tx, stages.Bodies)
+		if err != nil {
+			return fmt.Errorf("re-read Bodies progress: %w", err)
+		}
+		logger.Info("Progress", "bodies", progress)
 		return nil
 	}); err != nil {
 		return err
@@ -561,44 +543,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	defer tx.Rollback()
 
 	if integritySlow {
-		secp256k1.ContextForThread(1)
-		for i := block; ; i++ {
-			if err := common.Stopped(ctx.Done()); err != nil {
-				return err
-			}
-			h, _ := br.HeaderByNumber(ctx, tx, i)
-			if h == nil {
-				break
-			}
-			withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
-			if err != nil {
-				return err
-			}
-			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
-			txs := withoutSenders.Transactions()
-			if txs.Len() != len(senders) {
-				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
-				return nil
-			}
-			if txs.Len() == 0 {
-				continue
-			}
-			signer := types.MakeSigner(chainConfig, i, h.Time)
-			for j := 0; j < txs.Len(); j++ {
-				from, err := signer.Sender(txs[j])
-				if err != nil {
-					return err
-				}
-				fromValue := from.Value()
-				if !bytes.Equal(fromValue[:], senders[j][:]) {
-					logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
-				}
-			}
-			if i%10 == 0 {
-				logger.Info("checked", "block", i)
-			}
-		}
-		return nil
+		return checkSenders(ctx, tx, br, chainConfig, block, logger)
 	}
 
 	s := stage(sync, tx, stages.Senders)
@@ -723,6 +668,59 @@ func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logge
 		return err
 	}
 	return dbstate.CompleteExecReset(dirs, logger)
+}
+
+func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, chainConfig *chain2.Config, fromBlock uint64, logger log.Logger) (err error) {
+	secp256k1.ContextForThread(1)
+	wrongSenders := 0
+	defer func() {
+		if wrongSenders > 0 {
+			err = errors.Join(err, fmt.Errorf("%d wrong senders", wrongSenders))
+		}
+	}()
+	for i := fromBlock; ; i++ {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+		h, err := br.HeaderByNumber(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			break
+		}
+		withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		if withoutSenders == nil {
+			return fmt.Errorf("missing block body at block %d", i)
+		}
+		withoutSenders.Body().SendersFromTxs() // remove senders info from txs
+		txs := withoutSenders.Transactions()
+		if txs.Len() != len(senders) {
+			return fmt.Errorf("not equal amount of senders: block %d, db %d, expect %d", i, len(senders), txs.Len())
+		}
+		if txs.Len() == 0 {
+			continue
+		}
+		signer := types.MakeSigner(chainConfig, i, h.Time)
+		for j := 0; j < txs.Len(); j++ {
+			from, err := signer.Sender(txs[j])
+			if err != nil {
+				return err
+			}
+			fromValue := from.Value()
+			if !bytes.Equal(fromValue[:], senders[j][:]) {
+				logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
+				wrongSenders++
+			}
+		}
+		if i%10 == 0 {
+			logger.Info("checked", "block", i)
+		}
+	}
+	return nil
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -863,17 +861,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
+		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (uint64, error) {
+			retireToBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return nil, err
+				return 0, err
 			}
-			pruneStage.FinalityCtx = finalityCtx
-			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.RetireToBlock = retireToBlock
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return 0, err
+			}
+			return execfinality.CollateToTxNum(ctx, tx, br.TxnumReader(), retireToBlock)
 		})
 		return err
 	}
@@ -1394,7 +1395,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader(), nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }

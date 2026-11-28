@@ -941,54 +941,74 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	t.Parallel()
-	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
-	tx, err := m.DB.BeginTemporalRw(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	br := m.BlockReader
-	txNumReader := br.TxnumReader()
-	ctx := m.Ctx
+	for _, tc := range []struct {
+		name   string
+		index  func(txNum uint64) uint
+		served bool // by the single-receipt reader, with the position as its index.
+	}{
+		{"txNum as index", func(txNum uint64) uint { return uint(txNum) }, true},
+		{"another index", func(uint64) uint { return 3_468_750_000 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+			tx, err := m.DB.BeginTemporalRw(m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			br := m.BlockReader
+			txNumReader := br.TxnumReader()
+			ctx := m.Ctx
 
-	tx1 := newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1)
-	tx2 := newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2)
+			tx1 := newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1)
+			tx2 := newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2)
 
-	header := &types.Header{Number: *common.Num1}
-	hash := header.Hash()
-	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
-	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
+			header := &types.Header{Number: *common.Num1}
+			hash := header.Hash()
+			body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
+			require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
+			require.NoError(t, rawdb.WriteHeader(tx, header))
+			require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+			require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
+			require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
-	badReceipt := &types.Receipt{
-		Status:            types.ReceiptStatusSuccessful,
-		CumulativeGasUsed: 1,
-		GasUsed:           1,
-		BlockNumber:       &header.Number,
-		BlockHash:         hash,
-		TransactionIndex:  3_468_750_000,
+			blockNum := header.Number.Uint64()
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
+			require.NoError(t, err)
+			defer sd.Close()
+			base, err := txNumReader.Min(t.Context(), tx, blockNum)
+			require.NoError(t, err)
+			badReceipt := &types.Receipt{
+				Status:            types.ReceiptStatusSuccessful,
+				CumulativeGasUsed: 1,
+				GasUsed:           1,
+				BlockNumber:       &header.Number,
+				BlockHash:         hash,
+				TransactionIndex:  tc.index(base + 1),
+			}
+			require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
+			require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), badReceipt, base+1))
+			require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+2))
+			_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, base+2, "flush-commitment", nil)
+			require.NoError(t, err)
+			require.NoError(t, sd.Flush(ctx, tx))
+
+			b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+			require.NoError(t, err)
+			require.NotNil(t, b)
+			rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
+			require.NoError(t, err)
+			require.Empty(t, rs)
+			r, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{BlockNum: blockNum, BlockHash: hash, TxnHash: tx1.Hash(), TxNum: base + 1}, 0)
+			require.NoError(t, err)
+			require.Equal(t, tc.served, ok)
+			if !tc.served {
+				require.Nil(t, r)
+				return
+			}
+			require.Equal(t, uint(0), r.TransactionIndex)
+			require.Equal(t, uint64(1), r.CumulativeGasUsed)
+		})
 	}
-
-	blockNum := header.Number.Uint64()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
-	require.NoError(t, err)
-	defer sd.Close()
-	base, err := txNumReader.Min(t.Context(), tx, blockNum)
-	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
-	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), badReceipt, base+1))
-	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+2))
-	_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, base+2, "flush-commitment", nil)
-	require.NoError(t, err)
-	require.NoError(t, sd.Flush(ctx, tx))
-
-	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(t, err)
-	require.NotNil(t, b)
-	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
-	require.NoError(t, err)
-	require.Empty(t, rs)
 }
 
 func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {

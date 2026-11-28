@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -454,7 +455,7 @@ func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, err
 	if err := state.EmitTouchedAsOf(writes, view, updates); err != nil {
 		return nil, err
 	}
-	hph := commitment.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(20, commitment.NewMemoryContext(), commitment.DefaultTrieConfig())
 	defer hph.Release()
 	return hph.Process(context.Background(), updates, "genesis", nil, commitment.WarmupConfig{})
 }
@@ -463,7 +464,7 @@ func genesisStateRoot(writes *state.WriteSet, vm *state.VersionMap) ([]byte, err
 // IntraBlockState, returning it with the finalized write set already published to the
 // state's version map.
 func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState, *state.WriteSet, error) {
-	statedb := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	statedb := state.New(state.NewNoopReader())
 	statedb.SetTxContext(0, 0)
 	statedb.SetTrace(false)
 
@@ -516,7 +517,7 @@ func GenesisState(g *types.Genesis, head *types.Header) (*state.IntraBlockState,
 		}
 
 		if len(account.Constructor) > 0 {
-			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
+			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head, nil); err != nil {
 				return nil, nil, err
 			}
 			// The constructor reads the alloc storage, but deploys over a fresh account:

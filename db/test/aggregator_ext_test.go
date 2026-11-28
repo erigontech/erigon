@@ -51,12 +51,13 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
+const collateAll = uint64(math.MaxUint64)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -83,7 +84,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
-	hph := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
+	hph := v2.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -136,7 +137,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -414,7 +415,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 	})
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
@@ -516,7 +517,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, maxTx, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, maxTx, collateAll)
 	require.NoError(t, err)
 
 	buildTx, err := db.BeginTemporalRw(t.Context())
@@ -627,7 +628,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	//t.Logf("expected hash: %x", expectedHash)
-	err = agg.BuildFiles(db, stepSize*16, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, stepSize*16, collateAll)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -718,7 +719,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
@@ -779,12 +780,16 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	finalityCtx := execfinality.NewContext(blocks, 0, 5, true, rawdbv3.TxNums)
+	var collateToTxNum uint64
+	require.NoError(t, tdb.View(ctx, func(tx kv.Tx) (err error) {
+		collateToTxNum, err = execfinality.CollateToTxNum(ctx, tx, rawdbv3.TxNums, execfinality.RetireToBlock(blocks, 0, 5, true))
+		return err
+	}))
 	if buildFiles2 {
-		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
+		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), collateToTxNum, true)
 		agg.WaitForFiles()
 	} else {
-		err = agg.BuildFiles(tdb, txnNums, finalityCtx)
+		err = agg.BuildFiles(tdb, txnNums, collateToTxNum)
 	}
 	require.NoError(t, err)
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())

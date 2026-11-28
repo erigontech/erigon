@@ -18,15 +18,15 @@ package v3
 
 import "slices"
 
-func packedLen(nibbleCount int) int {
+func PackedLen(nibbleCount int) int {
 	if nibbleCount < 0 {
 		panic("negative nibble count")
 	}
 	return (nibbleCount + 1) / 2
 }
 
-func packPath(nibbles []byte, dst []byte) []byte {
-	packed := packedLen(len(nibbles))
+func PackPath(nibbles []byte, dst []byte) []byte {
+	packed := PackedLen(len(nibbles))
 	dst = slices.Grow(dst[:0], packed)[:packed]
 	for i, nibble := range nibbles {
 		if nibble > 0x0f {
@@ -41,8 +41,8 @@ func packPath(nibbles []byte, dst []byte) []byte {
 	return dst
 }
 
-func packedMatches(packed []byte, nibbles []byte) bool {
-	if len(packed) != packedLen(len(nibbles)) {
+func PackedMatches(packed []byte, nibbles []byte) bool {
+	if len(packed) != PackedLen(len(nibbles)) {
 		return false
 	}
 	for i, nib := range nibbles {

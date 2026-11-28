@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -262,4 +263,48 @@ func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, &first[0], &got[0])
 	require.Equal(t, size, p.bytes.Load())
+}
+
+func TestBranchPrefetcherReusesTheQueueOfAClosedOne(t *testing.T) {
+	first := newBranchPrefetcher(context.Background(), nil)
+	queue := first.work
+	first.close()
+	second := newBranchPrefetcher(context.Background(), nil)
+	defer second.close()
+	require.True(t, queue == second.work, "a new prefetcher must take the queue of a closed one instead of allocating a new one")
+}
+
+type blockingPrefetchDB struct {
+	kv.TemporalRoDB
+	started chan struct{}
+	release chan struct{}
+}
+
+func (db *blockingPrefetchDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	db.started <- struct{}{}
+	<-db.release
+	return nil, context.Canceled
+}
+
+func TestBranchPrefetcherHandsOffItsQueueOnlyAfterItsWorkersStop(t *testing.T) {
+	select {
+	case <-spareQueue:
+	default:
+	}
+	db := &blockingPrefetchDB{started: make(chan struct{}), release: make(chan struct{})}
+	p := newBranchPrefetcher(context.Background(), db)
+	for i := range 2 * branchPrefetchWorkers {
+		p.add(prefetchItem{account: common.Hash{byte(i)}})
+	}
+	for range branchPrefetchWorkers {
+		<-db.started
+	}
+	closed := make(chan struct{})
+	go func() { p.close(); close(closed) }()
+	require.Never(t, func() bool { return len(spareQueue) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"the queue must not reach the next prefetcher while a worker of the closed one can still read it")
+	close(db.release)
+	<-closed
+	queue := <-spareQueue
+	require.Zero(t, len(queue), "the handed-off queue must be drained")
 }

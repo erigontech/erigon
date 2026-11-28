@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -90,6 +92,84 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	for i, l := range logs {
 		require.Equal(t, c.Blocks[0].Transactions()[i].Hash(), l.TxHash)
 		require.Equal(t, []common.Hash{topics[i]}, l.Topics)
+	}
+}
+
+// eth_getTransactionReceipt and eth_getLogs return the position in the block as eth_getBlockReceipts does, for a
+// cached receipt whose index is its txNum (served from the cache) or any other wrong index (computed again).
+func TestPersistedReceiptWithTxNumAsIndex(t *testing.T) {
+	enableHistoricalRCache(t)
+	for _, tc := range []struct {
+		name   string
+		index  func(txNum uint64) uint
+		served bool // from the persistent cache.
+	}{
+		{"txNum as index", func(txNum uint64) uint { return uint(txNum) }, true},
+		{"another index", func(uint64) uint { return 3_246_875_000 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newLatestLogsTestChain(t)
+			base := newBaseApiForTest(m)
+			var header *types.Header
+			var minTxNum uint64
+			require.NoError(t, m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) (err error) {
+				if header, err = base._blockReader.HeaderByNumber(m.Ctx, tx, 1); err != nil {
+					return err
+				}
+				minTxNum, err = base._txNumReader.Min(m.Ctx, tx, 1)
+				return err
+			}))
+			// Give transaction 1's stored receipt a wrong index.
+			entries := map[string][]byte{}
+			require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+				if err := tx.ForEach(kv.TblRCacheHistoryVals, nil, func(k, v []byte) error {
+					r := &types.ReceiptForStorage{}
+					if len(v) == 0 || rlp.DecodeBytes(v, r) != nil || r.TransactionIndex != 1 {
+						return nil
+					}
+					r.TransactionIndex = tc.index(minTxNum + 2)
+					var buf bytes.Buffer
+					if err := r.EncodeRLP(&buf); err != nil {
+						return err
+					}
+					entries[string(k)] = buf.Bytes()
+					return nil
+				}); err != nil {
+					return err
+				}
+				for k, v := range entries {
+					if err := tx.Put(kv.TblRCacheHistoryVals, []byte(k), v); err != nil {
+						return err
+					}
+				}
+				return nil
+			}))
+			require.Len(t, entries, 1)
+
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			for i := range 3 {
+				r, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, i, minTxNum+1+uint64(i))
+				require.NoError(t, err)
+				require.Equal(t, i != 1 || tc.served, ok, "transaction %d", i)
+				if ok {
+					require.Equal(t, uint(i), r.TransactionIndex, "transaction %d", i)
+				}
+			}
+
+			// Fresh APIs: a receipt in the in-memory caches would hide the persisted one.
+			logs, err := logsOf(newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}))
+			require.NoError(t, err)
+			require.Len(t, logs, 3)
+			for i, l := range logs {
+				require.Equal(t, hexutil.Uint(i), l.TxIndex)
+			}
+			receipt, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetTransactionReceipt(m.Ctx, logs[1].TxHash)
+			require.NoError(t, err)
+			require.Equal(t, hexutil.Uint64(1), receipt.TransactionIndex)
+			require.Equal(t, hexutil.Uint(1), receipt.Logs[0].TxIndex)
+		})
 	}
 }
 

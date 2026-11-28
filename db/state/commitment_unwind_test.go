@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2branch "github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -104,7 +104,7 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					write(tx, filesEnd+1, keys[otherBranchIdx], account(1))
 					return nil
 				}))
-				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, unboundedFinalityCtx))
+				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, collateAll))
 				require.NoError(t, agg.MergeLoop(ctx))
 				if !statecfg.ExperimentalCommitmentV3 {
 					var shortened int
@@ -129,7 +129,7 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					emptyBranch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
 					require.Len(t, emptyBranch, 4)
-					require.Zero(t, commitment.BranchData(emptyBranch).ChildCount())
+					require.Zero(t, v2branch.BranchData(emptyBranch).ChildCount())
 					_, _, inDB, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 					require.NoError(t, err)
 					require.Equal(t, branch == "recreated_db", inDB, "exercise the requested empty branch source")
@@ -241,7 +241,7 @@ func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
 					require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, keys[0], account(20), 20, nil))
 				})
 				if files {
-					require.NoError(t, agg.BuildFiles(db, 21, unboundedFinalityCtx))
+					require.NoError(t, agg.BuildFiles(db, 21, collateAll))
 					require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 						_, err := tx.PruneSmallBatches(ctx, time.Hour)
 						require.NoError(t, err)
@@ -255,7 +255,7 @@ func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
 					prefix := nibbles.HexToCompact(path[:len(path)-1])
 					branch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
-					require.Equal(t, 2, commitment.BranchData(branch).ChildCount())
+					require.Equal(t, 2, v2branch.BranchData(branch).ChildCount())
 					return nil
 				}))
 				shallowChanges, _ := write(db, 37, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {

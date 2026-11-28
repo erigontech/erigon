@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	ecrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -111,14 +112,23 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	for range 8 {
 		connectInbound(t, local)
 	}
+	pid := connectBothWays(t, local)
+	require.True(t, s.handleNewConnection(pid, network.DirOutbound, nil, validate))
+
+	require.True(t, s.handleNewConnection(pid, network.DirInbound, nil, validate))
+	require.Equal(t, network.Connected, local.Network().Connectedness(pid))
+}
+
+// connectBothWays connects local to a new peer, which then dials local back, so local holds an outbound and an
+// inbound connection to it.
+func connectBothWays(t *testing.T, local host.Host) peer.ID {
+	t.Helper()
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	require.NoError(t, err)
 	listening, err := libp2p.New(libp2p.Identity(priv), libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, listening.Close()) })
 	require.NoError(t, local.Connect(t.Context(), peer.AddrInfo{ID: listening.ID(), Addrs: listening.Addrs()}))
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirOutbound, nil, validate))
-
 	dialing, err := libp2p.New(libp2p.Identity(priv), libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, dialing.Close()) })
@@ -126,9 +136,25 @@ func TestInboundConnectionFromOutboundPeerKeepsPeerAtInboundCap(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(local.Network().ConnsToPeer(listening.ID())) == 2
 	}, 5*time.Second, 5*time.Millisecond)
+	return listening.ID()
+}
 
-	require.True(t, s.handleNewConnection(listening.ID(), network.DirInbound, nil, validate))
-	require.Equal(t, network.Connected, local.Network().Connectedness(listening.ID()))
+func TestInboundRedialAfterAClosedOutboundConnectionRejectedAtInboundCap(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	s.cfg.MaxPeerCount = 10
+
+	for range 8 {
+		connectInbound(t, local)
+	}
+	pid := connectBothWays(t, local)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid, outboundOnly: true}}}
+
+	require.False(t, s.handleNewConnection(pid, network.DirInbound, nil, func() (bool, error) {
+		t.Error("a peer rejected at the inbound cap must not be handshaked")
+		return false, nil
+	}))
+	waitDisconnected(t, local, pid)
 }
 
 func TestInboundPeerGoneBeforeAdmissionRejectedAtInboundCap(t *testing.T) {
@@ -401,4 +427,75 @@ func TestSelectPeersToPrunePrefersPeersOffSubnetsBelowSearchTarget(t *testing.T)
 	}
 
 	require.Equal(t, []peer.ID{"wellCovered"}, selectPeersToPrune(candidates, coverage, 1, 0))
+}
+
+func peersInfoDirection(t *testing.T, s *Sentinel, pid peer.ID) string {
+	t.Helper()
+	return peersInfoEntry(t, s, pid).Direction
+}
+
+func peersInfoEntry(t *testing.T, s *Sentinel, pid peer.ID) *sentinelproto.Peer {
+	t.Helper()
+	for _, p := range s.GetPeersInfos().Peers {
+		if p.Pid == pid.String() {
+			return p
+		}
+	}
+	t.Fatalf("peer %s is not listed", pid)
+	return nil
+}
+
+func TestPeersInfoTakesTheDirectionFromAnOpenConnection(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectBothWays(t, local)
+
+	require.Equal(t, "outbound", peersInfoDirection(t, s, pid), "the oldest open connection is outbound")
+
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid, outboundOnly: true}}}
+	require.Equal(t, "inbound", peersInfoDirection(t, s, pid), "a closed outbound connection is still listed first")
+}
+
+func TestPeersInfoKeepsTheDirectionOfAPeerWithoutAnOpenConnection(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectInbound(t, local).ID()
+	require.Equal(t, "connected", peersInfoEntry(t, s, pid).State)
+	s.p2p = stubP2P{host: closingHost{Host: local, net: closingNetwork{Network: local.Network(), closing: pid}}}
+
+	entry := peersInfoEntry(t, s, pid)
+	require.Equal(t, "inbound", entry.Direction)
+	require.Equal(t, "disconnected", entry.State, "a peer with only closed connections")
+}
+
+// emptiedNetwork removes a peer's connections after the first ConnsToPeer call, as libp2p does when
+// the last closed connection goes away.
+type emptiedNetwork struct {
+	network.Network
+	pid   peer.ID
+	calls *int
+}
+
+func (n emptiedNetwork) ConnsToPeer(pid peer.ID) []network.Conn {
+	if pid != n.pid {
+		return n.Network.ConnsToPeer(pid)
+	}
+	*n.calls++
+	if *n.calls > 1 {
+		return nil
+	}
+	conns := n.Network.ConnsToPeer(pid)
+	for i, c := range conns {
+		conns[i] = closedConn{c}
+	}
+	return conns
+}
+
+func TestPeersInfoReadsTheConnectionsOnce(t *testing.T) {
+	local := newListeningHost(t)
+	s := testSentinel(t, local)
+	pid := connectInbound(t, local).ID()
+	s.p2p = stubP2P{host: closingHost{Host: local, net: emptiedNetwork{Network: local.Network(), pid: pid, calls: new(int)}}}
+
+	require.Equal(t, "inbound", peersInfoDirection(t, s, pid))
 }

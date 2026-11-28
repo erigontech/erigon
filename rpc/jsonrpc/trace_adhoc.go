@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -94,6 +93,36 @@ func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	return ethapi.CheckCallData(args.Data, args.Input)
+}
+
+// TraceCallConfig is the override parameter of trace_call and trace_callMany. It accepts either
+// an eth_simulateV1 state override map, keyed by account address, or a TraceConfig object.
+type TraceCallConfig config.TraceConfig
+
+func (c *TraceCallConfig) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	addresses := 0
+	for key := range members {
+		if common.IsHexAddress(key) || hexutil.Has0xPrefix(key) {
+			addresses++
+		}
+	}
+	switch addresses {
+	case 0:
+		return json.Unmarshal(data, (*config.TraceConfig)(c))
+	case len(members):
+		var overrides ethapi.StateOverrides
+		if err := json.Unmarshal(data, &overrides); err != nil {
+			return err
+		}
+		*c = TraceCallConfig{StateOverrides: &overrides}
+		return nil
+	default:
+		return errors.New("override object mixes account addresses with configuration fields")
+	}
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -482,7 +511,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 				ot.lastVmOp.Cost += int(gas.Execution)
 			}
 		} else {
-			vmTrace.Code = code
+			// The code may reference transaction-scoped mmap memory, so detach before rollback.
+			vmTrace.Code = bytes.Clone(code)
 		}
 	}
 	ot.builtin = precompile
@@ -984,7 +1014,9 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Code = "="
 				} else {
 					m := make(map[string]*StateDiffCode)
-					m["*"] = &StateDiffCode{From: fromCode, To: toCode}
+					// The pre-state code may reference transaction-scoped mmap memory, so detach before rollback. The
+					// changed code was written by this transaction.
+					m["*"] = &StateDiffCode{From: bytes.Clone(fromCode), To: toCode}
 					accountDiff.Code = m
 					allEqual = false
 				}
@@ -1023,7 +1055,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 						return err
 					}
 					m := make(map[string]hexutil.Bytes)
-					m["-"] = code
+					// The code may reference transaction-scoped mmap memory, so detach before rollback.
+					m["-"] = bytes.Clone(code)
 					accountDiff.Code = m
 				}
 				{
@@ -1259,7 +1292,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (_ *TraceCallResult, err error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ *TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
 	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1461,7 +1495,8 @@ func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, k
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (_ []*TraceCallResult, err error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (_ []*TraceCallResult, err error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
 	defer func() { err = wrapPrunedHistory(err) }()
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1957,7 +1992,7 @@ func (b *bufferedWriter) CreateContract(address accounts.Address) error {
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
 	// Checked before decoding to bound its allocations: on every fork an authorization costs at
 	// least ExecutionPerAuthBaseCostEIP8038 of intrinsic gas, so a larger list cannot fit under the gas cap.
-	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
+	if n := types.SetCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
 		return nil, clientLimitExceededError(fmt.Sprintf("authorization list of %d entries exceeds the RPC gas cap %d", n, api.gasCap))
 	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
@@ -2095,37 +2130,4 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	return traceResult, nil
-}
-
-// setCodeAuthorizationCount returns the authorization-list length of a canonical or
-// RLP-enveloped SetCode transaction without decoding it, or 0 for any other input.
-func setCodeAuthorizationCount(encoded []byte) int {
-	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
-		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
-		if err != nil || isList {
-			return 0
-		}
-		encoded = encoded[dataPos : dataPos+dataLen]
-	}
-	if len(encoded) == 0 || encoded[0] != types.SetCodeTxType {
-		return 0
-	}
-	payload := encoded[1:]
-	pos, _, err := rlp.ParseList(payload, 0)
-	if err != nil {
-		return 0
-	}
-	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
-	for range 9 {
-		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
-		if err != nil {
-			return 0
-		}
-		pos = dataPos + dataLen
-	}
-	dataPos, dataLen, err := rlp.ParseList(payload, pos)
-	if err != nil {
-		return 0
-	}
-	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
 }

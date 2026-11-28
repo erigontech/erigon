@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -44,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -607,8 +610,8 @@ func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
-		Return(nil, nil).Times(2)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.Phase0Version).
+		Return(false, nil).Times(2)
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 	require.NoError(t, err)
@@ -685,8 +688,8 @@ func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true, nil)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.GloasVersion).
-		Return(nil, nil)
+	engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), executionHash, executionHash, executionHash, clparams.GloasVersion).
+		Return(false, nil)
 
 	_, computedRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 
@@ -1491,6 +1494,63 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 	}
 }
 
+func TestCanonicalRootsLeaveSkippedSlotsEmpty(t *testing.T) {
+	phase0, _, _ := tests.GetPhase0Random()
+	capella, _, _ := tests.GetCapellaRandom()
+	electra, _, _ := tests.GetElectraRandom()
+	chains := map[string][]*cltypes.SignedBeaconBlock{
+		"phase0":                    phase0,
+		"capella":                   capella,
+		"electra":                   electra,
+		"gloas full parent":         tests.GetGloasFixture("missed_slot_payload_availability", false, 0).Blocks,
+		"gloas missed epochs":       tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0).Blocks,
+		"gloas every payload empty": tests.GetGloasFixture("finality_no_updates_at_genesis", false, 0).Blocks,
+	}
+	for name, blocks := range chains {
+		for _, viaForkChoice := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fork choice %v", name, viaForkChoice), func(t *testing.T) {
+				ctx := t.Context()
+				cfg := newLockOrderFixture(t, 0).cfg
+				cfg.indiciesDB = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+				roots := make(map[uint64]common.Hash, len(blocks))
+				for i, block := range blocks {
+					root, err := block.Block.HashSSZ()
+					require.NoError(t, err)
+					roots[block.Block.Slot] = root
+					if i == 0 || !viaForkChoice {
+						require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+							return writeDownloadedBlock(tx, block, nil, false, false)
+						}))
+						continue
+					}
+					require.NoError(t, persistAcceptedBlock(ctx, cfg, block))
+					require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+						_, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, root, cfg)
+						return err
+					}))
+				}
+
+				require.NoError(t, cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+					for slot := blocks[0].Block.Slot; slot <= blocks[len(blocks)-1].Block.Slot; slot++ {
+						root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+						require.NoError(t, err)
+						want, hasBlock := roots[slot]
+						if !hasBlock {
+							require.Equal(t, common.Hash{}, root, "skipped slot %d has a canonical root", slot)
+							continue
+						}
+						require.Equal(t, want, root, "slot %d", slot)
+						body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root))
+						require.NoError(t, err)
+						require.NotEmpty(t, body, "canonical block at slot %d has no body", slot)
+					}
+					return nil
+				}))
+			})
+		}
+	}
+}
+
 func writeTestBlockIndices(t *testing.T, tx kv.RwTx, root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 	t.Helper()
 	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
@@ -2285,4 +2345,46 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		return 0, common.Hash{}, err
 	}
 	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
+}
+
+// A VALID answer to the forkchoice update for an optimistic head means the EL validated it, so the head is no
+// longer optimistic when the head event and the beacon API read it.
+func TestForkChoiceUpdateValidForHeadClearsOptimisticHead(t *testing.T) {
+	for _, headValid := range []bool{true, false} {
+		t.Run(fmt.Sprintf("head valid %t", headValid), func(t *testing.T) {
+			blocks, anchor, _ := tests.GetBellatrixRandom()
+			beaconCfg := anchor.BeaconConfig()
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			gomock.InOrder(
+				engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil),
+				engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+			)
+			clock := eth_clock.NewEthereumClock(anchor.GenesisTime(), anchor.GenesisValidatorsRoot(), beaconCfg)
+			graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(clock, anchor, engine, pool.NewOperationsPool(beaconCfg), graph,
+				beaconevents.NewEventEmitter(), synced_data.NewSyncedDataManager(beaconCfg, true), nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+			require.NoError(t, err)
+			for _, block := range blocks[:2] {
+				store.OnTick((anchor.GenesisTime()+block.Block.Slot*beaconCfg.SecondsPerSlot)*1000 + 1)
+				require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
+			}
+			head := blocks[1]
+			headRoot, err := head.Block.HashSSZ()
+			require.NoError(t, err)
+			require.True(t, store.IsRootOptimistic(headRoot))
+			engine.EXPECT().ForkChoiceUpdateHead(gomock.Any(), gomock.Any(), gomock.Any(), head.Block.Body.ExecutionPayload.BlockHash, gomock.Any()).
+				Return(headValid, nil)
+			cfg := &Cfg{
+				forkChoice: store,
+				beaconCfg:  beaconCfg,
+				rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, beaconCfg, clock),
+			}
+
+			require.NoError(t, notifyServicesOfHead(t.Context(), log.New(), cfg, forkchoice.ForkChoiceNode{Root: headRoot}, head.Block.Slot))
+
+			require.Equal(t, !headValid, store.IsRootOptimistic(headRoot))
+		})
+	}
 }

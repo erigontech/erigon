@@ -17,21 +17,31 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+
+	"github.com/spf13/cobra"
 
 	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 )
 
 func main() {
-	rootCmd := commands.RootCommand()
 	ctx, _ := common.RootContext()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Println(err)
+	if err := run(ctx, commands.RootCommand()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func run(ctx context.Context, rootCmd *cobra.Command) error {
+	err := rootCmd.ExecuteContext(ctx)
+	if ctx.Err() != nil && commonerrors.IsOnly(err, context.Canceled, common.ErrStopped) {
+		return nil
+	}
+	return err
 }

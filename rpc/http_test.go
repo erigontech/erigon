@@ -160,7 +160,7 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 
 	logger := log.New()
-	const respLength = MaxRequestContentLength * 3
+	const respLength = MaxRequestContentLength + 1
 
 	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	defer s.Stop()
@@ -812,4 +812,23 @@ func TestHTTPUnsubscribeReportsUnknownSubscription(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&msg))
 	require.NotNil(t, msg.Error)
 	require.Equal(t, ErrSubscriptionNotFound.Error(), msg.Error.Message)
+}
+
+func TestHTTPRequestValidationContentTypes(t *testing.T) {
+	for _, tc := range []struct {
+		contentType string
+		want        int
+	}{
+		{"application/json; charset=utf-8", 0},
+		{"Application/JSON", 0},
+		{"application/json-rpc", 0},
+		{"application/jsonrequest", 0},
+		{"application/json;", 0},
+		{"application/jsonx", http.StatusUnsupportedMediaType},
+		{"text/plain", http.StatusUnsupportedMediaType},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			confirmRequestValidationCode(t, http.MethodPost, tc.contentType, "", tc.want)
+		})
+	}
 }

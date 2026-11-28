@@ -24,6 +24,8 @@ import (
 type OptimisticStore interface {
 	AddOptimisticCandidate(blockRoot common.Hash, block *cltypes.BeaconBlock) error
 	ValidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
+	// ValidateChain removes the block and its optimistic ancestors, and keeps the blocks of other forks.
+	ValidateChain(blockRoot common.Hash)
 	InvalidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
 	IsOptimistic(root common.Hash) bool
 }

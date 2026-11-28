@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -919,7 +919,7 @@ func TestValidationUnwindPreservesCanonicalBranches(t *testing.T) {
 	candidate, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
 	require.NoError(t, err)
 	defer candidate.Close()
-	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branches := tx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	key := []byte{1, 2}
 	branches.Put(key, []byte("canonical"), 1, 20)
 	candidate.Unwind(16, nil)
@@ -949,7 +949,7 @@ func TestValidationUnwindAdoptionInvalidatesSharedCache(t *testing.T) {
 	child.BindStateCache(sc)
 	key := make([]byte, 20)
 	seed(t, sc, tx, kv.AccountsDomain, key, encAccount(2), 20)
-	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branches := tx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	branches.Put([]byte{1, 2}, []byte{3}, 1, 20)
 	child.Unwind(16, nil)
 	require.NoError(t, parent.Merge(t.Context(), 0, child, 0))
@@ -1035,7 +1035,7 @@ func TestValidationCachePublicationRequiresCommit(t *testing.T) {
 			sd.BindStateCache(sc)
 			key := make([]byte, 20)
 			seed(t, sc, tx, kv.AccountsDomain, key, encAccount(2), 20)
-			branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+			branches := tx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 			branches.Put([]byte{1, 2}, []byte{3}, 1, 20)
 			sd.Unwind(16, nil)
 			stop := errors.New("cancel publication")
@@ -1195,7 +1195,7 @@ func TestValidationCommitAppliesDeferredBranchUnwind(t *testing.T) {
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branches := tx.AggTx().(branchcache.BranchCacheProvider).BranchCache()
 	key := []byte{1, 2}
 	branches.Put(key, []byte("stale"), 1, 20)
 

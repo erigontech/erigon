@@ -479,3 +479,45 @@ func TestValidationInterrupted(t *testing.T) {
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
 }
+
+// Only a VALID answer reports the head valid: a syncing or accepted head is still optimistic.
+func TestForkChoiceUpdateHeadReportsValidOnlyForValidStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    *engine_types.PayloadStatus
+		err       error
+		wantValid bool
+		wantErr   error
+	}{
+		{name: "valid", status: &engine_types.PayloadStatus{Status: engine_types.ValidStatus}, wantValid: true},
+		{name: "syncing", status: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}},
+		{name: "accepted", status: &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}},
+		{name: "no payload status"},
+		{name: "invalid", status: &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedErrorFromString("bad block"),
+		}, wantErr: errors.New("engine payload status error: bad block")},
+		{name: "timeout", err: context.DeadlineExceeded, wantErr: ErrForkChoiceUpdateTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			var response *engine_types.ForkChoiceUpdatedResponse
+			if tc.err == nil {
+				response = &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: tc.status}
+			}
+			cc := &ExecutionClientEngine{engine: &fcuEngineStub{response: response, err: tc.err}, beaconCfg: &cfg}
+
+			valid, err := cc.ForkChoiceUpdateHead(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, clparams.DenebVersion)
+
+			require.Equal(t, tc.wantValid, valid)
+			switch {
+			case tc.wantErr == nil:
+				require.NoError(t, err)
+			case errors.Is(tc.wantErr, ErrForkChoiceUpdateTimeout):
+				require.ErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+			default:
+				require.EqualError(t, err, tc.wantErr.Error())
+			}
+		})
+	}
+}

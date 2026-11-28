@@ -27,7 +27,9 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"time"
 
+	"github.com/dlclark/regexp2/v2"
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
 
@@ -53,11 +55,19 @@ func init() {
 		panic(err)
 	}
 	tracers.RegisterLookup(true, newJsTracer)
+	// goja runs some patterns on regexp2, whose matches ignore Interrupt and by default never time out.
+	// A pattern takes the timeout when it is compiled, so the timeout is set first.
+	regexp2.DefaultMatchTimeout = regexpMatchTimeout
+	bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 }
 
-// bigIntProgram is compiled once and the exported function mostly invoked to convert
-// hex strings into big ints.
-var bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
+// regexpMatchTimeout bounds, to about one second, how long a trace can run past its deadline inside one
+// regexp2 match: regexp2 has no per-match cancel, adds its clock period to the deadline and checks it
+// from time to time, so it cannot use the deadline of each trace.
+const regexpMatchTimeout = time.Second
+
+// bigIntProgram converts hex strings into big ints. Only init compiles it, after it sets the regexp2 timeout.
+var bigIntProgram *goja.Program
 
 // maxCallStackSize leaves room for a tracer that walks the call tree through a native callback
 // such as Array.map, which uses two frames per EVM call frame (up to 1024 when the 63/64 gas rule
@@ -330,6 +340,10 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 	t.ctx["from"] = t.vm.ToValue(fromValue[:])
 	toValue := to.Value()
 	t.ctx["to"] = t.vm.ToValue(toValue[:])
+	// goja turns a nil slice into null, which the buffer helpers reject; an empty call has an empty buffer.
+	if input == nil {
+		input = []byte{}
+	}
 	t.ctx["input"] = t.vm.ToValue(input)
 	if gas.State != 0 {
 		t.ctx["stateGas"] = t.vm.ToValue(gas.State)
@@ -382,7 +396,7 @@ func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdG
 
 // onEnd is called after the call finishes to finalize the tracing.
 func (t *jsTracer) onEnd(output []byte, err error) {
-	t.ctx["output"] = t.vm.ToValue(bytes.Clone(output))
+	t.ctx["output"] = t.vm.ToValue(append([]byte{}, output...))
 	if err != nil {
 		t.ctx["error"] = t.vm.ToValue(err.Error())
 	}
@@ -448,20 +462,37 @@ func (t *jsTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, wrapError("result", err)
 	}
-	encoded, err := marshalResult(res)
+	encoded, err := marshalResult(t.vm, res)
 	if err != nil {
 		return nil, err
 	}
 	return json.RawMessage(encoded), t.err
 }
 
-func marshalResult(res goja.Value) (encoded []byte, err error) {
+func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
-	return json.Marshal(res)
+	if !goja.IsString(res) && !goja.IsBigInt(res) {
+		return json.Marshal(res)
+	}
+	// A string or BigInt is stringified as the "" property of an object without a prototype, as
+	// JSON.stringify does: a string keeps its UTF-16 code units and runs no toJSON hook, and a BigInt
+	// hook gets the key "". json.Marshal does not encode a long concatenated string as a string.
+	holder := vm.CreateObject(nil)
+	if err := holder.Set("", res); err != nil {
+		return nil, err
+	}
+	encoded, err = json.Marshal(holder)
+	if err != nil {
+		return nil, err
+	}
+	if string(encoded) == "{}" { // a toJSON hook returned undefined, a Symbol or a function
+		return json.Marshal(goja.Undefined())
+	}
+	return encoded[len(`{"":`) : len(encoded)-1], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -614,7 +645,6 @@ func (t *jsTracer) setBuiltinFunctions() {
 // suitable for JS consumption.
 func (t *jsTracer) setTypeConverters() error {
 	// Inject bigint logic.
-	// TODO: To be replaced after goja adds support for native JS bigint.
 	toBigCode, err := t.vm.RunProgram(bigIntProgram)
 	if err != nil {
 		return err

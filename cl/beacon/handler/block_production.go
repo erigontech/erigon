@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -74,6 +75,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -116,6 +118,27 @@ const payloadPublicationDivisor = 4
 const gloasPayloadCollectionDivisor = 3
 
 const minimumPayloadBuildTime = 500 * time.Millisecond
+
+var (
+	payloadCollectedSeconds = map[bool]metrics.Summary{
+		true:  metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="prepared"}`),
+		false: metrics.GetOrCreateSummary(`caplin_block_production_payload_collected_seconds{window="unprepared"}`),
+	}
+	payloadPollFailures = metrics.GetOrCreateCounterVec("caplin_block_production_payload_poll_failures_total", []string{"reason"})
+)
+
+func payloadPollFailureReason(err error) string {
+	switch classifyProductionError(err) {
+	case productionErrorBusy:
+		return "busy"
+	case productionErrorUnknownPayload:
+		return "unknown_payload"
+	case productionErrorCanceled, productionErrorUnexpectedCancellation:
+		return "canceled"
+	default:
+		return "other"
+	}
+}
 
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
@@ -649,21 +672,26 @@ func attemptsMade(attempts int) string {
 }
 
 const (
-	defaultAttestationDataImportWait  = time.Second
-	attestationDataImportPollInterval = 5 * time.Millisecond
+	defaultImportWait  = time.Second
+	importPollInterval = 5 * time.Millisecond
 )
 
-func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (forkchoice.ForkChoiceNode, bool) {
-	waitedSlot := slot + 1
-	deadline := time.Now().Add(a.attestationDataImportWait)
+func (a *ApiHandler) importInProgress(slot uint64) bool {
+	return a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
+}
+
+// waitForImportedHead returns the fork choice head once the import of the slot's block ends. waitedSlot records the
+// slot whose wait reached the cap, so later callers sharing it do not wait again for that slot.
+func (a *ApiHandler) waitForImportedHead(ctx context.Context, slot uint64, waitedSlot *atomic.Uint64) (forkchoice.ForkChoiceNode, bool) {
+	spentMarker := slot + 1
+	deadline := time.Now().Add(a.importWait)
 	for {
-		waitSpent := a.attestationDataWaitedSlot.Load() == waitedSlot
+		waitSpent := waitedSlot.Load() == spentMarker
 		if !waitSpent && !time.Now().Before(deadline) {
-			a.attestationDataWaitedSlot.Store(waitedSlot)
+			waitedSlot.Store(spentMarker)
 			waitSpent = true
 		}
-		importInProgress := a.forkchoiceStore.HighestSeen() < slot && a.forkchoiceStore.PayloadImportInProgress(slot)
-		if !importInProgress || waitSpent {
+		if !a.importInProgress(slot) || waitSpent {
 			if head, ok := a.forkchoiceStore.TryGetHeadNode(); ok {
 				return head, true
 			}
@@ -674,7 +702,7 @@ func (a *ApiHandler) waitForAttestationHead(ctx context.Context, slot uint64) (f
 		select {
 		case <-ctx.Done():
 			return forkchoice.ForkChoiceNode{}, false
-		case <-time.After(attestationDataImportPollInterval):
+		case <-time.After(importPollInterval):
 		}
 	}
 }
@@ -705,7 +733,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if *slot > a.ethClock.GetCurrentSlot() {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
-	head, haveHead := a.waitForAttestationHead(r.Context(), *slot)
+	head, haveHead := a.waitForImportedHead(r.Context(), *slot, &a.attestationDataWaitedSlot)
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
@@ -1761,6 +1789,9 @@ func (a *ApiHandler) getBuilderPayload(
 			return nil, nil, err
 		}
 	}
+	if err := header.VerifySignature(a.beaconChainCfg, baseState.Version()); err != nil {
+		return nil, nil, err
+	}
 
 	return header, blockValue, nil
 }
@@ -1918,12 +1949,21 @@ func (a *ApiHandler) produceBeaconBody(
 			)
 		}
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		options := gloasBlockOptionsFromContext(ctx)
+		recordMetrics := options == nil || !options.bidRequest
 		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
 			ctx, buildWindow, retryTime,
 			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				p, b, rb, v, getErr := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+				if getErr != nil && recordMetrics {
+					payloadPollFailures.WithLabelValues(payloadPollFailureReason(getErr)).Inc()
+				}
+				return p, b, rb, v, getErr
 			},
 		)
+		if err == nil && payload != nil && recordMetrics {
+			payloadCollectedSeconds[warmup > 0].Observe(time.Since(slotStart).Seconds())
+		}
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return

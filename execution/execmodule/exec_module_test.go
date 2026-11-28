@@ -820,7 +820,7 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangeset
 	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
 }
 
-func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+func newExecutedTransferChain(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -831,7 +831,7 @@ func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester,
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	m := execmoduletester.New(t, append(opts, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))...)
 	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),

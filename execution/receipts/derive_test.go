@@ -26,9 +26,16 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -111,10 +118,9 @@ func (r fundedReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 	return len(code), nil
 }
 
-// A later tx must see the earlier ones on a versioned state, whether they produce receipts or
-// only warm the state up: the second call needs the first one's nonce and storage write.
-func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
-	t.Parallel()
+// counterCalls returns two calls of one sender to the counter that fundedReader serves, in block 1.
+func counterCalls(t *testing.T) (*chain.Config, types.Transactions, *types.Header, fundedReader) {
+	t.Helper()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
@@ -128,6 +134,15 @@ func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 		txns = append(txns, txn)
 	}
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 1_000_000}
+	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender, counter: accounts.InternAddress(counter)}
+	return cfg, txns, header, reader
+}
+
+// A later tx must see the earlier ones on a versioned state, whether they produce receipts or
+// only warm the state up: the second call needs the first one's nonce and storage write.
+func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
+	t.Parallel()
+	cfg, txns, header, reader := counterCalls(t)
 	derive := func(ibs *state.IntraBlockState, fromIdx int) types.Receipts {
 		defer ibs.Close()
 		gp := new(protocol.GasPool).AddGas(header.GasLimit)
@@ -135,7 +150,6 @@ func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 		require.NoError(t, err)
 		return receipts
 	}
-	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender, counter: accounts.InternAddress(counter)}
 	for _, fromIdx := range []int{0, 1} {
 		got := derive(state.NewWithVersionMap(reader, state.NewVersionMap(nil)), fromIdx)
 		require.Len(t, got, len(txns)-fromIdx)
@@ -145,4 +159,71 @@ func TestDeriveForRangeVersionedSeesEarlierTxs(t *testing.T) {
 			require.Equal(t, common.Hash{31: byte(fromIdx + i + 1)}, receipt.Logs[0].Topics[0], "fromIdx=%d tx=%d", fromIdx, i)
 		}
 	}
+}
+
+// Cached prior receipts are used when their index is their position, or their txNum (then the position is
+// served); a receipt with any other index is re-executed instead.
+func TestDerivePriorReceiptsChecksCachedIndex(t *testing.T) {
+	t.Parallel()
+	cfg, txns, header, reader := counterCalls(t)
+	const blockStartTxNum = 1
+	for _, tc := range []struct {
+		name        string
+		secondIndex uint
+		cached      bool
+	}{
+		{"matching index", 1, true},
+		{"txNum as index", blockStartTxNum + 1, true},
+		{"another index", 5, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EnableDomain(kv.RCacheDomain)
+			tx, sd := temporaltest.NewTestTxSD(t, db)
+			cachedReceipts := []*types.Receipt{
+				{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 111, TransactionIndex: 0},
+				{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 222, TransactionIndex: tc.secondIndex},
+			}
+			for i, r := range cachedReceipts {
+				require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, blockStartTxNum+uint64(i)))
+			}
+			require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, blockStartTxNum+2))
+			require.NoError(t, sd.Flush(t.Context(), tx))
+
+			ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+			defer ibs.Close()
+			gp := new(protocol.GasPool).AddGas(header.GasLimit)
+			got, err := DerivePriorReceipts(t.Context(), cfg, ethash.NewFaker(), header, txns, 2, blockStartTxNum, tx, ibs, gp, nil)
+			require.NoError(t, err)
+			require.Len(t, got, 2)
+			for i, r := range got {
+				require.Equal(t, uint(i), r.TransactionIndex)
+				if tc.cached {
+					require.Equal(t, cachedReceipts[i].CumulativeGasUsed, r.CumulativeGasUsed, "receipt %d is read from the cache", i)
+				} else {
+					require.Len(t, r.Logs, 1, "receipt %d is re-executed", i)
+				}
+			}
+		})
+	}
+}
+
+// A cached prior receipt that cannot be read is an error, not a reason to re-execute.
+func TestDerivePriorReceiptsReturnsCacheReadError(t *testing.T) {
+	t.Parallel()
+	cfg, txns, header, reader := counterCalls(t)
+	const blockStartTxNum = 1
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EnableDomain(kv.RCacheDomain)
+	tx, sd := temporaltest.NewTestTxSD(t, db)
+	require.NoError(t, sd.AsPutDel(tx).DomainPut(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, []byte{0xff}, blockStartTxNum, nil))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, blockStartTxNum+1))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	defer ibs.Close()
+	gp := new(protocol.GasPool).AddGas(header.GasLimit)
+	_, err := DerivePriorReceipts(t.Context(), cfg, ethash.NewFaker(), header, txns, 1, blockStartTxNum, tx, ibs, gp, nil)
+	require.ErrorIs(t, err, rlp.ErrValueTooLarge)
 }
