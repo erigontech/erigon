@@ -278,6 +278,9 @@ func (m *Merger) Merge(
 				abort()
 				return err
 			}
+			if newDirtySegment == nil { // the type has no visible file inside the range
+				continue
+			}
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}

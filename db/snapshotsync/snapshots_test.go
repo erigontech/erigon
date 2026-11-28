@@ -2476,3 +2476,26 @@ func TestRetireFilesAboveRetiresAHiddenMergedFile(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeRangeUnderALargerHeadersAndBodiesFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createTestSegmentFile(t, 0, 200_000, typ.Enum(), dir, version.V1_0, logger)
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	createTestSegmentFile(t, 100_000, 200_000, snaptype2.Transactions.Enum(), dir, snaptype2.Transactions.Versions().Current, logger)
+	for from := uint64(100_000); from < 200_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(100_000, 200_000)}, ranges)
+	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	require.Equal(t, []Range{NewRange(0, 100_000), NewRange(100_000, 200_000)}, visibleRanges(s, snaptype2.Transactions))
+}
