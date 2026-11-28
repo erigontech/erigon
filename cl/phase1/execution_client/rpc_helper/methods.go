@@ -22,6 +22,7 @@ const (
 	EngineNewPayloadV3 = "engine_newPayloadV3"
 	EngineNewPayloadV4 = "engine_newPayloadV4"
 	EngineNewPayloadV5 = "engine_newPayloadV5"
+	EngineNewPayloadV6 = "engine_newPayloadV6"
 )
 
 const (

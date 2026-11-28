@@ -225,3 +225,30 @@ func engineXProofBalance(balance uint64) *hexutil.U256 {
 	value := hexutil.U256(*uint256.NewInt(balance))
 	return &value
 }
+
+func TestEngineXCheckInclusionListSatisfied(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	for _, tc := range []struct {
+		name    string
+		fixture string
+		got     *bool
+		wantErr bool
+	}{
+		{name: "no expectation", fixture: `{}`, got: &no},
+		{name: "match", fixture: `{"inclusionListSatisfied":true}`, got: &yes},
+		{name: "mismatch", fixture: `{"inclusionListSatisfied":true}`, got: &no, wantErr: true},
+		{name: "missing verdict", fixture: `{"inclusionListSatisfied":false}`, got: nil, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload EngineXTestNewPayload
+			require.NoError(t, json.Unmarshal([]byte(tc.fixture), &payload))
+			err := payload.checkInclusionListSatisfied(tc.got)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "inclusionListSatisfied")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

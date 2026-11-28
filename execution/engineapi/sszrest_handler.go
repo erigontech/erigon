@@ -143,6 +143,10 @@ func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported %s %q", engineForkHeader, forkName))
 		return
 	}
+	if route == sszForkRouteForkchoice && version >= clparams.HezeVersion {
+		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("forkchoice is not supported for %s %q", engineForkHeader, forkName))
+		return
+	}
 	switch route {
 	case sszForkRouteNewPayload:
 		e.handleSSZNewPayload(w, r, forkName, version)
@@ -337,7 +341,7 @@ func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, for
 	if !ok {
 		return nil, false
 	}
-	payload, parentRoot, executionRequests, err := decodeNewPayloadEnvelope(body, version)
+	payload, parentRoot, executionRequests, inclusionList, err := decodeNewPayloadEnvelope(body, version)
 	if err != nil {
 		e.writeSSZDecodeProblem(w, r, err)
 		return nil, false
@@ -352,14 +356,15 @@ func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, for
 	case clparams.CapellaVersion:
 		status, err = e.NewPayloadV2(r.Context(), payload)
 	case clparams.DenebVersion:
-		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, nil, version, true, onValid)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, nil, nil, version, true, onValid)
 	default:
-		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, executionRequests, version, true, onValid)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, executionRequests, inclusionList, version, true, onValid)
 	}
 	if err != nil {
 		writeEngineProblem(w, err)
 		return nil, false
 	}
+	status.SSZVersion = version
 	return status, true
 }
 

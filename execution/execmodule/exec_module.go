@@ -512,6 +512,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	defer e.keepExtendingFork(block.Hash())()
 	return e.validateChain(ctx, block, false)
 }
 
@@ -533,12 +534,15 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil, nil
 	}
 	defer e.semaphore.Release(1)
-	if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
-		return valid, view, err
+	if !e.inclusionListPending(blockHash) {
+		if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
+			return valid, view, err
+		}
 	}
 	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
 	}
+	defer e.keepExtendingFork(blockHash)()
 	start := time.Now()
 	result, err := e.validateChain(ctx, block, true)
 	validateChainDuration.ObserveDuration(start)
@@ -554,6 +558,19 @@ func closeWithoutView(view *func() error, close func()) {
 	if *view == nil {
 		close()
 	}
+}
+
+// keepExtendingFork moves the extending fork aside while a validated block is checked again for a new inclusion list,
+// and returns the function that puts it back. A view of the checked block must be taken before that function runs.
+func (e *ExecModule) keepExtendingFork(blockHash common.Hash) func() {
+	if !e.inclusionListPending(blockHash) || !e.forkValidator.IsValidated(blockHash) {
+		return func() {}
+	}
+	kept := e.forkValidator.detachExtendingFork(blockHash)
+	if kept == nil {
+		return func() {}
+	}
+	return func() { e.forkValidator.restoreExtendingFork(kept) }
 }
 
 // validateChain with revalidate executes again a non-canonical block that passed validation before, so the fork
@@ -573,7 +590,6 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 		payloadExecuted    bool
 		canonical          bool
 		missingSegment     bool
-		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
 		var err error
@@ -634,6 +650,15 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 			ValidationStatus: ExecutionStatusTooFarAway,
 			LatestValidHash:  common.Hash{},
 		}, nil
+	}
+	var isInvalidChain bool
+	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
+		// Re-execution cannot change validity, so a re-check that gives no verdict keeps the old one.
+		defer func() {
+			if !isInvalidChain && !e.forkValidator.IsValidated(blockHash) {
+				e.forkValidator.markValidated(blockHash)
+			}
+		}()
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && !revalidate && e.forkValidator.IsValidated(blockHash)) {
@@ -729,7 +754,7 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 	if status == engine_types.AcceptedStatus {
 		validationStatus = ExecutionStatusMissingSegment
 	}
-	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	isInvalidChain = status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
 	// Only open a second tx when we actually need to write (bad-chain purge).
 	// On the valid-chain path (the common case at tip) opening + empty-committing
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
@@ -768,6 +793,18 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 		result.ValidationError = validationError.Error()
 	}
 	return result, nil
+}
+
+func (e *ExecModule) inclusionListPending(blockHash common.Hash) bool {
+	if e.readAheader == nil {
+		return false
+	}
+	_, ilHash, ok := e.readAheader.ReadInclusionList(blockHash)
+	if !ok {
+		return false
+	}
+	_, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	return !checked
 }
 
 // viewRetainedTip views blockHash when it is the tip of the fork the fork validator retains, and must run under the

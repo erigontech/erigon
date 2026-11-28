@@ -28,8 +28,8 @@ func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
 	return ssz2.MarshalSSZ(nil, list)
 }
 
-func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot common.Hash, requests []hexutil.Bytes) ([]byte, error) {
-	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests))...)
+func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot common.Hash, requests, inclusionList []hexutil.Bytes) ([]byte, error) {
+	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests), newTransactionsSSZ(inclusionList))...)
 }
 
 func encodeForkchoiceUpdate(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *engine_types.PayloadAttributes, custody []byte) ([]byte, error) {
@@ -63,10 +63,10 @@ func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedRespon
 }
 
 // decodePayloadStatusWithWitness returns a nil witness when the optional is absent.
-func decodePayloadStatusWithWitness(buf []byte) (*engine_types.PayloadStatus, *jsonrpc.ExecutionWitnessResult, error) {
+func decodePayloadStatusWithWitness(buf []byte, version clparams.StateVersion) (*engine_types.PayloadStatus, *jsonrpc.ExecutionWitnessResult, error) {
 	status := &engine_types.PayloadStatus{}
 	optional := solid.NewTransactionsSSZWithLimits(1, math.MaxUint32)
-	if err := ssz2.UnmarshalSSZStrict(buf, 0, status, optional); err != nil {
+	if err := ssz2.UnmarshalSSZStrict(buf, int(version), status, optional); err != nil {
 		return nil, nil, err
 	}
 	if optional.Len() == 0 {

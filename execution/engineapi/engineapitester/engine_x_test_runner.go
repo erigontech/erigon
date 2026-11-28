@@ -465,6 +465,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
 	var executionRequests []hexutil.Bytes
+	var inclusionList []hexutil.Bytes
 	err := json.Unmarshal(payload.Params[0], &enginePayload)
 	if err != nil {
 		return err
@@ -483,6 +484,12 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	}
 	if len(payload.Params) > 3 {
 		err := json.Unmarshal(payload.Params[3], &executionRequests)
+		if err != nil {
+			return err
+		}
+	}
+	if len(payload.Params) > 4 {
+		err := json.Unmarshal(payload.Params[4], &inclusionList)
 		if err != nil {
 			return err
 		}
@@ -507,6 +514,8 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 				r, err = tester.EngineApiClient.NewPayloadV4(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
 			case "5":
 				r, err = tester.EngineApiClient.NewPayloadV5(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
+			case "6":
+				r, err = tester.EngineApiClient.NewPayloadV6(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests, inclusionList)
 			default:
 				return nil, "", fmt.Errorf("unsupported new payload version: %s", payload.NewPayloadVersion)
 			}
@@ -532,6 +541,9 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	}
 	if expectFailure {
 		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
+	}
+	if err := payload.checkInclusionListSatisfied(enginePayloadStatus.InclusionListSatisfied); err != nil {
+		return err
 	}
 	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion, testName, hook)
 }
@@ -633,6 +645,18 @@ type EngineXTestNewPayload struct {
 	// the same as ValidationError: any non-Valid status or RPC-level error
 	// counts as success.
 	ErrorCode string `json:"errorCode,omitempty"`
+	// InclusionListSatisfied is the expected verdict of a VALID payload on a fork with inclusion lists.
+	InclusionListSatisfied *bool `json:"inclusionListSatisfied,omitempty"`
+}
+
+func (p EngineXTestNewPayload) checkInclusionListSatisfied(got *bool) error {
+	if p.InclusionListSatisfied == nil || (got != nil && *got == *p.InclusionListSatisfied) {
+		return nil
+	}
+	if got == nil {
+		return fmt.Errorf("inclusionListSatisfied is missing, expected %t", *p.InclusionListSatisfied)
+	}
+	return fmt.Errorf("inclusionListSatisfied is %t, expected %t", *got, *p.InclusionListSatisfied)
 }
 
 type PreAllocHash string

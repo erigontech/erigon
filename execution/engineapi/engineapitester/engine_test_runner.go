@@ -160,6 +160,9 @@ func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain
 	case p.ValidationError != "" || p.ErrorCode != "":
 		return fmt.Errorf("payload is valid, expected %s%s", p.ValidationError, p.ErrorCode)
 	}
+	if err := p.checkInclusionListSatisfied(status.InclusionListSatisfied); err != nil {
+		return err
+	}
 	if hash == nil {
 		return errors.New("valid payload has no block hash")
 	}
