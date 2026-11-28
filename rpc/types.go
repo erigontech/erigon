@@ -46,6 +46,9 @@ type API struct {
 
 	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
 	Iface reflect.Type
+
+	// Typed replaces the reflection call of some methods of Service, keyed by RPC method name without the namespace.
+	Typed map[string]TypedMethod
 }
 
 // Error wraps RPC errors, which contain an error code in addition to the message.

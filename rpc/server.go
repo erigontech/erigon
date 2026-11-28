@@ -110,14 +110,14 @@ func (s *Server) SetSubscriptionLimit(limit int) {
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this server provides to clients.
 func (s *Server) RegisterName(name string, receiver any) error {
-	return s.services.registerName(name, receiver, nil)
+	return s.services.registerName(name, receiver, nil, nil)
 }
 
 // RegisterAPI registers api.Service under api.Namespace, limited to api.Iface when set.
 // It fails when api.Service does not implement api.Iface, so a renamed or mistyped method
 // is not withheld silently.
 func (s *Server) RegisterAPI(api API) error {
-	return s.services.registerName(api.Namespace, api.Service, api.Iface)
+	return s.services.registerName(api.Namespace, api.Service, api.Iface, api.Typed)
 }
 
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes

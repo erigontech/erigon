@@ -31,7 +31,7 @@ import (
 
 type benchEthService struct{}
 
-func (benchEthService) Call(context.Context, CallArgs, *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (benchEthService) Call(context.Context, CallArgs, *rpc.BlockNumberOrHash, *StateOverrides, *BlockOverrides) (hexutil.Bytes, error) {
 	return hexutil.Bytes{}, nil
 }
 
@@ -47,7 +47,8 @@ func (w *discardResponseWriter) WriteHeader(int)             {}
 func BenchmarkServeHTTP(b *testing.B) {
 	srv := rpc.NewServer(50, false, false, false, log.New(), 0)
 	defer srv.Stop()
-	if err := srv.RegisterName("eth", benchEthService{}); err != nil {
+	api := rpc.API{Namespace: "eth", Service: benchEthService{}, Typed: map[string]rpc.TypedMethod{"call": rpc.Method4(benchEthService{}.Call)}}
+	if err := srv.RegisterAPI(api); err != nil {
 		b.Fatal(err)
 	}
 	for _, bc := range []struct{ name, body string }{

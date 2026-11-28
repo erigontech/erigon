@@ -125,6 +125,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Public:    true,
 				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
+				Typed:     map[string]rpc.TypedMethod{"call": rpc.Method4(ethImpl.Call)},
 			}, rpc.API{
 				Namespace: "eth",
 				Public:    true,

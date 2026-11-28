@@ -268,7 +268,7 @@ func initClient(conn ServerCodec, logger log.Logger) *Client {
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this client provides to the server.
 func (c *Client) RegisterName(name string, receiver any) error {
-	return c.services.registerName(name, receiver, nil)
+	return c.services.registerName(name, receiver, nil, nil)
 }
 
 func (c *Client) nextID() json.RawMessage {

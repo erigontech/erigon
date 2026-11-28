@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -68,9 +69,34 @@ type callback struct {
 
 	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
 	timerFailure metrics.Summary // pre-cached failure timer
+
+	typed func(ctx context.Context, args []reflect.Value) (any, error) // set when the method skips reflect.Value.Call
 }
 
-func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type) error {
+// TypedMethod calls a method with arguments of known types instead of reflect.Value.Call.
+type TypedMethod struct {
+	fn   any
+	call func(ctx context.Context, args []reflect.Value) (any, error)
+}
+
+// Method4 makes the TypedMethod of fn, a method value with four arguments after the context.
+func Method4[A, B, C, D, R any](fn func(context.Context, A, B, C, D) (R, error)) TypedMethod {
+	return TypedMethod{fn: fn, call: func(ctx context.Context, args []reflect.Value) (any, error) {
+		r, err := fn(ctx, typedArg[A](args[0]), typedArg[B](args[1]), typedArg[C](args[2]), typedArg[D](args[3]))
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
+	}}
+}
+
+// typedArg returns the argument value; its type always matches, since argTypes come from the same fn.
+func typedArg[T any](v reflect.Value) T {
+	t, _ := reflect.TypeAssert[T](v)
+	return t
+}
+
+func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type, typed map[string]TypedMethod) error {
 	rcvrVal := reflect.ValueOf(rcvr)
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
@@ -86,6 +112,15 @@ func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type
 	callbacks := suitableCallbacks(rcvrVal, iface, r.logger)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
+	}
+	for method, tm := range typed {
+		reflected, ok := callbacks[method]
+		cb := newCallback(reflect.Value{}, reflect.ValueOf(tm.fn), method, r.logger)
+		if !ok || reflected.isSubscribe || reflected.streamable || !slices.Equal(cb.argTypes, reflected.argTypes) || cb.errPos != reflected.errPos {
+			return fmt.Errorf("typed method %s does not match a method of service %T", method, rcvr)
+		}
+		cb.typed = tm.call
+		callbacks[method] = cb
 	}
 
 	r.mu.Lock()
@@ -222,6 +257,21 @@ func (c *callback) makeArgTypes() {
 
 // call invokes the callback.
 func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream *jsonstream.Stream) (res any, errRes error) {
+	// Catch panic while running the callback.
+	defer func() {
+		if err := recover(); err != nil {
+			c.logger.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
+			errRes = errors.New("method handler crashed")
+		}
+	}()
+	if c.typed != nil {
+		res, err := c.typed(ctx, args)
+		if err != nil || dbg.RpcDropResponse {
+			return nil, err
+		}
+		return res, nil
+	}
+
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {
@@ -234,14 +284,6 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	if c.streamable {
 		fullargs = append(fullargs, reflect.ValueOf(&stream).Elem())
 	}
-
-	// Catch panic while running the callback.
-	defer func() {
-		if err := recover(); err != nil {
-			c.logger.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
-			errRes = errors.New("method handler crashed")
-		}
-	}()
 	// Run the callback.
 	results := c.fn.Call(fullargs)
 	if len(results) == 0 {
