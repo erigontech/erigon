@@ -328,6 +328,31 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 	t.Require().True(t.gomockCtrl.Satisfied())
 }
 
+func (t *voluntaryExitTestSuite) TestImmediateVerificationIgnoresVerifiedDuplicateAfterPoolPrune() {
+	const validatorIndex = uint64(10)
+	curEpoch := uint64(100)
+	msg := &SignedVoluntaryExitForGossip{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 1, ValidatorIndex: validatorIndex},
+		},
+		ImmediateVerification: true,
+	}
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * clparams.MainnetBeaconConfig.SlotsPerEpoch))
+	validator := solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, curEpoch+1, 0)
+	st.ValidatorSet().Set(int(validatorIndex), validator)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	t.beaconCfg.FarFutureEpoch = validator.ExitEpoch()
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
+
+	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+	t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(validatorIndex))
+
+	t.Require().ErrorIs(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(validatorIndex))
+	t.Require().True(t.gomockCtrl.Satisfied())
+}
+
 func (t *voluntaryExitTestSuite) TestImmediateVerificationRejectsInvalidKnownExit() {
 	const validatorIndex = uint64(10)
 	curEpoch := uint64(100)
