@@ -320,21 +320,42 @@ func TestInexactMigrationLogsArchiveCommand(t *testing.T) {
 	}
 }
 
+type retentionLogRecorder struct{ records []*log.Record }
+
+func (h *retentionLogRecorder) Log(r *log.Record) error {
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *retentionLogRecorder) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *retentionLogRecorder) value(key string) (any, bool) {
+	for _, r := range h.records {
+		for i := 0; i+1 < len(r.Ctx); i += 2 {
+			if r.Ctx[i] == key {
+				return r.Ctx[i+1], true
+			}
+		}
+	}
+	return nil, false
+}
+
 func TestArchiveRetireHintNamesDatadir(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db, err := OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
-	var buf bytes.Buffer
+	recorder := &retentionLogRecorder{}
 	logger := log.New()
-	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	logger.SetHandler(recorder)
 	cfg := clparams.CaplinConfig{RetentionSource: clparams.CaplinRetentionSourceNewFlags, RequestedRetention: clparams.CaplinRetention{Mode: clparams.CaplinPruneModeArchive}}
 	oldest := clparams.OldestStoredResult{Blocks: clparams.StoredSlot{Slot: 1, Holds: true}}
 	require.NoError(t, resolveAndStoreRetention(t.Context(), db, oldest, &cfg, &clparams.MainnetBeaconConfig, 15_660_000, dirs, logger))
-	require.Contains(t, buf.String(), "mdbx_size=")
-	if !strings.Contains(buf.String(), dirs.DataDir) {
-		t.Fatalf("missing node datadir in retire hint: %s", buf.String())
-	}
+	_, found := recorder.value("mdbx_size")
+	require.True(t, found, "missing mdbx_size")
+	hint, found := recorder.value("hint")
+	require.True(t, found, "missing retire hint")
+	require.Equal(t, "capcli seg retire --datadir="+dirs.DataDir, hint)
 }
 
 func TestArchiveLogsPartialStateDB(t *testing.T) {
