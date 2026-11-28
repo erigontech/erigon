@@ -301,6 +301,12 @@ type VersionMap struct {
 	absentAccountHook func()
 }
 
+// unused reports whether nothing was written to or seeded into vm.
+func (vm *VersionMap) unused() bool {
+	return vm.s.Load() == nil && vm.originAccounts.Load() == nil && vm.originStorage.Load() == nil &&
+		!vm.HasBAL && vm.derivedRemovals == nil && vm.stamps == nil && !vm.sealedArmed.Load() && vm.baseTxNum.Load() == 0
+}
+
 type writeStamps struct {
 	n        int
 	inflight []atomic.Int32

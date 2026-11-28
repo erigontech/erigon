@@ -1083,9 +1083,26 @@ func TestNewAndResetBuildAVersionedState(t *testing.T) {
 	defer ibs.Close()
 	require.NotNil(t, ibs.VersionMap())
 	before := ibs.VersionMap()
+	before.StoreOriginAccount(accounts.InternAddress(common.HexToAddress("0x01")), &accounts.Account{})
 	ibs.Reset()
 	require.NotNil(t, ibs.VersionMap())
 	require.NotSame(t, before, ibs.VersionMap(), "Reset drops the previous tx's writes with its map")
+}
+
+func TestResetAfterASharedVersionMapRebindsTheUnusedPrivateMap(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	ibs.Reset()
+	private := ibs.VersionMap()
+	shared := NewVersionMap(nil)
+	shared.StoreOriginAccount(accounts.InternAddress(common.HexToAddress("0x01")), &accounts.Account{})
+	ibs.SetVersionMap(shared)
+	ibs.Reset()
+	require.Same(t, private, ibs.VersionMap())
+	require.Zero(t, testing.AllocsPerRun(10, func() {
+		ibs.SetVersionMap(shared)
+		ibs.Reset()
+	}))
 }
 
 // TestFinalizedWritesClearsCodeDomainOnEmptyOverride pins that clearing an

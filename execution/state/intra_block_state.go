@@ -164,8 +164,10 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level.
 	versionMap *VersionMap
-	writes     WriteSet
-	reads      ReadSet
+	// privateVersionMap is the map Reset binds; it is reused while nothing has written to it.
+	privateVersionMap *VersionMap
+	writes            WriteSet
+	reads             ReadSet
 	// origins collects committed pre-block base cells (at originIndex) that a cold
 	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
 	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
@@ -329,7 +331,10 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.sdProbeEpoch++
 	ibs.accessList.Reset()
 	clear(ibs.transientStorage)
-	ibs.SetVersionMap(NewVersionMap(nil))
+	if ibs.privateVersionMap == nil || !ibs.privateVersionMap.unused() {
+		ibs.privateVersionMap = NewVersionMap(nil)
+	}
+	ibs.SetVersionMap(ibs.privateVersionMap)
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
