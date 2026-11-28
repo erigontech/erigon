@@ -117,6 +117,7 @@ type ForkChoiceStore struct {
 	checkpointPromotionEpoch      uint64 // latest epoch whose start-of-epoch promotion was handled, guarded by mu
 
 	proposerBoostRoot              atomic.Value
+	proposerBoostResetSlot         uint64 // latest slot whose start reset proposerBoostRoot, guarded by mu
 	headHash                       common.Hash
 	headSlot                       uint64
 	headPayloadStatus              cltypes.PayloadStatus

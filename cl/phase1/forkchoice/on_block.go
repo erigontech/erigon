@@ -228,6 +228,9 @@ func (f *ForkChoiceStore) admitBlockLocked(block *cltypes.SignedBeaconBlock, rej
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	// on_block runs atomically at the store time it is called with, so the time spent importing
+	// the block must not make it late.
+	storeTimeMs := f.timeMs.Load()
 	if block != nil && block.Block != nil {
 		finishImport := f.BeginPayloadImport(block.Block.Slot)
 		defer finishImport()
@@ -278,6 +281,11 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
+	// A block called before its slot is admitted only once the store reaches the slot.
+	if f.slotAtTimeMs(storeTimeMs) < block.Block.Slot {
+		storeTimeMs = f.timeMs.Load()
+	}
+	f.resetProposerBoost(f.Slot())
 	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
@@ -367,7 +375,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			if overlap != nil {
 				join = overlap.join
 			}
-			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot); warm {
+			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot, storeTimeMs); warm {
 				// Build the justified state for the head before the block while f.mu is released.
 				joinOverlap := join
 				join = func() {
@@ -562,7 +570,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
-	storeTimeMs := f.timeMs.Load()
 	var prepared *preparedPostState
 	if overlap != nil {
 		prepared = overlap.prepared

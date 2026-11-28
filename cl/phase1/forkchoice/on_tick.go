@@ -58,12 +58,18 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 	if currentSlot <= f.slotAtTimeMs(previousTimeMs) {
 		return
 	}
+	f.runSlotStart(currentSlot)
+}
+
+// runSlotStart runs the work of on_tick_per_slot for the start of currentSlot. The tick advances the
+// time before it takes f.mu for this work.
+func (f *ForkChoiceStore) runSlotStart(currentSlot uint64) {
 	f.mu.Lock()
 	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.proposerBoostRoot.Store(common.Hash{})
+	f.resetProposerBoost(currentSlot)
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		f.promoteUnrealizedCheckpoints(f.computeEpochAtSlot(currentSlot))
 	}
@@ -88,6 +94,17 @@ func (f *ForkChoiceStore) promoteUnrealizedCheckpoints(epoch uint64) {
 	}
 }
 
+// resetProposerBoost runs the proposer boost reset of a slot start once. A tick advances the time
+// before it takes f.mu, so its reset can come after the reset of a later slot, or after a block
+// of its slot was applied, which runs the reset first.
+func (f *ForkChoiceStore) resetProposerBoost(slot uint64) {
+	if slot <= f.proposerBoostResetSlot {
+		return
+	}
+	f.proposerBoostRoot.Store(common.Hash{})
+	f.proposerBoostResetSlot = slot
+}
+
 func (f *ForkChoiceStore) nearChainTip(slot uint64) bool {
 	return f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot
 }
@@ -101,5 +118,6 @@ func (f *ForkChoiceStore) SetTimeForSpecTest(timeMs uint64) {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
+	f.proposerBoostResetSlot = f.slotAtTimeMs(timeMs)
 	f.checkpointPromotionEpoch = f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
 }

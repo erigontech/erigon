@@ -122,7 +122,7 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// imports it without the boost.
 	headBeforeBlock := gloasHeadBeforeBlock
 	timeliness, _ := f.getBlockTimeliness(blockRoot)
-	if blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
+	if f.Slot() == currentSlot && blockVersion < clparams.GloasVersion && timeliness[clparams.AttestationTimelinessIndex] &&
 		f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		head, err := f.headBeforeBlockPreGloasLocked(block.Slot)
 		if err != nil {
@@ -145,8 +145,12 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	// Remove the parent from the head set
 	delete(f.headSet, block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
+	// update_proposer_boost_root: conditionally set proposer boost root. A block applied after the store time has
+	// reached a later slot gets no boost; otherwise onBlock has already run the boost reset of this slot at
+	// admission. A tick can advance the time while the head is computed, so the slot is checked again here.
+	if f.Slot() == currentSlot {
+		f.updateProposerBoostRoot(headBeforeBlock, blockRoot, currentSlot)
+	}
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	if blockVersion >= clparams.GloasVersion {
@@ -194,7 +198,9 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	f.unrealizedFinalizations.Store(blockRoot, prepared.postPullupFinalized)
 	f.updateUnrealizedCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the post-pull-up checkpoints to the store.
-	currentEpoch := f.computeEpochAtSlot(currentSlot)
+	// The epoch is taken at commit: an epoch tick that ran during the import has already promoted the unrealized
+	// checkpoints, which would otherwise miss this block's advance.
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	}

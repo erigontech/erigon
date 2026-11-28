@@ -1,13 +1,17 @@
 package forkchoice
 
 import (
+	"context"
 	"math"
 	"testing"
+	"time"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -205,6 +209,217 @@ func TestSlotStartTickDoesNotMakeLateLocalBlockTimely(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, timeliness[clparams.AttestationTimelinessIndex])
 	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// onBlockWaitingForLock calls OnBlock while f.mu is held and runs whileWaiting once OnBlock waits for it.
+func onBlockWaitingForLock(t *testing.T, f *ForkChoiceStore, block *cltypes.SignedBeaconBlock, whileWaiting func()) {
+	t.Helper()
+	f.mu.Lock()
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, false, true, false) }()
+	require.Eventually(t, func() bool { return f.blocksProcessing.Load() == 1 }, lockScopeTimeout, time.Millisecond)
+	whileWaiting()
+	f.mu.Unlock()
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
+}
+
+// importParent imports the parent of the ex-ante fixture block at the start of its slot, so the
+// parent holds the proposer boost.
+func importParent(t *testing.T, engine execution_client.ExecutionEngine) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	f, parent, _, block := buildExAnteStoreBeforeBlocks(t, engine, nil)
+	f.OnTick(slotStartTimeMs(f, parent.Block.Slot))
+	require.NoError(t, f.OnBlock(t.Context(), parent, false, true, false))
+	return f, block
+}
+
+// importBlockWhileTimePasses imports a block of the slot after its parent, entering OnBlock
+// enterMs into the slot, and runs duringEL with the block's slot while the EL validates the payload.
+func importBlockWhileTimePasses(t *testing.T, enterMs uint64, duringEL func(f *ForkChoiceStore, slot uint64)) (*ForkChoiceStore, common.Hash) {
+	t.Helper()
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	f, block := importParent(t, engine)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + enterMs)
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	duringEL(f, block.Block.Slot)
+	close(releaseEL)
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
+	root := mustRoot(t, block)
+	return f, root
+}
+
+// A block that enters the import before the attestation deadline stays timely and gets the boost,
+// although the EL returns after the deadline.
+func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot) + 4500)
+	})
+
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Equal(t, root, f.ProposerBoostRoot())
+}
+
+// The slot tick resets the proposer boost, so a block whose slot ends while it is imported must
+// not set the boost after that reset.
+func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot+1) + 100)
+	})
+
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// Two ticks can advance the store time to a slot and to the next one, then run their slot-start
+// work in the reverse order. The earlier reset finishing last must not let a block of the earlier
+// slot set the boost in the later slot.
+func TestReversedSlotStartResetsKeepBoostExpired(t *testing.T) {
+	f, _ := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot+1) + 100)
+		f.runSlotStart(slot)
+	})
+
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// The slot-start work of a tick into an earlier slot can take f.mu after a timely block of the
+// next slot got the boost. It must not remove that boost.
+func TestStaleSlotStartKeepsBoostOfNewerSlot(t *testing.T) {
+	f, block := importParent(t, nil)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	root := mustRoot(t, block)
+	require.Equal(t, root, f.ProposerBoostRoot())
+
+	f.runSlotStart(f.slotAtTimeMs(slotStartTimeMs(f, block.Block.Slot-1) + 100))
+
+	assert.Equal(t, root, f.ProposerBoostRoot())
+}
+
+// A tick advances the store time into a slot before it takes f.mu for the slot-start work. A
+// timely block of the slot applied in between must get the boost, and that work must keep it.
+func TestBlockAppliedBeforePendingSlotStartGetsBoost(t *testing.T) {
+	f, block := importParent(t, nil)
+	require.NotZero(t, f.ProposerBoostRoot(), "the parent must hold the boost of its slot")
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
+	f.timeMs.Store(slotStartMs + 100)
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+	root := mustRoot(t, block)
+	assert.Equal(t, root, f.ProposerBoostRoot())
+
+	f.runSlotStart(f.slotAtTimeMs(slotStartMs + 100))
+
+	assert.Equal(t, root, f.ProposerBoostRoot())
+}
+
+// A tick can advance the store time into the block's slot before it takes f.mu. The import must
+// already have reset the boost of the previous slot while the EL validates the payload, and the
+// timely block must then get the boost.
+func TestPendingSlotStartResetRunsBeforeTheBlockImport(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+	f, block := importParent(t, engine)
+	require.NotZero(t, f.ProposerBoostRoot(), "the parent must hold the boost of its slot")
+	f.timeMs.Store(slotStartTimeMs(f, block.Block.Slot) + 100)
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	assert.Zero(t, f.ProposerBoostRoot())
+	close(releaseEL)
+	require.NoError(t, awaitOnBlock(t, onBlockDone))
+	assert.Equal(t, mustRoot(t, block), f.ProposerBoostRoot())
+}
+
+// A block that commits after the time reached the next slot must not set the boost while that
+// slot's tick still waits for f.mu: a head computed in between would count it.
+func TestBlockCommittedAfterNextSlotTimeGetsNoBoost(t *testing.T) {
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.timeMs.Store(slotStartTimeMs(f, slot+1) + 100)
+	})
+
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// A block called before its slot is admitted only once the store reaches the slot, so it is
+// processed at the store time of its admission.
+func TestBlockCalledBeforeItsSlotUsesAdmissionTime(t *testing.T) {
+	f, block := importParent(t, nil)
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
+	f.OnTick(slotStartMs - 50)
+	onBlockWaitingForLock(t, f, block, func() { f.timeMs.Store(slotStartMs + 100) })
+
+	root := mustRoot(t, block)
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+}
+
+// A block called in its slot keeps the store time of the call while it waits for f.mu.
+func TestBlockWaitingForLockUsesCallTime(t *testing.T) {
+	f, block := importParent(t, nil)
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
+	f.OnTick(slotStartMs + 3000)
+	onBlockWaitingForLock(t, f, block, func() { f.timeMs.Store(slotStartMs + 4500) })
+
+	root := mustRoot(t, block)
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+}
+
+// A Gloas block called in its slot whose import takes f.mu after the next slot's tick advanced the
+// time must end without the boost, as on_block followed by that tick does.
+func TestGloasBlockLockedAfterNextSlotTickEndsWithoutBoost(t *testing.T) {
+	importUpToLast := func(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
+		fixture := tests.GetGloasFixture("attestation", false, 0)
+		f := newBlockTestStore(t, fixture.PreState)
+		last := len(fixture.Blocks) - 1
+		for _, block := range fixture.Blocks[:last] {
+			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
+			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+		}
+		block := fixture.Blocks[last]
+		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
+		return f, block
+	}
+
+	serial, serialBlock := importUpToLast(t)
+	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
+	root := mustRoot(t, serialBlock)
+	require.Equal(t, root, serial.ProposerBoostRoot(), "the fixture block must get the boost in its slot")
+	nextSlotMs := slotStartTimeMs(serial, serialBlock.Block.Slot+1) + 100
+	serial.OnTick(nextSlotMs)
+	require.Zero(t, serial.ProposerBoostRoot())
+
+	f, block := importUpToLast(t)
+	onBlockWaitingForLock(t, f, block, func() { f.timeMs.Store(nextSlotMs) })
+	timeliness, ok := f.getBlockTimeliness(root)
+	require.True(t, ok)
+	assert.True(t, timeliness[clparams.AttestationTimelinessIndex])
+	assert.True(t, timeliness[clparams.PtcTimelinessIndex])
+	f.runSlotStart(f.slotAtTimeMs(nextSlotMs))
+
+	assert.Zero(t, f.ProposerBoostRoot())
+}
+
+// Spec test fixtures can move the store time back to an earlier slot, whose blocks must still
+// get the proposer boost.
+func TestSpecTestTimeMovedBackKeepsProposerBoost(t *testing.T) {
+	f, block := importParent(t, nil)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot+3))
+	f.SetTimeForSpecTest(slotStartTimeMs(f, block.Block.Slot))
+	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
+
+	root := mustRoot(t, block)
+	assert.Equal(t, root, f.ProposerBoostRoot())
 }
 
 func TestRecordBlockTimeliness_PreGloas_Timely(t *testing.T) {
