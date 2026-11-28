@@ -476,15 +476,12 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
-	if goja.IsString(res) {
-		// A long concatenation is a Go struct that json.Marshal does not encode as a string.
-		return json.Marshal(res.String())
-	}
-	if !goja.IsBigInt(res) {
+	if !goja.IsString(res) && !goja.IsBigInt(res) {
 		return json.Marshal(res)
 	}
-	// A BigInt is stringified as the "" property of an object without a prototype, as JSON.stringify
-	// does, so its toJSON hook gets the key "".
+	// A string or BigInt is stringified as the "" property of an object without a prototype, as
+	// JSON.stringify does: a string keeps its UTF-16 code units and runs no toJSON hook, and a BigInt
+	// hook gets the key "". json.Marshal does not encode a long concatenated string as a string.
 	holder := vm.NewObject()
 	if err := holder.SetPrototype(nil); err != nil {
 		return nil, err

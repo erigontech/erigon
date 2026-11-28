@@ -559,6 +559,12 @@ func TestTopLevelPrimitiveResults(t *testing.T) {
 	res, err = run(`'é ' + '😀'`)
 	require.NoError(t, err)
 	require.JSONEq(t, `"é 😀"`, string(res), "a non-ASCII string is a JSON string")
+	res, err = run(`'😀'.slice(0, 1)`)
+	require.NoError(t, err)
+	require.Equal(t, `"\ud83d"`, string(res), "a lone high surrogate keeps its code unit, as JSON.stringify does")
+	res, err = run(`'😀'.slice(1)`)
+	require.NoError(t, err)
+	require.Equal(t, `"\ude00"`, string(res), "a lone low surrogate keeps its code unit")
 
 	for _, nonFinite := range []string{`NaN`, `Infinity`, `-Infinity`} {
 		_, err = run(nonFinite)
