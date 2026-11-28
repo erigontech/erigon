@@ -252,7 +252,7 @@ func TestTotalActiveBalanceIsNotSharedAcrossBranchesForkedInPreviousEpoch(t *tes
 				want = branches.lowerTotal
 			}
 
-			preCacheActiveValidatorsForEpoch(polluter, epoch, branches.cacheRoot)
+			preCacheActiveValidatorsForEpoch(polluter, epoch, branches.cacheRoot, common.Hash{})
 			if tc.copyVictim {
 				var err error
 				victim, err = victim.Copy()

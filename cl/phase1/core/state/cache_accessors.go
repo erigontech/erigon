@@ -62,12 +62,18 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 	}
 
 	// Compute active validators
-	indicies := make([]uint64, 0, b.ValidatorLength())
+	if b.ValidatorLength() > 0 {
+		shuffling_metrics.ActiveValidatorsIndicesComputed.Inc()
+	}
+	scratch := make([]uint64, 0, b.ValidatorLength())
 	for i := 0; i < b.ValidatorLength(); i++ {
 		if b.ValidatorSet().Get(i).Active(epoch) {
-			indicies = append(indicies, uint64(i))
+			scratch = append(scratch, uint64(i))
 		}
 	}
+	// Cached lists live long; copy to drop the registry-sized spare capacity.
+	indicies := make([]uint64, len(scratch))
+	copy(indicies, scratch)
 
 	b.activeValidatorsCache.Add(epoch, indicies)
 	if lookaheadRoot != (common.Hash{}) {
