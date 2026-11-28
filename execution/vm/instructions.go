@@ -1515,7 +1515,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		}
 	}
 	if rules.IsEIPEnabled(7708) && !balance.IsZero() && toOtherAccount { // EIP-7708
-		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
+		misc.AddEthTransferLog(ibs, self.Value(), beneficiaryAddr.Value(), balance)
 	}
 	tracer := evm.Config().Tracer
 	depth := evm.callTraceDepth(evm.depth)
