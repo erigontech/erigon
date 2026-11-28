@@ -66,6 +66,9 @@ var (
 	stubNoTxIdx = dbg.EnvBool("STUB_NO_TXIDX", false)
 	stubNoAcc   = dbg.EnvBool("STUB_NO_ACC", false)
 	stubNoRRoot = dbg.EnvBool("STUB_NO_RROOT", false)
+
+	stubInLoopRRoot = dbg.EnvBool("STUB_INLOOP_RROOT", false)
+	stubSink        byte
 )
 
 // commitmentIntraBlockTxs > 0 enables mid-block commitment checkpoints every N

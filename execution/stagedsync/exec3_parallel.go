@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -88,6 +90,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 
 type parallelExecutor struct {
+	stubBuf bytes.Buffer
 	txExecutor
 	// verdict and exhausted carry the apply loop's typed outcome as data, out of a
 	// run whose executor stayed healthy. At most one is set, and neither is set when
@@ -281,6 +284,13 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	if stubNoTxIdx {
 	} else if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	if stubInLoopRRoot && r.receipt != nil {
+		one := types.Receipts{r.receipt}
+		r.receipt.Bloom = types.CreateBloom(one)
+		pe.stubBuf.Reset()
+		one.EncodeIndex(0, &pe.stubBuf)
+		stubSink ^= crypto.Keccak256Hash(pe.stubBuf.Bytes())[0]
 	}
 	return nil
 }
