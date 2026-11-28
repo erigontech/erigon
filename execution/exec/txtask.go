@@ -97,6 +97,8 @@ type TxResult struct {
 	TxIn        state.ReadSet
 	TxOut       *state.WriteSet
 
+	ReadAddrs, WriteAddrs []state.AddrPaths
+
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
