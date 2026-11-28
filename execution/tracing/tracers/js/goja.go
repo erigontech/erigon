@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"time"
 
 	"github.com/dlclark/regexp2/v2"
 	"github.com/dop251/goja"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 var assetTracers = make(map[string]string)
@@ -55,14 +55,19 @@ func init() {
 		panic(err)
 	}
 	tracers.RegisterLookup(true, newJsTracer)
-	// goja runs some patterns on regexp2, whose matches ignore Interrupt and by default never time out;
-	// bound them by the same limit as an RPC EVM call.
-	regexp2.DefaultMatchTimeout = rpccfg.DefaultEvmCallTimeout
+	// goja runs some patterns on regexp2, whose matches ignore Interrupt and by default never time out.
+	// A pattern takes the timeout when it is compiled, so set it before bigIntProgram compiles.
+	regexp2.DefaultMatchTimeout = regexpMatchTimeout
+	bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 }
+
+// regexpMatchTimeout bounds how long a trace can run past its deadline inside one regexp2 match:
+// regexp2 has no per-match cancel, so it cannot use the deadline of each trace.
+const regexpMatchTimeout = time.Second
 
 // bigIntProgram is compiled once and the exported function mostly invoked to convert
 // hex strings into big ints.
-var bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
+var bigIntProgram *goja.Program
 
 // maxCallStackSize leaves room for a tracer that walks the call tree through a native callback
 // such as Array.map, which uses two frames per EVM call frame (up to 1024 when the 63/64 gas rule
@@ -470,20 +475,27 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 			encoded, err = nil, wrapError("result", uncatchableError(r))
 		}
 	}()
-	if _, isObject := res.(*goja.Object); isObject || goja.IsUndefined(res) || goja.IsNull(res) {
+	switch res.(type) {
+	case *goja.Object, *goja.Symbol:
 		return json.Marshal(res)
 	}
-	// A primitive is stringified as the only element of an array without a prototype:
-	// that follows JSON.stringify, which reads no toJSON hook of a string, number or boolean.
-	holder := vm.NewArray(res)
+	if goja.IsUndefined(res) || goja.IsNull(res) {
+		return json.Marshal(res)
+	}
+	// A primitive is stringified as the "" property of an object without a prototype, as JSON.stringify
+	// does: no toJSON hook of a string, number or boolean runs, and a BigInt hook gets the key "".
+	holder := vm.NewObject()
 	if err := holder.SetPrototype(nil); err != nil {
+		return nil, err
+	}
+	if err := holder.Set("", res); err != nil {
 		return nil, err
 	}
 	encoded, err = json.Marshal(holder)
 	if err != nil {
 		return nil, err
 	}
-	return encoded[1 : len(encoded)-1], nil
+	return encoded[len(`{"":`) : len(encoded)-1], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -636,7 +648,6 @@ func (t *jsTracer) setBuiltinFunctions() {
 // suitable for JS consumption.
 func (t *jsTracer) setTypeConverters() error {
 	// Inject bigint logic.
-	// TODO: To be replaced after goja adds support for native JS bigint.
 	toBigCode, err := t.vm.RunProgram(bigIntProgram)
 	if err != nil {
 		return err

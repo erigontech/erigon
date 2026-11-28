@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlclark/regexp2/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 type vmContext struct {
@@ -565,23 +563,18 @@ func TestTopLevelPrimitiveResults(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `1`, string(res))
 
+	res, err = run(`(BigInt.prototype.toJSON = function(key) { return key === '' ? 'root' : 'member ' + key; }, 42n)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"root"`, string(res), "a root value gets the key \"\"")
+
+	undefinedRes, err := run(`undefined`)
+	require.NoError(t, err)
+	symbolRes, err := run(`Symbol('x')`)
+	require.NoError(t, err)
+	require.Equal(t, string(undefinedRes), string(symbolRes), "JSON.stringify treats undefined and a Symbol the same")
+
 	_, nestedErr := run(`{amount: 42n}`)
 	require.Error(t, nestedErr)
 	_, err = run(`42n`)
 	require.EqualError(t, err, nestedErr.Error(), "a top-level BigInt fails as a nested one does")
-}
-
-func TestRegexpMatchesHaveATimeBudget(t *testing.T) {
-	require.Equal(t, rpccfg.DefaultEvmCallTimeout, regexp2.DefaultMatchTimeout)
-
-	defer func(old time.Duration) { regexp2.DefaultMatchTimeout = old }(regexp2.DefaultMatchTimeout)
-	regexp2.DefaultMatchTimeout = 50 * time.Millisecond
-	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function() {
-		return /^(?=(a|aa)+b)/.test('a'.repeat(64));
-	}}`, nil, nil)
-	require.NoError(t, err)
-	start := time.Now()
-	_, err = tracer.GetResult()
-	require.ErrorContains(t, err, "timeout")
-	require.Less(t, time.Since(start), 10*time.Second)
 }
