@@ -170,6 +170,19 @@ func TestSqueezeCodeSelectsLegacyCommitmentFromDatadir(t *testing.T) {
 	require.False(t, statecfg.ExperimentalCommitmentV3)
 }
 
+func TestPublishableSelectsLegacyCommitmentFromDatadir(t *testing.T) {
+	t.Setenv("ERIGON_COMMITMENT_V3", "")
+	t.Cleanup(statecfg.SetCommitmentV3(statecfg.DefaultCommitmentV3))
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen().Close()
+	err := doPublishable(t.Context(), dirs, nil)
+	require.False(t, statecfg.ExperimentalCommitmentV3)
+	if err != nil {
+		require.NotContains(t, err.Error(), "less than supported version")
+	}
+}
+
 func TestSegDUMissingDatadirDoesNotCreate(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "missing")
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
