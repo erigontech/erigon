@@ -408,26 +408,15 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 	defer tx.Rollback()
 
-	{
-		blockNum, err := api._blockReader.HeaderNumber(ctx, tx, cannonicalBlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if blockNum == nil {
-			return nil, fmt.Errorf("block not found %x", cannonicalBlockHash)
-		}
-		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, *blockNum)
-		if err != nil {
-			return nil, err
-		}
-		if !isCanonicalHash {
-			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
-		}
+	blockNum, found, err := rpchelper.CanonicalBlockNumberByHash(ctx, tx, api._blockReader, cannonicalBlockHash)
+	if errors.As(err, &rpchelper.NonCanonicalHashError{}) {
+		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
 	}
-
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api._blockReader)
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("block not found %x", cannonicalBlockHash)
 	}
 
 	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)

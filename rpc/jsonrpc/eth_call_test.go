@@ -1776,6 +1776,24 @@ func testGetProofRequestShapes(t *testing.T, v3 bool) {
 		require.Nil(t, proof)
 	})
 
+	t.Run("non-canonical hash", func(t *testing.T) {
+		var side *types.Header
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			mid, err := m.BlockReader.HeaderByNumber(ctx, tx, 3)
+			if err != nil {
+				return err
+			}
+			side = types.CopyHeader(mid)
+			side.Extra = []byte("side")
+			return rawdb.WriteHeader(tx, side)
+		}))
+		for _, requireCanonical := range []bool{true, false} {
+			proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(side.Hash(), requireCanonical)))
+			require.ErrorAs(t, err, &rpchelper.NonCanonicalHashError{}, "requireCanonical=%v", requireCanonical)
+			require.Nil(t, proof)
+		}
+	})
+
 	t.Run("too many keys", func(t *testing.T) {
 		proof, err := api.GetProof(ctx, contractAddr, make([]hexutil.Bytes, maxGetProofKeys+1), head)
 		require.Nil(t, proof)

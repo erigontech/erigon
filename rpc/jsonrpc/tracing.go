@@ -58,10 +58,10 @@ func rejectPendingNumber(blockNr rpc.BlockNumber) error {
 }
 
 func rejectPending(blockNrOrHash rpc.BlockNumberOrHash) error {
-	if blockNrOrHash.BlockNumber == nil {
-		return nil
+	if blockNrOrHash.IsPending() {
+		return errPendingNotSupported
 	}
-	return rejectPendingNumber(*blockNrOrHash.BlockNumber)
+	return nil
 }
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.

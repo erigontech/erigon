@@ -617,33 +617,25 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 
 func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
 	// The requested hash and the indexed state must belong to the same canonical view.
-	reader := canonicalViewReader{api._blockReader}
-	blockNumber, err := reader.HeaderNumber(ctx, tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if blockNumber == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-	}
-	canonicalHash, ok, err := reader.CanonicalHash(ctx, tx, *blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
-	}
-	if canonicalHash != blockHash {
+	blockNumber, found, err := rpchelper.CanonicalBlockNumberByHash(ctx, tx, canonicalViewReader{api._blockReader}, blockHash)
+	if errors.As(err, &rpchelper.NonCanonicalHashError{}) {
 		return nil, errors.New("block hash is not canonical")
 	}
-	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
+	if err != nil {
 		return nil, err
 	}
-	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, *blockNumber, txIndex)
+	if !found {
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return nil, err
+	}
+	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, *blockNumber, txIndex)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -683,7 +675,7 @@ type AccountResult struct {
 
 // GetRawHeader implements debug_getRawHeader and returns an RLP-encoded header for a block number or hash.
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		if api.pendingBlock() != nil {
 			return nil, nil
 		}
@@ -712,7 +704,7 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		if api.pendingBlock() != nil {
 			return nil, nil
 		}
@@ -747,7 +739,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 
 // GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
 func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		if api.pendingBlock() != nil {
 			return nil, nil
 		}

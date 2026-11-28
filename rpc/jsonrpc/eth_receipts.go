@@ -130,31 +130,27 @@ var errBlockHashNotFound = errors.New("block not found")
 // told; elsewhere a missing body is what it says it is, and answering with an empty log
 // array would hide it.
 func (api *BaseAPI) resolveLogsBlockHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	number, found, err := rpchelper.CanonicalBlockNumberByHash(ctx, tx, api._blockReader, hash)
+	if errors.As(err, &rpchelper.NonCanonicalHashError{}) {
+		found, err = false, nil
+	}
 	if err != nil {
 		return 0, err
 	}
-	if number == nil {
+	if !found {
 		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
-	if err != nil {
-		return 0, err
-	}
-	if !ok || canonicalHash != hash {
-		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
-	}
-	body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
+	body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, number)
 	if err != nil {
 		return 0, err
 	}
 	if body == nil {
-		if err := api.checkPruneBlocks(ctx, tx, *number); err != nil {
+		if err := api.checkPruneBlocks(ctx, tx, number); err != nil {
 			return 0, err
 		}
 		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
 	}
-	return *number, nil
+	return number, nil
 }
 
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
@@ -607,7 +603,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	// Pending block receipts are only available if the miner has a pending block
 	// with executed transactions. Erigon receives only header+txs from the miner
 	// and cannot compute receipts on-the-fly.
-	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+	if numberOrHash.IsPending() {
 		return nil, errors.New("pending receipts are not available")
 	}
 

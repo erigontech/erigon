@@ -2912,3 +2912,37 @@ func TestGetModifiedAccountsByHash_NonCanonicalErrors(t *testing.T) {
 	_, err = api.GetModifiedAccountsByHash(m.Ctx, c.Blocks[0].Hash(), &forkEnd)
 	require.ErrorContains(t, err, "not currently canonical")
 }
+
+func TestAccountAtRejectsNonCanonicalHash(t *testing.T) {
+	requireNotCanonical := func(t *testing.T, err error) {
+		t.Helper()
+		require.EqualError(t, err, "block hash is not canonical")
+		var coded rpc.Error
+		require.NotErrorAs(t, err, &coded, "the error must keep the default JSON-RPC code")
+	}
+
+	t.Run("another canonical block at its height", func(t *testing.T) {
+		m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+		_, err := api.AccountAt(m.Ctx, orphanedChain[0].Blocks[0].Hash(), 0, m.Address)
+		requireNotCanonical(t, err)
+	})
+
+	t.Run("no canonical block at its height", func(t *testing.T) {
+		m := execmoduletester.New(t)
+		c := insertOverlayRaceChain(t, m)
+		header := &types.Header{
+			ParentHash: c.TopBlock.Hash(),
+			Number:     *uint256.NewInt(uint64(overlayRaceChainSize) + 1),
+			Difficulty: *uint256.NewInt(0),
+			Time:       c.TopBlock.Time() + 10,
+			GasLimit:   30_000_000,
+		}
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error { return rawdb.WriteHeader(tx, header) }))
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+		_, err := api.AccountAt(m.Ctx, header.Hash(), 0, m.Address)
+		requireNotCanonical(t, err)
+	})
+}

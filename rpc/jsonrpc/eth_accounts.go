@@ -93,7 +93,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
-	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
 		}, &grpc.EmptyCallOption{})

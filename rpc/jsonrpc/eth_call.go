@@ -64,7 +64,7 @@ var (
 )
 
 func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		return errPendingStateNotSupported
 	}
 	return nil
@@ -179,7 +179,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	// The pending block is a proposal with no executed state behind it, so
 	// estimate at the latest executed block instead.
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+	if blockNrOrHash.IsPending() {
 		blockNrOrHash = &latestExecutedNumOrHash
 	}
 
