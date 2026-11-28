@@ -28,9 +28,8 @@ const (
 )
 
 var (
-	regionAheadMaxBytes   uint64 = 64 << 20
-	regionAheadSmallBytes uint64 = 4 << 20
-	regionAdvise                 = (*seg.Decompressor).MadvWillNeedWords
+	regionAheadMaxBytes uint64 = 64 << 20
+	regionAdvise               = (*seg.Decompressor).MadvWillNeedWords
 )
 
 type regionKey struct {
@@ -56,33 +55,18 @@ func (dt *DomainRoTx) regionAhead(i int, k []byte) {
 	}
 	key := regionKey{addr: [length.Addr]byte(k[:length.Addr]), file: i}
 	hits, tracked := dt.regionHits[key]
-	if !tracked && len(dt.regionHits) >= regionAheadTracked {
+	if !tracked && len(dt.regionHits) == regionAheadTracked {
 		clear(dt.regionHits)
 	}
 	dt.regionHits[key] = hits + 1
 	if hits+1 != regionAheadHits {
 		return
 	}
-	if from, to, ok := dt.regionWords(i, key.addr[:]); ok && to-from <= regionAheadMaxBytes {
-		regionAdvise(dt.files[i].src.decompressor, from, to)
-	}
-	dt.regionAheadSmallFiles(i, key.addr)
-}
-
-func (dt *DomainRoTx) regionAheadSmallFiles(hit int, addr [length.Addr]byte) {
-	done := regionKey{addr: addr, file: -1}
-	if _, ok := dt.regionHits[done]; ok {
+	from, to, ok := dt.regionWords(i, key.addr[:])
+	if !ok || to-from > regionAheadMaxBytes {
 		return
 	}
-	dt.regionHits[done] = 0
-	for j := range dt.files {
-		if j == hit {
-			continue
-		}
-		if from, to, ok := dt.regionWords(j, addr[:]); ok && to-from <= regionAheadSmallBytes {
-			regionAdvise(dt.files[j].src.decompressor, from, to)
-		}
-	}
+	regionAdvise(dt.files[i].src.decompressor, from, to)
 }
 
 func (dt *DomainRoTx) regionWords(i int, prefix []byte) (from, to uint64, ok bool) {
