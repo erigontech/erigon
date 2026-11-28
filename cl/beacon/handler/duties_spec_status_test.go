@@ -204,13 +204,19 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 				fcu.FinalizedSlotVal = 127
 				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-					return tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+					for slot := uint64(96); slot < 128; slot++ {
+						if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(slot)); err != nil {
+							return err
+						}
+					}
+					return nil
 				}))
 				return handler
 			},
-			method:     http.MethodGet,
-			path:       "/eth/v1/validator/duties/proposer/3",
-			wantStatus: http.StatusInternalServerError,
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "validators not found for slot 96",
 		},
 		{
 			name: "proposer validator table empty during replay",
@@ -1158,6 +1164,46 @@ func TestHistoricalFuluMissingEpochDataStatus(t *testing.T) {
 					if tc.progress == 96 {
 						require.Contains(t, body, "epoch data not found")
 					}
+				})
+			}
+		})
+	}
+}
+
+func TestHistoricalProposerFirstSlotMissedPastValidatorTable(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		replay      bool
+		wantStatus  int
+		wantMessage string
+	}{
+		{"replay", true, http.StatusServiceUnavailable, "static validator table does not yet cover slot 97"},
+		{"no replay", false, http.StatusBadRequest, "proposer duties: epoch 3 is not yet reconstructed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.FinalizedSlotVal = 127
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				for slot := uint64(96); slot < 128; slot++ {
+					if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
+				}
+				return state_accessors.SetStateProcessingProgress(tx, 128)
+			}))
+			var table *state_accessors.StaticValidatorTable
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				table, err = state_accessors.LoadStaticValidatorTable(tx, true, tc.replay)
+				return err
+			}))
+			table.SetSlot(96)
+			h.stateReader = historical_states_reader.NewHistoricalStatesReader(h.beaconChainCfg, nil, table, preState, nil, h.syncedData)
+			for _, version := range []string{"v1", "v2"} {
+				t.Run(version, func(t *testing.T) {
+					status, body := dutiesSpecStatusRequest(t, h, http.MethodGet, "/eth/"+version+"/validator/duties/proposer/3", "")
+					require.Equal(t, tc.wantStatus, status, body)
+					require.Contains(t, body, tc.wantMessage)
 				})
 			}
 		})
