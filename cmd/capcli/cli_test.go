@@ -94,9 +94,7 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 			for _, secret := range []string{"pw-secret", "path-secret", "user"} {
 				require.NotContains(t, err.Error(), secret)
 			}
-			if name != "head" && name != "state root" {
-				require.Contains(t, err.Error(), host)
-			}
+			require.Contains(t, err.Error(), host)
 
 			for _, malformed := range []string{"http://h/%zz/path-secret", "http://user:Ab3x/path-secret@h/"} {
 				err = request(malformed)

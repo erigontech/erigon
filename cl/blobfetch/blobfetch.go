@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -437,6 +438,7 @@ func RedactURLError(err error) error {
 		ue.Err = context.Canceled
 	case errors.Is(ue.Err, context.DeadlineExceeded):
 		ue.Err = context.DeadlineExceeded
+	case errors.As(ue.Err, new(*net.OpError)), errors.As(ue.Err, new(*net.DNSError)):
 	default:
 		ue.Err = errors.New("HTTP request failed")
 	}
