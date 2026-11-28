@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -68,9 +70,9 @@ func TestBranchChildCountUnderCommitmentV3(t *testing.T) {
 		return mem.Records()
 	}
 	hphRecords := process(func(pc commitment.PatriciaContext) commitment.Trie {
-		return commitment.NewHexPatriciaHashed(length.Addr, pc, commitment.DefaultTrieConfig())
+		return v2.NewHexPatriciaHashed(length.Addr, pc, commitment.DefaultTrieConfig())
 	}, commitment.ModeUpdate)
-	v3Trie, v3Updates := v3.NewTrie(t.TempDir(), commitment.DefaultTrieConfig())
+	v3Trie, v3Updates := v3.NewTrie(t.TempDir())
 	v3Updates.Close()
 	v3Records := process(func(pc commitment.PatriciaContext) commitment.Trie {
 		v3Trie.ResetContext(pc)
@@ -86,7 +88,7 @@ func TestBranchChildCountUnderCommitmentV3(t *testing.T) {
 	for _, op := range ops {
 		full := commitment.KeyToHexNibbleHash(op.Key)
 		for cut := 0; cut <= len(full); cut++ {
-			want := commitment.BranchData(hphRecords[string(nibbles.HexToCompact(full[:cut]))]).ChildCount()
+			want := branch.BranchData(hphRecords[string(nibbles.HexToCompact(full[:cut]))]).ChildCount()
 			if want >= 2 {
 				branches++
 			}
