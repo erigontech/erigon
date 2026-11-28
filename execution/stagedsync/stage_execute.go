@@ -96,13 +96,21 @@ type ExecuteBlockCfg struct {
 	// reference instead of the header.
 	balSink func(blockNum uint64, bal types.BlockAccessList)
 
-	workers *execWorkerCache
+	workers *ExecWorkerCache
 }
 
 // SetBALSink registers a callback receiving each executed block's derived BAL.
 // Test-only.
 func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
 	cfg.balSink = sink
+}
+
+// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own cache.
+func (cfg ExecuteBlockCfg) ShareWorkers(c *ExecWorkerCache) ExecuteBlockCfg {
+	if c != nil {
+		cfg.workers = c
+	}
+	return cfg
 }
 
 func StageExecuteBlocksCfg(
@@ -145,7 +153,7 @@ func StageExecuteBlocksCfg(
 		experimentalBAL:   experimentalBAL,
 		readAheader:       readAheader,
 		discardCommitment: dbg.DiscardCommitment(),
-		workers:           &execWorkerCache{},
+		workers:           &ExecWorkerCache{},
 	}
 }
 

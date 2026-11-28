@@ -365,6 +365,7 @@ func NewDefaultStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
+	execWorkers *stagedsync.ExecWorkerCache,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -378,7 +379,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageHeadersCfg(blockReader),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).ShareWorkers(execWorkers),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
 	)
@@ -395,6 +396,7 @@ func NewPipelineStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
+	execWorkers *stagedsync.ExecWorkerCache,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -412,7 +414,7 @@ func NewPipelineStages(ctx context.Context,
 		ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.SnapshotBlobsFromSlot(), cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).ShareWorkers(execWorkers),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
 	)
@@ -428,6 +430,7 @@ func NewInMemoryExecution(
 	blockWriter *blockio.BlockWriter,
 	logger log.Logger,
 	readAheader *exec.BlockReadAheader,
+	execWorkers *stagedsync.ExecWorkerCache,
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
@@ -436,7 +439,7 @@ func NewInMemoryExecution(
 			stagedsync.StageHeadersCfg(blockReader),
 			stagedsync.StageBodiesCfg(blockReader, blockWriter),
 			stagedsync.StageSendersCfg(controlServer.ChainConfig, true /* badBlockHalt */, cfg.Dirs.Tmp, blockReader, readAheader),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).ShareWorkers(execWorkers),
 		),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */

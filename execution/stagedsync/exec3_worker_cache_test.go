@@ -30,7 +30,7 @@ import (
 
 func TestWorkerCacheNeverGivesOneWorkerToTwoCalls(t *testing.T) {
 	const n = 2
-	cache := &execWorkerCache{}
+	cache := &ExecWorkerCache{}
 	var inUse sync.Map
 	var wg sync.WaitGroup
 	for range 8 {

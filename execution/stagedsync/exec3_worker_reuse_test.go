@@ -147,7 +147,7 @@ func TestExecV3ReusedWorkersAfterACancelledCall(t *testing.T) {
 func TestWorkerStartupErrorKeepsIdleWorkers(t *testing.T) {
 	pe, _ := newResumeTestExec(t, newResumeTestDB(t), chain.AllProtocolChanges)
 	pe.workerCount = 1
-	pe.cfg.workers = &execWorkerCache{}
+	pe.cfg.workers = &ExecWorkerCache{}
 	worker := exec.NewWorkerContext(t.Context(), true, nil, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
 	pe.cfg.workers.put([]*exec.WorkerContext{worker})
 	t.Cleanup(func() { closeWorkers(pe.cfg.workers.take(1)) })
@@ -161,4 +161,23 @@ func TestWorkerStartupErrorKeepsIdleWorkers(t *testing.T) {
 
 	require.Len(t, pe.cfg.workers.idle, 1, "a startup failure took the worker out of the cache")
 	require.Same(t, worker, pe.cfg.workers.idle[0])
+}
+
+func TestExecV3ConfigsSharingACacheReuseOneWorkerSet(t *testing.T) {
+	r, fx := newReuseReplay(t)
+	shared := &ExecWorkerCache{}
+	other := r.cfg
+	other.workers = &ExecWorkerCache{}
+	r.cfg = r.cfg.ShareWorkers(shared)
+	other = other.ShareWorkers(shared)
+
+	require.NoError(t, runOnParent(t, r, fx))
+	workers := idleWorkers(r)
+	require.Len(t, workers, 5)
+
+	r.cfg = other
+	ranOnCached := takenDuringCall(t, r, nil)
+	require.NoError(t, runOnParent(t, r, fx))
+	require.True(t, ranOnCached(), "the second config did not run on the set the first one parked")
+	require.True(t, slices.Equal(workers, idleWorkers(r)))
 }

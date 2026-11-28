@@ -6,16 +6,18 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 )
 
-// execWorkerCache keeps the parallel executor's worker contexts between ExecV3 calls,
-// so a call reuses their IntraBlockStates instead of building new ones.
-type execWorkerCache struct {
+// ExecWorkerCache keeps the parallel executor's worker contexts between ExecV3 calls,
+// so a call reuses their IntraBlockStates instead of building new ones. A worker keeps
+// the db, block reader and engine it was built with, so only configs built over the
+// same ones may share a cache.
+type ExecWorkerCache struct {
 	mu   sync.Mutex
 	idle []*exec.WorkerContext
 }
 
 // take hands out the idle workers when there are n of them, or nil: the caller
 // then builds its own. A nil cache never has idle workers.
-func (c *execWorkerCache) take(n int) []*exec.WorkerContext {
+func (c *ExecWorkerCache) take(n int) []*exec.WorkerContext {
 	if c == nil {
 		return nil
 	}
@@ -32,7 +34,7 @@ func (c *execWorkerCache) take(n int) []*exec.WorkerContext {
 
 // put parks workers that no task runs on and keeps them for the next take, or closes
 // them when the cache is nil or already holds a set.
-func (c *execWorkerCache) put(workers []*exec.WorkerContext) {
+func (c *ExecWorkerCache) put(workers []*exec.WorkerContext) {
 	if c != nil {
 		c.mu.Lock()
 		if c.idle == nil {
