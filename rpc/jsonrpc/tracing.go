@@ -389,7 +389,7 @@ func (c *DebugTraceCallConfig) UnmarshalJSON(input []byte) error {
 	dec := struct {
 		*tracersConfig.TraceConfig
 		BlockOverrides *checkedBlockOverrides
-	}{TraceConfig: (*tracersConfig.TraceConfig)(c)}
+	}{TraceConfig: (*tracersConfig.TraceConfig)(c), BlockOverrides: (*checkedBlockOverrides)(c.BlockOverrides)}
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}

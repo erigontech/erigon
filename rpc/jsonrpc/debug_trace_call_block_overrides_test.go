@@ -20,12 +20,15 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func TestDebugTraceCallBlockOverrideKeys(t *testing.T) {
@@ -91,4 +94,26 @@ func TestDebugTraceCallBlockOverrideKeys(t *testing.T) {
 		client, callArgs, _ := dialDebug(t, chain.TestChainBerlinConfig)
 		require.NoError(t, traceCall(client, callArgs, `{"difficulty":"0x1"}`))
 	})
+}
+
+func TestDebugTraceCallConfigPreservesJSONMerge(t *testing.T) {
+	prefilled := func() *ethapi.BlockOverrides {
+		number, gasLimit := hexutil.U256(*uint256.NewInt(7)), hexutil.Uint64(30_000_000)
+		return &ethapi.BlockOverrides{Number: &number, GasLimit: &gasLimit}
+	}
+	for _, input := range []string{
+		`{"tracer":"callTracer"}`,
+		`null`,
+		`{"blockOverrides":{"time":"0x10"}}`,
+		`{"blockOverrides":{"number":"0x9"}}`,
+		`{"blockOverrides":{}}`,
+		`{"blockOverrides":null}`,
+		`{"blockOverrides":{"time":"0x10"},"BlockOverrides":{"gasLimit":"0x1"}}`,
+	} {
+		want := tracersConfig.TraceConfig{BlockOverrides: prefilled()}
+		require.NoError(t, json.Unmarshal([]byte(input), &want), input)
+		got := DebugTraceCallConfig{BlockOverrides: prefilled()}
+		require.NoError(t, json.Unmarshal([]byte(input), &got), input)
+		require.Equal(t, want, tracersConfig.TraceConfig(got), input)
+	}
 }
