@@ -332,7 +332,11 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 	balStr := acc.Balance.Hex()
 	codeStr := "0x"
 	if !acc.IsEmptyCodeHash() {
-		if codeBytes, codeErr := reader.ReadAccountCode(addr); codeErr == nil && codeBytes != nil {
+		codeBytes, err := reader.ReadAccountCode(addr)
+		if err != nil {
+			return "", 0, "", err
+		}
+		if codeBytes != nil {
 			codeStr = hexutil.Encode(codeBytes)
 		}
 	}
