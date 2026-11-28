@@ -200,6 +200,10 @@ func (sd *TemporalMemBatch) runlockAllDomains() {
 }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
+	return sd.DomainPutOwned(domain, k, bytes.Clone(v), txNum, preval)
+}
+
+func (sd *TemporalMemBatch) DomainPutOwned(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
 }
@@ -215,7 +219,7 @@ func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, 
 // calculator, one block at a time), so routing its diff this way needs no
 // lock against SetChangesetAccumulator, unlike DomainPut/DomainDel.
 func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
-	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, v, txNum)
+	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, bytes.Clone(v), txNum)
 	kb := common.ToBytesZeroCopy(k)
 	if sameTxNumUpdate {
 		return sd.domainWriters[kv.CommitmentDomain].addValue(kb, v, kv.Step(txNum/sd.stepSize))
@@ -366,10 +370,11 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 
 // putLatest reports whether this write is a same-txNum update of the key,
 // replacing the key's last entry in place instead of appending a version.
+// It keeps val, so callers pass bytes the batch owns: a value may alias a .kv mmap
+// (the foreground exec tx's file generation) that a background merge can munmap
+// while a concurrent commitment worker reads sd.mem.
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
-	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
-	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
-	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
+	valWithStep := dataWithTxNum{data: val, txNum: txNum}
 	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
 	sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 	return sameTxNumUpdate

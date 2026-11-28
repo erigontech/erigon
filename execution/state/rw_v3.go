@@ -291,7 +291,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
+				} else if err := domains.DomainPutOwned(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}
