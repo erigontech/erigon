@@ -269,13 +269,17 @@ func commitmentV3OfChaindata(ctx context.Context, path string, logger log.Logger
 	}
 	db, err := mdbx.New(dbcfg.ChainDB, logger).Path(path).Accede(true).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{kv.TblCommitmentVals: {Flags: kv.DupSort}}
+			return kv.TableCfg{kv.TblCommitmentVals: {Flags: kv.DupSort, IsDeprecated: true}}
 		}).Open(ctx)
 	if err != nil {
 		return false, false, fmt.Errorf("opening chaindata to read its commitment state: %w", err)
 	}
 	defer db.Close()
 	err = db.View(ctx, func(tx kv.Tx) (err error) {
+		exists, err := tx.(kv.BucketMigrator).ExistsTable(kv.TblCommitmentVals)
+		if err != nil || !exists {
+			return err
+		}
 		if v3, err = tx.Has(kv.TblCommitmentVals, commitment.KeyCommitmentV3State); err != nil || v3 {
 			found = v3
 			return err
