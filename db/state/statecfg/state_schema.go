@@ -99,11 +99,7 @@ var legacyCommitmentDomain DomainCfg
 func SetCommitmentV3(on bool) (restore func()) {
 	schema, v3 := Schema, ExperimentalCommitmentV3
 	ExperimentalCommitmentV3 = on
-	if on {
-		EnableCommitmentV3Records(&Schema.CommitmentDomain)
-	} else {
-		Schema.CommitmentDomain = legacyCommitmentDomain
-	}
+	SetCommitmentFileVersions(on, on)
 	return func() { Schema, ExperimentalCommitmentV3 = schema, v3 }
 }
 

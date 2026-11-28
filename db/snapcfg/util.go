@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -50,7 +51,17 @@ type (
 	PreverifiedItem  = preverified.Item
 )
 
-var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
+var snapshotGitBranchEnv = dbg.EnvString("SNAPS_GIT_BRANCH", "")
+
+func snapshotGitBranch() string {
+	switch {
+	case snapshotGitBranchEnv != "":
+		return snapshotGitBranchEnv
+	case statecfg.ExperimentalCommitmentV3:
+		return ver.CommitmentV3SnapshotGitBranch
+	}
+	return ver.DefaultSnapshotGitBranch
+}
 
 // knownChains is the set of chain names with a preverified-hash source. It is
 // the authoritative answer for KnownCfg's (_, known bool) return. Immutable.
@@ -581,15 +592,16 @@ var EmbeddedWebseeds = map[string][]string{
 	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
-// Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
+// Webseeds returns the webseeds of the snapshot branch the manifest comes from.
 func Webseeds(ctx context.Context, chain string) ([]string, bool) {
 	embedded, ok := EmbeddedWebseeds[chain]
-	if snapshotGitBranch == ver.DefaultSnapshotGitBranch { // the embedded list is the default branch's
+	branch := snapshotGitBranch()
+	if branch == ver.DefaultSnapshotGitBranch { // the embedded list is the default branch's
 		return embedded, ok
 	}
 	ctx, cancel := context.WithTimeout(ctx, webseedsFetchTimeout)
 	defer cancel()
-	b, err := fetchWebseeds(ctx, snapshotGitBranch, chain)
+	b, err := fetchWebseeds(ctx, branch, chain)
 	var named map[string]string
 	if err == nil {
 		err = toml.Unmarshal(b, &named)
@@ -603,7 +615,7 @@ func Webseeds(ctx context.Context, chain string) ([]string, bool) {
 	if err == nil {
 		return slices.Sorted(maps.Values(named)), true
 	}
-	log.Warn("[snapshots] cannot use the webseed list of the snapshot branch", "branch", snapshotGitBranch, "chain", chain, "err", err, "embedded", embedded)
+	log.Warn("[snapshots] cannot use the webseed list of the snapshot branch", "branch", branch, "chain", chain, "err", err, "embedded", embedded)
 	return embedded, ok
 }
 
@@ -696,14 +708,14 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
 		var err error
-		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch(), chainName)
 		if err == nil {
 			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
 		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = FetchChainToml(ctx, Github, snapshotGitBranch, chainName)
+			hashes, err = FetchChainToml(ctx, Github, snapshotGitBranch(), chainName)
 			if err != nil {
 				return err
 			}

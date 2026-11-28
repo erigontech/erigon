@@ -25,6 +25,9 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -117,6 +120,18 @@ func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
 
 	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "convert the datadir with `integration commitment convert --v3`, or roll back an interrupted conversion with `integration commitment convert --restore`; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
+}
+
+func TestCommitmentV3OfDatadirWithoutCommitmentTable(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{} }).MustOpen()
+	db.Close()
+
+	v3, found, err := CommitmentV3OfDatadir(t.Context(), dirs, log.Root())
+	require.NoError(t, err)
+	require.False(t, v3)
+	require.False(t, found)
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {

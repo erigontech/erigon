@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -44,15 +45,15 @@ func TestChainTomlGitHubURL(t *testing.T) {
 }
 
 func TestWebseedsFollowTheManifestBranch(t *testing.T) {
-	prevBranch, prevFetch := snapshotGitBranch, fetchWebseeds
-	t.Cleanup(func() { snapshotGitBranch, fetchWebseeds = prevBranch, prevFetch })
+	prevBranch, prevFetch := snapshotGitBranchEnv, fetchWebseeds
+	t.Cleanup(func() { snapshotGitBranchEnv, fetchWebseeds = prevBranch, prevFetch })
 	webseeds := func(branch string, file string, fetchErr error) []string {
 		t.Helper()
-		snapshotGitBranch = branch
+		snapshotGitBranchEnv = branch
 		fetchWebseeds = func(ctx context.Context, branch, chain string) ([]byte, error) {
 			_, bounded := ctx.Deadline()
 			require.True(t, bounded, "the fetch runs on every startup, so it needs a timeout")
-			require.Equal(t, snapshotGitBranch, branch)
+			require.Equal(t, snapshotGitBranch(), branch)
 			require.Equal(t, networkname.Mainnet, chain)
 			return []byte(file), fetchErr
 		}
@@ -71,4 +72,17 @@ func TestWebseedsFollowTheManifestBranch(t *testing.T) {
 	for _, bad := range []string{"v1:", "v1:https://:443", "v1:erigon310-v1-snapshots-mainnet.erigon.network", "v1:ftp://erigon310-v1-snapshots-mainnet.erigon.network"} {
 		require.Equal(t, embedded, webseeds("release/3.10", `"e3-v1-pub" = "`+bad+`"`, nil), "%q is no HTTP(S) URL with a host", bad)
 	}
+}
+
+func TestSnapshotGitBranchFollowsCommitmentVariant(t *testing.T) {
+	prev := snapshotGitBranchEnv
+	t.Cleanup(func() { snapshotGitBranchEnv = prev })
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	snapshotGitBranchEnv = ""
+
+	require.Equal(t, version.CommitmentV3SnapshotGitBranch, snapshotGitBranch())
+	statecfg.SetCommitmentV3(false)
+	require.Equal(t, version.DefaultSnapshotGitBranch, snapshotGitBranch())
+	snapshotGitBranchEnv = "main"
+	require.Equal(t, "main", snapshotGitBranch(), "SNAPS_GIT_BRANCH must win over the commitment variant")
 }

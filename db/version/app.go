@@ -34,12 +34,14 @@ const (
 	Minor                    = 9             // Minor version component of the current release
 	Micro                    = 0             // Patch version component of the current release
 	Modifier                 = "dev"         // Modifier component of the current release
-	DefaultSnapshotGitBranch = "release/3.6" // Branch of erigontech/erigon-snapshot to use in OtterSync.
+	DefaultSnapshotGitBranch = "release/3.6" // Branch of erigontech/erigon-snapshot to use in OtterSync with legacy commitment.
 	VersionKeyCreated        = "ErigonVersionCreated"
 	VersionKeyFinished       = "ErigonVersionFinished"
 	ClientName               = "erigon"
 	ClientCode               = "EG"
 )
+
+const CommitmentV3SnapshotGitBranch = "release/3.10"
 
 // VersionNoMeta holds the textual version string excluding the metadata.
 var VersionNoMeta = func() string {
