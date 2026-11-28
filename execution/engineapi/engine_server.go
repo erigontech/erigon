@@ -365,12 +365,15 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	npT0 := time.Now()
+	npIO0 := npIONow()
+	var npIOW npIO
 	var npBal, npTx, npHash, npQuick, npLock time.Time
 	defer func() {
 		if req == nil {
 			return
 		}
-		e.logger.Info("[np-split] np", "blk", req.BlockNumber.Uint64(), "entryUs", npT0.UnixMicro(), "endUs", time.Now().UnixMicro(), "bal", npSince(npT0, npBal), "txdec", npSince(npBal, npTx), "hash", npSince(npTx, npHash), "checks", npSince(npHash, npQuick), "lock", npSince(npQuick, npLock), "total", time.Since(npT0))
+		args := []any{"blk", req.BlockNumber.Uint64(), "entryUs", npT0.UnixMicro(), "endUs", time.Now().UnixMicro(), "bal", npSince(npT0, npBal), "txdec", npSince(npBal, npTx), "hash", npSince(npTx, npHash), "checks", npSince(npHash, npQuick), "lock", npSince(npQuick, npLock), "total", time.Since(npT0)}
+		e.logger.Info("[np-split] np", append(args, npIOArgs(npIO0, npIOW, npIONow(), npQuick)...)...)
 	}()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
@@ -616,6 +619,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, true, defaultReadinessWait)
 	npQuick = time.Now()
+	npIOW = npIONow()
 	if err != nil {
 		return nil, err
 	}
