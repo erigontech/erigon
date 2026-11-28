@@ -61,8 +61,12 @@ type prefetchedShard struct {
 	records map[string]prefetchedRecord
 }
 
+// spareQueue hands a closed prefetcher's queue to the next one: allocating 4 MB per block is visible on the newPayload path.
+var spareQueue = make(chan chan prefetchItem, 1)
+
 type branchPrefetcher struct {
 	work   chan prefetchItem
+	stop   chan struct{}
 	wg     sync.WaitGroup
 	seed   maphash.Seed
 	shards [branchPrefetchShards]prefetchedShard
@@ -73,7 +77,11 @@ type branchPrefetcher struct {
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
 	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, branchPrefetchQueue)
+	select {
+	case p.work = <-spareQueue:
+	default:
+		p.work = make(chan prefetchItem, branchPrefetchQueue)
+	}
 	ctx = kv.WithNonBlockingAcquire(ctx)
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
@@ -82,7 +90,7 @@ func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetc
 }
 
 func newPrefetchRecords() *branchPrefetcher {
-	p := &branchPrefetcher{seed: maphash.MakeSeed()}
+	p := &branchPrefetcher{seed: maphash.MakeSeed(), stop: make(chan struct{})}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
@@ -102,8 +110,14 @@ func (p *branchPrefetcher) close() {
 		select {
 		case <-p.work:
 		default:
-			close(p.work)
+			close(p.stop)
 			p.wg.Wait()
+			if cap(p.work) == branchPrefetchQueue {
+				select {
+				case spareQueue <- p.work:
+				default:
+				}
+			}
 			return
 		}
 	}
@@ -154,7 +168,13 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 }
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
-	for it := range p.work {
+	for {
+		var it prefetchItem
+		select {
+		case it = <-p.work:
+		case <-p.stop:
+			return
+		}
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			continue
@@ -178,10 +198,7 @@ func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []by
 	it.touch(read)
 	for range branchPrefetchPerTx - 1 {
 		select {
-		case next, ok := <-p.work:
-			if !ok {
-				return
-			}
+		case next := <-p.work:
 			next.touch(read)
 		default:
 			return

@@ -263,3 +263,11 @@ func TestBranchPrefetcherKeepsTheFirstRecordOfAKey(t *testing.T) {
 	require.Same(t, &first[0], &got[0])
 	require.Equal(t, size, p.bytes.Load())
 }
+
+func TestBranchPrefetcherReusesTheQueueOfAClosedOne(t *testing.T) {
+	first := newBranchPrefetcher(context.Background(), nil)
+	first.close()
+	second := newBranchPrefetcher(context.Background(), nil)
+	defer second.close()
+	require.True(t, first.work == second.work, "a new prefetcher must take the queue of a closed one instead of allocating a new one")
+}
