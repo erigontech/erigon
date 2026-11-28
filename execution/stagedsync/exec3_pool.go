@@ -26,10 +26,11 @@ type poolTask struct {
 	result     *exec.TxResult
 	reruns     int
 
-	mu      sync.Mutex
-	parked  bool
-	pending bool
-	fin     bool
+	mu            sync.Mutex
+	parked        bool
+	pending       bool
+	pendingTarget int
+	fin           bool
 }
 
 type poolWorker struct {
@@ -176,10 +177,9 @@ func (pt *poolTask) waitThen(t, next int) bool {
 const poolNamedReruns = 3
 
 func (pt *poolTask) rerunAfter(named int) bool {
-	pt.reruns++
-	if pt.reruns <= poolNamedReruns {
+	if t, ok := pt.rerunTarget(named); ok {
 		pt.next = psReexec
-		return !pt.be.requeueAt(pt.tv.index, named, pt, pt.be.wakeValidated)
+		return !pt.be.requeueAt(pt.tv.index, t, pt, pt.be.wakeValidated)
 	}
 	return pt.waitThen(pt.tv.index-1, psReexec)
 }
@@ -187,8 +187,8 @@ func (pt *poolTask) rerunAfter(named int) bool {
 // rerunAfterPredecessor re-runs the task once its predecessor commits: the predecessor's deferred sender charge
 // (pre-Amsterdam) lands only at commit, so waking on its validation could repeat the same failure.
 func (pt *poolTask) rerunAfterPredecessor() bool {
-	pt.reruns++
-	return pt.waitThen(pt.tv.index-1, psReexec)
+	t, _ := pt.rerunTarget(pt.tv.index - 1)
+	return pt.waitThen(t, psReexec)
 }
 
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
@@ -285,6 +285,14 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 	return pt.publish(p)
 }
 
+func (pt *poolTask) rerunTarget(t int) (int, bool) {
+	pt.reruns++
+	if pt.reruns > poolNamedReruns {
+		return pt.tv.index - 1, false
+	}
+	return t, true
+}
+
 func (pt *poolTask) publish(p *taskPool) bool {
 	pt.send(p, pt.result)
 	pt.result = nil
@@ -292,8 +300,9 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.mu.Lock()
 	if pt.pending {
 		pt.pending = false
+		target, _ := pt.rerunTarget(pt.pendingTarget)
 		pt.mu.Unlock()
-		return pt.rerunAfterPredecessor()
+		return pt.waitThen(target, psReexec)
 	}
 	pt.parked = true
 	pt.mu.Unlock()

@@ -173,18 +173,18 @@ func TestPoolReexecSignalRequeuesParkedTask(t *testing.T) {
 	pt := &poolTask{be: be, tv: &taskVersion{execTask: &execTask{index: 0}}, next: psReexec, parked: true}
 	be.poolTasks = []*poolTask{pt}
 
-	be.signalSelfLoopReexec(0)
+	be.signalSelfLoopReexec(0, -1)
 	require.False(t, pt.parked, "the re-exec signal left the task parked")
 	require.Equal(t, 1, pe.pool.queue.Len(), "the re-exec signal did not queue the task on the pool")
 	require.Same(t, pt, pe.pool.pop())
 
-	be.signalSelfLoopReexec(0)
+	be.signalSelfLoopReexec(0, -1)
 	require.True(t, pt.pending, "a signal for a running task must latch")
 	require.Equal(t, 0, pe.pool.queue.Len(), "a signal for a running task queued it a second time")
 
 	pt.fin = true
 	pt.pending = false
-	be.signalSelfLoopReexec(0)
+	be.signalSelfLoopReexec(0, -1)
 	require.False(t, pt.pending, "a finalized task must ignore the signal")
 	require.Equal(t, 0, pe.pool.queue.Len())
 }
@@ -257,7 +257,9 @@ func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
 		pt := newPoolUnitTask(be, 2)
 		pt.next = psRecheck
 		pt.result = &exec.TxResult{}
-		pt.pending = pending
+		if pending {
+			be.signalSelfLoopReexec(2, 1)
+		}
 
 		pt.step(pe.pool, nil)
 
@@ -281,7 +283,7 @@ func TestPoolSignalWaitsForPredecessorCommit(t *testing.T) {
 	pt.next = psReexec
 	pt.parked = true
 
-	be.signalSelfLoopReexec(2)
+	be.signalSelfLoopReexec(2, 1)
 	require.Equal(t, 0, pe.pool.queue.Len(), "a re-exec signal queued the task before its predecessor committed")
 	require.Equal(t, []*poolTask{pt}, be.wakeAt[1])
 
@@ -338,7 +340,7 @@ func TestPoolNamedRerunWakesWhenWriterValidates(t *testing.T) {
 	pt2 := newPoolUnitTask(be, 2)
 	require.False(t, pt2.rerunAfter(1), "a dependency that survives the writer's validation waits for its commit")
 
-	be.signalSelfLoopReexec(1)
+	be.signalSelfLoopReexec(1, 0)
 	pt3 := newPoolUnitTask(be, 3)
 	require.False(t, pt3.rerunAfter(1), "a writer queued to re-execute is no longer validated")
 }
@@ -457,4 +459,27 @@ func TestNamedRerunWaitsForAFeeRecipientCellToSettle(t *testing.T) {
 	require.Zero(t, be.pool.queue.Len(), "the reader waits for its writer, not for an earlier commit")
 	be.signalCommitted(1)
 	require.Same(t, pt, be.pool.pop())
+}
+
+func TestPoolLatchedSignalKeepsHighestNamedTarget(t *testing.T) {
+	for _, capped := range []bool{false, true} {
+		pe, be := newPoolUnit(t, 4)
+		pt := newPoolUnitTask(be, 3)
+		pt.next = psRecheck
+		pt.result = &exec.TxResult{}
+		if capped {
+			pt.reruns = poolNamedReruns
+		}
+		be.signalSelfLoopReexec(3, 1)
+		be.signalSelfLoopReexec(3, 0)
+
+		pt.step(pe.pool, nil)
+
+		require.False(t, pt.pending, "the latched signal was not consumed")
+		if capped {
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[2], "past the named-rerun limit the re-run waits for tx-1")
+		} else {
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a latched re-run waits for the highest named writer")
+		}
+	}
 }

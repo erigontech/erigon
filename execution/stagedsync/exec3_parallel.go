@@ -1791,35 +1791,13 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
-	blocker = -1
-	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
-		func(rv, wv state.Version) state.VersionValidity {
-			if rv != wv {
-				// A same-writer re-publication (same TxIndex, new incarnation) names no
-				// blocker: parking would wait on a writer that will just re-publish, so
-				// re-execute at once — the new value is already published. Only a different
-				// writer that moved the version is a blocker to wait for.
-				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
-					// Invariant: a read can only be invalidated by a PREDECESSOR write.
-					// A blocker >= this task is a forward dependency (a future write
-					// invalidating a past read) — impossible in Block-STM; fail loud.
-					if b >= tv.index {
-						panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency",
-							be.blockNum, tv.index, tv.version.TxIndex, b, wv.TxIndex))
-					}
-					blocker = b
-				}
-				return state.VersionInvalid
-			}
-			return state.VersionValid
-		}, false, "")
-	if v != state.VersionValid {
-		if blocker == -1 {
-			// Invalid but no Done writer named: the invalidation is an in-flight
-			// ESTIMATE (MVReadResultDependency), which ValidateReadSet resolves without
-			// calling checkVersion. Find the estimate's writer so the caller waits for
-			// it — re-executing now would re-read the estimate and busy-loop. Validation
-			// also cross-checks the account's AddressPath and SelfDestructPath.
+	stale, blocker, scanned := be.staleReadSet(tv.version.TxIndex, result.TxIn)
+	if stale {
+		if blocker == -1 || !scanned {
+			// No writer named, or the scan stopped at a check that names none: take the
+			// highest in-flight ESTIMATE writer so the caller waits for it — re-executing
+			// now would re-read the estimate and busy-loop. Validation also cross-checks
+			// the account's AddressPath and SelfDestructPath.
 			noteEstimate := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) {
 				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
 				if rr.Status() == state.MVReadResultDependency {
@@ -2933,12 +2911,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				if !be.validateNow(txVersion.TxIndex) {
+				if valid, _ := be.validateNow(txVersion.TxIndex); !valid {
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
 					be.validateTasks.clearComplete(tx)
-					be.signalSelfLoopReexec(tx)
+					be.signalSelfLoopReexec(tx, tx-1)
 					break
 				}
 				delete(be.revalidate, tx)
@@ -2964,7 +2942,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				if senderWrites == nil {
 					be.validateTasks.clearComplete(tx)
-					be.signalSelfLoopReexec(tx)
+					be.signalSelfLoopReexec(tx, tx-1)
 					break
 				}
 				// Serial execution reads the sender before charging it; the block access list
@@ -3035,7 +3013,7 @@ func (be *blockExecutor) signalCommitted(tx int) {
 
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
-func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+func (be *blockExecutor) signalSelfLoopReexec(tx, target int) {
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3047,11 +3025,15 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	}
 	if pt.parked {
 		pt.parked = false
+		target, _ = pt.rerunTarget(target)
 		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt, be.wakeAt) {
+		if !be.requeueAt(tx, target, pt, be.wakeAt) {
 			be.pool.push(pt)
 		}
 		return
+	}
+	if !pt.pending || target > pt.pendingTarget {
+		pt.pendingTarget = target
 	}
 	pt.pending = true
 	pt.mu.Unlock()
@@ -3152,7 +3134,8 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			continue
 		}
 		txVersion := txResult.Task.Version()
-		if be.validateNow(txVersion.TxIndex) {
+		valid, blocker := be.validateNow(txVersion.TxIndex)
+		if valid {
 			continue
 		}
 		be.cntValidationFail++
@@ -3160,7 +3143,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.validateTasks.clearComplete(tx)
 		// Signal the parked worker to re-execute in place; leave execTasks complete so
 		// the re-sent result re-validates without going through the dispatch path.
-		be.signalSelfLoopReexec(tx)
+		be.signalSelfLoopReexec(tx, blocker)
 	}
 }
 
@@ -3195,14 +3178,41 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return slices.Sorted(maps.Keys(set))
 }
 
-func (be *blockExecutor) validateNow(txIdx int) bool {
-	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+func (be *blockExecutor) validateNow(txIdx int) (bool, int) {
+	stale, blocker, scanned := be.staleReadSet(txIdx, be.blockIO.ReadSet(txIdx))
+	if !scanned || blocker < 0 {
+		blocker = be.taskIndexOf(txIdx) - 1
+	}
+	return !stale, blocker
+}
+
+func (be *blockExecutor) staleReadSet(txIdx int, rs state.ReadSet) (stale bool, blocker int, scanned bool) {
+	tx := be.taskIndexOf(txIdx)
+	blocker = -1
+	v := be.versionMap.ValidateReadSet(txIdx, rs,
 		func(rv, wv state.Version) state.VersionValidity {
-			if rv != wv {
-				return state.VersionInvalid
+			if rv == wv {
+				return state.VersionValid
+			}
+			stale = true
+			// A same-writer re-publication (same TxIndex, new incarnation) names no
+			// blocker: parking would wait on a writer that will just re-publish, so
+			// re-execute at once — the new value is already published. Only a version
+			// moved by a different writer names a blocker: the higher of the two writers.
+			// Invariant: a read can only be invalidated by a PREDECESSOR write.
+			// A blocker >= this task is a forward dependency (a future write
+			// invalidating a past read) — impossible in Block-STM; fail loud.
+			if b := max(be.taskIndexOf(rv.TxIndex), be.taskIndexOf(wv.TxIndex)); (rv.TxIndex != wv.TxIndex || wv.Incarnation == -1) && b > blocker {
+				if b >= tx {
+					panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency",
+						be.blockNum, tx, txIdx, b, wv.TxIndex))
+				}
+				blocker = b
 			}
 			return state.VersionValid
-		}, false, "") == state.VersionValid
+		}, false, "")
+	scanned = v == state.VersionValid
+	return stale || !scanned, blocker, scanned
 }
 
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
@@ -3232,7 +3242,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 
 			// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
 			// write stamp does not imply an unchanged read set.
-			valid := be.validateNow(txVersion.TxIndex)
+			valid, blocker := be.validateNow(txVersion.TxIndex)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3269,7 +3279,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// Signal the parked worker whose stale verdict we rejected to re-exec in
 			// place; leave execTasks complete so the re-sent result re-validates
 			// without going through the dispatch path.
-			be.signalSelfLoopReexec(tx)
+			be.signalSelfLoopReexec(tx, blocker)
 		}
 
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {

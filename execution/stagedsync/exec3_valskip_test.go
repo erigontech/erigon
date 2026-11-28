@@ -72,5 +72,6 @@ func TestArrivalValidRejectsStaleRead(t *testing.T) {
 	t.Cleanup(func() { dbg.AssertEnabled = prev })
 	be, _ := newArrivalExecutor(t)
 	writeBalanceBelowReader(be.versionMap)
-	require.False(t, be.validateNow(arrivalReader))
+	valid, _ := be.validateNow(arrivalReader)
+	require.False(t, valid)
 }
