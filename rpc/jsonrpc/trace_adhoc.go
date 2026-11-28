@@ -96,6 +96,36 @@ func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
 	return ethapi.CheckCallData(args.Data, args.Input)
 }
 
+// TraceCallConfig is the override parameter of trace_call and trace_callMany. It accepts either
+// an eth_simulateV1 state override map, keyed by account address, or a TraceConfig object.
+type TraceCallConfig config.TraceConfig
+
+func (c *TraceCallConfig) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	addresses := 0
+	for key := range members {
+		if common.IsHexAddress(key) || hexutil.Has0xPrefix(key) {
+			addresses++
+		}
+	}
+	switch addresses {
+	case 0:
+		return json.Unmarshal(data, (*config.TraceConfig)(c))
+	case len(members):
+		var overrides ethapi.StateOverrides
+		if err := json.Unmarshal(data, &overrides); err != nil {
+			return err
+		}
+		*c = TraceCallConfig{StateOverrides: &overrides}
+		return nil
+	default:
+		return errors.New("override object mixes account addresses with configuration fields")
+	}
+}
+
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
 	Output          hexutil.Bytes                          `json:"output"`
@@ -1206,7 +1236,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) (*TraceCallResult, error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1420,7 +1451,8 @@ func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, k
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, callConfig *TraceCallConfig) ([]*TraceCallResult, error) {
+	traceConfig := (*config.TraceConfig)(callConfig)
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
