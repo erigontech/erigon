@@ -1155,8 +1155,10 @@ func TestHistoricalProposerFirstSlotMissedPastValidatorTable(t *testing.T) {
 			db, _, _, preState, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			fcu.FinalizedSlotVal = 127
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96)); err != nil {
-					return err
+				for slot := uint64(96); slot < 128; slot++ {
+					if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(slot)); err != nil {
+						return err
+					}
 				}
 				return state_accessors.SetStateProcessingProgress(tx, 128)
 			}))
