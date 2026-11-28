@@ -603,13 +603,16 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// read anchored on the destruct so a later funding write invalidates this
 		// reader. The destruct records a balance-clear write at this version (real
 		// SELFDESTRUCT and EIP-161 removal alike), so the read matches the cell and
-		// only a funding write bumps it. It is conflict-detection only — Empty on an
-		// absent account is not a real EVM balance access, so it stays out of the
-		// block access list.
-		if destructed, sdRes, ok := ibs.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
-			ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{
-				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}, internal: true},
-			})
+		// only a funding write bumps it. A balance read the tx already made is kept:
+		// it can be of a live balance a run of the destruct's tx left there. It is
+		// conflict-detection only — Empty on an absent account is not a real EVM
+		// balance access, so it stays out of the block access list.
+		if _, seen := ibs.reads.GetBalance(addr); !seen {
+			if destructed, sdRes, ok := ibs.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
+				ibs.reads.SetBalance(addr, VersionedRead[uint256.Int]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}, internal: true, wiped: true},
+				})
+			}
 		}
 		return true, nil
 	}

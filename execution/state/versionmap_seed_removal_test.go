@@ -18,6 +18,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1410,7 +1411,8 @@ func requireZeroBalanceSeed(t *testing.T, cells *btree.Map[int, *WriteCell[uint2
 // The access list seeds a removal of x at tx 3. The first run of tx 3 writes a balance of 8 at the
 // seed's version, and tx 4 reads it. The re-run removes x, which keeps the seeded destruct and moves
 // the balance to a deleted zero at the re-run's incarnation, so the read of 8 is stale. A read of the
-// deleted zero is recorded at the destruct's version, so it stays valid.
+// deleted zero, or of the removed account's emptiness, is recorded at the destruct's version, so it
+// stays valid.
 func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *testing.T) {
 	t.Parallel()
 	x := accounts.InternAddress(common.HexToAddress("0xd6"))
@@ -1443,4 +1445,166 @@ func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *te
 	vm.MarkWritesValidated(final, nil)
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
 	require.Equal(t, VersionValid, vm.ValidateReadSet(4, readBalance(0), validateEqualVersion, false, ""))
+
+	ibs := NewWithVersionMap(base, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 4)
+	empty, err := ibs.Empty(x)
+	require.NoError(t, err)
+	require.True(t, empty)
+	require.Equal(t, VersionValid, vm.ValidateReadSet(4, ibs.Reads(), validateEqualVersion, false, ""))
+}
+
+// Seeding derives a removal of x at tx 1 from code changes: a deleted zero balance. A run of tx 1
+// that writes a live zero balance writes the value the cell holds with another status, so the
+// cell takes the run's flag and a reader of the balance waits for the run: a deleted balance
+// reads as a removed account.
+func TestEqualBalanceFlushThatRevivesARemovalIsAChange(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xc4"))
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	require.Equal(t, ValueDeleted, requireDoneCell(t, vm.load(x).Balance, 1, 0).valStatus)
+
+	run := &WriteSet{}
+	run.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1, Incarnation: 1}}})
+	vm.FlushWrites(run, false)
+	c, ok := vm.load(x).Balance.Get(1)
+	require.True(t, ok)
+	require.Equal(t, FlagEstimate, c.loadFlag())
+
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	_, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, ibs.HadInvalidRead(), "a reader of the balance waits for the run")
+}
+
+// Seeding derives a removal of x at tx 1 from code changes. A run of tx 1 creates x, which puts a
+// live zero balance over the removal: the first run, at the removal's incarnation, or a run after a
+// drop put the removal back. Tx 2 reads the balance and the code hash of x, and may ask whether x is
+// empty before, after, or once the next run is flushed. While the creating run is in flight tx 2
+// waits for it; once it is validated tx 2 reads the created x, and its reads are invalid once the
+// next run removes x again or writes nothing, which puts the removal back.
+func TestBalanceReadOfACreateOverARemoval(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xc3"))
+	code := []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}
+	for _, bal := range []struct {
+		name    string
+		changes types.AccountChanges
+	}{
+		{"the access list has no balance", types.AccountChanges{Address: x.Value(), CodeChanges: code}},
+		{"the access list has the zero balance", types.AccountChanges{
+			Address: x.Value(), CodeChanges: code,
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(5)}, {Index: 2, Value: uint256.Int{}}},
+		}},
+	} {
+		for _, creatingRun := range []Incarnation{0, 2} {
+			for _, validated := range []bool{false, true} {
+				for _, nextRemoves := range []bool{true, false} {
+					for _, emptyCall := range []string{"none", "first", "last", "after the next run"} {
+						name := fmt.Sprintf("%s/creating run %d/validated=%v/next run removes x=%v/Empty %s", bal.name, creatingRun, validated, nextRemoves, emptyCall)
+						t.Run(name, func(t *testing.T) {
+							t.Parallel()
+							base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+							vm := NewVersionMap(types.BlockAccessList{bal.changes})
+							vm.SeedAddresses()
+							require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+							rerun := func(prev, cur *WriteSet, v Version) {
+								for h := range prev.AllHeaders() {
+									if !cur.Has(h) {
+										vm.DropWrite(h.Address, h.Path, h.Key, v)
+									}
+								}
+								vm.FlushWrites(cur, false)
+							}
+
+							prev := &WriteSet{}
+							if creatingRun > 0 {
+								run0 := &WriteSet{}
+								run0.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1}}})
+								vm.FlushWrites(run0, false)
+								vm.MarkWritesValidated(run0, nil)
+								rerun(run0, prev, Version{TxIndex: 1, Incarnation: 1})
+							}
+
+							creator := NewWithVersionMap(base, vm)
+							defer creator.Close()
+							creator.SetTxContext(1, 1)
+							creator.SetVersion(creatingRun)
+							require.NoError(t, creator.CreateAccount(x, true))
+							require.NoError(t, creator.SetNonce(x, 1, tracing.NonceChangeUnspecified))
+							require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
+							created, err := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+							require.NoError(t, err)
+							rerun(prev, created, Version{TxIndex: 1, Incarnation: creatingRun})
+							if validated {
+								vm.MarkWritesValidated(created, nil)
+							}
+
+							reader := NewWithVersionMap(base, vm)
+							defer reader.Close()
+							reader.SetTxContext(1, 2)
+							askEmpty := func() {
+								_, err := reader.Empty(x)
+								require.NoError(t, err)
+							}
+							if emptyCall == "first" {
+								askEmpty()
+							}
+							_, err = reader.GetBalance(x)
+							require.NoError(t, err)
+							codeHash, err := reader.GetCodeHash(x)
+							require.NoError(t, err)
+							if emptyCall == "last" {
+								askEmpty()
+							}
+							require.Equal(t, !validated, reader.HadInvalidRead(), "tx 2 waits for the run only while it is in flight")
+							if !validated {
+								return
+							}
+							require.Equal(t, accounts.EmptyCodeHash, codeHash, "tx 2 reads the created x")
+
+							next := &WriteSet{}
+							nextVersion := Version{TxIndex: 1, Incarnation: creatingRun + 1}
+							if nextRemoves {
+								next.SetEmptyRemoval(x, nextVersion)
+							}
+							rerun(created, next, nextVersion)
+							if emptyCall == "after the next run" {
+								askEmpty()
+							}
+							reads := reader.Reads()
+							vm.MarkWritesValidated(next, nil)
+							vm.MarkWritesComplete(next)
+							vm.SealUpTo(1)
+							require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""), "tx 2 read the created x")
+
+							for _, read := range []func(*IntraBlockState) error{
+								func(ibs *IntraBlockState) error {
+									if _, err := ibs.GetBalance(x); err != nil {
+										return err
+									}
+									_, err := ibs.GetCodeHash(x)
+									return err
+								},
+								func(ibs *IntraBlockState) error { _, err := ibs.Empty(x); return err },
+							} {
+								fresh := NewWithVersionMap(base, vm)
+								t.Cleanup(fresh.Close)
+								fresh.SetTxContext(1, 2)
+								require.NoError(t, read(fresh))
+								require.False(t, fresh.HadInvalidRead())
+								require.Equal(t, VersionValid, vm.ValidateReadSet(2, fresh.Reads(), validateEqualVersion, false, ""), "a fresh read of the removed x")
+							}
+						})
+					}
+				}
+			}
+		}
+	}
 }

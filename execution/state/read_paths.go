@@ -337,6 +337,7 @@ func readCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key a
 					case StoragePath:
 						s.reads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case BalancePath:
+						hdr.wiped = true
 						s.reads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case NoncePath:
 						s.reads.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
