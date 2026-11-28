@@ -533,8 +533,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 	if config == nil {
 		return nil, nil
 	}
-	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
 	if err != nil {
 		return nil, err
 	}
