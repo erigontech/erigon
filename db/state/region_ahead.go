@@ -56,7 +56,7 @@ func (dt *DomainRoTx) regionAhead(i int, k []byte) {
 	key := regionKey{addr: [length.Addr]byte(k[:length.Addr]), file: i}
 	hits, tracked := dt.regionHits[key]
 	if !tracked && len(dt.regionHits) == regionAheadTracked {
-		clear(dt.regionHits)
+		return
 	}
 	dt.regionHits[key] = hits + 1
 	if hits+1 != regionAheadHits {
