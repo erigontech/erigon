@@ -174,7 +174,7 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 		return nil, false, err
 	}
 	view := g.filters.WithTemporalOverlay(tx)
-	receipt, ok, err := readPersistedReceipt(view, header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	receipt, ok, err := readPersistedReceipt(view, header.Number.Uint64(), header.Hash(), txnHash, txNum, txIndex)
 	if err != nil || !ok {
 		return nil, false, err
 	}
@@ -182,16 +182,15 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	return receipt, true, nil
 }
 
-func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
-	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64, txIndex int) (*types.Receipt, bool, error) {
+	return rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
 		TxNum:     txNum,
 		BlockNum:  blockNum,
 		BlockHash: blockHash,
 		TxnHash:   txnHash,
 		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
 		DontCalcBloom: true,
-	})
-	return receipt, ok && receipt != nil, err
+	}, txIndex)
 }
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
@@ -319,7 +318,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if !rpcDisableRCache && !calculatePostState {
 		var ok bool
 		var err error
-		receiptFromDB, ok, err = readPersistedReceipt(tx, blockNum, blockHash, txnHash, txNum)
+		receiptFromDB, ok, err = readPersistedReceipt(tx, blockNum, blockHash, txnHash, txNum, index)
 		if err != nil {
 			return nil, err
 		}
@@ -704,9 +703,6 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 	generated := fromExecution.Copy()
 	// Blob gas is derived from the transaction and is not stored in the receipt cache.
 	fromDB.BlobGasUsed = txn.GetBlobGas()
-	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
-	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
 		panic(fmt.Sprintf("assert: first log index mismatch: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
 	}
@@ -877,11 +873,8 @@ func (g *Generator) readRetainedReceipt(tx kv.TemporalTx, header *types.Header, 
 	if err != nil || next != afterTx {
 		return nil, err
 	}
-	receipt, ok, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum)
-	if err != nil || !ok || receipt.TransactionIndex != uint(index) {
-		return nil, err
-	}
-	return receipt, nil
+	receipt, _, err := readPersistedReceipt(tx, header.Number.Uint64(), hash, txn.Hash(), txNum, index)
+	return receipt, err
 }
 
 type loaderMutex[K comparable] struct {

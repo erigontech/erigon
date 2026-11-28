@@ -104,12 +104,14 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
 	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(
-			types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate),
-			*signer, testKey,
-		)
-		require.NoError(t, err)
-		block.AddTx(txn)
+		for range 2 {
+			txn, err := types.SignTx(
+				types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate),
+				*signer, testKey,
+			)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
 	}, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -121,18 +123,20 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.NoError(t, err)
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
-	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
-	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
+	header := block.HeaderNoCopy()
 
 	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
-	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
-	require.NoError(t, err)
-	require.Len(t, receipt.Logs, 1)
-	require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
+	for i, txn := range block.Transactions() {
+		txNum := minTxNum + 1 + uint64(i) // past the block's system tx
+		receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, i, txNum, nil)
+		require.NoError(t, err)
+		require.Len(t, receipt.Logs, 1)
+		require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
 
-	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true)
-	bloom := types.CreateBloom(types.Receipts{receipt})
-	require.Equal(t, &bloom, served.LogsBloom)
+		served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true)
+		bloom := types.CreateBloom(types.Receipts{receipt})
+		require.Equal(t, &bloom, served.LogsBloom)
+	}
 }
 
 // TestGetReceiptReplayOfStorageWriteAndLog pins a replayed receipt of a contract call that writes
