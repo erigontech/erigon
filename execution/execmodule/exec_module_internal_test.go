@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
@@ -41,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -453,4 +456,63 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 func TestCacheCodeByHashIsNilWithoutStateCache(t *testing.T) {
 	require.True(t, (&Cache{}).CodeByHash() == nil)
 	require.True(t, (&Cache{execModule: &ExecModule{}}).CodeByHash() == nil, "a nil *StateCache must not become a non-nil CodeByHash")
+}
+
+func TestBeginPayloadStopsMempoolPrewarmBetweenRounds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var rounds int
+		module := &ExecModule{
+			backgroundCtx: t.Context(),
+			config:        chain.TestChainBerlinConfig,
+			readAheader:   exec.NewBlockReadAheader(),
+			logger:        log.New(),
+			mempoolPrewarm: &mempoolPrewarm{provide: func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+				rounds++
+				return nil, nil
+			}},
+		}
+		defer module.stopMempoolPrewarm()
+		module.prepareMempoolPrewarm()(&types.Header{})
+		done := module.mempoolPrewarm.done
+		synctest.Wait()
+		require.Equal(t, 1, rounds)
+		select {
+		case <-done:
+			t.Fatal("the pass must remain alive between rounds")
+		default:
+		}
+		start := time.Now()
+		end := module.BeginPayload()
+		defer end()
+		select {
+		case <-done:
+		default:
+			t.Fatal("BeginPayload returned before the pass stopped")
+		}
+		require.Equal(t, start, time.Now(), "BeginPayload should wake the pass before the next timer tick")
+		require.Equal(t, 1, rounds)
+	})
+}
+
+func TestMempoolPrewarmSkipsACallbackPreparedBeforeANewerPayload(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var rounds int
+		module := &ExecModule{
+			backgroundCtx: t.Context(),
+			config:        chain.TestChainBerlinConfig,
+			readAheader:   exec.NewBlockReadAheader(),
+			logger:        log.New(),
+			mempoolPrewarm: &mempoolPrewarm{provide: func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+				rounds++
+				return nil, nil
+			}},
+		}
+		defer module.stopMempoolPrewarm()
+		start := module.prepareMempoolPrewarm()
+		module.BeginPayload()()
+		start(&types.Header{})
+		synctest.Wait()
+		require.Zero(t, rounds, "a callback prepared before a newer payload must not start a pass")
+		require.Nil(t, module.mempoolPrewarm.done)
+	})
 }

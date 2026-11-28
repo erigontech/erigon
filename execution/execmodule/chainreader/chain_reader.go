@@ -55,6 +55,13 @@ func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionM
 	}
 }
 
+func (c ChainReaderWriterEth1) BeginPayload() func() {
+	if module, ok := c.executionModule.(*execmodule.ExecModule); ok {
+		return module.BeginPayload()
+	}
+	return nil
+}
+
 func (c ChainReaderWriterEth1) Config() *chain.Config {
 	return c.cfg
 }

@@ -22,6 +22,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 
@@ -280,4 +281,57 @@ func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *te
 		_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
 		require.ErrorIs(t, err, context.Canceled)
 	}
+}
+
+func TestPrewarmTxnsSelectsPrivateCopiesWithinGasBudget(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	var slots TxnSlots
+	for nonce := range uint64(2) {
+		slots.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	txns, err := pool.PrewarmTxns(ctx, common.Hash{}, 0, 150_000, 10, nil)
+	require.NoError(t, err)
+	require.Len(t, txns, 1, "the budget fits only one transaction's declared gas limit")
+	require.Equal(t, slots.Txns[0].Txn.Hash(), txns[0].Hash())
+	require.NotSame(t, slots.Txns[0].Txn, txns[0])
+	gotSender, ok := txns[0].GetSender()
+	require.True(t, ok)
+	require.Equal(t, sender, gotSender.Value())
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	txns, err = pool.PrewarmTxns(ctx, common.Hash{}, 0, 150_000, 10, nil)
+	require.NoError(t, err)
+	require.Empty(t, txns, "a pass should give up if the pool lock is busy")
+}
+
+func TestPrewarmTxnsExcludesWarmHashesBeforeGasBudget(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	first := newTestSenderTxnSlot(t, sender, 0)
+	var slots TxnSlots
+	slots.Append(first, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	txns, err := pool.PrewarmTxns(ctx, common.Hash{}, 0, 100_000, 1, nil)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	seen := mapset.NewSet[[32]byte](txns[0].Hash())
+	late := newTestSenderTxnSlot(t, sender, 1)
+	var lateSlots TxnSlots
+	lateSlots.Append(late, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, lateSlots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	txns, err = pool.PrewarmTxns(ctx, common.Hash{}, 0, 100_000, 1, seen)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	require.Equal(t, late.Txn.Hash(), txns[0].Hash(), "a warm hash must not use the round's gas budget")
+	require.Equal(t, 1, seen.Cardinality(), "selection must leave execution tracking to the caller")
 }

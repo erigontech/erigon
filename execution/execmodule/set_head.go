@@ -58,6 +58,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
+	e.stopMempoolPrewarm()
 	resumeReadAhead, err := e.suspendReadAhead(ctx)
 	if err != nil {
 		return fmt.Errorf("suspend read-ahead: %w", err)

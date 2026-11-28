@@ -376,6 +376,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, errCaplinEnabled
 	}
 
+	if end := e.chainRW.BeginPayload(); end != nil {
+		defer end()
+	}
+
 	e.engineLogSpamer.RecordRequest()
 	e.logger.Debug("[NewPayload] processing new request", "blockNum", req.BlockNumber.Uint64(), "blockHash", req.BlockHash, "parentHash", req.ParentHash)
 	if len(req.LogsBloom) != types.BloomByteLength {

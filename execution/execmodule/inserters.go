@@ -65,6 +65,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	e.stopMempoolPrewarm()
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()

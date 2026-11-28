@@ -23,16 +23,19 @@ import (
 	"testing/synctest"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -344,4 +347,91 @@ func TestWaitForResponseDoesNotCallBackAfterCancellation(t *testing.T) {
 		require.True(t, busy)
 		require.Equal(t, 2, calls, "a callback must not start after cancellation")
 	}
+}
+
+func TestMempoolPrewarmFlagOff(t *testing.T) {
+	previous := dbg.MempoolPrewarm
+	dbg.MempoolPrewarm = false
+	t.Cleanup(func() { dbg.MempoolPrewarm = previous })
+	module := execmoduletester.New(t)
+	called := make(chan struct{}, 1)
+	module.ExecModule.SetMempoolPrewarm(func(context.Context, common.Hash, uint64, uint64, int, mapset.Set[[32]byte]) (types.Transactions, error) {
+		called <- struct{}{}
+		return nil, nil
+	})
+	require.Nil(t, module.ExecModule.BeginPayload(), "the flag off must not install the prewarm guard")
+	applyMempoolPrewarmHead(t, module)
+	module.ExecModule.Drain()
+	require.Empty(t, called)
+}
+
+func TestNewPayloadCancelsMempoolPrewarm(t *testing.T) {
+	previous := dbg.MempoolPrewarm
+	dbg.MempoolPrewarm = true
+	t.Cleanup(func() { dbg.MempoolPrewarm = previous })
+
+	for _, tc := range []struct {
+		name    string
+		options []execmoduletester.Option
+	}{
+		{name: "synchronous prune"},
+		{name: "background prune", options: []execmoduletester.Option{execmoduletester.WithFcuBackgroundPrune(), execmoduletester.WithParallelStateFlushing(true)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := execmoduletester.New(t, tc.options...)
+			started := make(chan common.Hash, 1)
+			stopped := make(chan struct{})
+			m.ExecModule.SetMempoolPrewarm(func(ctx context.Context, hash common.Hash, _, _ uint64, _ int, _ mapset.Set[[32]byte]) (types.Transactions, error) {
+				started <- hash
+				<-ctx.Done()
+				close(stopped)
+				return nil, ctx.Err()
+			})
+			t.Cleanup(m.ExecModule.Drain)
+			head := applyMempoolPrewarmHead(t, m)
+			select {
+			case hash := <-started:
+				require.Equal(t, head.Hash(), hash)
+			case <-time.After(time.Second):
+				t.Fatal("committed forkchoice did not start mempool prewarm")
+			}
+
+			repeat, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), common.Hash{}, common.Hash{})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, repeat.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			select {
+			case <-stopped:
+				t.Fatal("repeated forkchoice stopped the pass on the same head")
+			default:
+			}
+
+			srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, nil, false, false, false, true, nil, nil, 0, 64)
+			payload, err := engine_types.ExecutionPayloadFromBlock(head)
+			require.NoError(t, err)
+			payload.LogsBloom = nil
+			_, err = srv.NewPayloadV2(t.Context(), payload)
+			require.ErrorContains(t, err, "invalid logsBloom")
+			select {
+			case <-stopped:
+			default:
+				t.Fatal("newPayload returned before it stopped the mempool pass")
+			}
+		})
+	}
+}
+
+func applyMempoolPrewarmHead(t *testing.T, m *execmoduletester.ExecModuleTester) *types.Block {
+	t.Helper()
+	pack, err := m.GenerateChainFrom(m.Genesis, 1, nil)
+	require.NoError(t, err)
+	head := pack.Blocks[0]
+	status, err := m.InsertBlocks(t.Context(), pack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	return head
 }
