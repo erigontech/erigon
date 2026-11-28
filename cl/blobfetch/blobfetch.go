@@ -223,7 +223,7 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 
 	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, base.JoinPath(path).String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, RedactURLError(err)
 	}
 	req.Header.Set("Accept", "application/json")
 
@@ -429,11 +429,18 @@ func RedactURLError(err error) error {
 		return errors.New("malformed endpoint URL")
 	}
 	ue.URL = RedactEndpoint(ue.URL)
-	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
+	switch {
+	case strings.HasPrefix(ue.Err.Error(), "failed to parse Location header"):
 		// net/http quotes the header, and a server can repeat the request's path and query in it.
 		ue.Err = errors.New("malformed redirect Location header")
+	case errors.Is(ue.Err, context.Canceled):
+		ue.Err = context.Canceled
+	case errors.Is(ue.Err, context.DeadlineExceeded):
+		ue.Err = context.DeadlineExceeded
+	default:
+		ue.Err = errors.New("HTTP request failed")
 	}
-	return err
+	return ue
 }
 
 // ValidEndpoint reports whether endpoint is an http or https URL with a host. Callers do not echo a rejected value:
