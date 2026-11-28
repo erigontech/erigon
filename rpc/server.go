@@ -143,7 +143,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 		return
 	}
 
-	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), new(handler), codec)
+	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
 	for {
 		msgs, batch, err := readBatch(codec, s.batchLimit, s.logger)
 		if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
@@ -166,22 +166,21 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	}
 }
 
-// newConnHandler builds the handler of one connection in h, so every transport applies the
+// newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
-func (s *Server) newConnHandler(ctx context.Context, h *handler, conn jsonWriter) *handler {
-	return newHandler(ctx, h, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
+	return newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
-// serveSingleRequest reads and processes a single RPC request from the given codec, with its handler
-// built in h. This
+// serveSingleRequest reads and processes a single RPC request from the given codec. This
 // is used to serve HTTP connections. Subscriptions are not allowed in this mode.
-func (s *Server) serveSingleRequest(ctx context.Context, h *handler, codec ServerCodec, stream *jsonstream.Stream) *jsonrpcMessage {
+func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {
 		return nil
 	}
 
-	h = s.newConnHandler(ctx, h, codec)
+	h := s.newConnHandler(ctx, codec)
 	h.allowSubscribe = false
 	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
