@@ -17,9 +17,8 @@ const (
 	gossipSubDout = 1  // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
-	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
-	gossipSubMcacheGossip = 3   // number of windows to gossip about
-	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
+	gossipSubMcacheLen    = 6 // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3 // number of windows to gossip about
 	// heartbeat interval
 	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
 )
@@ -39,6 +38,7 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]
 	}
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
+	seenTTL := seenMessagesTTL(beaconConfig)
 
 	thresholds := &pubsub.PeerScoreThresholds{
 		GossipThreshold:             -4000,
@@ -63,11 +63,13 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]
 		DecayInterval:               oneSlotDuration,
 		DecayToZero:                 gossip.DecayToZero,
 		RetainScore:                 100 * oneEpochDuration, // Retain for 100 epochs
+		SeenMsgTTL:                  seenTTL,
 	}
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(p.msgId),
+		pubsub.WithSeenMessagesTTL(seenTTL),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(p.cfg.NetworkConfig.MaxGossipMessageSize())),
@@ -78,6 +80,12 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]
 		pubsub.WithMessagePriority(gossipMessageHasPriority),
 	}
 	return psOpts, nil
+}
+
+// seenMessagesTTL is seen_ttl of the consensus p2p spec: message IDs are kept for two epochs,
+// the window in which an attestation stays valid since Deneb.
+func seenMessagesTTL(beaconConfig *clparams.BeaconChainConfig) time.Duration {
+	return 2 * time.Duration(beaconConfig.SlotsPerEpoch) * time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 }
 
 func gossipMessageHasPriority(m *pubsub.Message) bool {
