@@ -62,6 +62,12 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+var (
+	stubNoTxIdx = dbg.EnvBool("STUB_NO_TXIDX", false)
+	stubNoAcc   = dbg.EnvBool("STUB_NO_ACC", false)
+	stubNoRRoot = dbg.EnvBool("STUB_NO_RROOT", false)
+)
+
 // commitmentIntraBlockTxs > 0 enables mid-block commitment checkpoints every N
 // txs for non-BAL blocks, overlapping the fold with execution (0 = off). It
 // reuses the step-edge mid-block checkpoint path: fold the touches accumulated

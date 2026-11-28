@@ -278,7 +278,8 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
-	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+	if stubNoTxIdx {
+	} else if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	return nil
@@ -766,7 +767,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 						// Spawn per-block validation concurrently; joined via Wait() below
 						// after the other per-result work has run alongside it.
-						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
+						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts && !stubNoRRoot, checkBloom && !stubNoRRoot, applyResult.Receipts,
 							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
 
@@ -786,7 +787,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// keep accumulator access single-threaded. StartChange must precede
 					// NotifyAccumulator: it initialises the latestChange entry the notify
 					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
+					if stubNoAcc {
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					} else if pe.accumulator != nil && applyResult.Header != nil {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
 							<-balDone
