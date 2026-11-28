@@ -528,6 +528,11 @@ func (s *Antiquary) NotifyBackfilled() {
 	s.backfilled.Store(true) // this is the lowest slot not in snapshots
 }
 
+// Backfilled reports whether NotifyBackfilled has been called.
+func (s *Antiquary) Backfilled() bool {
+	return s.backfilled.Load()
+}
+
 func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
 }
