@@ -104,7 +104,7 @@ func buildAccountHistory(t *testing.T, faults accountHistoryFaults) kv.TemporalR
 	require.NoError(t, domains.Flush(ctx, tx))
 	require.NoError(t, tx.Commit())
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	require.NoError(t, agg.BuildFiles(db, txs, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, txs, collateAll))
 	require.GreaterOrEqual(t, agg.EndTxNumMinimax(), uint64(30))
 	return db
 }
