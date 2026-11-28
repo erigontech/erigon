@@ -795,12 +795,15 @@ func (h *PoolTestHandle) SimulateCachedEonRead(t *testing.T, ekg testhelpers.Eon
 }
 
 func (h *PoolTestHandle) SimulateNewEonRead(t *testing.T, ekg testhelpers.EonKeyGeneration) {
+	h.SimulateCachedEonRead(t, ekg)
+	h.simulateEonState(t, ekg)
+}
+
+func (h *PoolTestHandle) simulateEonState(t *testing.T, ekg testhelpers.EonKeyGeneration) {
+	t.Helper()
 	ksmAddr := common.HexToAddress(h.config.KeyperSetManagerContractAddress)
 	ksmAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetManagerABI))
 	require.NoError(t, err)
-	eonIndexRes, err := ksmAbi.Methods["getKeyperSetIndexByBlock"].Outputs.PackValues([]any{uint64(ekg.EonIndex)})
-	require.NoError(t, err)
-	h.SimulateCallResult(ksmAddr, eonIndexRes)
 	keyperSetAddr := common.HexToAddress("0x0000000000000000000000000000000000005555")
 	keyperSetAddrRes, err := ksmAbi.Methods["getKeyperSetAddress"].Outputs.PackValues([]any{keyperSetAddr})
 	require.NoError(t, err)
