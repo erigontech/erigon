@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
@@ -77,6 +79,12 @@ func TestGenesisStartNotifiesAntiquaryBackfilled(t *testing.T) {
 	stage := ConsensusClStages().Stages[DownloadHistoricalBlocks]
 	require.NoError(t, stage.ActionFunc(context.Background(), log.New(), cfg, Args{}))
 	require.True(t, cfg.hasDownloaded)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root)
+		return nil
+	}))
 
 	require.True(t, antiq.Backfilled(), "a genesis start must mark the antiquary backfilled, otherwise its state worker never runs")
 }
