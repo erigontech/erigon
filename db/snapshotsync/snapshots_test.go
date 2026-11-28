@@ -2476,3 +2476,27 @@ func TestRetireFilesAboveRetiresAHiddenMergedFile(t *testing.T) {
 		}
 	}
 }
+
+func TestRetireFilesBelowRetiresAHiddenMergedFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 200_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var deleted []string
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 150_000, func(l []string) error { deleted = append(deleted, l...); return nil })
+	require.NoError(t, err)
+	require.True(t, retired)
+	require.Contains(t, deleted, snaptype.SegmentFileName(version.V1_0, 0, 100_000, snaptype2.Transactions.Enum()))
+	require.NoError(t, s.OpenFolder())
+	for _, r := range visibleRanges(s, snaptype2.Transactions) {
+		require.GreaterOrEqual(t, r.From(), uint64(140_000))
+	}
+}

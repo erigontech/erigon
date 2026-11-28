@@ -1804,10 +1804,10 @@ func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...str
 	return nil
 }
 
-// RetireFilesBelow retires VISIBLE segments of type typ ending below blockTo, handing their
-// files (.seg + indexes) to onDelete for the seeder. Reads visible only — invisible garbage
-// is the merge clean-up's job. The View pins the generation for both the read and the
-// deferred off-lock unlink.
+// RetireFilesBelow retires the visible segments of type typ ending below blockTo, and the merged
+// files hidden over them, handing their files (.seg + indexes) to onDelete for the seeder. Other
+// invisible garbage is the merge clean-up's job. The View pins the generation for both the read
+// and the deferred off-lock unlink.
 func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
@@ -1823,13 +1823,22 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	}
 
 	var names, paths []string
-	for _, sn := range segs {
-		if sn.To() >= blockTo {
-			continue
+	retire := func(sn *DirtySegment) {
+		if sn.To() < blockTo {
+			names = append(names, sn.FileName())
+			paths = append(paths, sn.FilePaths(s.dir)...)
 		}
-		names = append(names, sn.src.FileName())
-		paths = append(paths, sn.src.FilePaths(s.dir)...)
 	}
+	for _, sn := range segs {
+		retire(sn.src)
+	}
+	s.dirtyLock.RLock()
+	for sn := range s.mergedFilesNotInEveryType() { // not visible, but shown again once the files under it are gone
+		if sn.segType.Enum() == typ.Enum() {
+			retire(sn)
+		}
+	}
+	s.dirtyLock.RUnlock()
 	if len(names) == 0 {
 		return false, nil
 	}
