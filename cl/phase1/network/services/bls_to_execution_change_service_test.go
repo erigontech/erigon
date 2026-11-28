@@ -270,6 +270,25 @@ func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
 	require.True(t, testCtx.gomockCtrl.Satisfied())
 }
 
+func TestBlsToExecutionChangeIgnoresVerifiedChangeThePoolSkips(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, st := setupBLSToExecutionChangeTest(t)
+	msg := newSignedBLSToExecutionChangeForGossip(validatorIndex)
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From))
+	syncHeadState(t, testCtx.syncedData, st)
+	testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "ComputeSigningRoot", msg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(2)
+	testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
+	require.NoError(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+
+	// The pool entry and the validator cache entry expire, but the pool still remembers the signature.
+	require.True(t, testCtx.operationsPool.BLSToExecutionChangesPool.DeleteIfExist(msg.SignedBLSToExecutionChange.Signature))
+	testCtx.service.(*blsToExecutionChangeService).seen.Remove(validatorIndex)
+
+	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	require.False(t, testCtx.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature))
+	require.True(t, testCtx.gomockCtrl.Satisfied())
+}
+
 func TestBlsToExecutionChangeGossipNotAcceptedBeforeSignatureVerification(t *testing.T) {
 	const validatorIndex = uint64(1)
 	testCtx, st := setupBLSToExecutionChangeTest(t)

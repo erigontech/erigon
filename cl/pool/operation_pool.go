@@ -43,9 +43,11 @@ func NewOperationPool[K comparable, T any](capacity int, matricName string) *Ope
 	}
 }
 
-func (o *OperationPool[K, T]) Insert(k K, operation T) {
+// Insert reports whether it stored the operation. A key inserted within lifeSpan is skipped,
+// even if the pool has dropped it since.
+func (o *OperationPool[K, T]) Insert(k K, operation T) bool {
 	if _, ok := o.recentlySeen.Load(k); ok {
-		return
+		return false
 	}
 	o.pool.Add(k, operation)
 	o.recentlySeen.Store(k, time.Now())
@@ -60,6 +62,7 @@ func (o *OperationPool[K, T]) Insert(k K, operation T) {
 		})
 		o.lastPruned = time.Now()
 	}
+	return true
 }
 
 func (o *OperationPool[K, T]) DeleteIfExist(k K) (removed bool) {

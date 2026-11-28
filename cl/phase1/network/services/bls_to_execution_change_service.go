@@ -180,7 +180,9 @@ func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.Signed
 	if seen, _ := s.seen.ContainsOrAdd(change.Message.ValidatorIndex, struct{}{}); seen {
 		return false
 	}
+	if !s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change) {
+		return false
+	}
 	s.emitters.Operation().SendBlsToExecution(change)
-	s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change)
 	return true
 }

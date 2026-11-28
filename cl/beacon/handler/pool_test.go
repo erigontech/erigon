@@ -726,6 +726,8 @@ func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
 	}
 	message := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xab}}
 	pooled := &cltypes.SignedBLSToExecutionChange{Message: message, Signature: sign(keys[0], message)}
+	pooledSSZ, err := pooled.EncodeSSZ(nil)
+	require.NoError(t, err)
 	otherAddress := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xcd}}
 	post := func(t *testing.T, handler *ApiHandler, change *cltypes.SignedBLSToExecutionChange) int {
 		body, err := json.Marshal([]*cltypes.SignedBLSToExecutionChange{change})
@@ -782,6 +784,7 @@ func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
 				gossipManager:               gossipManager,
 			}
 			require.Equal(t, http.StatusOK, post(t, handler, pooled))
+			require.Equal(t, [][]byte{pooledSSZ}, published)
 			published = nil
 
 			require.Equal(t, tc.wantStatus, post(t, handler, tc.submission))
