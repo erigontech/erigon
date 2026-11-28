@@ -1803,10 +1803,22 @@ func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...str
 	return nil
 }
 
+// retireLocked detaches segs from dirty, retires them and publishes the new visible files. It returns
+// their file paths for the seeder. Must be called with dirtyLock held.
+func (s *BaseRoSnapshots) retireLocked(segs retiredSegments) (paths []string) {
+	for _, sn := range segs {
+		paths = append(paths, sn.FilePaths(s.dir)...)
+		s.dirty[sn.segType.Enum()].Delete(sn)
+	}
+	retire(mvcc.RetireReasonAged, segs)
+	s.recalcVisibleFiles(s.alignMin, segs)
+	return paths
+}
+
 // RetireFilesBelow retires VISIBLE segments of type typ ending below blockTo, handing their
 // files (.seg + indexes) to onDelete for the seeder. Reads visible only — invisible garbage
-// is the merge clean-up's job. The View pins the generation for both the read and the
-// deferred off-lock unlink.
+// is the merge clean-up's job. Files are picked and detached under one dirtyLock, so a merge
+// cannot land in between. The View pins the generation for the deferred off-lock unlink.
 func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
@@ -1814,41 +1826,41 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 
 	v := s.View()
 	defer v.Close()
-	segs := v.Segments(typ)
-
-	wouldRetireEveryFile := len(segs) > 0 && blockTo > segs[len(segs)-1].To()
-	if wouldRetireEveryFile {
-		return false, nil
-	}
-
-	var names, paths []string
-	for _, sn := range segs {
-		if sn.To() >= blockTo {
-			continue
+	var segs retiredSegments
+	var paths []string
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		visible := s.visible.Load().segments[typ.Enum()]
+		wouldRetireEveryFile := len(visible) > 0 && blockTo > visible[len(visible)-1].To()
+		if wouldRetireEveryFile {
+			return
 		}
-		names = append(names, sn.src.FileName())
-		paths = append(paths, sn.src.FilePaths(s.dir)...)
-	}
-	if len(names) == 0 {
+		for _, sn := range visible {
+			if sn.To() < blockTo {
+				segs = append(segs, sn.src)
+			}
+		}
+		if len(segs) > 0 {
+			paths = s.retireLocked(segs)
+		}
+	}()
+	if len(segs) == 0 {
 		return false, nil
 	}
-
+	s.logger.Info("[snapshots] retired old block files", "type", typ.Name(), "removed", len(segs), "blockTo", blockTo)
 	if onDelete != nil {
 		if err := onDelete(paths); err != nil {
-			return false, fmt.Errorf("onDelete: %w", err)
+			return true, fmt.Errorf("onDelete: %w", err)
 		}
 	}
-
-	if err := s.retireFiles(mvcc.RetireReasonAged, names...); err != nil {
-		return false, err
-	}
-	s.logger.Info("[snapshots] retired old block files", "type", typ.Name(), "removed", len(names), "blockTo", blockTo)
 	return true, nil
 }
 
 // RetireFilesAbove retires VISIBLE segments whose range ends beyond blockNum — the extra
 // files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
-// to onDelete for the seeder. Reads visible only; unlink is deferred to the reader watermark.
+// to onDelete for the seeder. Files are picked and detached under one dirtyLock; unlink is
+// deferred to the reader watermark.
 func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
@@ -1856,33 +1868,36 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 
 	v := s.View()
 	defer v.Close()
-	var names, paths []string
-	retire := func(sn *DirtySegment) {
-		if !BlockFileRetainedUnderCap(sn.To(), blockNum) {
-			names = append(names, sn.FileName())
-			paths = append(paths, sn.FilePaths(s.dir)...)
+	var paths []string
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		var segs retiredSegments
+		retire := func(sn *DirtySegment) {
+			if !BlockFileRetainedUnderCap(sn.To(), blockNum) {
+				segs = append(segs, sn)
+			}
 		}
-	}
-	for _, t := range s.types {
-		for _, sn := range v.Segments(t) {
-			retire(sn.src)
+		visible := s.visible.Load()
+		for _, t := range s.types {
+			for _, sn := range visible.segments[t.Enum()] {
+				retire(sn.src)
+			}
 		}
-	}
-	s.dirtyLock.RLock()
-	for sn := range s.mergedFilesNotInEveryType() { // not visible, but shown again once the files under it are gone
-		retire(sn)
-	}
-	s.dirtyLock.RUnlock()
-	if len(names) == 0 {
+		for sn := range s.mergedFilesNotInEveryType() { // not visible, but shown again once the files under it are gone
+			retire(sn)
+		}
+		if len(segs) > 0 {
+			paths = s.retireLocked(segs)
+		}
+	}()
+	if len(paths) == 0 || onDelete == nil {
 		return nil
 	}
-
-	if onDelete != nil {
-		if err := onDelete(paths); err != nil {
-			return fmt.Errorf("onDelete: %w", err)
-		}
+	if err := onDelete(paths); err != nil {
+		return fmt.Errorf("onDelete: %w", err)
 	}
-	return s.retireFiles(mvcc.RetireReasonAged, names...)
+	return nil
 }
 
 type indexJob struct {
