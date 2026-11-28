@@ -572,6 +572,11 @@ func TestTopLevelPrimitiveResults(t *testing.T) {
 	symbolRes, err := run(`Symbol('x')`)
 	require.NoError(t, err)
 	require.Equal(t, string(undefinedRes), string(symbolRes), "JSON.stringify treats undefined and a Symbol the same")
+	for _, hookResult := range []string{`undefined`, `Symbol('x')`, `function() {}`} {
+		res, err = run(`(BigInt.prototype.toJSON = function() { return ` + hookResult + `; }, 42n)`)
+		require.NoError(t, err, hookResult)
+		require.Equal(t, string(undefinedRes), string(res), "a BigInt hook that returns %s gives an undefined result", hookResult)
+	}
 
 	_, nestedErr := run(`{amount: 42n}`)
 	require.Error(t, nestedErr)

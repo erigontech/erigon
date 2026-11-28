@@ -495,6 +495,9 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 	if err != nil {
 		return nil, err
 	}
+	if string(encoded) == "{}" { // a toJSON hook returned undefined, a Symbol or a function
+		return json.Marshal(goja.Undefined())
+	}
 	return encoded[len(`{"":`) : len(encoded)-1], nil
 }
 
