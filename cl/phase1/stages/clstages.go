@@ -413,6 +413,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 							return fmt.Errorf("failed to write genesis beacon block: %w", err)
 						}
+						// A genesis start has no block or blob history to download, so both backfills are
+						// already complete. The history download stage is the only other place that marks them.
+						cfg.antiquary.NotifyBackfilled()
+						cfg.antiquary.NotifyBlobBackfilled(true)
 						cfg.state = nil // Release the state
 						return nil
 					}

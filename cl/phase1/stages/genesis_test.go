@@ -21,11 +21,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
@@ -64,4 +67,24 @@ func TestWriteGenesisBeaconBlockGloas(t *testing.T) {
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, config.GenesisSlot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(genesisRoot), canonicalRoot)
+}
+
+// A genesis start returns from DownloadHistoricalBlocks before the history download
+// stage, which is the only other place that marks the block and blob backfills.
+func TestDownloadHistoricalBlocksMarksAntiquaryBackfilledAtGenesis(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	cfg := fixture.cfg
+	cfg.syncedData = fixture.syncedData
+	cfg.state = fixture.headState
+	cfg.dirs = datadir.New(t.TempDir())
+	cfg.indiciesDB = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg.antiquary = antiquary.NewAntiquary(t.Context(), nil, nil, nil, cfg.beaconCfg, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), false, false, false, false, nil)
+	require.False(t, cfg.antiquary.Backfilled())
+	require.False(t, cfg.antiquary.BlobBackfilled())
+
+	stage := ConsensusClStages().Stages[DownloadHistoricalBlocks]
+	require.NoError(t, stage.ActionFunc(t.Context(), log.New(), cfg, Args{}))
+
+	require.True(t, cfg.antiquary.Backfilled(), "a genesis start has nothing to download, so the antiquary must be marked backfilled")
+	require.True(t, cfg.antiquary.BlobBackfilled(), "a genesis start has no blobs to download, so the blob backfill must be marked complete")
 }
