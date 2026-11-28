@@ -1800,18 +1800,29 @@ func TestInclusionListSatisfiedUsesCachedResult(t *testing.T) {
 // empty. An IL txn over the per-txn execution cap fits only in that real pool.
 func TestInclusionListSatisfiedResolvesAmbiguousGasPools(t *testing.T) {
 	t.Parallel()
-	exact := inclusionListResultForExecutionOnlyBlock(t, true)
+	exact := inclusionListResultForExecutionOnlyBlock(t, 1, true)
 	require.NotNil(t, exact)
 	require.False(t, *exact, "the IL txn must fit the block's exact gas pool")
 
-	fallback := inclusionListResultForExecutionOnlyBlock(t, false)
+	fallback := inclusionListResultForExecutionOnlyBlock(t, 1, false)
+	require.NotNil(t, fallback)
+	require.Equal(t, *exact, *fallback)
+}
+
+func TestInclusionListSatisfiedReplaySeesEarlierTxnWrites(t *testing.T) {
+	t.Parallel()
+	exact := inclusionListResultForExecutionOnlyBlock(t, 2, true)
+	require.NotNil(t, exact)
+	require.False(t, *exact)
+
+	fallback := inclusionListResultForExecutionOnlyBlock(t, 2, false)
 	require.NotNil(t, fallback)
 	require.Equal(t, *exact, *fallback)
 }
 
 // inclusionListResultForExecutionOnlyBlock returns the IL result from execution
 // when executeWithIL is set, otherwise from the state history fallback.
-func inclusionListResultForExecutionOnlyBlock(t *testing.T, executeWithIL bool) *bool {
+func inclusionListResultForExecutionOnlyBlock(t *testing.T, blockTxnCount int, executeWithIL bool) *bool {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -1824,15 +1835,17 @@ func inclusionListResultForExecutionOnlyBlock(t *testing.T, executeWithIL bool) 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	blockTxn, err := types.SignTx(types.NewTransaction(0, sender, uint256.NewInt(1), params.TxGas, gasPrice, nil), signer, key)
-	require.NoError(t, err)
 	chainPack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
-		gen.AddTx(blockTxn)
+		for nonce := range uint64(blockTxnCount) {
+			blockTxn, err := types.SignTx(types.NewTransaction(nonce, sender, uint256.NewInt(1), params.TxGas, gasPrice, nil), signer, key)
+			require.NoError(t, err)
+			gen.AddTx(blockTxn)
+		}
 	})
 	require.NoError(t, err)
 	block := chainPack.Blocks[0]
 	require.Greater(t, block.GasLimit()-block.GasUsed(), params.MaxTxnGasLimit)
-	ilTxn, err := types.SignTx(types.NewTransaction(1, sender, uint256.NewInt(1), block.GasLimit(), gasPrice, nil), signer, key)
+	ilTxn, err := types.SignTx(types.NewTransaction(uint64(blockTxnCount), sender, uint256.NewInt(1), block.GasLimit(), gasPrice, nil), signer, key)
 	require.NoError(t, err)
 	il := types.Transactions{ilTxn}
 
@@ -1846,6 +1859,61 @@ func inclusionListResultForExecutionOnlyBlock(t *testing.T, executeWithIL bool) 
 	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
 	require.NoError(t, err)
 	return satisfied
+}
+
+// The only block txn calls a contract that STATICCALLs the beacon roots contract for the block's
+// timestamp and hits INVALID when the call fails. It burns its whole gas limit unless it sees the
+// block-init write, and the gas limits make the IL txn fit only the exact gas pool.
+func inclusionListResultForBlockInitReader(t *testing.T, executeWithIL bool) *bool {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	probe := common.Address{0xcc}
+	const probeTxnGas = 200_000
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: params.MaxTxnGasLimit + 100_000,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(common.Ether)},
+			common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"): {Nonce: 1, Code: common.FromHex("0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500")},
+			// mstore(0, timestamp); if iszero(staticcall(gas, beaconRoots, 0, 32, 0, 32)) { invalid }
+			probe: {Nonce: 1, Code: common.FromHex("0x42600052602060006020600073000f3df6d732807ef1319fb7b8bb8522d0beac025afa602757fe5b00")},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	probeTxn, err := types.SignTx(types.NewTransaction(0, probe, uint256.NewInt(0), probeTxnGas, gasPrice, nil), signer, key)
+	require.NoError(t, err)
+	chainPack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.AddTx(probeTxn)
+	})
+	require.NoError(t, err)
+	require.Equal(t, types.ReceiptStatusSuccessful, chainPack.Receipts[0][0].Status)
+	block := chainPack.Blocks[0]
+	require.GreaterOrEqual(t, block.GasLimit()-block.GasUsed(), params.MaxTxnGasLimit)
+	require.Less(t, block.GasLimit()-probeTxnGas, params.MaxTxnGasLimit)
+	ilTxn, err := types.SignTx(types.NewTransaction(1, sender, uint256.NewInt(1), block.GasLimit(), gasPrice, nil), signer, key)
+	require.NoError(t, err)
+	il := types.Transactions{ilTxn}
+	if executeWithIL {
+		block = block.WithInclusionList(il)
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	return satisfied
+}
+
+func TestInclusionListSatisfiedReplaySeesBlockInitWrites(t *testing.T) {
+	t.Parallel()
+	exact := inclusionListResultForBlockInitReader(t, true)
+	require.NotNil(t, exact)
+	require.False(t, *exact)
+	fallback := inclusionListResultForBlockInitReader(t, false)
+	require.NotNil(t, fallback)
+	require.Equal(t, *exact, *fallback)
 }
 
 func TestInclusionListSatisfiedUnknownBlockIsNil(t *testing.T) {

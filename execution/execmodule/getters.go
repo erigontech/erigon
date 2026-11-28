@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -121,7 +122,7 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 		result = &satisfied
 	}
 	if result == nil {
-		gasPool, err := e.replayBlockGasPool(tx, block, blockStartTxNum, getHeader)
+		gasPool, err := e.replayBlockGasPool(tx, block, blockStartTxNum, getHeader, blockContext.Rules(e.config))
 		if err != nil {
 			return nil, err
 		}
@@ -137,12 +138,25 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 
 // replayBlockGasPool re-executes block on the state before it to recover the
 // per-dimension gas left, which the header's max-of-dimensions GasUsed hides.
-func (e *ExecModule) replayBlockGasPool(tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, getHeader func(common.Hash, uint64) (*types.Header, error)) (*protocol.GasPool, error) {
+func (e *ExecModule) replayBlockGasPool(tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, getHeader func(common.Hash, uint64) (*types.Header, error), blockRules *chain.Rules) (*protocol.GasPool, error) {
 	header := block.Header()
 	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
 	defer ibs.Close()
+	publishPhase := func() error {
+		writes, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return err
+		}
+		ibs.FlushWritesToVersionMap(writes)
+		ibs.ResetIO()
+		return nil
+	}
 	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
+	ibs.SetTxContext(block.NumberU64(), -1)
 	if err := protocol.InitializeBlockExecution(e.engine, chainReader, header, e.config, ibs, e.logger, nil); err != nil {
+		return nil, err
+	}
+	if err := publishPhase(); err != nil {
 		return nil, err
 	}
 	gasPool := protocol.NewGasPool(header.GasLimit, e.config.GetMaxBlobGasPerBlock(header.Time))
@@ -150,6 +164,9 @@ func (e *ExecModule) replayBlockGasPool(tx kv.TemporalTx, block *types.Block, bl
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(block.NumberU64(), i)
 		if _, err := protocol.ApplyTransaction(e.config, blockHashFunc, e.engine, accounts.NilAddress, gasPool, ibs, header, txn, new(protocol.GasUsed), vm.Config{}); err != nil {
+			return nil, err
+		}
+		if err := publishPhase(); err != nil {
 			return nil, err
 		}
 	}
