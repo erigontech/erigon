@@ -63,7 +63,11 @@ func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum 
 }
 
 func (w *witnessMemBatch) DomainPutOwned(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
-	return w.DomainPut(domain, k, v, txNum, preval)
+	if !w.sealed {
+		return w.DomainPut(domain, k, v, txNum, preval)
+	}
+	w.recordWrite(domain, k)
+	return w.TemporalMemBatch.DomainPutOwned(domain, k, v, txNum, preval)
 }
 
 func (w *witnessMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
