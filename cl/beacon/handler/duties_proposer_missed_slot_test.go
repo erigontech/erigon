@@ -17,52 +17,47 @@
 package handler
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetDutiesProposerHistoricalEpochFirstSlotMissed(t *testing.T) {
-	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, blocks, _, _, postState, handler, _, manager, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	cfg := handler.beaconChainCfg
+
+	epoch := state.Epoch(postState)
+	firstSlot := epoch * cfg.SlotsPerEpoch
+	for _, block := range blocks {
+		require.NotEqual(t, firstSlot, block.Block.Slot)
+	}
+	require.Greater(t, postState.Slot(), firstSlot)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.HeadVal = headRoot
 	fcu.HeadSlotVal = postState.Slot()
-
-	epoch := uint64(3)
-	firstSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: headRoot}
-	fcu.FinalizedSlotVal = (epoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+	fcu.FinalizedSlotVal = (epoch+1)*cfg.SlotsPerEpoch - 1
 	fcu.LowestAvailableSlotVal = &firstSlot
 
-	before := getProposerDutiesForEpoch(t, handler, epoch)
-	require.Len(t, before.Data, int(handler.beaconChainCfg.SlotsPerEpoch))
+	expected, err := postState.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+	head, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(head, (epoch+1)*cfg.SlotsPerEpoch))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(head, headRoot))
 
-	key := base_encoding.Encode64ToBytes4(firstSlot)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		row, err := tx.GetOne(kv.SlotData, key)
-		require.NoError(t, err)
-		require.NotNil(t, row)
-		return tx.Delete(kv.SlotData, key)
-	}))
-
-	recorder := httptest.NewRecorder()
-	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
-	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-
-	var after proposerDutiesResponse
-	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&after))
-	require.Equal(t, before.Data, after.Data)
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.Len(t, response.Data, int(cfg.SlotsPerEpoch))
+	for i, duty := range response.Data {
+		require.Equal(t, firstSlot+uint64(i), duty.Slot)
+		require.Equal(t, expected[i], duty.ValidatorIndex, "slot %d", duty.Slot)
+	}
 }
