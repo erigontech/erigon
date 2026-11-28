@@ -80,3 +80,13 @@ func displayOf(bytes []byte) []byte {
 
 	return bytes[:20]
 }
+
+func TestEncodedSingleByteTrieValueLength(t *testing.T) {
+	for _, b := range []byte{0, 0x7f, 0x80, 0x99, 0xff} {
+		value := RlpEncodedBytes{b}
+		encoded, err := EncodeToBytes([]byte(value))
+		if err != nil || value.DoubleRLPLen() != len(encoded) {
+			t.Fatalf("length of encoded trie value %x: got %d, want %d, err %v", b, value.DoubleRLPLen(), len(encoded), err)
+		}
+	}
+}

@@ -182,6 +182,39 @@ func TestV2Resolution(t *testing.T) {
 	}
 }
 
+func TestRetainedEmbeddedNodeValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		keys [][]byte
+	}{
+		{"branch", [][]byte{{0x10}, {0x11}, {0x20}}},
+		{"extension", [][]byte{{0x10}, {0x11}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reference := newEmpty()
+			hexKeys := make([][]byte, len(tc.keys))
+			for i, key := range tc.keys {
+				reference.Update(key, key)
+				hexKeys[i] = nibblizeKey(key, true)
+			}
+
+			hb := NewHashBuilder(false)
+			retainRoot := func(prefix []byte) bool { return len(prefix) == 0 }
+			genStructStepsOver(t, hb, retainRoot, nil, hexKeys, func(i int) GenStructStepData {
+				return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(tc.keys[i])}
+			}, nil)
+			require.Equal(t, reference.Hash(), hb.rootHash())
+
+			retained := NewInMemoryTrie(hb.root())
+			for _, key := range tc.keys {
+				value, found := retained.Get(key)
+				require.True(t, found, "key %x", key)
+				require.Equal(t, key, value, "key %x", key)
+			}
+		})
+	}
+}
+
 // In this test, we try to combine both accounts and their storage items in the single
 // hash builder by tricking the GenStructStep slightly.
 // For storage items, we will be using the keys which are concatenation of the contract address hash,
