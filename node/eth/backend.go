@@ -29,7 +29,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -199,6 +198,7 @@ type Ethereum struct {
 	stopNode       func() error
 	bgComponentsEg errgroup.Group
 	readAheader    *exec.BlockReadAheader
+	execWorkers    *stagedsync.ExecWorkers
 	kzgWarmupDone  chan struct{}
 }
 
@@ -735,6 +735,9 @@ func New(
 		txnProvider = backend.shutterPool
 	}
 
+	// One worker set for every config that runs ExecV3 over chainDB, blockReader and engine.
+	backend.execWorkers = &stagedsync.ExecWorkers{}
+	execWorkers := backend.execWorkers
 	blkBuilder := builder.NewBuilder(
 		backend.chainDB,
 		&config.Builder,
@@ -757,7 +760,7 @@ func New(
 			config.Sync,
 			config.ExperimentalBAL,
 			backend.readAheader,
-		),
+		).ShareWorkers(execWorkers),
 		backend.notifications.Events,
 		&vm.Config{},
 		txnProvider,
@@ -844,8 +847,6 @@ func New(
 		}
 	}
 
-	// One worker set for every config that runs ExecV3 over chainDB, blockReader and engine.
-	execWorkers := new(atomic.Pointer[[]*exec.WorkerContext])
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, execWorkers)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
@@ -1497,6 +1498,7 @@ func (s *Ethereum) Stop() error {
 	if s.execModule != nil {
 		s.execModule.Drain()
 	}
+	s.execWorkers.Close()
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
 	// transactions. The read-aheader spawns fire-and-forget goroutines via
