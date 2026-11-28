@@ -30,6 +30,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -2635,7 +2636,7 @@ func TestRetireBelowKeepsTransactionsVisible(t *testing.T) {
 	require.Equal(t, uint64(300_000), s.VisibleSegmentsMaxTo(snaptype2.Transactions.Enum()), "no transaction is visible after the retire")
 }
 
-// Cutoff retires run while readers walk the visible files and indexes are built.
+// Cutoff retires run while readers walk the visible files and an index build is in flight.
 func TestRetireConcurrentWithReadersAndIndexBuilds(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -2645,6 +2646,14 @@ func TestRetireConcurrentWithReadersAndIndexBuilds(t *testing.T) {
 		}
 	}
 	createTestSegmentFile(t, 0, 50_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	idxNames := []string{
+		snaptype.IdxFileName(version.V1_0, 0, 50_000, snaptype2.Transactions.Name()),
+		snaptype.IdxFileName(version.V1_0, 0, 50_000, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	}
+	stash := t.TempDir()
+	for _, n := range idxNames {
+		require.NoError(t, os.Rename(filepath.Join(dir, n), filepath.Join(stash, n)))
+	}
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(t, s.OpenFolder())
@@ -2672,21 +2681,205 @@ func TestRetireConcurrentWithReadersAndIndexBuilds(t *testing.T) {
 			}
 		})
 	}
+	jobs := s.claimIndexJobs() // the index build of [0, 50k) starts
+	require.Len(t, jobs, 1)
+	built := make(chan struct{})
+	release := make(chan struct{})
 	wg.Go(func() {
-		for i := range 50 {
-			_ = s.OpenFolder()
-			if i%2 == 0 {
-				_ = s.IndexMissed(t.Context(), "t", dir, nil, logger)
-			}
+		defer close(built)
+		<-release
+		for _, n := range idxNames {
+			_ = os.Rename(filepath.Join(stash, n), filepath.Join(dir, n))
 		}
+		s.ReleaseRange(jobs[0].t, jobs[0].from, jobs[0].to)
+		_ = s.OpenFolder()
 	})
 	for i := range 20 {
-		_, err := s.RetireFilesBelow(snaptype2.Transactions, uint64(10_000*(i%9+1)), nil)
+		retired, err := s.RetireFilesBelow(snaptype2.Transactions, uint64(10_000*(i%9+1)), nil)
 		require.NoError(t, err)
+		require.False(t, retired, "a retire below the cutoff runs while the index build is in flight")
 		require.NoError(t, s.RetireFilesAbove(90_000, nil))
 	}
+	close(release)
+	<-built
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 30_000, nil)
+	require.NoError(t, err)
+	require.True(t, retired)
 	close(stop)
 	wg.Wait()
+
+	require.NoError(t, s.OpenFolder())
+	for _, r := range visibleRanges(s, snaptype2.Transactions) {
+		require.GreaterOrEqual(t, r.From(), uint64(20_000), "transactions below the cutoff are visible again")
+	}
+	s.WalkDirtySegments(snaptype2.Transactions.Enum(), func(sn *DirtySegment) bool {
+		require.True(t, sn.IsIndexed(), sn.FileName())
+		for _, f := range sn.FilePaths(dir) {
+			require.FileExists(t, filepath.Join(dir, f))
+		}
+		return true
+	})
 }
 
 func mergeErr(_ bool, err error) error { return err }
+
+func visibleCovers(s *BaseRoSnapshots, typ snaptype.Type, from, to uint64) bool {
+	for _, r := range visibleRanges(s, typ) {
+		if r.From() <= from && r.To() >= to {
+			return true
+		}
+	}
+	return false
+}
+
+// A merge integrates while a retire below waits for dirtyLock: the retire selects against the
+// visible files of that moment, so it keeps the merge output that holds the blocks at the cutoff.
+func TestRetireFilesBelowDuringAMergeKeepsTheMergeOutput(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	var small []string
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for from := uint64(0); from < 30_000; from += 10_000 {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+			small = append(small, snaptype.SegmentFileName(version.V1_0, from, from+10_000, typ.Enum()))
+		}
+		createTestSegmentFile(t, 0, 20_000, typ.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenList(small, false))
+	require.True(t, visibleCovers(s, snaptype2.Transactions, 10_000, 20_000))
+
+	s.dirtyLock.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.RetireFilesBelow(snaptype2.Transactions, 15_000, nil)
+		done <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.visible.Load().refcnt.Load() == 0 {
+		require.True(t, time.Now().Before(deadline))
+		time.Sleep(time.Millisecond)
+	}
+	// What integrateMergedDirtyFiles does for the [0, 20k) merge.
+	var merged []string
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		merged = append(merged, snaptype.SegmentFileName(version.V1_0, 0, 20_000, typ.Enum()))
+	}
+	require.NoError(t, s.openSegments(merged, true, false))
+	var retired retiredSegments
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for _, r := range []Range{{0, 10_000}, {10_000, 20_000}} {
+			if sn := s.delete(snaptype.SegmentFileName(version.V1_0, r.from, r.to, typ.Enum())); sn != nil {
+				retired = append(retired, sn)
+			}
+		}
+	}
+	retire(mvcc.RetireReasonMerged, retired)
+	s.recalcVisibleFiles(s.alignMin, retired)
+	s.dirtyLock.Unlock()
+	require.NoError(t, <-done)
+
+	require.True(t, visibleCovers(s, snaptype2.Transactions, 15_000, 20_000),
+		"blocks at or above the cutoff were retired: visible %v", visibleRanges(s, snaptype2.Transactions))
+}
+
+// An unindexed segment below the cutoff whose index is not being built is retired with the others.
+func TestRetireFilesBelowRetiresAnUnindexedFileWithNoIndexBuild(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		for from := uint64(0); from < 30_000; from += 10_000 {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	for _, n := range []string{
+		snaptype.IdxFileName(version.V1_0, 0, 10_000, snaptype2.Transactions.Name()),
+		snaptype.IdxFileName(version.V1_0, 0, 10_000, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	} {
+		require.NoError(t, os.Remove(filepath.Join(dir, n)))
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.False(t, s.isInProgress(snaptype2.Transactions.Enum(), 0, 10_000))
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 25_000, nil)
+	require.NoError(t, err)
+	require.True(t, retired, "no index build is in flight, yet the retire waits")
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+	s.dirty[snaptype2.Transactions.Enum()].Walk(func(segs []*DirtySegment) bool {
+		for _, sn := range segs {
+			require.GreaterOrEqual(t, sn.to, uint64(25_000), "a file below the cutoff stays: %s", sn.FileName())
+		}
+		return true
+	})
+}
+
+// An unindexed merged file that straddles the cutoff is retired, so indexing it later shows nothing below the cutoff.
+func TestRetireFilesBelowRetiresAnUnindexedStraddlingFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	idxNames := []string{
+		snaptype.IdxFileName(version.V1_0, 0, 100_000, snaptype2.Transactions.Name()),
+		snaptype.IdxFileName(version.V1_0, 0, 100_000, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	}
+	stash := t.TempDir()
+	for _, n := range idxNames {
+		require.NoError(t, os.Rename(filepath.Join(dir, n), filepath.Join(stash, n)))
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 50_000, nil)
+	require.NoError(t, err)
+	require.True(t, retired)
+	for _, n := range idxNames {
+		require.NoError(t, os.Rename(filepath.Join(stash, n), filepath.Join(dir, n)))
+	}
+	require.NoError(t, s.OpenFolder())
+	for _, r := range visibleRanges(s, snaptype2.Transactions) {
+		require.GreaterOrEqual(t, r.From(), uint64(40_000), "transactions below the cutoff are visible again: %v", visibleRanges(s, snaptype2.Transactions))
+	}
+}
+
+// Two versions of one range resolve to the same index files, so retiring the older one keeps them.
+func TestRetireFilesBelowKeepsTheIndexOfASameRangeSurvivor(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 200_000, typ.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 200_000, 300_000, typ.Enum(), dir, version.V1_0, logger)
+	}
+	createTestSegmentFile(t, 0, 200_000, snaptype2.Transactions.Enum(), dir, version.V1_1, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, 3, s.dirty[snaptype2.Transactions.Enum()].Len())
+
+	var deleted []string
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 200_000, func(l []string) error { deleted = append(deleted, l...); return nil })
+	require.NoError(t, err)
+	require.True(t, retired)
+	for _, f := range deleted {
+		require.Equal(t, ".seg", filepath.Ext(f), "an index the kept segment reads is handed to the seeder: %s", f)
+	}
+	s.reclaimRetired()
+	s.WalkDirtySegments(snaptype2.Transactions.Enum(), func(sn *DirtySegment) bool {
+		for _, f := range sn.FilePaths(dir) {
+			require.FileExists(t, filepath.Join(dir, f), "the kept segment lost its index")
+		}
+		return true
+	})
+	require.NoError(t, s.OpenFolder())
+	require.True(t, visibleCovers(s, snaptype2.Transactions, 0, 200_000))
+}

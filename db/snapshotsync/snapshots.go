@@ -1804,25 +1804,46 @@ func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...str
 	return nil
 }
 
-// dirtyFilesIf returns the names and file paths of the dirty segments of the given types that match.
-// Cutoff retires select by range, not by visibility: a hidden file is shown again once the files
-// under it are gone.
-func (s *BaseRoSnapshots) dirtyFilesIf(match func(*DirtySegment) bool, types ...snaptype.Enum) (names, paths []string) {
+// retireDirtyLocked retires the dirty segments of the given types that match and publishes the new
+// visible files. It returns their file paths for the seeder. Cutoff retires select by range, not by
+// visibility: a hidden file is shown again once the files under it are gone. Must be called with
+// dirtyLock held.
+func (s *BaseRoSnapshots) retireDirtyLocked(match func(*DirtySegment) bool, types ...snaptype.Enum) (retired retiredSegments, paths []string) {
 	for _, t := range types {
-		s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
-			if match(sn) {
-				names = append(names, sn.FileName())
-				paths = append(paths, sn.FilePaths(s.dir)...)
+		var matched retiredSegments
+		keptRanges := make(map[Range]struct{})
+		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if match(sn) {
+					matched = append(matched, sn)
+				} else {
+					keptRanges[sn.Range] = struct{}{}
+				}
 			}
 			return true
 		})
+		for _, sn := range matched {
+			files := sn.FilePaths(s.dir)
+			// openIdx masks the version, so a kept segment of the same range reads these index files.
+			if _, shared := keptRanges[sn.Range]; shared {
+				sn.keepIdxFiles.Store(true)
+				files = slices.DeleteFunc(files, func(f string) bool { return filepath.Ext(f) != ".seg" })
+			}
+			paths = append(paths, files...)
+			s.dirty[t].Delete(sn)
+		}
+		retired = append(retired, matched...)
 	}
-	return names, paths
+	if len(retired) > 0 {
+		retire(mvcc.RetireReasonAged, retired)
+		s.recalcVisibleFiles(s.alignMin, retired)
+	}
+	return retired, paths
 }
 
-// RetireFilesBelow retires every indexed segment of type typ ending below blockTo, visible or not,
-// handing their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for
-// the deferred off-lock unlink.
+// RetireFilesBelow retires every segment of type typ ending below blockTo, visible or not, handing
+// their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for the
+// deferred off-lock unlink.
 func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
@@ -1830,46 +1851,51 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 
 	v := s.View()
 	defer v.Close()
-	segs := v.Segments(typ)
-
-	wouldRetireEveryFile := len(segs) == 0 || blockTo > segs[len(segs)-1].To()
-	if wouldRetireEveryFile {
-		return false, nil
-	}
-
-	visible := make(map[*DirtySegment]bool, len(segs))
-	for _, sn := range segs {
-		visible[sn.src] = true
-	}
-	var unindexedBelow bool
-	names, paths := s.dirtyFilesIf(func(sn *DirtySegment) bool {
-		if !sn.IsIndexed() {
-			unindexedBelow = unindexedBelow || sn.to <= blockTo
-			return false
+	t := typ.Enum()
+	var retired retiredSegments
+	var paths []string
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		segs := s.visible.Load().segments[t]
+		wouldRetireEveryFile := len(segs) == 0 || blockTo > segs[len(segs)-1].To()
+		if wouldRetireEveryFile {
+			return
 		}
-		// A file that is not visible holds no block the visible files lack, so it goes once it
-		// starts below the cutoff; kept, it would be shown again with the range below the cutoff.
-		return sn.to < blockTo || (sn.from < blockTo && !visible[sn])
-	}, typ.Enum())
-	if unindexedBelow {
-		// Its index may be in flight, and once indexed it would cut the visible files at a gap.
-		s.logger.Debug("[snapshots] block file retire waits for an index build", "type", typ.Name(), "blockTo", blockTo)
+		visible := make(map[*DirtySegment]bool, len(segs))
+		for _, sn := range segs {
+			visible[sn.src] = true
+		}
+		var indexBuildBelow bool
+		s.dirty[t].Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if !sn.IsIndexed() && sn.from < blockTo && s.isInProgress(t, sn.from, sn.to) {
+					indexBuildBelow = true
+					return false
+				}
+			}
+			return true
+		})
+		if indexBuildBelow {
+			// Once indexed it would cut the visible files at a gap; the next cutoff cycle retires it.
+			s.logger.Debug("[snapshots] block file retire waits for an index build", "type", typ.Name(), "blockTo", blockTo)
+			return
+		}
+		// A file that is not visible holds no block the visible files lack, so it goes once it starts
+		// below the cutoff; kept, it would be shown again with the range below the cutoff.
+		retired, paths = s.retireDirtyLocked(func(sn *DirtySegment) bool {
+			return sn.to < blockTo || (sn.from < blockTo && !visible[sn])
+		}, t)
+	}()
+	if len(retired) == 0 {
 		return false, nil
 	}
-	if len(names) == 0 {
-		return false, nil
-	}
-
+	s.logger.Info("[snapshots] retired old block files", "type", typ.Name(), "removed", len(retired), "blockTo", blockTo)
 	if onDelete != nil {
 		if err := onDelete(paths); err != nil {
-			return false, fmt.Errorf("onDelete: %w", err)
+			return true, fmt.Errorf("onDelete: %w", err)
 		}
 	}
-
-	if err := s.retireFiles(mvcc.RetireReasonAged, names...); err != nil {
-		return false, err
-	}
-	s.logger.Info("[snapshots] retired old block files", "type", typ.Name(), "removed", len(names), "blockTo", blockTo)
 	return true, nil
 }
 
@@ -1883,19 +1909,18 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 
 	v := s.View()
 	defer v.Close()
-	names, paths := s.dirtyFilesIf(func(sn *DirtySegment) bool {
+	s.dirtyLock.Lock()
+	retired, paths := s.retireDirtyLocked(func(sn *DirtySegment) bool {
 		return sn.IsIndexed() && !BlockFileRetainedUnderCap(sn.to, blockNum)
 	}, s.enums...)
-	if len(names) == 0 {
+	s.dirtyLock.Unlock()
+	if len(retired) == 0 || onDelete == nil {
 		return nil
 	}
-
-	if onDelete != nil {
-		if err := onDelete(paths); err != nil {
-			return fmt.Errorf("onDelete: %w", err)
-		}
+	if err := onDelete(paths); err != nil {
+		return fmt.Errorf("onDelete: %w", err)
 	}
-	return s.retireFiles(mvcc.RetireReasonAged, names...)
+	return nil
 }
 
 type indexJob struct {
