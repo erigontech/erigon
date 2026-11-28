@@ -428,6 +428,110 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 	}
 }
 
+// A payload with more transactions than its gas limit allows is INVALID. When its parent is
+// validated and the payload is well formed, the parent is the latest valid ancestor and
+// latestValidHash must name it. When the parent is not validated, a transaction is zero-length or
+// malformed, the block hash is wrong, the blob hashes do not match or the block access list is
+// malformed, latestValidHash stays null.
+func TestNewPayloadGasLimitRejectionReportsValidatedParent(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 1
+	parentHash := common.Hash{0x1}
+	for _, test := range []struct {
+		name            string
+		parentValidated bool
+		rawTxn          hexutil.Bytes // replaces the payload's transaction, keeping the block hash right
+		wrongBlockHash  bool
+		prague          bool
+		blobHashes      []common.Hash // passed to engine_newPayloadV4
+		amsterdam       bool
+		bal             hexutil.Bytes // the block access list of engine_newPayloadV5
+		wantParent      bool
+	}{
+		{name: "validated parent", parentValidated: true, wantParent: true},
+		{name: "parent not validated", parentValidated: false},
+		{name: "zero-length transaction", parentValidated: true, rawTxn: hexutil.Bytes{}},
+		{name: "malformed transaction", parentValidated: true, rawTxn: hexutil.Bytes{0xc0}},
+		{name: "wrong block hash", parentValidated: true, wrongBlockHash: true},
+		{name: "validated parent on Prague", parentValidated: true, prague: true, blobHashes: []common.Hash{}, wantParent: true},
+		{name: "wrong blob hashes on Prague", parentValidated: true, prague: true, blobHashes: []common.Hash{{0x01}}},
+		{name: "validated parent on Amsterdam", parentValidated: true, amsterdam: true, bal: hexutil.Bytes{0xc0}, wantParent: true},
+		{name: "malformed block access list on Amsterdam", parentValidated: true, amsterdam: true, bal: hexutil.Bytes{0xc1, 0x80}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := preCancunChainConfig()
+			switch {
+			case test.prague:
+				cfg = preOsakaChainConfig()
+			case test.amsterdam:
+				cfg = allForksChainConfig()
+			}
+			to := common.Address{0x1}
+			txs := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}}
+			header := makeParentHeader(1001)
+			header.ParentHash = parentHash
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			if test.prague || test.amsterdam {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
+				balHash := crypto.Keccak256Hash(test.bal) // the hash of an empty or malformed list
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			if test.rawTxn != nil {
+				payload.Transactions = []hexutil.Bytes{test.rawTxn}
+				header.TxHash = types.DeriveSha(types.BinaryTransactions([][]byte{test.rawTxn}))
+				payload.BlockHash = types.RlpHash(header) // Hash() would return the hash cached above
+			}
+			if test.wrongBlockHash {
+				payload.BlockHash = common.Hash{0x2}
+			}
+
+			stub := &stubExecutionModule{
+				isValidatedFunc: func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+			}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			switch {
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, test.blobHashes, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.amsterdam:
+				payload.BlockAccessList = &test.bal
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			default:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			require.NoError(t, err)
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
+			if test.wantParent {
+				require.NotNil(t, status.LatestValidHash)
+				require.Equal(t, parentHash, *status.LatestValidHash)
+			} else {
+				require.Nil(t, status.LatestValidHash)
+			}
+		})
+	}
+}
+
 func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
 	t.Parallel()
 

@@ -512,8 +512,27 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
+		// A validated parent is the latest valid ancestor of this payload, but only once the payload is
+		// well formed: latestValidHash must stay null for a zero-length or malformed transaction, a wrong
+		// block hash, blob hashes that do not match the transactions and a malformed block access list.
+		// Otherwise it cannot be determined here, and it stays null too.
+		var latestValidHash common.Hash
+		if e.chainRW.IsValidated(req.ParentHash) && blockAccessListErr == nil {
+			transactions, wellFormed := payloadIsWellFormed(&header, req.BlockHash, req.Transactions)
+			if wellFormed && blockAccessList != nil && blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)) != nil {
+				wellFormed = false
+			}
+			if wellFormed && version >= clparams.DenebVersion && !deriveBlobHashes {
+				err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), e.config.GetMaxBlobGasPerBlock(header.Time), e.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
+				wellFormed = !errors.Is(err, misc.ErrMismatchBlobHashes) && !errors.Is(err, misc.ErrInvalidVersionedHash)
+			}
+			if wellFormed {
+				latestValidHash = req.ParentHash
+			}
+		}
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
+			LatestValidHash: latestValidOrNull(latestValidHash),
 			ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
 		}, nil
 	}
@@ -1300,6 +1319,27 @@ func ancestorRejected(ancestor common.Hash, ancestorErr string) string {
 		return ""
 	}
 	return fmt.Sprintf("ancestor %s rejected: %s", ancestor, ancestorErr)
+}
+
+// payloadIsWellFormed reports whether every transaction of a payload decodes and its block hash
+// matches the header built from the payload, and returns the decoded transactions. It sets
+// header.TxHash. It does not recover senders or check gas.
+func payloadIsWellFormed(header *types.Header, blockHash common.Hash, raw []hexutil.Bytes) ([]types.Transaction, bool) {
+	txs := make([][]byte, len(raw))
+	transactions := make([]types.Transaction, len(raw))
+	for i, transaction := range raw {
+		if len(transaction) == 0 || types.TypedTransactionMarshalledAsRlpString(transaction) {
+			return nil, false
+		}
+		txn, err := types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
+		if err != nil {
+			return nil, false
+		}
+		txs[i] = transaction
+		transactions[i] = txn
+	}
+	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+	return transactions, header.Hash() == blockHash
 }
 
 func latestValidOrNull(h common.Hash) *common.Hash {
