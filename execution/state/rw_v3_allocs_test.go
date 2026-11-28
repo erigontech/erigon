@@ -342,6 +342,24 @@ func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
 		"three more account fields cost %v allocations per account; holding them by value costs none", perAccount)
 }
 
+// The fold applies every tx's view, and a transfer writes two of its eight categories, so
+// the categories the tx did not write must cost no allocation.
+func TestApplyWritesSkipsCategoriesTheTxDidNotWrite(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	ws := &WriteSet{}
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(5)})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 1})
+	view := NewVersionMapWriteView(ws, NewVersionMap(nil), 0)
+	txNum := uint64(1)
+	allocs := testing.AllocsPerRun(20, func() {
+		txNum++
+		require.NoError(t, ApplyWrites(view, domains, tx, 1, txNum, false))
+	})
+	// Measured 60 when every category is ranged and 15 when only the written ones are.
+	require.Less(t, allocs, 30.0, "a balance and nonce write costs %v allocations", allocs)
+}
+
 // latestReads counts the reads of one domain ApplyWrites sends to the database.
 type latestReads struct {
 	kv.TemporalTx

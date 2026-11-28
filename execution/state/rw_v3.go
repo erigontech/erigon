@@ -109,37 +109,53 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 			return d
 		}
-		for a, vw := range writes.Balances() {
-			d := ensure(a)
-			d.balance = g.Some(vw.Val)
-			d.balanceDeleted = vw.Deletes()
+		if writes.hasPath(BalancePath) {
+			for a, vw := range writes.Balances() {
+				d := ensure(a)
+				d.balance = g.Some(vw.Val)
+				d.balanceDeleted = vw.Deletes()
+			}
 		}
-		for a, vw := range writes.Nonces() {
-			ensure(a).nonce = g.Some(vw.Val)
+		if writes.hasPath(NoncePath) {
+			for a, vw := range writes.Nonces() {
+				ensure(a).nonce = g.Some(vw.Val)
+			}
 		}
-		for a, vw := range writes.Incarnations() {
-			ensure(a).incarnation = g.Some(vw.Val)
+		if writes.hasPath(IncarnationPath) {
+			for a, vw := range writes.Incarnations() {
+				ensure(a).incarnation = g.Some(vw.Val)
+			}
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
-		for a, vw := range writes.CodeHashes() {
-			ensure(a).codeHash = g.Some(vw.Val)
+		if writes.hasPath(CodeHashPath) {
+			for a, vw := range writes.CodeHashes() {
+				ensure(a).codeHash = g.Some(vw.Val)
+			}
 		}
-		for a, vw := range writes.Codes() {
-			d := ensure(a)
-			d.code = vw.Val.Bytes
-			d.codeWritten = true
+		if writes.hasPath(CodePath) {
+			for a, vw := range writes.Codes() {
+				d := ensure(a)
+				d.code = vw.Val.Bytes
+				d.codeWritten = true
+			}
 		}
-		for a, vw := range writes.SelfDestructs() {
-			ensure(a).selfDestruct = vw.Val
+		if writes.hasPath(SelfDestructPath) {
+			for a, vw := range writes.SelfDestructs() {
+				ensure(a).selfDestruct = vw.Val
+			}
 		}
-		for a, vw := range writes.CreateContracts() {
-			ensure(a).createContract = vw.Val
+		if writes.hasPath(CreateContractPath) {
+			for a, vw := range writes.CreateContracts() {
+				ensure(a).createContract = vw.Val
+			}
 		}
-		for a, byKey := range writes.StorageChanges() {
-			d := ensure(a)
-			for k, vw := range byKey {
-				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
+		if writes.hasPath(StoragePath) {
+			for a, byKey := range writes.StorageChanges() {
+				d := ensure(a)
+				for k, vw := range byKey {
+					d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
+				}
 			}
 		}
 

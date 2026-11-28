@@ -1198,6 +1198,31 @@ func (ws *WriteSet) IsEmpty() bool {
 		len(ws.code) == 0 && len(ws.codeHash) == 0 && len(ws.codeSize) == 0 && len(ws.storage) == 0
 }
 
+func (ws *WriteSet) hasPath(path AccountPath) bool {
+	if ws == nil {
+		return false
+	}
+	switch path {
+	case BalancePath:
+		return len(ws.balance) > 0
+	case NoncePath:
+		return len(ws.nonce) > 0
+	case IncarnationPath:
+		return len(ws.incarnation) > 0
+	case CodeHashPath:
+		return len(ws.codeHash) > 0
+	case CodePath:
+		return len(ws.code) > 0
+	case SelfDestructPath:
+		return len(ws.selfDestruct) > 0
+	case CreateContractPath:
+		return len(ws.createContract) > 0
+	case StoragePath:
+		return len(ws.storage) > 0
+	}
+	return true
+}
+
 // Has reports whether a write exists at h's (Address, Path, Key).
 func (ws *WriteSet) Has(h WriteHeader) bool {
 	return ws.hasHeader(h)
