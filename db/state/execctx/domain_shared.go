@@ -1887,10 +1887,15 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
+	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, sd.mem.DomainPut)
 }
 
-func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+// DomainPutOwned is DomainPut that keeps v instead of a copy; see kv.TemporalMemBatch.DomainPutOwned.
+func (sd *SharedDomains) DomainPutOwned(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, sd.mem.DomainPutOwned)
+}
+
+func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, put func(kv.Domain, string, []byte, uint64, []byte) error) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1907,7 +1912,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// sd.mem and is published to the cache only after a successful Commit;
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	return put(domain, ks, v, txNum, prevVal)
 }
 
 // resolvePrevVal runs DomainPut's shared prologue: touches ks for the

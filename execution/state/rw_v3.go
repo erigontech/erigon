@@ -77,7 +77,8 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // ApplyWrites writes a finalized write-set directly to the shared
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
-// needed to reconstruct the serialised account.
+// needed to reconstruct the serialised account. domains keeps the code bytes of
+// writes without a copy, so callers must not change them after the call.
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
@@ -291,7 +292,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
+				} else if err := domains.DomainPutOwned(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}

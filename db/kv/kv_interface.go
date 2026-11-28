@@ -669,6 +669,9 @@ func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txN
 
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
+	// DomainPutOwned is DomainPut that keeps v instead of a copy: v must be heap
+	// memory that nobody changes after the call.
+	DomainPutOwned(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
 	// GetLatest returns the key's latest in-mem value. On a miss, step carries
 	// the key's in-flight-unwind bound — NoStepBound when none — so callers

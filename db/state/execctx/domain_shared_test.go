@@ -2709,3 +2709,30 @@ func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
 	mergeAndCheck(deepTarget, shallowTarget)
 	mergeAndCheck(shallowTarget, deepTarget)
 }
+
+func TestSharedDomain_DomainPutOwnedKeepsTheValue(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 100)
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	ownedAddr, copiedAddr := common.HexToAddress("0x01"), common.HexToAddress("0x02")
+	owned, copied := []byte{0x60, 0x00}, []byte{0x60, 0x01}
+	require.NoError(t, domains.DomainPutOwned(kv.CodeDomain, rwTx, ownedAddr[:], owned, 1, nil))
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, rwTx, copiedAddr[:], copied, 1, nil))
+
+	got, _, err := domains.GetLatest(kv.CodeDomain, rwTx, ownedAddr[:])
+	require.NoError(t, err)
+	require.Same(t, &owned[0], &got[0])
+	got, _, err = domains.GetLatest(kv.CodeDomain, rwTx, copiedAddr[:])
+	require.NoError(t, err)
+	require.Equal(t, copied, got)
+	require.NotSame(t, &copied[0], &got[0])
+}

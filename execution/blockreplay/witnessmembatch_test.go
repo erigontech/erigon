@@ -2,6 +2,7 @@ package blockreplay_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -72,4 +73,28 @@ func TestWitnessPrefixIteration(t *testing.T) {
 		return true, nil
 	}))
 	require.Zero(t, got, "no witness slots may remain after DomainDelPrefix")
+}
+
+func TestWitnessDomainPutOwnedKeepsTheValue(t *testing.T) {
+	fx := loadFixture(t, "25604144")
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	const seedTxNum = 1 << 20
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, writes, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+
+	addr := common.HexToAddress("0x01")
+	owned := []byte{0x60, 0x00}
+	require.NoError(t, doms.DomainPutOwned(kv.CodeDomain, tx, addr[:], owned, seedTxNum+1, nil))
+	got, _, err := doms.GetLatest(kv.CodeDomain, tx, addr[:])
+	require.NoError(t, err)
+	require.Same(t, &owned[0], &got[0])
+	require.Contains(t, writes.Diff(&blockreplay.Outputs{}), fmt.Sprintf("extra code write changes state: %x", addr[:]),
+		"the replay write set must record the owned code write")
 }
