@@ -76,12 +76,12 @@ func TestBlockImportedAcrossEpochTickPromotesItsCheckpoints(t *testing.T) {
 		blocks, anchor, _ := tests.GetBellatrixRandom()
 		f := newBlockTestStore(t, anchor)
 		for _, block := range blocks[:targetIndex] {
-			f.OnTick(slotTimeMs(f, block.Block.Slot) + 1)
+			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
 			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
 		}
 		block := blocks[targetIndex]
-		f.OnTick(slotTimeMs(f, block.Block.Slot) + 1)
-		nextEpochMs := slotTimeMs(f, (block.Block.Slot/f.beaconCfg.SlotsPerEpoch+1)*f.beaconCfg.SlotsPerEpoch) + 100
+		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 1)
+		nextEpochMs := slotStartTimeMs(f, (block.Block.Slot/f.beaconCfg.SlotsPerEpoch+1)*f.beaconCfg.SlotsPerEpoch) + 100
 		return f, block, nextEpochMs
 	}
 
@@ -229,19 +229,25 @@ func importUntilHeadCountsVotes(t *testing.T) (*ForkChoiceStore, *cltypes.Signed
 	return nil, nil
 }
 
-// A block already past the attestation deadline gets no head before it, so its import does not build the
-// justified state for one.
-func TestLateBlockDoesNotWarmTheJustifiedState(t *testing.T) {
+// The import builds the justified state for the head before the block only when the block can get the boost:
+// it is timely at the store time of the call, and the store has not reached a later slot.
+func TestBlockWarmsTheJustifiedStateOnlyWhenItCanGetTheBoost(t *testing.T) {
 	f, block := importUntilHeadCountsVotes(t)
 	f.checkpointStates.Delete(f.JustifiedCheckpoint())
 	slot := block.Block.Slot
+	timelyMs := slotStartTimeMs(f, slot) + 100
 	deadlineMs := slotStartTimeMs(f, slot) + f.getAttestationDueMs(f.computeEpochAtSlot(slot))
 
-	_, warm := f.headCheckpointToWarmLocked(slot)
+	_, warm := f.headCheckpointToWarmLocked(slot, timelyMs)
 	require.True(t, warm)
+	_, warm = f.headCheckpointToWarmLocked(slot, deadlineMs)
+	require.False(t, warm, "a block late at its call time gets no head")
 	f.timeMs.Store(deadlineMs)
-	_, warm = f.headCheckpointToWarmLocked(slot)
-	require.False(t, warm)
+	_, warm = f.headCheckpointToWarmLocked(slot, timelyMs)
+	require.True(t, warm, "a block timely at its call time that takes f.mu after the deadline still gets a head")
+	f.timeMs.Store(slotStartTimeMs(f, slot+1))
+	_, warm = f.headCheckpointToWarmLocked(slot, timelyMs)
+	require.False(t, warm, "a block applied in a later slot gets no boost")
 }
 
 // epochStartBlock returns the anchor and a block of the epoch's first slot that advances the

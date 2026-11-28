@@ -211,10 +211,6 @@ func TestSlotStartTickDoesNotMakeLateLocalBlockTimely(t *testing.T) {
 	assert.Zero(t, f.ProposerBoostRoot())
 }
 
-func slotTimeMs(f *ForkChoiceStore, slot uint64) uint64 {
-	return (f.genesisTime + slot*f.beaconCfg.SecondsPerSlot) * 1000
-}
-
 // onBlockWaitingForLock calls OnBlock while f.mu is held and runs whileWaiting once OnBlock waits for it.
 func onBlockWaitingForLock(t *testing.T, f *ForkChoiceStore, block *cltypes.SignedBeaconBlock, whileWaiting func()) {
 	t.Helper()
@@ -232,23 +228,22 @@ func onBlockWaitingForLock(t *testing.T, f *ForkChoiceStore, block *cltypes.Sign
 func importParent(t *testing.T, engine execution_client.ExecutionEngine) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
 	t.Helper()
 	f, parent, _, block := buildExAnteStoreBeforeBlocks(t, engine, nil)
-	f.OnTick(slotTimeMs(f, parent.Block.Slot))
+	f.OnTick(slotStartTimeMs(f, parent.Block.Slot))
 	require.NoError(t, f.OnBlock(t.Context(), parent, false, true, false))
 	return f, block
 }
 
 // importBlockWhileTimePasses imports a block of the slot after its parent, entering OnBlock
-// enterMs into the slot, and runs duringEL while the EL validates the payload.
-func importBlockWhileTimePasses(t *testing.T, enterMs uint64, duringEL func(f *ForkChoiceStore, slotStartMs uint64)) (*ForkChoiceStore, common.Hash) {
+// enterMs into the slot, and runs duringEL with the block's slot while the EL validates the payload.
+func importBlockWhileTimePasses(t *testing.T, enterMs uint64, duringEL func(f *ForkChoiceStore, slot uint64)) (*ForkChoiceStore, common.Hash) {
 	t.Helper()
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	f, block := importParent(t, engine)
-	slotStartMs := slotTimeMs(f, block.Block.Slot)
-	f.OnTick(slotStartMs + enterMs)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + enterMs)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
 	awaitSignal(t, elEntered, "NewPayload to start")
-	duringEL(f, slotStartMs)
+	duringEL(f, block.Block.Slot)
 	close(releaseEL)
 	require.NoError(t, awaitOnBlock(t, onBlockDone))
 	root := mustRoot(t, block)
@@ -258,8 +253,8 @@ func importBlockWhileTimePasses(t *testing.T, enterMs uint64, duringEL func(f *F
 // A block that enters the import before the attestation deadline stays timely and gets the boost,
 // although the EL returns after the deadline.
 func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
-	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
-		f.OnTick(slotStartMs + 4500)
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot) + 4500)
 	})
 
 	timeliness, ok := f.getBlockTimeliness(root)
@@ -271,8 +266,8 @@ func TestBlockTimelinessUsesTimeWhenImportStarts(t *testing.T) {
 // The slot tick resets the proposer boost, so a block whose slot ends while it is imported must
 // not set the boost after that reset.
 func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
-	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
-		f.OnTick(slotStartMs + 12000 + 100)
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot+1) + 100)
 	})
 
 	timeliness, ok := f.getBlockTimeliness(root)
@@ -285,9 +280,9 @@ func TestBlockImportedAcrossSlotTickGetsNoBoost(t *testing.T) {
 // work in the reverse order. The earlier reset finishing last must not let a block of the earlier
 // slot set the boost in the later slot.
 func TestReversedSlotStartResetsKeepBoostExpired(t *testing.T) {
-	f, _ := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
-		f.OnTick(slotStartMs + 12000 + 100)
-		f.runSlotStart(f.slotAtTimeMs(slotStartMs + 100))
+	f, _ := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.OnTick(slotStartTimeMs(f, slot+1) + 100)
+		f.runSlotStart(slot)
 	})
 
 	assert.Zero(t, f.ProposerBoostRoot())
@@ -297,12 +292,12 @@ func TestReversedSlotStartResetsKeepBoostExpired(t *testing.T) {
 // next slot got the boost. It must not remove that boost.
 func TestStaleSlotStartKeepsBoostOfNewerSlot(t *testing.T) {
 	f, block := importParent(t, nil)
-	f.OnTick(slotTimeMs(f, block.Block.Slot) + 100)
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
 	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
 	root := mustRoot(t, block)
 	require.Equal(t, root, f.ProposerBoostRoot())
 
-	f.runSlotStart(f.slotAtTimeMs(slotTimeMs(f, block.Block.Slot-1) + 100))
+	f.runSlotStart(f.slotAtTimeMs(slotStartTimeMs(f, block.Block.Slot-1) + 100))
 
 	assert.Equal(t, root, f.ProposerBoostRoot())
 }
@@ -312,7 +307,7 @@ func TestStaleSlotStartKeepsBoostOfNewerSlot(t *testing.T) {
 func TestBlockAppliedBeforePendingSlotStartGetsBoost(t *testing.T) {
 	f, block := importParent(t, nil)
 	require.NotZero(t, f.ProposerBoostRoot(), "the parent must hold the boost of its slot")
-	slotStartMs := slotTimeMs(f, block.Block.Slot)
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
 	f.timeMs.Store(slotStartMs + 100)
 	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
 	root := mustRoot(t, block)
@@ -330,7 +325,7 @@ func TestPendingSlotStartResetRunsBeforeTheBlockImport(t *testing.T) {
 	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	f, block := importParent(t, engine)
 	require.NotZero(t, f.ProposerBoostRoot(), "the parent must hold the boost of its slot")
-	f.timeMs.Store(slotTimeMs(f, block.Block.Slot) + 100)
+	f.timeMs.Store(slotStartTimeMs(f, block.Block.Slot) + 100)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- f.OnBlock(context.Background(), block, true, true, false) }()
 	awaitSignal(t, elEntered, "NewPayload to start")
@@ -343,8 +338,8 @@ func TestPendingSlotStartResetRunsBeforeTheBlockImport(t *testing.T) {
 // A block that commits after the time reached the next slot must not set the boost while that
 // slot's tick still waits for f.mu: a head computed in between would count it.
 func TestBlockCommittedAfterNextSlotTimeGetsNoBoost(t *testing.T) {
-	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slotStartMs uint64) {
-		f.timeMs.Store(slotStartMs + 12000 + 100)
+	f, root := importBlockWhileTimePasses(t, 3000, func(f *ForkChoiceStore, slot uint64) {
+		f.timeMs.Store(slotStartTimeMs(f, slot+1) + 100)
 	})
 
 	timeliness, ok := f.getBlockTimeliness(root)
@@ -357,7 +352,7 @@ func TestBlockCommittedAfterNextSlotTimeGetsNoBoost(t *testing.T) {
 // processed at the store time of its admission.
 func TestBlockCalledBeforeItsSlotUsesAdmissionTime(t *testing.T) {
 	f, block := importParent(t, nil)
-	slotStartMs := slotTimeMs(f, block.Block.Slot)
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
 	f.OnTick(slotStartMs - 50)
 	onBlockWaitingForLock(t, f, block, func() { f.timeMs.Store(slotStartMs + 100) })
 
@@ -370,7 +365,7 @@ func TestBlockCalledBeforeItsSlotUsesAdmissionTime(t *testing.T) {
 // A block called in its slot keeps the store time of the call while it waits for f.mu.
 func TestBlockWaitingForLockUsesCallTime(t *testing.T) {
 	f, block := importParent(t, nil)
-	slotStartMs := slotTimeMs(f, block.Block.Slot)
+	slotStartMs := slotStartTimeMs(f, block.Block.Slot)
 	f.OnTick(slotStartMs + 3000)
 	onBlockWaitingForLock(t, f, block, func() { f.timeMs.Store(slotStartMs + 4500) })
 
@@ -388,11 +383,11 @@ func TestGloasBlockLockedAfterNextSlotTickEndsWithoutBoost(t *testing.T) {
 		f := newBlockTestStore(t, fixture.PreState)
 		last := len(fixture.Blocks) - 1
 		for _, block := range fixture.Blocks[:last] {
-			f.OnTick(slotTimeMs(f, block.Block.Slot) + 100)
+			f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
 			require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
 		}
 		block := fixture.Blocks[last]
-		f.OnTick(slotTimeMs(f, block.Block.Slot) + 100)
+		f.OnTick(slotStartTimeMs(f, block.Block.Slot) + 100)
 		return f, block
 	}
 
@@ -400,7 +395,7 @@ func TestGloasBlockLockedAfterNextSlotTickEndsWithoutBoost(t *testing.T) {
 	require.NoError(t, serial.OnBlock(t.Context(), serialBlock, false, true, false))
 	root := mustRoot(t, serialBlock)
 	require.Equal(t, root, serial.ProposerBoostRoot(), "the fixture block must get the boost in its slot")
-	nextSlotMs := slotTimeMs(serial, serialBlock.Block.Slot+1) + 100
+	nextSlotMs := slotStartTimeMs(serial, serialBlock.Block.Slot+1) + 100
 	serial.OnTick(nextSlotMs)
 	require.Zero(t, serial.ProposerBoostRoot())
 
@@ -419,8 +414,8 @@ func TestGloasBlockLockedAfterNextSlotTickEndsWithoutBoost(t *testing.T) {
 // get the proposer boost.
 func TestSpecTestTimeMovedBackKeepsProposerBoost(t *testing.T) {
 	f, block := importParent(t, nil)
-	f.OnTick(slotTimeMs(f, block.Block.Slot+3))
-	f.SetTimeForSpecTest(slotTimeMs(f, block.Block.Slot))
+	f.OnTick(slotStartTimeMs(f, block.Block.Slot+3))
+	f.SetTimeForSpecTest(slotStartTimeMs(f, block.Block.Slot))
 	require.NoError(t, f.OnBlock(t.Context(), block, false, true, false))
 
 	root := mustRoot(t, block)

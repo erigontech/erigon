@@ -375,7 +375,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			if overlap != nil {
 				join = overlap.join
 			}
-			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot); warm {
+			if justifiedCheckpoint, warm := f.headCheckpointToWarmLocked(block.Block.Slot, storeTimeMs); warm {
 				// Build the justified state for the head before the block while f.mu is released.
 				joinOverlap := join
 				join = func() {
