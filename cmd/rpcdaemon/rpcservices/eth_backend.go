@@ -278,7 +278,7 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remoteproto.SubscribeLogsReply), requestor *atomic.Value) error {
+func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remoteproto.SubscribeLogsReply), onReady func(func(*remoteproto.LogsFilterRequest) error)) error {
 	acks, err := back.newFilterAcks(ctx)
 	if err != nil {
 		return err
@@ -291,9 +291,11 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		return err
 	}
-	requestor.Store(func(req *remoteproto.LogsFilterRequest) error {
-		return sendFilterUpdate(acks, subscription.Send, req, req.Ack)
-	})
+	if onReady != nil {
+		onReady(func(req *remoteproto.LogsFilterRequest) error {
+			return sendFilterUpdate(acks, subscription.Send, req, req.Ack)
+		})
+	}
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -364,7 +366,8 @@ type filterAcks struct {
 
 // newFilterAcks asks the server's version before each stream opens: a stream can reconnect to an erigon of another version.
 func (back *RemoteBackend) newFilterAcks(ctx context.Context) (*filterAcks, error) {
-	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{})
+	// Waits for the connection like the stream itself, so a stream reconnects once erigon is reachable again.
+	v, err := back.remoteEthBackend.Version(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, fmt.Errorf("rpcdaemon: the filter stream needs the server version: %w", err)
 	}

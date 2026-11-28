@@ -96,12 +96,11 @@ type Filters struct {
 	// replaces its filter with each request it receives, so a stale snapshot
 	// delivered after a newer one would silently stop delivery of the newer
 	// subscription's events.
-	logsRequestMu         sync.Mutex
-	receiptsSubs          *ReceiptsFilterAggregator
-	receiptsRequestor     atomic.Value
-	receiptsRequestMu     sync.Mutex // see logsRequestMu
-	pendingReceiptsUpdate atomic.Bool
-	onNewSnapshot         func()
+	logsRequestMu     sync.Mutex
+	receiptsSubs      *ReceiptsFilterAggregator
+	receiptsRequestor atomic.Value
+	receiptsRequestMu sync.Mutex // see logsRequestMu
+	onNewSnapshot     func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, types.Logs]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -201,7 +200,15 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor); err != nil {
+			err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, func(send func(*remoteproto.LogsFilterRequest) error) {
+				ff.mu.Lock()
+				ff.logsRequestor.Store(send)
+				ff.mu.Unlock()
+				// A new stream starts with an empty filter on the server, so send it the current one. The request lock
+				// can be held by an update that waits for an ack this stream reads only after onReady returns.
+				go ff.updateRemoteLogsFilter()
+			})
+			if err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Dec()
@@ -233,14 +240,13 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				ff.mu.Lock()
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
-				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					// The request lock can be held by an update that waits for an ack this stream reads only after onReady returns.
-					go func() {
-						if err := ff.sendReceiptsFilterUpdate(false); err != nil {
-							logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-						}
-					}()
-				}
+				// A new stream starts with an empty filter on the server, so send it the current one. The request lock
+				// can be held by an update that waits for an ack this stream reads only after onReady returns.
+				go func() {
+					if err := ff.sendReceiptsFilterUpdate(false); err != nil {
+						logger.Warn("rpc filters: error sending the receipts filter to a new stream", "err", err)
+					}
+				}()
 			})
 			ff.receiptsSubs.endStream()
 			if err != nil {
@@ -788,10 +794,8 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 }
 
 // sendReceiptsFilterUpdate sends the current receipts filter state to the server.
-// If the requestor is not yet available, it sets a flag so the onReady callback
-// will send the update once the receipts subscription goroutine connects.
-// The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
-// storing the requestor concurrently. ack makes the update wait until the server applies it.
+// Before the receipts stream connects there is no requestor, and the stream sends
+// the current state once it connects. ack makes the update wait until the server applies it.
 func (ff *Filters) sendReceiptsFilterUpdate(ack bool) error {
 	ff.receiptsRequestMu.Lock()
 	defer ff.receiptsRequestMu.Unlock()
@@ -799,12 +803,10 @@ func (ff *Filters) sendReceiptsFilterUpdate(ack bool) error {
 	rfr.Ack = ack
 	ff.mu.Lock()
 	loaded := ff.receiptsRequestor.Load()
+	ff.mu.Unlock()
 	if loaded == nil {
-		ff.pendingReceiptsUpdate.Store(true)
-		ff.mu.Unlock()
 		return nil
 	}
-	ff.mu.Unlock()
 	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 

@@ -18,13 +18,19 @@ package rpcservices
 
 import (
 	"context"
+	"errors"
+	"net"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/node/direct"
@@ -88,10 +94,10 @@ type (
 
 // connectLogs opens a logs stream to srv until ctx ends and returns its filter requestor.
 func connectLogs(ctx context.Context, srv gatedAckServer, onNewLogs func(*remoteproto.SubscribeLogsReply)) logsSend {
-	var requestor atomic.Value
-	go NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil).SubscribeLogs(ctx, onNewLogs, &requestor) //nolint:errcheck
-	synctest.Wait()
-	return requestor.Load().(logsSend)
+	back := NewRemoteBackend(direct.NewEthBackendClientDirect(srv), nil, nil)
+	ready := make(chan logsSend, 1)
+	go back.SubscribeLogs(ctx, onNewLogs, func(send logsSend) { ready <- send }) //nolint:errcheck
+	return <-ready
 }
 
 // connectReceipts opens a receipts stream to srv until ctx ends and returns its filter requestor.
@@ -164,4 +170,58 @@ func TestFilterUpdateDoesNotWaitOnServerWithoutAcks(t *testing.T) {
 		require.NoError(t, send(&remoteproto.LogsFilterRequest{AllAddresses: true, Ack: true}))
 		srv.release <- struct{}{} // the fake server still holds the request
 	})
+}
+
+// TestFilterStreamsWaitForErigon checks that a filter stream opened while erigon is not up, as after a restart, waits
+// and connects once erigon is back instead of failing and waiting for the next retry.
+func TestFilterStreamsWaitForErigon(t *testing.T) {
+	for name, subscribe := range map[string]func(context.Context, *RemoteBackend, chan<- struct{}) error{
+		"logs": func(ctx context.Context, back *RemoteBackend, ready chan<- struct{}) error {
+			return back.SubscribeLogs(ctx, ignoreLogs, func(logsSend) { ready <- struct{}{} })
+		},
+		"receipts": func(ctx context.Context, back *RemoteBackend, ready chan<- struct{}) error {
+			return back.SubscribeReceipts(ctx, func(*remoteproto.SubscribeReceiptsReply) {}, func(receiptsSend) { ready <- struct{}{} })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			listener := bufconn.Listen(1024 * 1024)
+			server := grpc.NewServer()
+			remoteproto.RegisterETHBACKENDServer(server, newGatedAckServer())
+			t.Cleanup(server.Stop)
+			go func() { _ = server.Serve(listener) }()
+
+			var up atomic.Bool
+			dialedWhileDown := make(chan struct{}, 1)
+			conn, err := grpc.NewClient("passthrough:///erigon",
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.Config{BaseDelay: 10 * time.Millisecond, Multiplier: 1, MaxDelay: 10 * time.Millisecond}}),
+				grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+					if !up.Load() {
+						select {
+						case dialedWhileDown <- struct{}{}:
+						default:
+						}
+						return nil, errors.New("erigon is not up")
+					}
+					return listener.DialContext(ctx)
+				}),
+			)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, conn.Close()) })
+			back := NewRemoteBackend(remoteproto.NewETHBACKENDClient(conn), nil, nil)
+
+			ready := make(chan struct{}, 1)
+			done := make(chan error, 1)
+			go func() { done <- subscribe(t.Context(), back, ready) }()
+			<-dialedWhileDown
+			up.Store(true)
+			select {
+			case <-ready:
+			case err := <-done:
+				t.Fatalf("the stream gave up while erigon was down: %v", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("the stream did not connect once erigon was up")
+			}
+		})
+	}
 }
