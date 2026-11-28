@@ -253,15 +253,15 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 			} {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 					key := "k-" + domain.String() + "-" + next.name
-					first := []byte("first-and-long-enough-to-be-reused")
-					sd.putLatest(domain, key, first, 1)
+					const want = "first-and-long-enough-to-be-reused"
+					sd.putLatest(domain, key, []byte(want), 1)
 					borrowed, _, ok := sd.GetLatest(domain, []byte(key))
 					require.True(t, ok)
-					require.Equal(t, first, borrowed)
+					require.Equal(t, want, string(borrowed))
 
 					sd.putLatest(domain, key, []byte(next.val), next.txNum)
 
-					require.Equal(t, first, borrowed,
+					require.Equal(t, want, string(borrowed),
 						"%s/%s: a borrowed value must survive a later write to its key", domain, next.name)
 				}
 			}
