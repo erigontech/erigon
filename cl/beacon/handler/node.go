@@ -92,24 +92,21 @@ var (
 	peerDirections = []string{"inbound", "outbound"}
 )
 
-// peerFilter reads a list query parameter, repeated or comma-separated. Empty values are skipped, and an
-// empty filter matches every value.
+// peerFilter reads a list query parameter, repeated or comma-separated. Empty values are skipped, each value
+// is kept once, and an empty filter matches every value.
 func peerFilter(r *http.Request, name string, allowed []string) ([]string, error) {
 	values, err := beaconhttp.StringListFromQueryParams(r, name)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	filter := make([]string, 0, len(values))
+	values = slices.DeleteFunc(values, func(value string) bool { return value == "" })
 	for _, value := range values {
-		if value == "" {
-			continue
-		}
 		if !slices.Contains(allowed, value) {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid %s: %q", name, value))
 		}
-		filter = append(filter, value)
 	}
-	return filter, nil
+	slices.Sort(values)
+	return slices.Compact(values), nil
 }
 
 func matchesPeerFilter(filter []string, value string) bool {

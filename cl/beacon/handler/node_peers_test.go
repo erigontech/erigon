@@ -119,3 +119,10 @@ func TestNodePeerFindsPeerWithoutENR(t *testing.T) {
 	require.Equal(t, "inbound", resp.Data.(peer).PeerID)
 	require.Nil(t, resp.Data.(peer).Enr)
 }
+
+func TestPeerFilterKeepsEachValueOnce(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/eth/v1/node/peers?state=connected,connected&state=&state=disconnected&state=connected", nil)
+	filter, err := peerFilter(r, "state", peerStates)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"connected", "disconnected"}, filter)
+}
