@@ -70,7 +70,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	}
 
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, gasLimit, nil, nil), contract.Caller())
-	tracer.EmitEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas, value, contractCode)
+	tracer.EmitEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, nil, startGas, value, contractCode)
 	ret, endGas, gasUsed, err := env.Run(contract, startGas, []byte{}, false)
 	tracer.EmitExit(0, ret, gasUsed, err, true)
 	// Rest gas assumes no refund
@@ -536,4 +536,68 @@ func TestTracerRecursionAsDeepAsCallFrames(t *testing.T) {
 	}}`
 	_, err := newJsTracer(code, new(tracers.Context), nil)
 	require.NoError(t, err)
+}
+
+func TestEmptyInputAndOutputAreEmptyBuffers(t *testing.T) {
+	tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return toHex(ctx.input) + toHex(ctx.output); }}`, nil, nil)
+	require.NoError(t, err)
+	res, err := runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	require.NoError(t, err)
+	require.JSONEq(t, `"0x0x"`, string(res))
+}
+
+func TestTopLevelPrimitiveResults(t *testing.T) {
+	run := func(result string) (json.RawMessage, error) {
+		tracer, err := newJsTracer(`{step: function() {}, fault: function() {}, result: function(ctx) { return `+result+`; }}`, nil, nil)
+		require.NoError(t, err)
+		return runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil)
+	}
+	res, err := run(`'to=' + toHex(ctx.to)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"to=0x0000000000000000000000000000000000000000"`, string(res))
+
+	res, err = run(`'é ' + '😀'`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"é 😀"`, string(res), "a non-ASCII string is a JSON string")
+	res, err = run(`'😀'.slice(0, 1)`)
+	require.NoError(t, err)
+	require.Equal(t, `"\ud83d"`, string(res), "a lone high surrogate keeps its code unit, as JSON.stringify does")
+	res, err = run(`'😀'.slice(1)`)
+	require.NoError(t, err)
+	require.Equal(t, `"\ude00"`, string(res), "a lone low surrogate keeps its code unit")
+
+	for _, nonFinite := range []string{`NaN`, `Infinity`, `-Infinity`} {
+		_, err = run(nonFinite)
+		require.Error(t, err, "%s has no JSON encoding", nonFinite)
+	}
+	res, err = run(`-0`)
+	require.NoError(t, err)
+	require.Equal(t, `-0`, string(res))
+
+	res, err = run(`(String.prototype.toJSON = function() { return 'changed'; }, 'original')`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"original"`, string(res), "JSON.stringify reads no toJSON hook of a primitive")
+	res, err = run(`(Number.prototype.toJSON = function() { return 'changed'; }, 1)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `1`, string(res))
+
+	res, err = run(`(BigInt.prototype.toJSON = function(key) { return key === '' ? 'root' : 'member ' + key; }, 42n)`)
+	require.NoError(t, err)
+	require.JSONEq(t, `"root"`, string(res), "a root value gets the key \"\"")
+
+	undefinedRes, err := run(`undefined`)
+	require.NoError(t, err)
+	symbolRes, err := run(`Symbol('x')`)
+	require.NoError(t, err)
+	require.Equal(t, string(undefinedRes), string(symbolRes), "JSON.stringify treats undefined and a Symbol the same")
+	for _, hookResult := range []string{`undefined`, `Symbol('x')`, `function() {}`} {
+		res, err = run(`(BigInt.prototype.toJSON = function() { return ` + hookResult + `; }, 42n)`)
+		require.NoError(t, err, hookResult)
+		require.Equal(t, string(undefinedRes), string(res), "a BigInt hook that returns %s gives an undefined result", hookResult)
+	}
+
+	_, nestedErr := run(`{amount: 42n}`)
+	require.Error(t, nestedErr)
+	_, err = run(`42n`)
+	require.EqualError(t, err, nestedErr.Error(), "a top-level BigInt fails as a nested one does")
 }

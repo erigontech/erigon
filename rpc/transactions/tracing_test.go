@@ -388,6 +388,26 @@ func TestAssembleTracerStopsAJSConstructorAtTheTimeout(t *testing.T) {
 	}
 }
 
+func TestAssembleTracerStopsARegexpMatchSoonAfterTheTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "{fault: function() {}, result: function() { return /^(?=(a|aa)+b)/.test('a'.repeat(64)); }}", "500ms"
+	tracer, _, cancel, err := AssembleTracer(t.Context(), &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout},
+		common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Minute)
+	require.NoError(t, err, "the timeout must come from GetResult, not from tracer setup")
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := tracer.GetResult()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "timeout")
+	case <-time.After(5 * time.Second):
+		t.Fatal("a regexp match outlived the trace timeout")
+	}
+}
+
 func TestTraceTimeoutCannotExceedTheServerTimeout(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
