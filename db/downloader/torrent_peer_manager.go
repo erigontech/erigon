@@ -24,15 +24,16 @@ type TorrentPeerManager struct {
 	nodeSourceFn func() NodeSource
 	logger       log.Logger
 
-	// probe, inject and now default to dialing over the client's sockets, adding the peer to every
-	// torrent and the wall clock; tests replace them.
+	// probe, inject and now default to dialing over the client's sockets, adding peers to the torrents
+	// and the wall clock; tests replace them.
 	probe  func(ctx context.Context, addr string) bool
-	inject func(torrent.PeerInfo)
+	inject func([]torrent.PeerInfo)
 	now    func() time.Time
 
 	// knownPeers holds the DevP2P peers with a BT endpoint, reachable or not. Only sync touches it, from Run's one
 	// goroutine, so it needs no lock.
 	knownPeers map[enode.ID]btPeerInfo
+	torrents   map[*torrent.Torrent]struct{}
 }
 
 const (
@@ -59,7 +60,7 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 		now:          time.Now,
 	}
 	m.probe = m.dialable
-	m.inject = m.addPeerToAllTorrents
+	m.inject = m.addPeersToTorrents
 	return m
 }
 
@@ -86,7 +87,7 @@ func (m *TorrentPeerManager) Run(ctx context.Context) {
 	}
 }
 
-// sync scans the current DevP2P peer set and adds the peers whose BT endpoint answers to every torrent.
+// sync scans the current DevP2P peer set and adds the peers whose BT endpoint answers to the torrents.
 // The torrent client dials a peer once per torrent and keeps no memory of failures across torrents, so an
 // endpoint that does not answer (NAT, firewall) would cost thousands of dials, each waiting for its timeout.
 // Each endpoint is checked with one dial first; an unreachable one is checked again later.
@@ -150,9 +151,7 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 		}
 		m.knownPeers[id] = p
 	}
-	for _, pi := range toInject {
-		m.inject(pi)
-	}
+	m.inject(toInject)
 }
 
 // dialable reports whether addr accepts a connection over the torrent client's own sockets (uTP and TCP,
@@ -188,11 +187,24 @@ func (m *TorrentPeerManager) dialable(ctx context.Context, addr string) bool {
 	return answered
 }
 
-// addPeerToAllTorrents adds the given peer to all currently active torrents.
-func (m *TorrentPeerManager) addPeerToAllTorrents(pi torrent.PeerInfo) {
-	for _, t := range m.client.Torrents() {
-		t.AddPeers([]torrent.PeerInfo{pi})
+// addPeersToTorrents gives a new torrent every reachable peer and a known torrent only the changed peers.
+func (m *TorrentPeerManager) addPeersToTorrents(changed []torrent.PeerInfo) {
+	var all []torrent.PeerInfo
+	for _, p := range m.knownPeers {
+		if p.reachable {
+			all = append(all, p.addr)
+		}
 	}
+	seen := make(map[*torrent.Torrent]struct{})
+	for _, t := range m.client.Torrents() {
+		seen[t] = struct{}{}
+		if _, ok := m.torrents[t]; !ok {
+			t.AddPeers(all)
+		} else if len(changed) > 0 {
+			t.AddPeers(changed)
+		}
+	}
+	m.torrents = seen
 }
 
 // PeerCount returns the number of tracked torrent peers. Like sync, it must not run alongside Run.
