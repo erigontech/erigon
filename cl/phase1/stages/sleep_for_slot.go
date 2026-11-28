@@ -35,6 +35,7 @@ const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 type sleepForSlotForkChoice interface {
 	GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error)
 	GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool)
+	LastExecutionHead() common.Hash
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
 	PendingEnvelopeRetryWake() <-chan struct{}
 	HasAttemptablePendingEnvelope(minSlot uint64) bool
@@ -70,7 +71,7 @@ func waitForNextSlotOrHeadChange(
 	syncedData sleepForSlotSyncedData,
 	clock sleepForSlotClock,
 	lastWake sleepForSlotWake,
-	lastExecutionHead common.Hash,
+	committedRoot common.Hash,
 ) (sleepForSlotWake, bool, error) {
 	nextSlotTime := clock.GetSlotTime(nextSlot)
 	timer := time.NewTimer(time.Until(nextSlotTime))
@@ -147,7 +148,7 @@ func waitForNextSlotOrHeadChange(
 		if !time.Now().Before(nextSlotTime) {
 			return sleepForSlotWake{}, false, nil
 		}
-		changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
+		changed := head.Root != syncedData.HeadRoot() || head.Root != committedRoot || (ready && executionHead != forkChoice.LastExecutionHead())
 		if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 			return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
 		}

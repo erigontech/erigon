@@ -42,17 +42,18 @@ import (
 )
 
 type sleepForSlotForkChoiceFake struct {
-	head           common.Hash
-	headSlot       uint64
-	payloadStatus  cltypes.PayloadStatus
-	executionHead  common.Hash
-	ready          *bool
-	calls          *int
-	retryMinSlots  *[]uint64
-	retryDeadlines *[]time.Time
-	emitter        *beaconevents.EventEmitter
-	attemptable    func(minSlot uint64) bool // nil reports an attemptable envelope
-	columnRetry    func(ctx context.Context, minSlot uint64)
+	head              common.Hash
+	headSlot          uint64
+	payloadStatus     cltypes.PayloadStatus
+	executionHead     common.Hash
+	lastExecutionHead common.Hash
+	ready             *bool
+	calls             *int
+	retryMinSlots     *[]uint64
+	retryDeadlines    *[]time.Time
+	emitter           *beaconevents.EventEmitter
+	attemptable       func(minSlot uint64) bool // nil reports an attemptable envelope
+	columnRetry       func(ctx context.Context, minSlot uint64)
 }
 
 func (f sleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
@@ -78,9 +79,10 @@ func TestSleepForSlotGloasPayloadStatusChangeBypassesRewakeInterval(t *testing.T
 				clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)}
 				wake, changed, err := waitForNextSlotOrHeadChange(
 					t.Context(), 11, sleepForSlotConfig(10),
-					sleepForSlotForkChoiceFake{head: head, payloadStatus: tc.status},
+					sleepForSlotForkChoiceFake{head: head, payloadStatus: tc.status, lastExecutionHead: tc.previous},
 					sleepForSlotSyncedDataFake{head: head}, clock,
-					sleepForSlotWake{root: head, executionHead: tc.previous, at: started}, tc.previous,
+					sleepForSlotWake{root: head, executionHead: tc.previous, at: started},
+					head,
 				)
 				require.NoError(t, err)
 				require.True(t, changed, "a payload decision at the same beacon root must wake canonical fork choice")
@@ -180,7 +182,8 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 		sleepForSlotForkChoiceFake{head: forkChoiceHead, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		materializedHead,
 	)
 
 	require.NoError(t, err)
@@ -204,7 +207,8 @@ func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing
 		sleepForSlotForkChoiceFake{head: head, calls: &calls},
 		sleepForSlotSyncedDataFake{head: head},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		head,
 	)
 
 	require.NoError(t, err)
@@ -234,7 +238,8 @@ func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t 
 				sleepForSlotForkChoiceFake{head: head, headSlot: tt.headSlot, retryMinSlots: &retryMinSlots, retryDeadlines: &retryDeadlines},
 				sleepForSlotSyncedDataFake{head: head},
 				clock,
-				sleepForSlotWake{}, common.Hash{},
+				sleepForSlotWake{},
+				head,
 			)
 
 			require.NoError(t, err)
@@ -262,7 +267,8 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 		sleepForSlotForkChoiceFake{head: common.Hash{2}, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		common.Hash{1},
 	)
 
 	require.NoError(t, err)
@@ -284,7 +290,8 @@ func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		sleepForSlotWake{root: forkChoiceHead, at: time.Now().Add(-sleepForSlotRewakeInterval)}, common.Hash{},
+		sleepForSlotWake{root: forkChoiceHead, at: time.Now().Add(-sleepForSlotRewakeInterval)},
+		materializedHead,
 	)
 
 	require.NoError(t, err)
@@ -301,7 +308,8 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		materializedHead,
 	)
 	require.NoError(t, err)
 	require.True(t, headChanged)
@@ -314,7 +322,8 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 		sleepForSlotForkChoiceFake{head: forkChoiceHead},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		wake, common.Hash{},
+		wake,
+		materializedHead,
 	)
 
 	require.NoError(t, err)
@@ -333,7 +342,8 @@ func TestSleepForSlotDoesNotBypassRewakeIntervalWhenExecutionHeadBecomesUnavaila
 		sleepForSlotForkChoiceFake{head: forkChoiceHead, executionHead: common.Hash{0xee}, ready: &ready},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		materializedHead,
 	)
 	require.NoError(t, err)
 	require.True(t, headChanged)
@@ -347,7 +357,8 @@ func TestSleepForSlotDoesNotBypassRewakeIntervalWhenExecutionHeadBecomesUnavaila
 		sleepForSlotForkChoiceFake{head: forkChoiceHead, ready: &ready},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
-		wake, common.Hash{},
+		wake,
+		materializedHead,
 	)
 
 	require.NoError(t, err)
@@ -373,7 +384,8 @@ func TestSleepForSlotPollCompletingAfterNextSlotDoesNotWakeEarly(t *testing.T) {
 					blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release, blockExecutionHead: blockedCall == "GetExecutionHead"},
 					sleepForSlotSyncedDataFake{head: common.Hash{1}},
 					clock,
-					sleepForSlotWake{}, common.Hash{},
+					sleepForSlotWake{},
+					common.Hash{1},
 				)
 
 				require.NoError(t, err)
@@ -412,7 +424,8 @@ func TestSleepForSlotPollCompletingAfterCancellationDoesNotWake(t *testing.T) {
 					blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release, blockExecutionHead: blockedCall == "GetExecutionHead"},
 					sleepForSlotSyncedDataFake{head: common.Hash{1}},
 					sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Second)},
-					sleepForSlotWake{}, common.Hash{},
+					sleepForSlotWake{},
+					common.Hash{1},
 				)
 
 				require.ErrorIs(t, err, context.Canceled)
@@ -434,7 +447,8 @@ func TestSleepForSlotContextCancellationEndsWaitPromptly(t *testing.T) {
 		sleepForSlotForkChoiceFake{head: common.Hash{1}},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
-		sleepForSlotWake{}, common.Hash{},
+		sleepForSlotWake{},
+		common.Hash{1},
 	)
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -471,6 +485,8 @@ func sleepForSlotConfig(gloasForkEpoch uint64) *clparams.BeaconChainConfig {
 	}
 }
 
+func (f sleepForSlotForkChoiceFake) LastExecutionHead() common.Hash { return f.lastExecutionHead }
+
 func (f sleepForSlotForkChoiceFake) GetExecutionHead(head forkchoice.ForkChoiceNode) (common.Hash, bool) {
 	if f.ready != nil {
 		return f.executionHead, *f.ready
@@ -488,6 +504,8 @@ func (f blockingSleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoice
 	}
 	return forkchoice.ForkChoiceNode{Root: f.head}, 0, nil
 }
+
+func (f blockingSleepForSlotForkChoiceFake) LastExecutionHead() common.Hash { return common.Hash{} }
 
 func (f blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool) {
 	if f.blockExecutionHead {
@@ -542,7 +560,6 @@ func startSleepForSlot(
 	forkChoice sleepForSlotForkChoice,
 	syncedHead common.Hash,
 	clock sleepForSlotClockFake,
-	lastExecutionHead common.Hash,
 ) *sleepForSlotRun {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -550,7 +567,8 @@ func startSleepForSlot(
 	go func() {
 		defer close(run.done)
 		_, _, run.err = waitForNextSlotOrHeadChange(
-			ctx, 11, beaconCfg, forkChoice, sleepForSlotSyncedDataFake{head: syncedHead}, clock, sleepForSlotWake{}, lastExecutionHead,
+			ctx, 11, beaconCfg, forkChoice, sleepForSlotSyncedDataFake{head: syncedHead}, clock, sleepForSlotWake{},
+			syncedHead,
 		)
 	}()
 	return run
@@ -574,7 +592,7 @@ func TestSleepForSlotColumnWakeCoalescesBurst(t *testing.T) {
 		clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Minute)}
 		run := startSleepForSlot(t, sleepForSlotConfig(10),
 			sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: retries.record},
-			head, clock, common.Hash{})
+			head, clock)
 
 		synctest.Wait()
 		require.Len(t, retries.passes(), 1, "a burst of notifications runs one pass")
@@ -601,7 +619,7 @@ func TestSleepForSlotColumnWakeBoundsPassesUnderSustainedNotifications(t *testin
 		clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Minute)}
 		run := startSleepForSlot(t, sleepForSlotConfig(10),
 			sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: columnRetry},
-			head, clock, common.Hash{})
+			head, clock)
 
 		synctest.Wait()
 		require.Len(t, retries.passes(), 1)
@@ -634,7 +652,7 @@ func TestSleepForSlotColumnWakeUsesPreviousSlotFloor(t *testing.T) {
 				clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: tc.currentSlot, nextSlot: time.Now().Add(time.Minute)}
 				run := startSleepForSlot(t, sleepForSlotConfig(10),
 					sleepForSlotForkChoiceFake{head: head, headSlot: tc.headSlot, emitter: emitter, columnRetry: retries.record},
-					head, clock, common.Hash{})
+					head, clock)
 
 				synctest.Wait()
 				require.Equal(t, []uint64{tc.want}, retries.passes())
@@ -667,7 +685,7 @@ func TestSleepForSlotColumnWakeSkipsRootsBelowThePreviousSlot(t *testing.T) {
 						head: head, calls: &reads, emitter: emitter, columnRetry: retries.record,
 						attemptable: func(minSlot uint64) bool { return tc.rootSlot >= minSlot },
 					},
-					head, clock, common.Hash{})
+					head, clock)
 
 				synctest.Wait()
 				require.Equal(t, tc.wantPasses, retries.passes())
@@ -690,7 +708,8 @@ func TestSleepForSlotPreGloasLeavesTheColumnWakeUntouched(t *testing.T) {
 		_, headChanged, err := waitForNextSlotOrHeadChange(
 			t.Context(), 11, sleepForSlotConfig(11),
 			sleepForSlotForkChoiceFake{head: head, calls: &reads, emitter: emitter, columnRetry: retries.record},
-			sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{}, common.Hash{},
+			sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{},
+			head,
 		)
 
 		require.NoError(t, err)
@@ -712,7 +731,8 @@ func TestSleepForSlotColumnWakeDefersToHeadChange(t *testing.T) {
 		wake, headChanged, err := waitForNextSlotOrHeadChange(
 			t.Context(), 11, sleepForSlotConfig(10),
 			sleepForSlotForkChoiceFake{head: common.Hash{2}, emitter: emitter, columnRetry: retries.record},
-			sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{}, common.Hash{},
+			sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{},
+			common.Hash{1},
 		)
 
 		require.NoError(t, err)
@@ -735,7 +755,7 @@ func TestSleepForSlotColumnWakeWithoutParkedEnvelopeReadsNoHead(t *testing.T) {
 			head: head, calls: &calls, emitter: emitter, columnRetry: retries.record,
 			attemptable: func(uint64) bool { return parked.Load() },
 		}
-		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock, common.Hash{})
+		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock)
 		defer run.cancel()
 
 		for _, root := range distinctRoots(128) {
@@ -777,7 +797,7 @@ func TestSleepForSlotColumnWakeBoundsHeadReadsWhileGetHeadNodeFails(t *testing.T
 			sleepForSlotForkChoiceFake: sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: retries.record},
 			failFirst:                  math.MaxInt32,
 		}
-		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock, common.Hash{})
+		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock)
 		defer run.cancel()
 
 		for _, root := range distinctRoots(128) {
@@ -814,7 +834,7 @@ func TestSleepForSlotColumnWakeMutedByAFailedHeadReadIsServedAfterTheNextTick(t 
 			sleepForSlotForkChoiceFake: sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: retries.record},
 			failFirst:                  1,
 		}
-		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock, common.Hash{})
+		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock)
 		defer run.cancel()
 		synctest.Wait()
 
@@ -841,13 +861,14 @@ func TestSleepForSlotColumnWakeSurvivesAHeadChangeReturn(t *testing.T) {
 
 		_, headChanged, err := waitForNextSlotOrHeadChange(
 			t.Context(), 11, sleepForSlotConfig(10), forkChoice,
-			sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{}, common.Hash{},
+			sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{},
+			common.Hash{1},
 		)
 		require.NoError(t, err)
 		require.True(t, headChanged)
 		require.Empty(t, retries.passes())
 
-		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, common.Hash{2}, clock, common.Hash{})
+		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, common.Hash{2}, clock)
 		defer run.cancel()
 		synctest.Wait()
 		require.Len(t, retries.passes(), 1, "the wake that the head change cut short must not wait for the poll")
@@ -881,7 +902,7 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 			clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(time.Minute)}
 			run := startSleepForSlot(t, sleepForSlotConfig(10),
 				sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: columnRetry},
-				head, clock, common.Hash{})
+				head, clock)
 
 			synctest.Wait()
 			run.stop(t)
@@ -902,7 +923,8 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 				_, _, err := waitForNextSlotOrHeadChange(
 					ctx, 11, sleepForSlotConfig(10),
 					sleepForSlotForkChoiceFake{head: head, emitter: emitter, columnRetry: retries.record},
-					sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{}, common.Hash{},
+					sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{},
+					head,
 				)
 				require.ErrorIs(t, err, context.Canceled)
 			}
@@ -925,7 +947,8 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 
 			_, _, err := waitForNextSlotOrHeadChange(
 				ctx, 11, sleepForSlotConfig(10), forkChoice,
-				sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{}, common.Hash{},
+				sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{},
+				common.Hash{1},
 			)
 
 			require.ErrorIs(t, err, context.Canceled)
@@ -960,12 +983,13 @@ func startSleepForSlotAtTip(t *testing.T, f *forwardSyncTipFixture, forkChoice s
 	head, _, err := f.cfg.forkChoice.GetHeadNode()
 	require.NoError(t, err)
 	executionHead, _ := f.cfg.forkChoice.GetExecutionHead(head)
+	f.cfg.forkChoice.RecordExecutionHead(executionHead, nil)
 	clock := sleepForSlotClockFake{
 		currentEpoch: f.currentSlot / f.cfg.beaconCfg.SlotsPerEpoch,
 		currentSlot:  f.currentSlot,
 		nextSlot:     time.Now().Add(time.Minute),
 	}
-	return startSleepForSlot(t, f.cfg.beaconCfg, forkChoice, head.Root, clock, executionHead)
+	return startSleepForSlot(t, f.cfg.beaconCfg, forkChoice, head.Root, clock)
 }
 
 type headReadCounter struct {
@@ -1144,5 +1168,36 @@ func TestSleepForSlotRetriesAfterAColumnStoredDuringTheWakeCheck(t *testing.T) {
 		require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot), "a column stored after the check read storage wakes another check")
 		require.Equal(t, started, time.Now())
 		run.stop(t)
+	})
+}
+
+func TestSleepForSlotWakesWhenHeadWasNotCommittedByTheStage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		head, parent := common.Hash{2}, common.Hash{1}
+		started := time.Now()
+		clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)}
+		wake, changed, err := waitForNextSlotOrHeadChange(
+			t.Context(), 11, sleepForSlotConfig(10),
+			sleepForSlotForkChoiceFake{head: head},
+			sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{}, parent,
+		)
+		require.NoError(t, err)
+		require.True(t, changed, "a head installed by publication must still wake the stage that has not committed it")
+		require.Equal(t, head, wake.root)
+	})
+}
+
+func TestSleepForSlotDoesNotWakeWhenHeadWasCommittedByTheStage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		head := common.Hash{2}
+		started := time.Now()
+		clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)}
+		_, changed, err := waitForNextSlotOrHeadChange(
+			t.Context(), 11, sleepForSlotConfig(10),
+			sleepForSlotForkChoiceFake{head: head},
+			sleepForSlotSyncedDataFake{head: head}, clock, sleepForSlotWake{}, head,
+		)
+		require.NoError(t, err)
+		require.False(t, changed)
 	})
 }

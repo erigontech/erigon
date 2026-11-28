@@ -17,12 +17,17 @@
 package forkchoice
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"testing/synctest"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -119,4 +124,130 @@ func TestGetExecutionHeadResolvesNode(t *testing.T) {
 			require.Equal(t, tc.want, hash)
 		})
 	}
+}
+
+func TestGetHeadExecutionHashFallsBackToEth1Hash(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ForkChoiceStore, *executionHeadGraph, *ForkChoiceNode)
+		want   common.Hash
+	}{
+		{name: "Gloas FULL", want: common.Hash{3}},
+		{
+			name: "Gloas EMPTY",
+			mutate: func(_ *ForkChoiceStore, _ *executionHeadGraph, head *ForkChoiceNode) {
+				head.PayloadStatus = cltypes.PayloadStatusEmpty
+			},
+			want: common.Hash{2},
+		},
+		{
+			name: "Gloas PENDING",
+			mutate: func(_ *ForkChoiceStore, _ *executionHeadGraph, head *ForkChoiceNode) {
+				head.PayloadStatus = cltypes.PayloadStatusPending
+			},
+			want: common.Hash{2},
+		},
+		{
+			name: "pre-Gloas block",
+			mutate: func(store *ForkChoiceStore, graph *executionHeadGraph, head *ForkChoiceNode) {
+				graph.blocks[head.Root] = cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.FuluVersion)
+			},
+			want: common.Hash{9},
+		},
+		{
+			name: "block without bid",
+			mutate: func(_ *ForkChoiceStore, graph *executionHeadGraph, head *ForkChoiceNode) {
+				delete(graph.blocks, head.Root)
+			},
+			want: common.Hash{9},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, graph, head := executionHeadFixture(t)
+			var err error
+			store.eth2Roots, err = lru.New[common.Hash, common.Hash](4)
+			require.NoError(t, err)
+			store.eth2Roots.Add(head.Root, common.Hash{9})
+			if tc.mutate != nil {
+				tc.mutate(store, graph, &head)
+			}
+			require.Equal(t, tc.want, store.GetHeadExecutionHash(head))
+		})
+	}
+}
+
+func TestLockExecutionHeadHonoursContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &ForkChoiceStore{executionHeadLock: make(chan struct{}, 1)}
+		unlock, err := store.LockExecutionHead(t.Context())
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		result := make(chan error, 1)
+		go func() {
+			unlockWaiter, err := store.LockExecutionHead(ctx)
+			if err == nil {
+				unlockWaiter()
+			}
+			result <- err
+		}()
+		synctest.Wait()
+		require.Empty(t, result, "LockExecutionHead returned while the lock was held")
+
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-result, context.Canceled)
+
+		unlock()
+		again, err := store.LockExecutionHead(t.Context())
+		require.NoError(t, err, "the cancelled waiter must not hold the lock")
+		again()
+	})
+}
+
+func TestLockExecutionHeadRejectsCancelledContextWhenFree(t *testing.T) {
+	store := &ForkChoiceStore{executionHeadLock: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for range 200 {
+		unlock, err := store.LockExecutionHead(ctx)
+		if err == nil {
+			unlock()
+		}
+		require.ErrorIs(t, err, context.Canceled)
+	}
+}
+
+func TestRecordExecutionHead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want common.Hash
+	}{
+		{name: "success", want: common.Hash{2}},
+		{name: "timeout", err: execution_client.ErrForkChoiceUpdateTimeout, want: common.Hash{2}},
+		{name: "busy", err: execution_client.ErrForkChoiceUpdateBusy, want: common.Hash{1}},
+		{name: "other error", err: errors.New("rejected"), want: common.Hash{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &ForkChoiceStore{}
+			store.RecordExecutionHead(common.Hash{1}, nil)
+			store.RecordExecutionHead(common.Hash{2}, tc.err)
+			require.Equal(t, tc.want, store.LastExecutionHead())
+		})
+	}
+}
+
+func TestTryLockExecutionHead(t *testing.T) {
+	store := &ForkChoiceStore{executionHeadLock: make(chan struct{}, 1)}
+	unlock, ok := store.TryLockExecutionHead()
+	require.True(t, ok)
+
+	_, ok = store.TryLockExecutionHead()
+	require.False(t, ok, "the lock is held")
+
+	unlock()
+	unlock, ok = store.TryLockExecutionHead()
+	require.True(t, ok, "unlock frees the lock")
+	unlock()
 }

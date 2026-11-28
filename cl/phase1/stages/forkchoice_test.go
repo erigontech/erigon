@@ -307,7 +307,7 @@ func startPostForkchoiceWithBlockedCopy(t *testing.T, blocker *blockingStateCopy
 	blocker.armed.Store(true)
 	done := make(chan error, 1)
 	go func() {
-		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+		done <- postForkchoiceOperations(t.Context(), tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -615,13 +615,13 @@ func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 	require.NoError(t, err)
-	require.Equal(t, executionHash, fixture.cfg.executionHead)
+	require.Equal(t, executionHash, fixture.cfg.forkChoice.LastExecutionHead())
 	fixture.cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(fixture.cfg.ethClock.GenesisTime() + fixture.cfg.beaconCfg.SecondsPerSlot))
 
 	_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 
 	require.NoError(t, err)
-	require.Equal(t, executionHash, fixture.cfg.executionHead)
+	require.Equal(t, executionHash, fixture.cfg.forkChoice.LastExecutionHead())
 }
 
 func TestComputeForkChoiceRecordsExecutionHeadWithoutEngine(t *testing.T) {
@@ -631,7 +631,22 @@ func TestComputeForkChoiceRecordsExecutionHeadWithoutEngine(t *testing.T) {
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 
 	require.NoError(t, err)
-	require.Equal(t, executionHash, fixture.cfg.executionHead)
+	require.Equal(t, executionHash, fixture.cfg.forkChoice.LastExecutionHead())
+}
+
+func TestNotifyServicesOfHeadPreGloasDoesNotLockExecutionHead(t *testing.T) {
+	executionHash := common.Hash{0x41}
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false, nil)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
+		Return(nil, nil)
+	head, headSlot, err := selectForkChoiceHead(fixture.cfg)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, notifyServicesOfHead(ctx, log.New(), fixture.cfg, head, headSlot))
+	require.Equal(t, executionHash, fixture.cfg.forkChoice.LastExecutionHead())
 }
 
 func newGloasCanonicalForkChoiceFixture(t *testing.T, full bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope, *testExecutionEngine) {
@@ -670,7 +685,7 @@ func TestComputeForkChoiceSendsGloasFullExecutionHeadWithoutVerification(t *test
 	require.Equal(t, headRoot, returnedRoot)
 	require.Equal(t, headBlock.Block.Slot, headSlot)
 	require.Equal(t, []common.Hash{bid.BlockHash}, engine.forkChoiceHeads)
-	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	require.Equal(t, bid.BlockHash, cfg.forkChoice.LastExecutionHead())
 }
 
 func TestComputeForkChoiceSendsGloasEmptyExecutionHead(t *testing.T) {
@@ -681,7 +696,7 @@ func TestComputeForkChoiceSendsGloasEmptyExecutionHead(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{bid.ParentBlockHash}, engine.forkChoiceHeads)
-	require.Equal(t, bid.ParentBlockHash, cfg.executionHead)
+	require.Equal(t, bid.ParentBlockHash, cfg.forkChoice.LastExecutionHead())
 }
 
 func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
@@ -695,7 +710,7 @@ func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, fixture.headRoot, computedRoot)
-	require.Equal(t, executionHash, fixture.cfg.executionHead)
+	require.Equal(t, executionHash, fixture.cfg.forkChoice.LastExecutionHead())
 }
 
 func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
@@ -708,7 +723,7 @@ func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 
 	require.NoError(t, err)
-	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	require.Equal(t, bid.BlockHash, cfg.forkChoice.LastExecutionHead())
 	previousWake.executionHead = bid.BlockHash
 	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
 }
@@ -736,12 +751,12 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 		engine.forkChoiceFn = direct.ForkChoiceUpdate
 
 		started := time.Now()
-		previousExecutionHead := cfg.executionHead
+		previousExecutionHead := cfg.forkChoice.LastExecutionHead()
 		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
 		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 1, module.forkChoiceCalls)
-		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")
+		require.Equal(t, previousExecutionHead, cfg.forkChoice.LastExecutionHead(), "a busy execution module did not apply the head")
 		require.Equal(t, bid.BlockHash, cfg.sleepForSlotLastWake.executionHead)
 		require.Equal(t, started, cfg.sleepForSlotLastWake.at)
 
@@ -749,7 +764,8 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 			t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg, cfg.forkChoice,
 			sleepForSlotSyncedDataFake{head: headRoot},
 			sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
-			cfg.sleepForSlotLastWake, cfg.executionHead,
+			cfg.sleepForSlotLastWake,
+			headRoot,
 		)
 		require.NoError(t, err)
 		require.True(t, changed, "the unapplied execution head must wake fork choice before the next slot")
@@ -759,7 +775,7 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 2, module.forkChoiceCalls)
-		require.Equal(t, bid.BlockHash, cfg.executionHead)
+		require.Equal(t, bid.BlockHash, cfg.forkChoice.LastExecutionHead())
 	})
 }
 
@@ -769,14 +785,14 @@ func TestComputeForkChoiceKeepsGloasExecutionHeadAfterFatalError(t *testing.T) {
 	previousHash := common.Hash{0x42}
 	previousWake := sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: time.Now()}
 	wantErr := errors.New("fork choice failed")
-	cfg.executionHead = previousHash
+	cfg.forkChoice.RecordExecutionHead(previousHash, nil)
 	cfg.sleepForSlotLastWake = previousWake
 	engine.forkChoiceErr = wantErr
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 
 	require.ErrorIs(t, err, wantErr)
-	require.Equal(t, previousHash, cfg.executionHead)
+	require.Equal(t, previousHash, cfg.forkChoice.LastExecutionHead())
 	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
 }
 
@@ -802,17 +818,18 @@ func TestGloasExecutionHeadChangeBypassesThrottleAfterDifferentStageDecision(t *
 				_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 				require.NoError(t, err)
 				require.Equal(t, []common.Hash{stageHead}, engine.forkChoiceHeads)
-				require.Equal(t, stageHead, cfg.executionHead)
+				require.Equal(t, stageHead, cfg.forkChoice.LastExecutionHead())
 				require.Equal(t, headRoot, cfg.sleepForSlotLastWake.root)
 				require.Equal(t, started, cfg.sleepForSlotLastWake.at)
 
 				ready := true
 				wake, changed, err := waitForNextSlotOrHeadChange(
 					t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg,
-					sleepForSlotForkChoiceFake{head: headRoot, executionHead: wakeHead, ready: &ready},
+					sleepForSlotForkChoiceFake{head: headRoot, executionHead: wakeHead, lastExecutionHead: stageHead, ready: &ready},
 					sleepForSlotSyncedDataFake{head: headRoot},
 					sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
-					cfg.sleepForSlotLastWake, cfg.executionHead,
+					cfg.sleepForSlotLastWake,
+					headRoot,
 				)
 				require.NoError(t, err)
 				require.True(t, changed)
@@ -829,7 +846,7 @@ func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 	require.NoError(t, err)
-	require.Equal(t, bid.ParentBlockHash, cfg.executionHead)
+	require.Equal(t, bid.ParentBlockHash, cfg.forkChoice.LastExecutionHead())
 	require.NoError(t, graph.DumpEnvelopeOnDisk(headRoot, envelope))
 	cfg.forkChoice.MarkPayloadStatus(headRoot, bid.BlockHash, execution_client.PayloadStatusNotValidated)
 
@@ -837,7 +854,8 @@ func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {
 		t.Context(), headBlock.Block.Slot+1, sleepForSlotConfig(0), cfg.forkChoice,
 		sleepForSlotSyncedDataFake{head: headRoot},
 		sleepForSlotClockFake{currentEpoch: 0, currentSlot: headBlock.Block.Slot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)},
-		sleepForSlotWake{}, cfg.executionHead,
+		sleepForSlotWake{},
+		headRoot,
 	)
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -847,7 +865,28 @@ func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {
 	_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 	require.NoError(t, err)
 	require.Equal(t, []common.Hash{bid.BlockHash}, engine.forkChoiceHeads)
-	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	require.Equal(t, bid.BlockHash, cfg.forkChoice.LastExecutionHead())
+}
+
+func TestGloasExecutionHeadSentByPublicationWakesStageWhenHeadReturnsToFull(t *testing.T) {
+	cfg, _, headRoot, headBlock, _, _ := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+
+	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, bid.BlockHash, cfg.forkChoice.LastExecutionHead())
+	cfg.forkChoice.RecordExecutionHead(bid.ParentBlockHash, nil)
+
+	wake, changed, err := waitForNextSlotOrHeadChange(
+		t.Context(), headBlock.Block.Slot+1, sleepForSlotConfig(0), cfg.forkChoice,
+		sleepForSlotSyncedDataFake{head: headRoot},
+		sleepForSlotClockFake{currentEpoch: 0, currentSlot: headBlock.Block.Slot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)},
+		sleepForSlotWake{root: headRoot, executionHead: bid.BlockHash, at: time.Now().Add(-sleepForSlotRewakeInterval)},
+		headRoot,
+	)
+	require.NoError(t, err)
+	require.True(t, changed, "an FCU another caller sent for a different head must wake the stage")
+	require.Equal(t, bid.BlockHash, wake.executionHead)
 }
 
 func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) {
@@ -861,7 +900,7 @@ func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) 
 	t.Cleanup(tx.Rollback)
 	done := make(chan error, 1)
 	go func() {
-		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+		done <- postForkchoiceOperations(t.Context(), tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
 	}()
 
 	requireLockOrderOperationCompletes(t, fixture, done)
@@ -881,7 +920,7 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+	require.NoError(t, postForkchoiceOperations(t.Context(), tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
 
 	require.Equal(t, 1, recorder.ownedCalls)
 	require.Zero(t, recorder.copyCalls)
@@ -924,7 +963,7 @@ func TestPostForkchoiceOperationsCopiesTheHeadIntoTheSpareState(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+	require.NoError(t, postForkchoiceOperations(t.Context(), tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
 
 	require.Same(t, spare, recorder.ownedState)
 	require.Equal(t, fixture.headState.Slot(), spare.Slot())
@@ -1141,6 +1180,27 @@ func TestForkchoiceRoutineBackfillsTheNewCanonicalBranchAfterCommit(t *testing.T
 	require.Equal(t, []common.Hash{f.branchRoot, {}}, seen.roots, "the backfill must be requested after the new canonical chain is committed")
 }
 
+func TestForkchoiceRoutineSendsAPreGloasChainReorgBeforeTheHeadEvent(t *testing.T) {
+	f, _ := newReorgOntoTwoBlockBranchFixture(t)
+	f.cfg.peerDas = das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	f.cfg.peerDas.(*das_mock_services.MockPeerDas).EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
+	events := make(chan *beaconevents.EventStream, 16)
+	subscription := f.cfg.emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), f.cfg, Args{}))
+
+	for len(events) > 0 {
+		evt := <-events
+		require.NotEqual(t, beaconevents.StateHead, evt.Event, "chain_reorg must precede the head event")
+		if evt.Event == beaconevents.StateChainReorg {
+			require.Equal(t, f.branchRoot, evt.Data.(*beaconevents.ChainReorgData).NewHeadBlock)
+			return
+		}
+	}
+	t.Fatal("a committed reorg must send its chain_reorg event")
+}
+
 func TestForkchoiceRoutineBackfillsAReorgWhenTheHeadNotificationFails(t *testing.T) {
 	f, _ := newReorgOntoTwoBlockBranchFixture(t)
 	wantErr := errors.New("execution layer rejected the head")
@@ -1203,7 +1263,7 @@ func TestUpdateCanonicalChainReportsAReorgWhenTheEventCannotBeBuilt(t *testing.T
 
 			require.NoError(t, f.cfg.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
 				faultyTx := failingStateRootReadTx{RwTx: tx, root: failingRoot, err: errors.New("state root read failed")}
-				forkSlot, reorged, err := updateCanonicalChainInTheDatabase(faultyTx, f.block.Block.Slot, f.branchRoot, f.cfg)
+				forkSlot, reorged, _, err := updateCanonicalChainInTheDatabase(faultyTx, f.block.Block.Slot, f.branchRoot, f.cfg)
 				require.NoError(t, err)
 				require.True(t, reorged)
 				require.Equal(t, f.forkSlot, forkSlot)
@@ -1280,7 +1340,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeTestBlockIndices(t, tx, root101b, root100, state101b, 101, false)
 	writeTestBlockIndices(t, tx, root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, tx, 102, root102b)
+	reorg := reorgEventFor(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth should be oldHeadSlot - forkPointSlot")
@@ -1313,7 +1373,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeTestBlockIndices(t, tx, root101b, root100, common.Hash{0xb1}, 101, false)
 	writeTestBlockIndices(t, tx, root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, tx, 102, root102b)
+	reorg := reorgEventFor(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(3), reorg.Depth, "reorg Depth: old tip 103 - fork point 100 = 3")
@@ -1345,7 +1405,7 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeTestBlockIndices(t, tx, root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeTestBlockIndices(t, tx, root103b, root102b, state103b, 103, false)
 
-	reorg := drainReorgEvent(t, tx, 103, root103b)
+	reorg := reorgEventFor(t, tx, 103, root103b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(103), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth: old tip 102 - fork point 100 = 2")
@@ -1368,7 +1428,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 	writeTestBlockIndices(t, tx, root102, root101, common.Hash{0xa2}, 102, false)
 
-	reorg := drainReorgEvent(t, tx, 102, root102)
+	reorg := reorgEventFor(t, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
@@ -1387,7 +1447,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeTestBlockIndices(t, tx, root101a, root100, state101a, 101, true)
 	writeTestBlockIndices(t, tx, root101b, root100, state101b, 101, false)
 
-	reorg := drainReorgEvent(t, tx, 101, root101b)
+	reorg := reorgEventFor(t, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(101), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(1), reorg.Depth, "reorg Depth: old tip 101 - fork point 100 = 1")
@@ -1438,7 +1498,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			}))
 
 			err := db.Update(t.Context(), func(tx kv.RwTx) error {
-				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
 				return err
 			})
 			require.ErrorIs(t, err, errBlockIndicesPending, "canonical publication must wait for the pending block write")
@@ -1453,7 +1513,7 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 				return nil
 			}))
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
 				return err
 			}))
 			requireCanonical(root101b, root102b)
@@ -1472,7 +1532,7 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			tx := mdbxtest.BeginRw(t, db)
 
-			_, _, err := updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg)
+			_, _, _, err := updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg)
 			require.NoError(t, err)
 			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot)
 			require.NoError(t, err)
@@ -1482,7 +1542,7 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, anchorSlot+1, oldRoot))
 			require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, newRoot, anchorSlot+2))
 			require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, newRoot, fixture.headRoot))
-			_, _, err = updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg)
+			_, _, _, err = updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg)
 			require.NoError(t, err)
 			root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot+1)
 			require.NoError(t, err)
@@ -1525,7 +1585,7 @@ func TestCanonicalRootsLeaveSkippedSlotsEmpty(t *testing.T) {
 					}
 					require.NoError(t, persistAcceptedBlock(ctx, cfg, block))
 					require.NoError(t, cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-						_, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, root, cfg)
+						_, _, _, err := updateCanonicalChainInTheDatabase(tx, block.Block.Slot, root, cfg)
 						return err
 					}))
 				}
@@ -1561,26 +1621,12 @@ func writeTestBlockIndices(t *testing.T, tx kv.RwTx, root, parentRoot, stateRoot
 	}
 }
 
-func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
+func reorgEventFor(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	cfg := newLockOrderFixture(t, 0).cfg
-	ch := make(chan *beaconevents.EventStream, 16)
-	sub := cfg.emitter.State().Subscribe(ch)
-	defer sub.Unsubscribe()
-
-	_, _, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	_, _, reorg, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
-
-	for {
-		select {
-		case evt := <-ch:
-			if evt.Event == beaconevents.StateChainReorg {
-				return evt.Data.(*beaconevents.ChainReorgData)
-			}
-		default:
-			return nil
-		}
-	}
+	return reorg
 }
 
 type invalidatingEventHeadStore struct {
@@ -2012,7 +2058,7 @@ func newSameRootFixture(t *testing.T, gloasForkEpoch, headSlot uint64) *sameRoot
 }
 
 func (f *sameRootFixture) runPass() error {
-	return postForkchoiceOperations(f.tx, log.New(), f.cfg, f.headSlot, f.headRoot)
+	return postForkchoiceOperations(context.Background(), f.tx, log.New(), f.cfg, f.headSlot, f.headRoot)
 }
 
 // setHeadStatus makes fork choice select the anchor with the given payload status. The unrelated payload

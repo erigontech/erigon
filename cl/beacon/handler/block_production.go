@@ -3412,16 +3412,28 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err != nil {
 		return err
 	}
+	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if headVersion >= clparams.GloasVersion {
+		unlock, ok := a.forkchoiceStore.TryLockExecutionHead()
+		if !ok {
+			log.Debug("BlockProduction: the execution head lock is held, skipping the head update", "root", headRoot)
+			return nil
+		}
+		defer unlock()
+	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+	headMoved, err := a.updateExecutionHead(ctx, headRoot, finalizedHash, safeHash, headVersion)
+	if err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
 		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) && !errors.Is(err, execution_client.ErrForkChoiceUpdateBusy) {
 			return err
 		}
 		log.Debug("BlockProduction: forkchoice update deferred while storing block", "root", headRoot, "err", err)
+	}
+	if headMoved {
+		return nil
 	}
 
 	if _, err := a.attestationProducer.ProduceAndCacheAttestationData(headState, headRoot, block.Block.Slot); err != nil {
@@ -3481,6 +3493,26 @@ func (a *ApiHandler) writeColumnSidecarsBatched(ctx context.Context, slot uint64
 	}
 	log.Warn("[Beacon REST] batched data column write failed, the columns were written one at a time", "slot", slot, "blockRoot", blockRoot, "columnCount", len(sidecars), "err", batchErr)
 	return nil
+}
+
+// updateExecutionHead sends the FCU for the selected head. From Gloas the caller holds the execution head lock, and
+// the update is skipped when the head moved, so it never sends a payload status older than the canonical stage's.
+func (a *ApiHandler) updateExecutionHead(ctx context.Context, headRoot common.Hash, finalizedHash, safeHash common.Hash, version clparams.StateVersion) (headMoved bool, err error) {
+	if version < clparams.GloasVersion {
+		_, err = a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, version)
+		return false, err
+	}
+	current, _, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return false, err
+	}
+	if current.Root != headRoot {
+		return true, nil
+	}
+	executionHead := a.forkchoiceStore.GetHeadExecutionHash(current)
+	_, err = a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, executionHead, nil, version)
+	a.forkchoiceStore.RecordExecutionHead(executionHead, err)
+	return false, err
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
