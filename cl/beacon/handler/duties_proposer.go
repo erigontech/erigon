@@ -63,6 +63,9 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
+	if currentEpoch := a.ethClock.GetCurrentEpoch(); epoch > currentEpoch+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is more than one epoch beyond clock epoch %d", epoch, currentEpoch))
+	}
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
@@ -80,7 +83,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		stateEpoch := state.Epoch(s)
 		if epoch > stateEpoch+maxEpochsLookaheadForDuties {
-			return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("proposer duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
 		useHistory = epoch < stateEpoch && (isFinalized || expectedSlot < lowestAvailableSlot)
 		if useHistory {
@@ -171,7 +174,7 @@ func (a *ApiHandler) prepareProposerDutiesForTarget(duties []proposerDuties, s *
 		s = versionedState
 	}
 
-	if targetVersion.After(s.Version()) || (s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead) || (recent && s.Version() < clparams.FuluVersion && stateEpoch < epoch) {
+	if targetVersion.After(s.Version()) || (s.Version() >= clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead) || (s.Version() < clparams.FuluVersion && stateEpoch < epoch && (recent || epoch <= stateEpoch+a.beaconChainCfg.MinSeedLookahead+1)) {
 		return a.copyHeadStateForDuties(s)
 	}
 	if !recent && s.Version() < clparams.FuluVersion && epoch > stateEpoch+a.beaconChainCfg.MinSeedLookahead+1 {

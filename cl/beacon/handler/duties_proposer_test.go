@@ -483,6 +483,45 @@ func TestGetDutiesProposerRecentPreFuluUsesEpochState(t *testing.T) {
 	}
 }
 
+func TestGetDutiesProposerPreFuluHeadUsesEpochState(t *testing.T) {
+	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	headEpoch := state.Epoch(postState)
+	targetEpoch := headEpoch + 1
+	targetSlot := targetEpoch * cfg.SlotsPerEpoch
+
+	head, err := postState.Copy()
+	require.NoError(t, err)
+	target := increaseProposerTestBalance(t, head)
+	unadvanced, err := head.GetBeaconProposerIndices(targetEpoch)
+	require.NoError(t, err)
+
+	expectedState, err := head.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expectedState, targetSlot))
+	expected, err := expectedState.GetBeaconProposerIndices(targetEpoch)
+	require.NoError(t, err)
+	require.NotEqual(t, unadvanced, expected)
+	balanceBefore, err := head.ValidatorEffectiveBalance(int(target))
+	require.NoError(t, err)
+	balanceAfter, err := expectedState.ValidatorEffectiveBalance(int(target))
+	require.NoError(t, err)
+	require.Greater(t, balanceAfter, balanceBefore)
+
+	manager, ok := syncedData.(*synced_data.SyncedDataManager)
+	require.True(t, ok)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(head, manager.HeadRoot()))
+	setDutiesClockEpoch(handler, targetEpoch)
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := "/eth/" + version + "/validator/duties/proposer/" + strconv.FormatUint(targetEpoch, 10)
+			response := getProposerDutiesForPath(t, handler, path)
+			require.Equal(t, clparams.ElectraVersion.String(), response.Version)
+			requireProposerDuties(t, response.Data, expectedState, targetSlot, expected)
+		})
+	}
+}
+
 func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 	_, _, _, _, postState, handler, _, manager, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
@@ -836,18 +875,75 @@ func TestGetDutiesProposerFutureEpochBounds(t *testing.T) {
 
 	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
 	for _, tc := range []struct {
-		epoch uint64
-		code  int
+		name       string
+		clockEpoch uint64
+		epoch      uint64
+		code       int
 	}{
-		{headEpoch + 2, http.StatusOK},
-		{headEpoch + 3, http.StatusServiceUnavailable},
-		{headEpoch + maxEpochsLookaheadForDuties + 1, http.StatusBadRequest},
+		{"within_seed_bound", headEpoch + 1, headEpoch + 2, http.StatusOK},
+		{"within_clock_bound_beyond_seed_bound", headEpoch + 2, headEpoch + 3, http.StatusServiceUnavailable},
+		{"within_clock_bound_beyond_head_lookahead", headEpoch + maxEpochsLookaheadForDuties, headEpoch + maxEpochsLookaheadForDuties + 1, http.StatusServiceUnavailable},
+		{"beyond_clock_bound", headEpoch + maxEpochsLookaheadForDuties, headEpoch + maxEpochsLookaheadForDuties + 2, http.StatusBadRequest},
 	} {
-		t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			setDutiesClockEpoch(handler, tc.clockEpoch)
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(tc.epoch, 10), http.NoBody)
 			recorder := httptest.NewRecorder()
 			handler.mux.ServeHTTP(recorder, request)
 			require.Equal(t, tc.code, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestGetDutiesProposerClockBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version clparams.StateVersion
+	}{
+		{"electra", clparams.ElectraVersion},
+		{"fulu", clparams.FuluVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, blocks, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			headEpoch := state.Epoch(postState)
+			headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+			require.NoError(t, err)
+			if tc.version == clparams.FuluVersion {
+				cfg.FuluForkEpoch = headEpoch
+				cfg.InitializeForkSchedule()
+				stateCfg := *postState.BeaconConfig()
+				stateCfg.FuluForkEpoch = headEpoch
+				stateCfg.InitializeForkSchedule()
+				encoded, err := postState.EncodeSSZ(nil)
+				require.NoError(t, err)
+				isolated := state.New(&stateCfg)
+				require.NoError(t, isolated.DecodeSSZ(encoded, int(clparams.ElectraVersion)))
+				postState, err = isolated.Copy()
+				require.NoError(t, err)
+				require.NoError(t, postState.UpgradeToFulu())
+			}
+			manager, ok := syncedData.(*synced_data.SyncedDataManager)
+			require.True(t, ok)
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(postState, headRoot))
+
+			for _, request := range []struct {
+				name        string
+				clockOffset uint64
+				epochOffset uint64
+				status      int
+			}{
+				{"current_epoch", 33, 33, http.StatusServiceUnavailable},
+				{"clock_plus_two", 33, 35, http.StatusBadRequest},
+			} {
+				t.Run(request.name, func(t *testing.T) {
+					setDutiesClockEpoch(handler, headEpoch+request.clockOffset)
+					path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(headEpoch+request.epochOffset, 10)
+					recorder := httptest.NewRecorder()
+					handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+					require.Equal(t, request.status, recorder.Code, recorder.Body.String())
+				})
+			}
 		})
 	}
 }
