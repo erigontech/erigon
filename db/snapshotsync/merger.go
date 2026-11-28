@@ -278,6 +278,9 @@ func (m *Merger) Merge(
 		reused := make(map[snaptype.Enum]struct{})
 		var reusedFiles []string
 		for _, t := range snapTypes {
+			if len(toMerge[t.Enum()]) == 0 { // a skipped type reuses nothing
+				continue
+			}
 			output := t.FileInfo(snapDir, r.From(), r.To())
 			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
 				continue
