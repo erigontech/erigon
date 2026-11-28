@@ -329,8 +329,8 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 }
 
 // A newPayload call the execution layer never answered says nothing about the
-// block, so the sender must not be rejected (and banned) for it.
-func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
+// block: the gossip verdict is already Accept, and the import is retried.
+func TestBlockServiceAcceptsAndRetriesLocalExecutionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -350,12 +350,12 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
 	fcu.OnBlockErr = fmt.Errorf("%w: execution client is down", forkchoice.ErrNewPayloadNoStatus)
 
-	err = svc.ProcessMessage(context.Background(), nil, blocks[1])
-	require.ErrorIs(t, err, ErrIgnore)
+	require.NoError(t, svc.ProcessMessage(context.Background(), nil, blocks[1]))
 
 	blockRoot, err := blocks[1].Block.HashSSZ()
 	require.NoError(t, err)
 	impl := svc.(*blockService)
+	waitForGossipImports(t, impl)
 	queuedValue, scheduled := impl.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, scheduled, "the block must be queued for a retry")
 
@@ -393,14 +393,14 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	}))
 }
 
-func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
+func TestBlockServiceAcceptsAndLogsOnBlockFailureAfterGossipValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		err    error
-		ignore bool
+		result string
 	}{
-		{name: "local failure", err: forkchoice.ErrMissingSegment, ignore: true},
-		{name: "invalid block", err: fmt.Errorf("%w: invalid block", forkchoice.ErrBlockInvalid)},
+		{name: "local failure", err: forkchoice.ErrMissingSegment, result: "failed"},
+		{name: "invalid block", err: fmt.Errorf("%w: invalid block", forkchoice.ErrBlockInvalid), result: "invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -419,15 +419,18 @@ func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
 			finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
 			fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
 			fcu.OnBlockErr = tc.err
+			counter := gossipBlockImportAfterAcceptCounter.WithLabelValues(tc.result)
+			before := counter.GetValue()
 
-			err = svc.ProcessMessage(context.Background(), nil, blocks[1])
-			require.ErrorIs(t, err, tc.err)
-			if tc.ignore {
-				require.ErrorIs(t, err, ErrIgnore)
-			} else {
-				require.NotErrorIs(t, err, ErrIgnore)
-				require.NotContains(t, err.Error(), "ignore")
-			}
+			require.NoError(t, svc.ProcessMessage(context.Background(), nil, blocks[1]))
+
+			impl := svc.(*blockService)
+			waitForGossipImports(t, impl)
+			require.Equal(t, before+1, counter.GetValue())
+			root, err := blocks[1].Block.HashSSZ()
+			require.NoError(t, err)
+			_, queued := impl.blocksScheduledForLaterExecution.Load(root)
+			require.False(t, queued, "an import failure that is not retriable must not queue the block")
 		})
 	}
 }
@@ -533,6 +536,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, blocks[1]))
+	waitForGossipImports(t, service.(*blockService))
 	key := proposerIndexAndSlot{
 		proposerIndex: blocks[1].Block.ProposerIndex,
 		slot:          blocks[1].Block.Slot,
@@ -1743,6 +1747,47 @@ func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
 	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.True(t, scheduled)
+}
+
+func TestBlockServiceGossipRejectsWrongPayloadTimestamp(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixtureWithPayloadTimeOffset(t, 1)
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.NotContains(t, err.Error(), "ignore")
+	require.Zero(t, processing.calls.Load())
+	require.Zero(t, scheduledBlockCount(t, service))
+}
+
+func TestBlockServiceGossipIgnoresChildOfInvalidParent(t *testing.T) {
+	for name, markInvalid := range map[string]func(*mock_services.ForkChoiceStorageMock, common.Hash){
+		"parent in invalid blocks": func(store *mock_services.ForkChoiceStorageMock, parentRoot common.Hash) {
+			store.InvalidBlocks = map[common.Hash]struct{}{parentRoot: {}}
+		},
+		"parent payload invalidated": func(store *mock_services.ForkChoiceStorageMock, parentRoot common.Hash) {
+			store.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, block, processing, _ := newFuluColumnGossipFixture(t)
+			markInvalid(processing.ForkChoiceStorage.(*mock_services.ForkChoiceStorageMock), block.Block.ParentRoot)
+
+			err := service.ProcessMessage(t.Context(), nil, block)
+			require.ErrorIs(t, err, ErrIgnore)
+			require.Zero(t, processing.calls.Load())
+			require.Zero(t, scheduledBlockCount(t, service))
+		})
+	}
+}
+
+func TestBlockServiceGossipAcceptsEmptyChildOfInvalidParent(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	fcu.InvalidBlocks = map[common.Hash]struct{}{parentRoot: {}}
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
 func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {

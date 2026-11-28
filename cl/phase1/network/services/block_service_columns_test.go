@@ -19,6 +19,7 @@ import (
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/transition"
@@ -43,6 +44,7 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 		service.timelines = newBlockTimelines(timelineClock(t, block.Block.Slot), logger)
 
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+		synctest.Wait()
 		job := serviceJob(t, service, root)
 		job.mu.Lock()
 		require.True(t, job.waitsForColumns)
@@ -92,6 +94,16 @@ func TestArchiveColumnRetryDoesNotWaitForOperationFeed(t *testing.T) {
 	}).AnyTimes()
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	require.Eventually(t, func() bool {
+		queued, ok := service.blocksScheduledForLaterExecution.Load(root)
+		if !ok {
+			return false
+		}
+		job := queued.(*blockJob)
+		job.mu.Lock()
+		defer job.mu.Unlock()
+		return job.waitsForColumns
+	}, acceptTestTimeout, time.Millisecond)
 	handle := &publishedBlockJobHandle{job: serviceJob(t, service, root)}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*blockJobExpiry)
 	defer cancel()
@@ -144,6 +156,7 @@ func TestProcessMessageRetriesWhenLastColumnArrivesBeforeJobWaits(t *testing.T) 
 			processing.err = nil
 		}}
 
+		service.startGossipImport = func(f func()) { f() }
 		start := time.Now()
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
 		synctest.Wait()
@@ -157,13 +170,28 @@ func TestProcessMessageRetriesWhenLastColumnArrivesBeforeJobWaits(t *testing.T) 
 
 func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
 	t.Helper()
-	parentState, cfg := newUpgradedValidationState(t, clparams.FuluVersion, func(cfg *clparams.BeaconChainConfig, _ uint64) {
+	return newFuluColumnGossipFixtureWithPayloadTimeOffset(t, 0)
+}
+
+// newFuluColumnGossipFixtureWithPayloadTimeOffset shifts the payload timestamp by that many seconds before the block is signed.
+func newFuluColumnGossipFixtureWithPayloadTimeOffset(t *testing.T, offset uint64) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
+	t.Helper()
+	return newColumnGossipFixture(t, clparams.FuluVersion, offset)
+}
+
+// newColumnGossipFixture supports Electra and Fulu.
+func newColumnGossipFixture(t *testing.T, version clparams.StateVersion, offset uint64) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
+	t.Helper()
+	parentState, cfg := newUpgradedValidationState(t, version, func(cfg *clparams.BeaconChainConfig, _ uint64) {
 		cfg.AltairForkEpoch = 0
 		cfg.BellatrixForkEpoch = 0
 		cfg.CapellaForkEpoch = 0
 		cfg.DenebForkEpoch = 0
 		cfg.ElectraForkEpoch = 0
-		cfg.FuluForkEpoch = 0
+		cfg.FuluForkEpoch = cfg.FarFutureEpoch
+		if version >= clparams.FuluVersion {
+			cfg.FuluForkEpoch = 0
+		}
 		cfg.GloasForkEpoch = cfg.FarFutureEpoch
 	})
 	parentSlot := parentState.Slot()
@@ -182,15 +210,16 @@ func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBea
 	validator.SetPublicKey(publicKey)
 	parentState.SetValidatorAtIndex(int(proposerIndex), validator)
 
-	parent := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	parent := cltypes.NewSignedBeaconBlock(cfg, version)
 	parent.Block.Slot = parentSlot
 	parentRoot, err := parent.Block.HashSSZ()
 	require.NoError(t, err)
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block := cltypes.NewSignedBeaconBlock(cfg, version)
 	block.Block.Slot = childSlot
 	block.Block.ProposerIndex = proposerIndex
 	block.Block.ParentRoot = parentRoot
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	block.Block.Body.ExecutionPayload.Time = state.ComputeTimestampAtSlot(parentState, childSlot) + offset
 	domain, err := parentState.GetDomain(cfg.DomainBeaconProposer, childSlot/cfg.SlotsPerEpoch)
 	require.NoError(t, err)
 	signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)

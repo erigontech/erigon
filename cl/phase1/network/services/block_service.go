@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -55,7 +57,18 @@ var (
 
 var publishedBlockJobSequence atomic.Uint64
 
-const maxConcurrentBlockValidationContexts = 4
+const (
+	maxConcurrentBlockValidationContexts = 4
+	maxConcurrentGossipBlockImports      = 8
+)
+
+var gossipBlockImportAfterAcceptCounter = metrics.GetOrCreateCounterVec(
+	"caplin_gossip_block_import_after_accept_total",
+	[]string{"result"},
+	"Total outcomes of pre-Gloas gossip block imports that run after the block was accepted",
+)
+
+var gossipBlockImportInlineCounter = metrics.GetOrCreateCounter("caplin_gossip_block_import_inline_total")
 
 // AcceptedBlockWriteError carries the exact signed copy accepted by fork choice
 // so a failed database write can be retried even after its header is pruned.
@@ -214,10 +227,15 @@ type elColumnsPublisher interface {
 }
 
 type blockService struct {
+	// ctx is independent of the gossip validator's context.
+	ctx                  context.Context
 	forkchoiceStore      forkchoice.ForkChoiceStorage
 	engine               execution_client.ExecutionEngine
 	dataColumns          elColumnsPublisher
 	startELColumnsImport func(context.Context, *cltypes.SignedBeaconBlock)
+	startGossipImport    func(func())
+	importSlots          chan struct{}
+	gossipImportTimeout  time.Duration
 	syncedData           *synced_data.SyncedDataManager
 	ethClock             eth_clock.EthereumClock
 	beaconCfg            *clparams.BeaconChainConfig
@@ -259,6 +277,7 @@ func NewBlockService(
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
 	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	b.ctx = ctx
 	b.engine = engine
 	b.dataColumns = dataColumns
 	go b.stopPublishedBlockJobsOnContext(ctx)
@@ -292,19 +311,22 @@ func newBlockService(
 		panic(err)
 	}
 	b := &blockService{
-		forkchoiceStore:  forkchoiceStore,
-		syncedData:       syncedData,
-		ethClock:         ethClock,
-		beaconCfg:        beaconCfg,
-		seenBlocksCache:  seenBlocksCache,
-		reservations:     make(map[proposerIndexAndSlot]*blockReservation),
-		validationCache:  validationCache,
-		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
-		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
-		elImportsStarted: elImportsStarted,
-		elBlobRetryRoots: elBlobRetryRoots,
-		emitter:          emitter,
-		db:               db,
+		ctx:                 context.Background(),
+		forkchoiceStore:     forkchoiceStore,
+		syncedData:          syncedData,
+		ethClock:            ethClock,
+		beaconCfg:           beaconCfg,
+		seenBlocksCache:     seenBlocksCache,
+		reservations:        make(map[proposerIndexAndSlot]*blockReservation),
+		validationCache:     validationCache,
+		validationCalls:     make(map[blockValidationContextKey]*blockValidationContextCall),
+		validationSlots:     make(chan struct{}, maxConcurrentBlockValidationContexts),
+		importSlots:         make(chan struct{}, maxConcurrentGossipBlockImports),
+		gossipImportTimeout: executionPayloadImportTimeout,
+		elImportsStarted:    elImportsStarted,
+		elBlobRetryRoots:    elBlobRetryRoots,
+		emitter:             emitter,
+		db:                  db,
 
 		publishedBlockScheduled: make(chan common.Hash, publishedBlockWakeBuffer),
 		timelines:               newBlockTimelines(ethClock, log.Root()),
@@ -312,6 +334,7 @@ func newBlockService(
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
 	}
+	b.startGossipImport = func(f func()) { go f() }
 	return b
 }
 
@@ -348,12 +371,69 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	b.timelines.seen(msg, arrived)
 	b.publishBlockGossipEvent(msg)
-	afterAdmission := startsELColumnsImportAfterAdmission(msg)
-	if !afterAdmission {
+	if !startsELColumnsImportAfterAdmission(msg) {
 		b.startELColumnsImportOnce(ctx, msg)
 	}
+	if msg.Version() < clparams.GloasVersion {
+		b.importAfterAccept(msg)
+		return nil
+	}
+	_, err := b.importGossipBlock(ctx, msg)
+	return err
+}
+
+type gossipImportResult string
+
+const (
+	gossipImportImported gossipImportResult = "imported"
+	gossipImportSkipped  gossipImportResult = "skipped"
+	gossipImportWaiting  gossipImportResult = "waiting"
+	gossipImportRetry    gossipImportResult = "retry"
+	gossipImportInvalid  gossipImportResult = "invalid"
+	gossipImportFailed   gossipImportResult = "failed"
+	gossipImportPanic    gossipImportResult = "panic"
+)
+
+// importAfterAccept imports a block the gossip validator has already accepted. It never drops a block: without a free
+// import slot the import runs on the caller.
+func (b *blockService) importAfterAccept(msg *cltypes.SignedBeaconBlock) {
+	finishPayloadImport := b.forkchoiceStore.BeginPayloadImport(msg.Block.Slot)
+	select {
+	case b.importSlots <- struct{}{}:
+		b.startGossipImport(func() {
+			defer func() { <-b.importSlots }()
+			b.runAcceptedImport(msg, finishPayloadImport)
+		})
+	default:
+		gossipBlockImportInlineCounter.Inc()
+		b.runAcceptedImport(msg, finishPayloadImport)
+	}
+}
+
+func (b *blockService) runAcceptedImport(msg *cltypes.SignedBeaconBlock, finishPayloadImport func()) {
+	defer finishPayloadImport()
+	defer func() {
+		if r := recover(); r != nil {
+			gossipBlockImportAfterAcceptCounter.WithLabelValues(string(gossipImportPanic)).Inc()
+			log.Error("Panic while importing an accepted gossip block", "slot", msg.Block.Slot, "proposer", msg.Block.ProposerIndex, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	ctx, cancel := context.WithTimeout(b.ctx, b.gossipImportTimeout)
+	defer cancel()
+	result, err := b.importGossipBlock(ctx, msg)
+	gossipBlockImportAfterAcceptCounter.WithLabelValues(string(result)).Inc()
+	switch {
+	case result == gossipImportInvalid:
+		root, _ := msg.Block.HashSSZ()
+		log.Warn("Accepted gossip block failed import", "slot", msg.Block.Slot, "root", common.Hash(root), "proposer", msg.Block.ProposerIndex, "err", err)
+	case result == gossipImportFailed:
+		log.Debug("Accepted gossip block was not imported", "slot", msg.Block.Slot, "proposer", msg.Block.ProposerIndex, "err", err)
+	}
+}
+
+func (b *blockService) importGossipBlock(ctx context.Context, msg *cltypes.SignedBeaconBlock) (gossipImportResult, error) {
 	accepted, err := b.processAndStoreBlock(ctx, msg, false)
-	if accepted && afterAdmission {
+	if accepted && startsELColumnsImportAfterAdmission(msg) {
 		b.startELColumnsImportOnce(ctx, msg)
 	}
 	if err != nil {
@@ -368,23 +448,26 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 					b.emitter.NotifyDataColumnStored(root)
 				}
 			}
-			return nil
+			return gossipImportWaiting, nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
 		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true, accepted)
 			job.logStorageErrorOnce(err)
 			if accepted {
-				return nil
+				return gossipImportRetry, nil
 			}
-			return fmt.Errorf("%w: %w", ErrIgnore, err)
+			return gossipImportRetry, fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		if errors.Is(err, forkchoice.ErrBlockInvalid) {
-			return err
+			return gossipImportInvalid, err
 		}
-		return fmt.Errorf("%w: %w", ErrIgnore, err)
+		return gossipImportFailed, fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
-	return nil
+	if !accepted {
+		return gossipImportSkipped, nil
+	}
+	return gossipImportImported, nil
 }
 
 // startsELColumnsImportAfterAdmission reports whether the EL column import waits for fork choice to admit the block:
@@ -748,6 +831,8 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 	}
 	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
+	var executionEnabled bool
+	var expectedTimestamp uint64
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -768,9 +853,30 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		} else if !ok {
 			return ErrInvalidSignature
 		}
+		if blockVersion >= clparams.BellatrixVersion && blockVersion < clparams.GloasVersion {
+			if payload := msg.Block.Body.ExecutionPayload; payload != nil {
+				enabled, err := b.isExecutionEnabled(headState, payload)
+				if err != nil {
+					return err
+				}
+				executionEnabled = enabled
+				expectedTimestamp = state.ComputeTimestampAtSlot(headState, msg.Block.Slot)
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	preGloas := blockVersion < clparams.GloasVersion
+	// [REJECT] The block's parent failed validation and its payload was not processed; [IGNORE] if the payload was processed (VALID or INVALIDATED).
+	if preGloas && b.forkchoiceStore.IsBlockInvalid(msg.Block.ParentRoot) {
+		if _, stored := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot); !stored {
+			if b.isPayloadProcessed(msg.Block.ParentRoot) {
+				return fmt.Errorf("%w: parent %v failed validation", ErrIgnore, msg.Block.ParentRoot)
+			}
+			return fmt.Errorf("parent %v failed validation and its payload was not processed", msg.Block.ParentRoot)
+		}
 	}
 
 	// Only signature-verified blocks may reach the retry checks below.
@@ -781,6 +887,19 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 			schedule()
 		}
 		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
+	}
+	parentPayloadInvalidated := preGloas && b.isParentPayloadInvalidated(msg.Block.ParentRoot, parentHeader, finalizedCheckpoint.Epoch)
+	// [IGNORE] [Fulu] The block's parent payload is not INVALIDATED, checked before the timestamp.
+	if parentPayloadInvalidated && blockVersion >= clparams.FuluVersion {
+		return fmt.Errorf("%w: parent %v payload is invalidated", ErrIgnore, msg.Block.ParentRoot)
+	}
+	// [REJECT] block.body.execution_payload.timestamp == compute_timestamp_at_slot(state, block.slot), if execution is enabled for the block.
+	if executionEnabled && msg.Block.Body.ExecutionPayload.Time != expectedTimestamp {
+		return fmt.Errorf("invalid execution payload timestamp %d for slot %d", msg.Block.Body.ExecutionPayload.Time, msg.Block.Slot)
+	}
+	// [IGNORE] [Bellatrix..Electra] The block's parent passes all validation, including the execution node verification of its payload, when that is complete.
+	if parentPayloadInvalidated {
+		return fmt.Errorf("%w: parent %v payload is invalidated", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
@@ -873,6 +992,51 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		return ErrInvalidCommitmentsCount
 	}
 	return nil
+}
+
+func (b *blockService) isPayloadProcessed(blockRoot common.Hash) bool {
+	status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(b.forkchoiceStore.GetEth1Hash(blockRoot))
+	return seen && (status == execution_client.PayloadStatusValidated || status == execution_client.PayloadStatusInvalidated)
+}
+
+// isParentPayloadInvalidated also reports a payload that is invalid only because an ancestor's payload is.
+func (b *blockService) isParentPayloadInvalidated(root common.Hash, header *cltypes.BeaconBlockHeader, finalizedEpoch uint64) bool {
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedEpoch, b.beaconCfg.SlotsPerEpoch)
+	if !ok {
+		return false
+	}
+	for {
+		if b.forkchoiceStore.IsBlockInvalid(root) {
+			return true
+		}
+		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(root)
+		if seen && status == execution_client.PayloadStatusInvalidated {
+			return true
+		}
+		if (seen && status == execution_client.PayloadStatusValidated) || header.Slot <= finalizedStartSlot {
+			return false
+		}
+		root = header.ParentRoot
+		if header, ok = b.forkchoiceStore.GetHeader(root); !ok {
+			return false
+		}
+	}
+}
+
+// isExecutionEnabled is is_execution_enabled: the merge is complete, or the payload is not the default one.
+func (b *blockService) isExecutionEnabled(headState *state.CachingBeaconState, payload *cltypes.Eth1Block) (bool, error) {
+	if state.IsMergeTransitionComplete(headState) {
+		return true, nil
+	}
+	payloadRoot, err := payload.HashSSZ()
+	if err != nil {
+		return false, err
+	}
+	defaultRoot, err := cltypes.NewEth1Block(payload.Version(), b.beaconCfg).HashSSZ()
+	if err != nil {
+		return false, err
+	}
+	return payloadRoot != defaultRoot, nil
 }
 
 func (b *blockService) blockValidationContext(ctx context.Context, parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {
