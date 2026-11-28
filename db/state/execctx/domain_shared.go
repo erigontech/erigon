@@ -1895,8 +1895,7 @@ func (sd *SharedDomains) DomainPutOwned(domain kv.Domain, roTx kv.TemporalTx, k,
 	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, sd.mem.DomainPutOwned)
 }
 
-func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte,
-	put func(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error) error {
+func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, put func(kv.Domain, string, []byte, uint64, []byte) error) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
