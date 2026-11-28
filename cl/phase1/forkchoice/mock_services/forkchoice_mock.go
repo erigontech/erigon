@@ -99,6 +99,7 @@ type ForkChoiceStorageMock struct {
 	envelopesMu                                        sync.RWMutex
 	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
+	InvalidBlocks                                      map[common.Hash]struct{}
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
 	OnBlockErr                                         error
@@ -799,6 +800,11 @@ func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context
 		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
 	}
 	return time.Time{}
+}
+
+func (f *ForkChoiceStorageMock) IsBlockInvalid(blockRoot common.Hash) bool {
+	_, ok := f.InvalidBlocks[blockRoot]
+	return ok
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
