@@ -28,7 +28,8 @@ const lifeSpan = 30 * time.Minute
 type OperationPool[K comparable, T any] struct {
 	pool         *lru.Cache[K, T] // Map the Signature to the underlying object
 	recentlySeen sync.Map         // map from K to time.Time
-	lastPruned   time.Time
+	pruneMu      sync.Mutex
+	lastPruned   time.Time // guarded by pruneMu
 }
 
 func NewOperationPool[K comparable, T any](capacity int, matricName string) *OperationPool[K, T] {
@@ -48,6 +49,8 @@ func (o *OperationPool[K, T]) Insert(k K, operation T) {
 	}
 	o.pool.Add(k, operation)
 	o.recentlySeen.Store(k, time.Now())
+	o.pruneMu.Lock()
+	defer o.pruneMu.Unlock()
 	if time.Since(o.lastPruned) > lifeSpan {
 		o.recentlySeen.Range(func(k, v any) bool {
 			if time.Since(v.(time.Time)) > lifeSpan {
