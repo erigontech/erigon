@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -224,7 +225,7 @@ func TestMergeSnapshots(t *testing.T) {
 		// and the subsegments marked canDelete=true will also be skipped, causing visible
 		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
 		// for doIndex=false merges and is only done in this test to skip redundant index rebuilding.
-		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+		_, err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -242,7 +243,7 @@ func TestMergeSnapshots(t *testing.T) {
 		Ranges := merger.FindMergeRanges(s.Ranges(false), snaptype.Unknown)
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
-		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
+		_, err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
@@ -330,7 +331,7 @@ func TestMergeFailureKeepsSamePathInput(t *testing.T) {
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
 	var deletedOnFailure []string
-	err := merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func([]string) error {
+	_, err := merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func([]string) error {
 		return injected
 	}, func(_ context.Context, files []string) error {
 		deletedOnFailure = append(deletedOnFailure, files...)
@@ -344,7 +345,7 @@ func TestMergeFailureKeepsSamePathInput(t *testing.T) {
 
 	require.NoError(t, s.OpenFolder())
 	var seeded []string
-	err = merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func(files []string) error {
+	_, err = merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func(files []string) error {
 		seeded = append(seeded, files...)
 		return nil
 	}, nil)
@@ -381,7 +382,7 @@ func TestMergeAbortDropsTheBuiltIndexOfASameRangeInput(t *testing.T) {
 	merger.DisableFsync()
 	injected := errors.New("injected")
 	// Windows refuses to rename the output's index over the open input index, so the merge fails there first.
-	require.Error(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, func([]string) error { return injected }, nil))
+	require.Error(mergeErr(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, func([]string) error { return injected }, nil)))
 
 	if kept, err := os.ReadFile(idxPath); err == nil {
 		require.Equal(inputIdx, kept, "the input's index path holds the removed output's index")
@@ -456,7 +457,7 @@ func TestFailedMergeLeavesInputFilesAsTheyWere(t *testing.T) {
 				}
 				merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 				merger.DisableFsync()
-				require.Error(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, onMerge, nil))
+				require.Error(mergeErr(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, onMerge, nil)))
 
 				for _, f := range inputFiles {
 					after, err := os.ReadFile(f)
@@ -525,7 +526,7 @@ func TestMergeFailureClosesMergedSegments(t *testing.T) {
 
 			before := openFds(t)
 			for range 3 {
-				require.ErrorIs(merger.Merge(t.Context(), s, types, ranges, dir, true, tc.onMerge, tc.onDelete), injected)
+				require.ErrorIs(mergeErr(merger.Merge(t.Context(), s, types, ranges, dir, true, tc.onMerge, tc.onDelete)), injected)
 			}
 			require.LessOrEqual(openFds(t), before)
 			for _, r := range ranges {
@@ -562,7 +563,7 @@ func TestMergeKeepsFinishedRangesOnLaterFailure(t *testing.T) {
 	}
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
-	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}, s.Dir(), false, onMerge, nil)
+	_, err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}, s.Dir(), false, onMerge, nil)
 	require.ErrorIs(err, errSecond)
 
 	s.dirtyLock.RLock()
@@ -669,7 +670,7 @@ func TestMergeRangeWithCoveredBodies(t *testing.T) {
 			merger.DisableFsync()
 			ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
 			require.Equal(t, []Range{NewRange(90_000, 100_000)}, ranges)
-			require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+			require.NoError(t, mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil)))
 			for _, typ := range snaptype2.BlockSnapshotTypes {
 				require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 90_000, 100_000, typ.Enum())))
 			}
@@ -697,7 +698,7 @@ func TestMergeSkipsPreClaimedRange(t *testing.T) {
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
-	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{claimed, free}, s.Dir(), false, nil, nil))
+	require.NoError(mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{claimed, free}, s.Dir(), false, nil, nil)))
 
 	skippedFile := filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, claimed.From(), claimed.To(), snaptype2.Transactions.Enum()))
 	exists, err := dir2.FileExist(skippedFile)
@@ -741,7 +742,7 @@ func TestMergeRangeUnderALargerBodiesFile(t *testing.T) {
 	merger.DisableFsync()
 	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
 	require.Equal(t, []Range{NewRange(10_000, 20_000)}, ranges)
-	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	require.NoError(t, mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil)))
 	for _, typ := range snaptype2.BlockSnapshotTypes {
 		require.FileExists(t, filepath.Join(dir, snaptype.SegmentFileName(typ.Versions().Current, 10_000, 20_000, typ.Enum())))
 	}
@@ -2087,7 +2088,7 @@ func TestMergeRemovesBuiltOutputsWhenALaterTypeFails(t *testing.T) {
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
-	require.Error(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil))
+	require.Error(mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil)))
 
 	for _, snT := range snaptype2.BlockSnapshotTypes[:len(snaptype2.BlockSnapshotTypes)-1] {
 		out := snT.FileInfo(dir, 0, 20_000).Path
@@ -2132,7 +2133,7 @@ func TestMergeAbortKeepsTheIndexOfASameRangeInput(t *testing.T) {
 
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
-	require.Error(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil))
+	require.Error(mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil)))
 
 	headersIdx := filepath.Join(dir, snaptype2.Headers.IdxFileNames(0, 20_000)[0])
 	exists, err := dir2.FileExist(headersIdx)
@@ -2184,7 +2185,7 @@ func TestVisibleBlockFilesKeepOneLayoutAfterAnInterruptedMerge(t *testing.T) {
 	merger.DisableFsync()
 	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
 	require.Equal(t, []Range{NewRange(0, 100_000)}, ranges)
-	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	require.NoError(t, mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil)))
 	after, err := os.Stat(leftover)
 	require.NoError(t, err)
 	require.True(t, os.SameFile(before, after), "the merge reuses the stopped merge's output instead of writing over the open file")
@@ -2520,7 +2521,7 @@ func TestMergeRangeUnderALargerHeadersAndBodiesFile(t *testing.T) {
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
 	ranges := merger.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
-	require.NoError(t, merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil))
+	require.NoError(t, mergeErr(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, dir, false, nil, nil)))
 	require.Equal(t, before, visibleRanges(s, snaptype2.Transactions))
 	require.NoFileExists(t, filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Headers.Versions().Current, 100_000, 200_000, snaptype2.Headers.Enum())))
 }
@@ -2547,7 +2548,7 @@ func TestRetireFilesBelowKeepsEveryFileWhenNothingVisible(t *testing.T) {
 	require.Equal(t, 2, s.dirty[snaptype2.Transactions.Enum()].Len())
 }
 
-// A cutoff retire ignores the range claim an index build holds, so the index written after it is orphaned.
+// A cutoff retire leaves a segment whose index build is in flight.
 func TestRetireFilesBelowSkipsSegmentWithIndexBuildInFlight(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -2590,3 +2591,102 @@ func TestRetireFilesBelowSkipsSegmentWithIndexBuildInFlight(t *testing.T) {
 		}
 	}
 }
+
+// A hidden merged file that ends past the cutoff is not shown again once its smaller files below the cutoff go.
+func TestRetireBelowUnderAStraddlingHiddenFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 200_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	_, err := s.RetireFilesBelow(snaptype2.Transactions, 50_000, nil)
+	require.NoError(t, err)
+	for _, r := range visibleRanges(s, snaptype2.Transactions) {
+		require.GreaterOrEqual(t, r.From(), uint64(40_000), "transactions below the cutoff are visible again: %v", visibleRanges(s, snaptype2.Transactions))
+	}
+}
+
+// A hidden transactions file past the aligned height is not shown again, so the alignMin cut keeps transactions visible.
+func TestRetireBelowKeepsTransactionsVisible(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 500_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+		if from < 300_000 {
+			createTestSegmentFile(t, from, from+10_000, snaptype2.Headers.Enum(), dir, version.V1_0, logger)
+			createTestSegmentFile(t, from, from+10_000, snaptype2.Bodies.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 500_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, uint64(300_000), s.VisibleSegmentsMaxTo(snaptype2.Transactions.Enum()))
+
+	_, err := s.RetireFilesBelow(snaptype2.Transactions, 300_000, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(300_000), s.VisibleSegmentsMaxTo(snaptype2.Transactions.Enum()), "no transaction is visible after the retire")
+}
+
+// Cutoff retires run while readers walk the visible files and indexes are built.
+func TestRetireConcurrentWithReadersAndIndexBuilds(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for from := uint64(0); from < 100_000; from += 10_000 {
+		for _, typ := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+10_000, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	createTestSegmentFile(t, 0, 50_000, snaptype2.Transactions.Enum(), dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				v := s.View()
+				for _, typ := range snaptype2.BlockSnapshotTypes {
+					for _, sn := range v.Segments(typ) {
+						g := sn.src.MakeGetter()
+						for g.HasNext() {
+							_, _ = g.Next(nil)
+						}
+					}
+				}
+				v.Close()
+			}
+		})
+	}
+	wg.Go(func() {
+		for i := range 50 {
+			_ = s.OpenFolder()
+			if i%2 == 0 {
+				_ = s.IndexMissed(t.Context(), "t", dir, nil, logger)
+			}
+		}
+	})
+	for i := range 20 {
+		_, err := s.RetireFilesBelow(snaptype2.Transactions, uint64(10_000*(i%9+1)), nil)
+		require.NoError(t, err)
+		require.NoError(t, s.RetireFilesAbove(90_000, nil))
+	}
+	close(stop)
+	wg.Wait()
+}
+
+func mergeErr(_ bool, err error) error { return err }

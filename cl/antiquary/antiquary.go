@@ -506,7 +506,7 @@ func (s *Antiquary) mergeBlocks() error {
 		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
 		onDelete = s.downloader.Delete
 	}
-	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
+	if _, err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
 		return err
 	}
 	s.removeBlockOverlaps()

@@ -1804,13 +1804,13 @@ func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...str
 	return nil
 }
 
-// dirtyFilesEndingIf returns the names and file paths of the indexed dirty segments of the given types
-// whose range end matches. Cutoff retires select by range, not by visibility: a hidden file is shown
-// again once the files under it are gone. An unindexed segment may have its index built off-lock.
-func (s *BaseRoSnapshots) dirtyFilesEndingIf(match func(to uint64) bool, types ...snaptype.Enum) (names, paths []string) {
+// dirtyFilesIf returns the names and file paths of the dirty segments of the given types that match.
+// Cutoff retires select by range, not by visibility: a hidden file is shown again once the files
+// under it are gone.
+func (s *BaseRoSnapshots) dirtyFilesIf(match func(*DirtySegment) bool, types ...snaptype.Enum) (names, paths []string) {
 	for _, t := range types {
 		s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
-			if sn.IsIndexed() && match(sn.to) {
+			if match(sn) {
 				names = append(names, sn.FileName())
 				paths = append(paths, sn.FilePaths(s.dir)...)
 			}
@@ -1820,9 +1820,9 @@ func (s *BaseRoSnapshots) dirtyFilesEndingIf(match func(to uint64) bool, types .
 	return names, paths
 }
 
-// RetireFilesBelow retires every segment of type typ ending below blockTo, visible or not, handing
-// their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for the
-// deferred off-lock unlink.
+// RetireFilesBelow retires every indexed segment of type typ ending below blockTo, visible or not,
+// handing their files (.seg + indexes) to onDelete for the seeder. The View pins the generation for
+// the deferred off-lock unlink.
 func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
@@ -1837,7 +1837,25 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 		return false, nil
 	}
 
-	names, paths := s.dirtyFilesEndingIf(func(to uint64) bool { return to < blockTo }, typ.Enum())
+	visible := make(map[*DirtySegment]bool, len(segs))
+	for _, sn := range segs {
+		visible[sn.src] = true
+	}
+	var unindexedBelow bool
+	names, paths := s.dirtyFilesIf(func(sn *DirtySegment) bool {
+		if !sn.IsIndexed() {
+			unindexedBelow = unindexedBelow || sn.to <= blockTo
+			return false
+		}
+		// A file that is not visible holds no block the visible files lack, so it goes once it
+		// starts below the cutoff; kept, it would be shown again with the range below the cutoff.
+		return sn.to < blockTo || (sn.from < blockTo && !visible[sn])
+	}, typ.Enum())
+	if unindexedBelow {
+		// Its index may be in flight, and once indexed it would cut the visible files at a gap.
+		s.logger.Debug("[snapshots] block file retire waits for an index build", "type", typ.Name(), "blockTo", blockTo)
+		return false, nil
+	}
 	if len(names) == 0 {
 		return false, nil
 	}
@@ -1855,9 +1873,9 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	return true, nil
 }
 
-// RetireFilesAbove retires every segment, visible or not, whose range ends beyond blockNum — the
-// extra files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
-// to onDelete for the seeder. Unlink is deferred to the reader watermark.
+// RetireFilesAbove retires every indexed segment, visible or not, whose range ends beyond blockNum —
+// the extra files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg +
+// indexes) to onDelete for the seeder. Unlink is deferred to the reader watermark.
 func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
@@ -1865,7 +1883,9 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 
 	v := s.View()
 	defer v.Close()
-	names, paths := s.dirtyFilesEndingIf(func(to uint64) bool { return !BlockFileRetainedUnderCap(to, blockNum) }, s.enums...)
+	names, paths := s.dirtyFilesIf(func(sn *DirtySegment) bool {
+		return sn.IsIndexed() && !BlockFileRetainedUnderCap(sn.to, blockNum)
+	}, s.enums...)
 	if len(names) == 0 {
 		return nil
 	}

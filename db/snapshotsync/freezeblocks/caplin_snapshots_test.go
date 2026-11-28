@@ -1064,6 +1064,29 @@ func TestRetireBlobsBelowRetiresSupersededSegments(t *testing.T) {
 	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
 }
 
+// A prune that would leave an unindexed segment below the cutoff waits, so indexing it later cannot cut
+// the visible files at a gap and move FrozenBlobs back.
+func TestRetireBlobsBelowWaitsForAnUnindexedSegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, false)
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 2*limit, 3*limit)
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+
+	_, err := sn.RetireBlobsBelow(10*limit, func([]string) error { return nil })
+	require.NoError(t, err)
+
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BlobSidecars.FileName(version.ZeroVersion, 0, limit))
+	require.True(t, ok)
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+}
+
 func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 	const slot = 7
 	const unfrozen = snaptype.CaplinMergeLimit + 1

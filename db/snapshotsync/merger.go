@@ -182,13 +182,19 @@ func (m *Merger) Merge(
 	doIndex bool,
 	onMerge func(mergedFileNames []string) error,
 	onDelete func(context.Context, []string) error,
-) (err error) {
+) (merged bool, err error) {
 	v := snapshots.View()
 	defer v.Close()
 
-	mergeRanges = slices.DeleteFunc(slices.Clone(mergeRanges), func(r Range) bool { return !m.everyTypeTiles(v, snapTypes, r) })
+	mergeRanges = slices.DeleteFunc(slices.Clone(mergeRanges), func(r Range) bool {
+		if m.everyTypeTiles(v, snapTypes, r) {
+			return false
+		}
+		m.logger.Debug("[snapshots] merge range skipped: a type has a file that crosses it", "from", r.From(), "to", r.To())
+		return true
+	})
 	if len(mergeRanges) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// Claim every (type, range) we're about to produce before writing any file,
@@ -218,7 +224,7 @@ func (m *Merger) Merge(
 		}
 	}
 	if len(claimed) == 0 {
-		return nil
+		return false, nil
 	}
 	mergeRanges = claimed
 
@@ -241,7 +247,7 @@ func (m *Merger) Merge(
 		out := make(map[snaptype.Enum][]*DirtySegment)
 		toMerge, err := m.filesByRange(v, snapTypes, r.From(), r.To())
 		if err != nil {
-			return err
+			return merged, err
 		}
 		for snapType, t := range toMerge {
 			if out[snapType] == nil {
@@ -289,7 +295,7 @@ func (m *Merger) Merge(
 			)
 			if err != nil {
 				abort()
-				return err
+				return merged, err
 			}
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
@@ -308,7 +314,7 @@ func (m *Merger) Merge(
 		if onMerge != nil {
 			if err := onMerge(slices.Clone(mergedFileNames)); err != nil {
 				abort()
-				return err
+				return merged, err
 			}
 		}
 
@@ -323,14 +329,15 @@ func (m *Merger) Merge(
 		}
 		if onDelete != nil {
 			if err := onDelete(ctx, toMergeFileNames); err != nil {
-				return fmt.Errorf("merger.Merge: onDelete: %w", err)
+				return merged, fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
 		m.integrateMergedDirtyFiles(snapshots, in, out)
+		merged = true
 		in = nil
 	}
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "ranges", len(mergeRanges), "from", mergeRanges[0].from, "to", mergeRanges[len(mergeRanges)-1].to)
-	return nil
+	return merged, nil
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
