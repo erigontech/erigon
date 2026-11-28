@@ -63,7 +63,7 @@ var computedAheadCount atomic.Int64
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
 var (
-	stubNoTxIdx = dbg.EnvBool("STUB_NO_TXIDX", false)
+	stubNoTxIdx = dbg.EnvBool("STUB_NO_TXIDX", true)
 	stubNoAcc   = dbg.EnvBool("STUB_NO_ACC", true)
 	stubNoRRoot = dbg.EnvBool("STUB_NO_RROOT", true)
 )
