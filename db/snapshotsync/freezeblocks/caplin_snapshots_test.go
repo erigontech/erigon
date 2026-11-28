@@ -355,7 +355,7 @@ func writeEmptyBlobSidecarsSegment(t *testing.T, dirs datadir.Dirs, from, to uin
 // visible generation while still counting as dirty.
 func writeEmptyCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool) {
 	t.Helper()
-	writeCaplinSegment(t, dirs, sType, from, to, withIndex, func(uint64) []byte { return nil })
+	writeCaplinSegment(t, dirs, sType, from, to, version.ZeroVersion, withIndex, func(uint64) []byte { return nil })
 }
 
 // slotWord makes each word the slot it is stored at, so a read can be checked against
@@ -366,9 +366,9 @@ func slotWord(slot uint64) []byte {
 	return w
 }
 
-func writeCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool, word func(slot uint64) []byte) {
+func writeCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, v version.Version, withIndex bool, word func(slot uint64) []byte) {
 	t.Helper()
-	segName := sType.FileName(version.ZeroVersion, from, to)
+	segName := sType.FileName(v, from, to)
 	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
 	require.True(t, ok)
 
@@ -399,7 +399,7 @@ func TestReadHeaderReadsSlotFromSegment(t *testing.T) {
 	word := blockSnapshotWord(t, block)
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, func(slot uint64) []byte {
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, version.ZeroVersion, true, func(slot uint64) []byte {
 		if slot == blockSlot {
 			return word
 		}
@@ -489,7 +489,7 @@ func TestReadBlindedBlockBySlotKeepsTheBodyRootOfTheStoredBlock(t *testing.T) {
 		}))
 	}
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, func(slot uint64) []byte { return snapshotWords[slot] })
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, version.ZeroVersion, true, func(slot uint64) []byte { return snapshotWords[slot] })
 	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
@@ -563,7 +563,7 @@ func TestReadBlobSidecars(t *testing.T) {
 	require.Len(t, encoded, sidecarSSZSize)
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, true, func(slot uint64) []byte {
+	writeCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, version.ZeroVersion, true, func(slot uint64) []byte {
 		switch slot {
 		case blobSlot:
 			return encoded
@@ -658,8 +658,8 @@ func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, slotWord)
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true, slotWord)
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, version.ZeroVersion, true, slotWord)
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, version.ZeroVersion, true, slotWord)
 
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
@@ -922,7 +922,7 @@ func TestDumpBlobSidecarsRangeRequiresBlobCount(t *testing.T) {
 func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, version.ZeroVersion, true, func(uint64) []byte { return nil })
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
@@ -943,7 +943,7 @@ func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
 
 func TestOpenBeaconBlocksIgnoresDamagedBlobSegments(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, version.ZeroVersion, true, func(uint64) []byte { return nil })
 	blobSeg := snaptype.BlobSidecars.FileName(version.ZeroVersion, 20_000, 30_000)
 	blobIdx := snaptype.IdxFileName(version.V1_1, 20_000, 30_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
 	for _, name := range []string{blobSeg, blobIdx} {
@@ -1102,7 +1102,7 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			}
 
 			dirs := datadir.New(t.TempDir())
-			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(s uint64) []byte {
 				switch s {
 				case slot:
 					return blockSnapshotWord(t, block)
@@ -1234,7 +1234,7 @@ func TestDumpBlobSidecarsRangeStopsWhenTheFrozenWordIsNotTheCanonicalBlock(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
-			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(s uint64) []byte {
 				switch {
 				case s == slot:
 					return tc.word
@@ -1289,7 +1289,7 @@ func withBodyRoot(t *testing.T, word []byte, bodyRoot common.Hash) []byte {
 func TestBlobCountFromBlocksStopsOnCancel(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(uint64) []byte { return nil })
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(uint64) []byte { return nil })
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
@@ -1323,7 +1323,7 @@ func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing
 	require.NoError(t, err)
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(s uint64) []byte {
 		switch s {
 		case slot:
 			return blockSnapshotWord(t, block)
@@ -1366,7 +1366,7 @@ func TestBlobCountFromBlocksRejectsAPreGloasChildOfAGloasBlock(t *testing.T) {
 	child.Block.ParentRoot = root
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(s uint64) []byte {
 		switch s {
 		case slot:
 			return blockSnapshotWord(t, block)
@@ -1413,7 +1413,7 @@ func TestBlobCountFromBlocksRejectsMissingCanonicalChild(t *testing.T) {
 	require.NoError(t, err)
 
 	dirs := datadir.New(t.TempDir())
-	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, version.ZeroVersion, true, func(s uint64) []byte {
 		switch s {
 		case slot:
 			return blockSnapshotWord(t, block)

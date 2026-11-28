@@ -1203,6 +1203,34 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 	// concurrent OpenIdxIfNeed on it, which race on its index slice.
 	seen := make(map[string]struct{}, len(fileNames))
 	pendingUnlink := s.pendingUnlinkNames()
+	for _, fName := range fileNames {
+		if _, dead := pendingUnlink[fName]; dead {
+			continue
+		}
+		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok || isState || f.Type == nil || snaptype.IsTorrentPartial(f.Ext) {
+			continue
+		}
+		if !s.HasType(f.Type) || s.isInProgress(f.Type.Enum(), f.From, f.To) {
+			continue
+		}
+		listedSegment := f.Ext == ".seg"
+		if !listedSegment && (f.Version.IsZero() || f.To < f.From) {
+			continue
+		}
+		if snaptype.IsCaplinType(f.Type.Enum()) && !f.Type.Versions().Supports(f.Version) {
+			segmentName := filepath.Base(fName)
+			if !listedSegment {
+				segmentName = f.Type.FileName(f.Version, f.From, f.To)
+			}
+			if info, err := os.Stat(filepath.Join(s.dir, segmentName)); err == nil && info.Mode().IsRegular() {
+				f.Type.Versions().MustSupport(f.Version, segmentName)
+			}
+		}
+	}
+
+	var unsupported *DirtySegment
+	var openErr error
 
 	for _, fName := range fileNames {
 		if _, dup := seen[fName]; dup {
@@ -1239,13 +1267,20 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 			if err := sn.Open(s.dir); err != nil {
 				stop, failErr := ClassifyOpenErr(err, optimistic)
 				if failErr != nil {
-					return failErr
+					openErr = failErr
+					break
 				}
 				if stop {
 					break
 				}
 				continue
 			}
+		}
+
+		if snaptype.IsCaplinType(sn.Type().Enum()) && !sn.Version().IsZero() && !sn.Type().Versions().Supports(sn.Version()) {
+			sn.closeSeg()
+			unsupported = sn
+			break
 		}
 
 		if !exists {
@@ -1265,11 +1300,14 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 
 	}
 
-	if err := wg.Wait(); err != nil {
-		return err
+	waitErr := wg.Wait()
+	if unsupported != nil {
+		unsupported.Type().Versions().MustSupport(unsupported.Version(), unsupported.FileName())
 	}
-
-	return nil
+	if openErr != nil {
+		return openErr
+	}
+	return waitErr
 }
 
 func (s *BaseRoSnapshots) Ranges(align bool) []Range {
@@ -1319,7 +1357,7 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 
 // OpenList opens exactly the named files, retiring whatever else the collection
 // still holds. Same shape as OpenFolder, but the caller supplies the list instead
-// of a directory scan. optimistic=true keeps going past a broken file.
+// of a directory scan. Existing unsupported Caplin segments panic in either mode.
 func (s *BaseRoSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	var retired retiredSegments
 	err := func() error {
