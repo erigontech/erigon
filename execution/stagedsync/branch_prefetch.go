@@ -158,7 +158,11 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 }
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
-	runnable := []metrics.Sample{{Name: "/sched/goroutines/runnable:goroutines"}}
+	sched := []metrics.Sample{
+		{Name: "/sched/goroutines/runnable:goroutines"},
+		{Name: "/sched/goroutines/running:goroutines"},
+		{Name: "/sched/gomaxprocs:threads"},
+	}
 	for it := range p.work {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -168,7 +172,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			if data, _, ok := p.get(key); ok {
 				return data
 			}
-			waitIdleP(runnable)
+			waitIdleP(sched)
 			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 			if err != nil {
 				return nil
@@ -203,12 +207,12 @@ func (it *prefetchItem) touch(read func(key []byte) []byte) {
 	v3.PrefetchPath(read, it.account[:], slot)
 }
 
-// waitIdleP holds a file read back while goroutines wait for a P: an mmap page fault keeps its P, so a faulting prefetch
-// read delays block execution.
-func waitIdleP(runnable []metrics.Sample) {
+// waitIdleP holds a file read back while every P is busy and a goroutine waits for one: an mmap page fault keeps its P,
+// so a faulting prefetch read delays block execution.
+func waitIdleP(sched []metrics.Sample) {
 	for range 40 {
-		metrics.Read(runnable)
-		if runnable[0].Value.Uint64() == 0 {
+		metrics.Read(sched)
+		if sched[0].Value.Uint64() == 0 || sched[1].Value.Uint64() < sched[2].Value.Uint64() {
 			return
 		}
 		time.Sleep(50 * time.Microsecond)
