@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/dlclark/regexp2/v2"
@@ -56,9 +57,7 @@ func init() {
 	}
 	tracers.RegisterLookup(true, newJsTracer)
 	// goja runs some patterns on regexp2, whose matches ignore Interrupt and by default never time out.
-	// A pattern takes the timeout when it is compiled, so set it before bigIntProgram compiles.
 	regexp2.DefaultMatchTimeout = regexpMatchTimeout
-	bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 }
 
 // regexpMatchTimeout bounds, to about one second, how long a trace can run past its deadline inside one
@@ -66,9 +65,9 @@ func init() {
 // from time to time, so it cannot use the deadline of each trace.
 const regexpMatchTimeout = time.Second
 
-// bigIntProgram is compiled once and the exported function mostly invoked to convert
-// hex strings into big ints.
-var bigIntProgram *goja.Program
+// bigIntProgram converts hex strings into big ints. It compiles on first use, after init: a regexp2
+// pattern takes the match timeout when it is compiled.
+var bigIntProgram = sync.OnceValue(func() *goja.Program { return goja.MustCompile("bigInt", bigIntegerJS, false) })
 
 // maxCallStackSize leaves room for a tracer that walks the call tree through a native callback
 // such as Array.map, which uses two frames per EVM call frame (up to 1024 when the 63/64 gas rule
@@ -482,10 +481,7 @@ func marshalResult(vm *goja.Runtime, res goja.Value) (encoded []byte, err error)
 	// A string or BigInt is stringified as the "" property of an object without a prototype, as
 	// JSON.stringify does: a string keeps its UTF-16 code units and runs no toJSON hook, and a BigInt
 	// hook gets the key "". json.Marshal does not encode a long concatenated string as a string.
-	holder := vm.NewObject()
-	if err := holder.SetPrototype(nil); err != nil {
-		return nil, err
-	}
+	holder := vm.CreateObject(nil)
 	if err := holder.Set("", res); err != nil {
 		return nil, err
 	}
@@ -649,7 +645,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 // suitable for JS consumption.
 func (t *jsTracer) setTypeConverters() error {
 	// Inject bigint logic.
-	toBigCode, err := t.vm.RunProgram(bigIntProgram)
+	toBigCode, err := t.vm.RunProgram(bigIntProgram())
 	if err != nil {
 		return err
 	}
