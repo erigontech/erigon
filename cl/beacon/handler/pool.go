@@ -55,6 +55,45 @@ const (
 	attesterSlashingJSONBytesPerIndexPair = 2 * 32
 )
 
+// Each element budget fits an indented element with the widest field values. Hex bitfields, which grow with the
+// chain configuration, are added to it.
+const (
+	poolJSONOverhead              = 4 << 10
+	attestationJSONBytes          = 1 << 10
+	singleAttestationJSONBytes    = 1 << 10
+	voluntaryExitJSONBytes        = 1 << 10
+	proposerSlashingJSONBytes     = 2 << 10
+	blsToExecutionChangeJSONBytes = 1 << 10
+	aggregateAndProofJSONBytes    = 2 << 10
+	syncCommitteeMessageJSONBytes = 1 << 10
+	contributionAndProofJSONBytes = 2 << 10
+	// The protocol does not bound a batch of BLS-to-execution changes; this exceeds what the operations pool holds.
+	maxBLSToExecutionChangesPerRequest = 1 << 14
+)
+
+func maxPoolJSONSize(maxElements, elementBytes uint64) int64 {
+	return int64(poolJSONOverhead + maxElements*elementBytes)
+}
+
+// decodeJSONBody reads body to EOF, so a size limit on body also covers bytes after the JSON value.
+func decodeJSONBody(body io.Reader, v any) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
+}
+
+// hexBitlistJSONBytes is the hex length of an SSZ bitlist of up to maxBits bits.
+func hexBitlistJSONBytes(maxBits uint64) uint64 {
+	return 2 * (maxBits/8 + 1)
+}
+
+// A slot has at most one attestation per committee member.
+func maxAttestationsPerSlot(cfg *clparams.BeaconChainConfig) uint64 {
+	return cfg.MaxCommitteesPerSlot * cfg.MaxValidatorsPerCommittee
+}
+
 const blockArrivalPollInterval = 50 * time.Millisecond
 
 // maxFutureSlotLookahead bounds how far beyond the current slot a
@@ -157,7 +196,8 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	maxBodySize := maxPoolJSONSize(maxAttestationsPerSlot(a.beaconChainCfg), attestationJSONBytes+hexBitlistJSONBytes(a.beaconChainCfg.MaxValidatorsPerCommittee))
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -241,7 +281,8 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 	}
 
 	req := []*solid.SingleAttestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	maxBodySize := maxPoolJSONSize(maxAttestationsPerSlot(a.beaconChainCfg), singleAttestationJSONBytes)
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -335,7 +376,7 @@ func (a *ApiHandler) awaitBlock(ctx context.Context, deadline time.Time, blockRo
 
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.SignedVoluntaryExit{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxPoolJSONSize(1, voluntaryExitJSONBytes)), &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -444,7 +485,7 @@ func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Reque
 
 func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.ProposerSlashing{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxPoolJSONSize(1, proposerSlashingJSONBytes)), &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -495,7 +536,8 @@ func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []pool
 
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.SignedBLSToExecutionChange{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	maxBodySize := maxPoolJSONSize(maxBLSToExecutionChangesPerRequest, blsToExecutionChangeJSONBytes)
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -534,7 +576,9 @@ func (a *ApiHandler) decodeSignedAggregatesAndProofs(w http.ResponseWriter, r *h
 	}
 	if contentType != "application/octet-stream" {
 		req := []*cltypes.SignedAggregateAndProof{}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		maxAggregates := a.beaconChainCfg.MaxCommitteesPerSlot * a.beaconChainCfg.TargetAggregatorsPerCommittee
+		maxBodySize := maxPoolJSONSize(maxAggregates, aggregateAndProofJSONBytes+hexBitlistJSONBytes(maxAttestationsPerSlot(a.beaconChainCfg)))
+		if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &req); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		return req, nil
@@ -629,7 +673,8 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 // it receives a list of sync committee messages and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SyncCommitteeMessage{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	maxBodySize := maxPoolJSONSize(a.beaconChainCfg.SyncCommitteeSize, syncCommitteeMessageJSONBytes)
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &msgs); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -732,7 +777,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 // it receives a list of signed contributions and proofs and adds them to the sync committee pool.
 func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SignedContributionAndProof{}
-	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
+	contributionBytes := contributionAndProofJSONBytes + 2*uint64(a.beaconChainCfg.SyncCommitteeAggregationBitsSize())
+	maxBodySize := maxPoolJSONSize(a.beaconChainCfg.SyncCommitteeSize, contributionBytes)
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxBodySize), &msgs); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

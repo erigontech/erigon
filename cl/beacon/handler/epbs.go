@@ -118,7 +118,7 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 
 	// Parse request body for validator indices (string-encoded per Beacon API spec)
 	var idxsStr []string
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&idxsStr); err != nil {
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize), &idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("invalid request body: %w", err))
 	}
