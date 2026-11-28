@@ -726,8 +726,7 @@ func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
 	}
 	message := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xab}}
 	pooled := &cltypes.SignedBLSToExecutionChange{Message: message, Signature: sign(keys[0], message)}
-	pooledSSZ, err := pooled.EncodeSSZ(nil)
-	require.NoError(t, err)
+	otherAddress := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xcd}}
 	post := func(t *testing.T, handler *ApiHandler, change *cltypes.SignedBLSToExecutionChange) int {
 		body, err := json.Marshal([]*cltypes.SignedBLSToExecutionChange{change})
 		require.NoError(t, err)
@@ -737,16 +736,19 @@ func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name          string
-		submission    *cltypes.SignedBLSToExecutionChange
-		wantStatus    int
-		wantPublished [][]byte
+		name       string
+		submission *cltypes.SignedBLSToExecutionChange
+		wantStatus int
 	}{
 		{
-			name:          "valid duplicate",
-			submission:    pooled,
-			wantStatus:    http.StatusOK,
-			wantPublished: [][]byte{pooledSSZ},
+			name:       "valid duplicate",
+			submission: pooled,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "second valid change for a pooled validator",
+			submission: &cltypes.SignedBLSToExecutionChange{Message: otherAddress, Signature: sign(keys[0], otherAddress)},
+			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "wrong signature for a seen validator",
@@ -783,29 +785,10 @@ func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
 			published = nil
 
 			require.Equal(t, tc.wantStatus, post(t, handler, tc.submission))
-			require.Equal(t, tc.wantPublished, published)
+			require.Empty(t, published)
+			require.Equal(t, []*cltypes.SignedBLSToExecutionChange{pooled}, opPool.BLSToExecutionChangesPool.Raw())
 		})
 	}
-}
-
-func TestPoolBlsToExecutionChangeDoesNotPublishIgnored(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	service := services_mock.NewMockBLSToExecutionChangeService(ctrl)
-	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	requestBody, err := json.Marshal([]*cltypes.SignedBLSToExecutionChange{{Message: &cltypes.BLSToExecutionChange{}}})
-	require.NoError(t, err)
-	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
-	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
-	handler := &ApiHandler{
-		blsToExecutionChangeService: service,
-		gossipManager:               gossipManager,
-	}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/bls_to_execution_changes", bytes.NewReader(requestBody))
-
-	handler.PostEthV1BeaconPoolBlsToExecutionChanges(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestPoolAggregatesAndProofs(t *testing.T) {

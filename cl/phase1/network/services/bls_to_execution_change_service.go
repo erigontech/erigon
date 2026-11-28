@@ -152,27 +152,35 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return err
 	}
 
+	stored := false
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures:  [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
 		SignRoots:   [][]byte{signedRoot[:]},
 		Pks:         [][]byte{change.From[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.storeVerifiedChange(msg.SignedBLSToExecutionChange)
+			stored = s.storeVerifiedChange(msg.SignedBLSToExecutionChange)
 		},
 	}
 
-	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	if !msg.ImmediateVerification {
+		return s.batchSignatureVerifier.VerifyBlsToExecutionChange(ctx, aggregateVerificationData)
 	}
-
-	return s.batchSignatureVerifier.VerifyBlsToExecutionChange(ctx, aggregateVerificationData)
+	if err := s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData); err != nil {
+		return err
+	}
+	// Only ImmediateVerification runs F before it returns; the batch path runs F on another goroutine.
+	if !stored {
+		return ErrIgnore
+	}
+	return nil
 }
 
-func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.SignedBLSToExecutionChange) {
+func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.SignedBLSToExecutionChange) bool {
 	if seen, _ := s.seen.ContainsOrAdd(change.Message.ValidatorIndex, struct{}{}); seen {
-		return
+		return false
 	}
 	s.emitters.Operation().SendBlsToExecution(change)
 	s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change)
+	return true
 }

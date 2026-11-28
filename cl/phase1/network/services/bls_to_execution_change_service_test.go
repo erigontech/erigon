@@ -197,6 +197,17 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 			},
 			wantInPool: true,
 		},
+		{
+			name: "immediate verification ignores a verified change for a seen validator",
+			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, st *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
+				testCtx.service.(*blsToExecutionChangeService).seen.Add(validatorIndex, struct{}{})
+				st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From))
+				syncHeadState(t, testCtx.syncedData, st)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "ComputeSigningRoot", msg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				testCtx.gomockCtrl.RecordCall(testCtx.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+			},
+			wantErr: ErrIgnore,
+		},
 	}
 
 	for _, tt := range tests {
