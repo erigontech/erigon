@@ -382,7 +382,7 @@ func (rs *StateV3) ApplyTxIndexes(
 
 var (
 	stubNoTraceIdx = dbg.EnvBool("STUB_NO_TRACEIDX", false)
-	stubNoLogIdx   = dbg.EnvBool("STUB_NO_LOGIDX", false)
+	stubNoLogIdx   = dbg.EnvBool("STUB_NO_LOGIDX", true)
 	stubNoRCache   = dbg.EnvBool("STUB_NO_RCACHE", false)
 )
 
