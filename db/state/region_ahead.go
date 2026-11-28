@@ -47,12 +47,13 @@ func (dt *DomainRoTx) resetRegionHits(blockNum uint64) {
 	switch {
 	case dt.regionHits == nil:
 		dt.regionHits = make(map[regionKey]uint32)
-	case blockNum != dt.regionBlock:
+		dt.regionBlock = blockNum
+	case blockNum > dt.regionBlock:
 		clear(dt.regionHits)
+		dt.regionBlock = blockNum
 	default:
 		maps.DeleteFunc(dt.regionHits, func(_ regionKey, hits uint32) bool { return hits < regionAheadHits })
 	}
-	dt.regionBlock = blockNum
 }
 
 func (dt *DomainRoTx) regionAhead(i int, k []byte) {

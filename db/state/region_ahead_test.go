@@ -151,12 +151,16 @@ func TestRegionWordsSplitTheFileByContract(t *testing.T) {
 	d := dt.files[0].src.decompressor
 	words := uint64(d.MakeGetter().Size())
 
+	g := dt.dataReader(d)
 	var end uint64
 	for addr := byte(1); addr <= 3; addr++ {
 		from, to, ok := dt.regionWords(0, regionSlotKey(addr, 0)[:length.Addr])
 		require.True(t, ok)
 		require.Equal(t, end, from)
 		require.Greater(t, to, from)
+		g.Reset(from)
+		first, _ := g.Next(nil)
+		require.Equal(t, regionSlotKey(addr, 0), first)
 		end = to
 	}
 	require.Equal(t, words, end)
@@ -199,6 +203,11 @@ func TestRegionAheadAdvisesARegionOncePerBlock(t *testing.T) {
 	require.Equal(t, [][2]uint64{region}, *advised)
 	tx(2)
 	require.Equal(t, [][2]uint64{region, region}, *advised)
+	tx(1)
+	tx(2)
+	require.Equal(t, [][2]uint64{region, region}, *advised, "a re-run of a lower block must not re-arm the region")
+	tx(3)
+	require.Equal(t, [][2]uint64{region, region, region}, *advised)
 }
 
 func TestRegionAheadIsOffUntilTheReaderResetsHits(t *testing.T) {
