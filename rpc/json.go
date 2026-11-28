@@ -343,9 +343,12 @@ func (c *jsonCodec) peerInfo() PeerInfo {
 }
 
 func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch bool, err error) {
-	rawmsg, err := c.readMessage()
+	rawmsg, msg, err := c.readMessage()
 	if err != nil {
 		return nil, false, err
+	}
+	if msg != nil {
+		return []*jsonrpcMessage{msg}, false, nil
 	}
 	messages, batch, err = parseMessage(rawmsg, batchLimit)
 	if err != nil {
@@ -366,35 +369,37 @@ func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch
 	return messages, batch, nil
 }
 
-// readMessage returns the bytes of the next message, checked to be valid JSON.
-func (c *jsonCodec) readMessage() (json.RawMessage, error) {
+// readMessage returns the bytes of the next message, checked to be valid JSON, and the
+// message itself when the check already picked it apart.
+func (c *jsonCodec) readMessage() (json.RawMessage, *jsonrpcMessage, error) {
 	// A stream has no framing, so the decoder finds the message end and checks it.
 	if c.readFrame == nil {
 		var rawmsg json.RawMessage
 		if err := c.decode(&rawmsg); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return rawmsg, nil
+		return rawmsg, nil, nil
 	}
 	// The transport delimits the message, so one read and one check will do.
 	// Decoding into a json.RawMessage would scan twice and copy.
 	frame, release, err := c.readFrame()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c.release = release
-	if !validJSON(frame) {
+	msg, ok := parseValidMessage(frame)
+	if !ok {
 		c.releaseFrame()
-		// Decode the broken message to report where it went wrong. validJSON
+		// Decode the broken message to report where it went wrong. ValidJSON
 		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
 		var rawmsg json.RawMessage
 		if err := json.Unmarshal(frame, &rawmsg); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return nil, errors.New("invalid JSON request")
+		return nil, nil, errors.New("invalid JSON request")
 	}
-	return frame, nil
+	return frame, msg, nil
 }
 
 func (c *jsonCodec) takeRelease() func() {
@@ -471,7 +476,7 @@ func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool,
 	}
 	if batchLimit > 0 {
 		size := 0
-		forEachJSONElement(raw, func([]byte) bool {
+		ForEachJSONElement(raw, func([]byte) bool {
 			size++
 			return true
 		})
@@ -480,7 +485,7 @@ func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool,
 		}
 	}
 	var msgs []*jsonrpcMessage
-	forEachJSONElement(raw, func(elem []byte) bool {
+	ForEachJSONElement(raw, func(elem []byte) bool {
 		if isJSONNull(elem) {
 			msgs = append(msgs, nil)
 			return true
@@ -509,10 +514,10 @@ func (e *batchTooLargeError) Error() string {
 // allocates nothing.
 func firstCallID(raw []byte) json.RawMessage {
 	var id json.RawMessage
-	forEachJSONElement(raw, func(elem []byte) bool {
+	ForEachJSONElement(raw, func(elem []byte) bool {
 		var msg jsonrpcMessage
 		hasMethod := false
-		forEachJSONField(elem, func(key, value []byte) {
+		ForEachJSONField(elem, func(key, value []byte) {
 			switch {
 			case jsonKeyIs(key, "id"):
 				msg.ID = value
@@ -535,33 +540,37 @@ func firstCallID(raw []byte) json.RawMessage {
 func fillMessage(input []byte, msg *jsonrpcMessage) {
 	// The raw fields point into input rather than being copied out of it, which
 	// matters because params is nearly all of a large request.
-	forEachJSONField(input, func(key, value []byte) {
-		if bytes.IndexByte(key, '\\') >= 0 {
-			// encoding/json unescapes object keys, so an escaped spelling of a
-			// known field has to match too.
-			var name string
-			if err := json.Unmarshal([]byte(`"`+string(key)+`"`), &name); err != nil {
-				return
-			}
-			key = []byte(name)
-		}
-		switch string(key) {
-		case "jsonrpc":
-			decodeStringField(value, &msg.Version)
-		case "id":
-			msg.ID = value
-		case "method":
-			decodeStringField(value, &msg.Method)
-		case "params":
-			msg.Params = value
-		case "error":
-			if json.Unmarshal(value, &msg.Error) != nil {
-				msg.Error = nil
-			}
-		case "result":
-			msg.Result = value
-		}
+	ForEachJSONField(input, func(key, value []byte) {
+		setMessageField(msg, key, value)
 	})
+}
+
+func setMessageField(msg *jsonrpcMessage, key, value []byte) {
+	if bytes.IndexByte(key, '\\') >= 0 {
+		// encoding/json unescapes object keys, so an escaped spelling of a
+		// known field has to match too.
+		var name string
+		if err := json.Unmarshal([]byte(`"`+string(key)+`"`), &name); err != nil {
+			return
+		}
+		key = []byte(name)
+	}
+	switch string(key) {
+	case "jsonrpc":
+		decodeStringField(value, &msg.Version)
+	case "id":
+		msg.ID = value
+	case "method":
+		decodeStringField(value, &msg.Method)
+	case "params":
+		msg.Params = value
+	case "error":
+		if json.Unmarshal(value, &msg.Error) != nil {
+			msg.Error = nil
+		}
+	case "result":
+		msg.Result = value
+	}
 }
 
 // decodeStringField sets dst as json.Unmarshal would: it unescapes the string and replaces invalid
@@ -633,7 +642,7 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 	// A json.Decoder would walk every argument twice, once to find where it ends.
 	args := make([]reflect.Value, 0, len(types))
 	var scanErr error
-	forEachJSONElement(rawArgs, func(elem []byte) bool {
+	ForEachJSONElement(rawArgs, func(elem []byte) bool {
 		i := len(args)
 		if i >= len(types) {
 			scanErr = fmt.Errorf("too many arguments, want at most %d", len(types))
@@ -668,10 +677,19 @@ func decodeArgument(elem []byte, arg reflect.Value) error {
 	}
 	// A type that unmarshals itself is called directly, which skips the
 	// validation pass json.Unmarshal runs first.
+	if u, ok := reflect.TypeAssert[ValidJSONUnmarshaler](arg); ok {
+		return u.UnmarshalValidJSON(elem)
+	}
 	if u, ok := reflect.TypeAssert[json.Unmarshaler](arg); ok {
 		return u.UnmarshalJSON(elem)
 	}
 	return json.Unmarshal(elem, arg.Interface())
+}
+
+// ValidJSONUnmarshaler decodes input its caller has already checked to be valid JSON,
+// so it can skip the check its UnmarshalJSON makes.
+type ValidJSONUnmarshaler interface {
+	UnmarshalValidJSON([]byte) error
 }
 
 func isJSONNull(raw json.RawMessage) bool {

@@ -29,7 +29,6 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -67,27 +66,26 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
-var callArgsParsers fastjson.ParserPool
-
 type callArgs CallArgs
 
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
-// Fields are decoded straight from one fastjson parse: encoding/json would scan a large
-// calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
-	// fastjson unescapes strings, while the hexutil types reject escaped text.
-	if bytes.IndexByte(raw, '\\') >= 0 {
+	if !rpc.ValidJSON(raw) {
 		return args.unmarshalStd(raw)
 	}
-	p := callArgsParsers.Get()
-	defer callArgsParsers.Put(p)
-	v, err := p.ParseBytes(raw)
-	if err != nil || v.Type() != fastjson.TypeObject {
+	return args.UnmarshalValidJSON(raw)
+}
+
+// UnmarshalValidJSON is UnmarshalJSON for input already checked to be valid JSON. Fields are
+// decoded straight from the input: encoding/json would scan a large calldata string twice.
+func (args *CallArgs) UnmarshalValidJSON(raw []byte) error {
+	// Only encoding/json unescapes strings, and the hexutil types reject escaped text anyway.
+	if bytes.IndexByte(raw, '\\') >= 0 || !isJSONKind(raw, '{') {
 		return args.unmarshalStd(raw)
 	}
 	ok := true
-	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
-		ok = ok && args.setField(key, f)
+	rpc.ForEachJSONField(raw, func(key, value []byte) {
+		ok = ok && args.setField(key, value)
 	})
 	if !ok {
 		return args.unmarshalStd(raw)
@@ -95,37 +93,43 @@ func (args *CallArgs) UnmarshalJSON(raw []byte) error {
 	return CheckCallData(args.Data, args.Input)
 }
 
+// isJSONKind reports whether the valid JSON value v opens with open.
+func isJSONKind(v []byte, open byte) bool {
+	v = bytes.TrimLeft(v, " \t\r\n")
+	return len(v) > 0 && v[0] == open
+}
+
 // setField decodes one member as encoding/json would, and reports false where it cannot
 // promise the same result: a field without a case here, a key matching a field only case-insensitively,
 // or a value encoding/json would reject (so the caller gets encoding/json's error).
-func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
+func (args *CallArgs) setField(key, v []byte) bool {
 	switch string(key) {
 	case "from":
-		return setText(&args.From, f)
+		return setText(&args.From, v)
 	case "to":
-		return setText(&args.To, f)
+		return setText(&args.To, v)
 	case "gas":
-		return setText(&args.Gas, f)
+		return setText(&args.Gas, v)
 	case "gasPrice":
-		return setText(&args.GasPrice, f)
+		return setText(&args.GasPrice, v)
 	case "maxPriorityFeePerGas":
-		return setText(&args.MaxPriorityFeePerGas, f)
+		return setText(&args.MaxPriorityFeePerGas, v)
 	case "maxFeePerGas":
-		return setText(&args.MaxFeePerGas, f)
+		return setText(&args.MaxFeePerGas, v)
 	case "maxFeePerBlobGas":
-		return setText(&args.MaxFeePerBlobGas, f)
+		return setText(&args.MaxFeePerBlobGas, v)
 	case "value":
-		return setText(&args.Value, f)
+		return setText(&args.Value, v)
 	case "nonce":
-		return setText(&args.Nonce, f)
+		return setText(&args.Nonce, v)
 	case "data":
-		return setText(&args.Data, f)
+		return setText(&args.Data, v)
 	case "input":
-		return setText(&args.Input, f)
+		return setText(&args.Input, v)
 	case "chainId":
-		return setText(&args.ChainID, f)
+		return setText(&args.ChainID, v)
 	case "accessList":
-		return setAccessList(&args.AccessList, f)
+		return setAccessList(&args.AccessList, v)
 	}
 	for _, name := range callArgsJSONNames {
 		if bytes.EqualFold(key, []byte(name)) {
@@ -143,62 +147,71 @@ var callArgsJSONNames = func() (names []string) {
 	return names
 }()
 
+// stringText returns the text of v, a member or element value holding an unescaped JSON string.
+func stringText(v []byte) ([]byte, bool) {
+	if len(v) < 2 || v[0] != '"' {
+		return nil, false
+	}
+	return v[1 : len(v)-1], true
+}
+
 // setText decodes a JSON string member through T's UnmarshalText; null clears the field.
 func setText[T any, PT interface {
 	*T
 	encoding.TextUnmarshaler
-}](dst **T, f *fastjson.Value) bool {
-	if f.Type() == fastjson.TypeNull {
+}](dst **T, v []byte) bool {
+	if string(v) == "null" {
 		*dst = nil
 		return true
 	}
-	s, err := f.StringBytes()
-	if err != nil {
+	s, ok := stringText(v)
+	if !ok {
 		return false
 	}
-	v := PT(new(T))
-	if v.UnmarshalText(s) != nil {
+	t := PT(new(T))
+	if t.UnmarshalText(s) != nil {
 		return false
 	}
-	*dst = (*T)(v)
+	*dst = (*T)(t)
 	return true
 }
 
 // setAccessList decodes an access list; a repeated "accessList" member goes to encoding/json,
 // which reuses the earlier slice.
-func setAccessList(dst **types.AccessList, f *fastjson.Value) bool {
-	if f.Type() == fastjson.TypeNull {
+func setAccessList(dst **types.AccessList, v []byte) bool {
+	if string(v) == "null" {
 		*dst = nil
 		return true
 	}
-	arr, err := f.Array()
-	if err != nil || *dst != nil {
+	if !isJSONKind(v, '[') || *dst != nil {
 		return false
 	}
-	al := make(types.AccessList, len(arr))
-	for i, e := range arr {
-		if !setAccessTuple(&al[i], e) {
-			return false
-		}
+	al := types.AccessList{}
+	ok := true
+	rpc.ForEachJSONElement(v, func(e []byte) bool {
+		al = append(al, types.AccessTuple{})
+		ok = setAccessTuple(&al[len(al)-1], e)
+		return ok
+	})
+	if ok {
+		*dst = &al
 	}
-	*dst = &al
-	return true
+	return ok
 }
 
-func setAccessTuple(dst *types.AccessTuple, f *fastjson.Value) bool {
-	o, err := f.Object()
-	if err != nil {
+func setAccessTuple(dst *types.AccessTuple, v []byte) bool {
+	if !isJSONKind(v, '{') {
 		return false
 	}
 	ok := true
-	o.Visit(func(key []byte, v *fastjson.Value) {
+	rpc.ForEachJSONField(v, func(key, v []byte) {
 		if !ok {
 			return
 		}
 		switch string(key) {
 		case "address":
-			s, err := v.StringBytes()
-			ok = err == nil && dst.Address.UnmarshalText(s) == nil
+			s, isString := stringText(v)
+			ok = isString && dst.Address.UnmarshalText(s) == nil
 		case "storageKeys":
 			ok = setStorageKeys(&dst.StorageKeys, v)
 		default:
@@ -208,24 +221,27 @@ func setAccessTuple(dst *types.AccessTuple, f *fastjson.Value) bool {
 	return ok
 }
 
-func setStorageKeys(dst *[]common.Hash, f *fastjson.Value) bool {
-	if f.Type() == fastjson.TypeNull {
+func setStorageKeys(dst *[]common.Hash, v []byte) bool {
+	if string(v) == "null" {
 		*dst = nil
 		return true
 	}
-	arr, err := f.Array()
-	if err != nil {
+	if !isJSONKind(v, '[') {
 		return false
 	}
-	keys := make([]common.Hash, len(arr))
-	for i, e := range arr {
-		s, err := e.StringBytes()
-		if err != nil || keys[i].UnmarshalText(s) != nil {
-			return false
-		}
+	keys := []common.Hash{}
+	ok := true
+	rpc.ForEachJSONElement(v, func(e []byte) bool {
+		var h common.Hash
+		s, isString := stringText(e)
+		ok = isString && h.UnmarshalText(s) == nil
+		keys = append(keys, h)
+		return ok
+	})
+	if ok {
+		*dst = keys
 	}
-	*dst = keys
-	return true
+	return ok
 }
 
 // unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.

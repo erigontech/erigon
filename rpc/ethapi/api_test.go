@@ -645,15 +645,25 @@ func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
 		`{"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000000"],"blobs":["0x01"],"commitments":[],"proofs":null}`,
 		`{"authorizationList":[{"chainId":"0x1","address":"0x0000000000000000000000000000000000000003","nonce":"0x0","yParity":"0x0","r":"0x1","s":"0x1"}]}`,
 		`null`,
+		` { "data" : "0x01" , "to" : null , "accessList" : [ { "address" : "0x0000000000000000000000000000000000000002" , "storageKeys" : [ ] } ] } `,
+		`"0x01"`,
+		`1`,
 	} {
-		var got, want CallArgs
-		gotErr := got.UnmarshalJSON([]byte(in))
+		var want CallArgs
 		wantErr := want.unmarshalStd([]byte(in))
-		require.Equal(t, wantErr == nil, gotErr == nil, in)
-		if wantErr == nil {
-			require.Equal(t, want, got, in)
-		} else {
-			require.Equal(t, wantErr.Error(), gotErr.Error(), in)
+		decoders := []func(*CallArgs, []byte) error{(*CallArgs).UnmarshalJSON}
+		if json.Valid([]byte(in)) {
+			decoders = append(decoders, (*CallArgs).UnmarshalValidJSON)
+		}
+		for _, decode := range decoders {
+			var got CallArgs
+			gotErr := decode(&got, []byte(in))
+			require.Equal(t, wantErr == nil, gotErr == nil, in)
+			if wantErr == nil {
+				require.Equal(t, want, got, in)
+			} else {
+				require.Equal(t, wantErr.Error(), gotErr.Error(), in)
+			}
 		}
 	}
 }

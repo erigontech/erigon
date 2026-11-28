@@ -132,9 +132,10 @@ func jsonKeyIs(raw []byte, name string) bool {
 	return len(name) == 0
 }
 
-// forEachJSONField calls fn with the key and raw value of every member of the
-// JSON object in data. Nothing is called if data does not hold an object.
-func forEachJSONField(data []byte, fn func(key, value []byte)) {
+// ForEachJSONField calls fn with the key and raw value of every member of the
+// JSON object in data, which must be valid JSON. Nothing is called if data does not
+// hold an object.
+func ForEachJSONField(data []byte, fn func(key, value []byte)) {
 	i := skipJSONSpace(data, 0)
 	if i >= len(data) || data[i] != '{' {
 		return
@@ -168,10 +169,10 @@ func forEachJSONField(data []byte, fn func(key, value []byte)) {
 	}
 }
 
-// forEachJSONElement calls fn with the raw value of every element of the JSON
-// array in data, until fn returns false. Nothing is called if data does not
-// hold an array.
-func forEachJSONElement(data []byte, fn func(value []byte) bool) {
+// ForEachJSONElement calls fn with the raw value of every element of the JSON
+// array in data, which must be valid JSON, until fn returns false. Nothing is
+// called if data does not hold an array.
+func ForEachJSONElement(data []byte, fn func(value []byte) bool) {
 	i := skipJSONSpace(data, 0)
 	if i >= len(data) || data[i] != '[' {
 		return
@@ -201,20 +202,54 @@ func forEachJSONElement(data []byte, fn func(value []byte) bool) {
 // maxJSONDepth matches the nesting limit encoding/json enforces.
 const maxJSONDepth = 10000
 
-// validJSON reports whether data holds exactly one JSON value. It accepts and
+// ValidJSON reports whether data holds exactly one JSON value. It accepts and
 // rejects exactly what json.Valid does, but walks string contents a word at a
 // time instead of a byte at a time, which is most of the cost of a body whose
 // bulk is one long string.
-func validJSON(data []byte) bool {
-	i, ok := scanValidJSON(data, skipJSONSpace(data, 0))
+func ValidJSON(data []byte) bool {
+	i, ok := scanValidJSON(data, skipJSONSpace(data, 0), maxJSONDepth)
 	return ok && skipJSONSpace(data, i) == len(data)
+}
+
+// parseValidMessage reports what ValidJSON does, and when data holds an object it also
+// picks it apart as fillMessage would, in the same pass. msg is nil for any other value.
+func parseValidMessage(data []byte) (msg *jsonrpcMessage, ok bool) {
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nil, ValidJSON(data)
+	}
+	msg = new(jsonrpcMessage)
+	i = skipJSONSpace(data, i+1)
+	if i < len(data) && data[i] != '}' {
+		for {
+			valStart, ok := scanJSONMemberKey(data, i)
+			if !ok {
+				return nil, false
+			}
+			key := data[i+1 : scanJSONString(data, i)-1]
+			valEnd, ok := scanValidJSON(data, valStart, maxJSONDepth-1)
+			if !ok {
+				return nil, false
+			}
+			setMessageField(msg, key, data[valStart:valEnd])
+			i = skipJSONSpace(data, valEnd)
+			if i >= len(data) || data[i] != ',' {
+				break
+			}
+			i = skipJSONSpace(data, i+1)
+		}
+	}
+	if i >= len(data) || data[i] != '}' || skipJSONSpace(data, i+1) != len(data) {
+		return nil, false
+	}
+	return msg, true
 }
 
 // scanValidJSON validates the value beginning at data[i] and returns the offset
 // just past it. Open composites are kept as closing brackets in a byte stack, not
 // in call frames: a body at the nesting limit is ~20 KB and would otherwise grow
 // the request goroutine's stack by megabytes.
-func scanValidJSON(data []byte, i int) (int, bool) {
+func scanValidJSON(data []byte, i, maxDepth int) (int, bool) {
 	var buf [32]byte
 	closers := buf[:0]
 	for {
@@ -225,7 +260,7 @@ func scanValidJSON(data []byte, i int) (int, bool) {
 		switch c := data[i]; c {
 		case '{', '[':
 			// Only a composite is a level of nesting, so only it is counted.
-			if len(closers) >= maxJSONDepth {
+			if len(closers) >= maxDepth {
 				return i, false
 			}
 			closer := byte(']')

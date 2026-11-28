@@ -325,6 +325,25 @@ func (s *selfDecoding) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
+// trustingDecoder records which of its decoders ran.
+type trustingDecoder struct{ via string }
+
+func (d *trustingDecoder) UnmarshalJSON([]byte) error      { d.via = "json"; return nil }
+func (d *trustingDecoder) UnmarshalValidJSON([]byte) error { d.via = "valid"; return nil }
+
+// The argument array has passed the gate, so a type that can skip its own check is told so.
+func TestParsePositionalArgumentsPrefersValidJSONDecoder(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeFor[trustingDecoder](), reflect.TypeFor[*trustingDecoder]()} {
+		got, err := parsePositionalArguments(json.RawMessage(`[{}]`), []reflect.Type{typ})
+		require.NoError(t, err)
+		d, ok := got[0].Interface().(trustingDecoder)
+		if !ok {
+			d = *got[0].Interface().(*trustingDecoder)
+		}
+		require.Equal(t, "valid", d.via, typ.String())
+	}
+}
+
 // TestParsePositionalArgumentsScan covers how an argument array is cut up.
 func TestParsePositionalArgumentsScan(t *testing.T) {
 	t.Parallel()
@@ -395,7 +414,7 @@ func FuzzJSONScanFields(f *testing.F) {
 			return // not an object
 		}
 		got := make(map[string]json.RawMessage)
-		forEachJSONField(data, func(key, value []byte) {
+		ForEachJSONField(data, func(key, value []byte) {
 			// The scan hands back the key still escaped, so unescape it the same
 			// way the map decode did before comparing.
 			var k string
@@ -427,9 +446,9 @@ func TestJSONScanMalformedTerminates(t *testing.T) {
 				t.Fatalf("no progress on %q", input)
 			}
 		}
-		forEachJSONElement([]byte(input), func([]byte) bool { count(); return true })
+		ForEachJSONElement([]byte(input), func([]byte) bool { count(); return true })
 		calls = 0
-		forEachJSONField([]byte(input), func(_, _ []byte) { count() })
+		ForEachJSONField([]byte(input), func(_, _ []byte) { count() })
 	}
 }
 
@@ -448,7 +467,7 @@ func FuzzJSONScanElements(f *testing.F) {
 			return // not an array
 		}
 		var got []json.RawMessage
-		forEachJSONElement(data, func(value []byte) bool {
+		ForEachJSONElement(data, func(value []byte) bool {
 			got = append(got, value)
 			return true
 		})
@@ -801,7 +820,31 @@ func FuzzValidJSON(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, input string) {
 		data := []byte(input)
-		require.Equal(t, json.Valid(data), validJSON(data), "input %.80q", input)
+		require.Equal(t, json.Valid(data), ValidJSON(data), "input %.80q", input)
+	})
+}
+
+// FuzzParseValidMessage pins the one-pass read of a message against the gate and the
+// envelope split it replaces.
+func FuzzParseValidMessage(f *testing.F) {
+	for _, s := range append([]string{
+		``, `{`, `{"a":1,}`, `{"a"}`, `{"a":}`, `{,}`, `{"a":1"b":2}`, `{} {}`, `{}x`, "{\"a\":\"\x01\"}",
+		`{"id":1,"method":"m","params":[1,]}`, `{"method":"m"} `, `{"id":01}`, `{"id":"\q"}`,
+		`{"a":` + nest(maxJSONDepth-1) + `}`, `{"a":` + nest(maxJSONDepth) + `}`, nest(maxJSONDepth + 1),
+	}, messageCorpus...) {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		data := []byte(input)
+		msg, ok := parseValidMessage(data)
+		require.Equal(t, json.Valid(data), ok, "input %.80q", input)
+		isObject := ok && data[skipJSONSpace(data, 0)] == '{'
+		require.Equal(t, isObject, msg != nil, "input %.80q", input)
+		if isObject {
+			want := new(jsonrpcMessage)
+			fillMessage(data, want)
+			require.NoError(t, sameMessage(msg, want), "input %.80q", input)
+		}
 	})
 }
 
@@ -814,7 +857,7 @@ func TestValidJSONDeepNestingKeepsStackSmall(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	done := make(chan bool)
 	go func() {
-		ok := validJSON(deep)
+		ok := ValidJSON(deep)
 		runtime.ReadMemStats(&after)
 		done <- ok
 	}()
@@ -845,7 +888,7 @@ func BenchmarkValidJSON(b *testing.B) {
 			b.Run("scan", func(b *testing.B) {
 				b.SetBytes(int64(len(body)))
 				for b.Loop() {
-					if !validJSON(body) {
+					if !ValidJSON(body) {
 						b.Fatal("invalid")
 					}
 				}
