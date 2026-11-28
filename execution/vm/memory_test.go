@@ -121,3 +121,51 @@ func TestMemoryResizeCapacity(t *testing.T) {
 		t.Fatalf("grow past two pages: cap %d, want %d", got, 4*memoryPageSize)
 	}
 }
+
+// TestMemoryLargeCopies pins Set, SetFromData and Copy against plain copy for
+// lengths around memmoveChunk, including Copy overlaps in both directions.
+func TestMemoryLargeCopies(t *testing.T) {
+	t.Parallel()
+	pattern := func(n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(i*7 + i>>8)
+		}
+		return b
+	}
+	for _, length := range []int{memmoveChunk - 1, memmoveChunk, memmoveChunk + 1, 2*memmoveChunk + 3, 3 * memmoveChunk} {
+		size := length + 2*memmoveChunk + 16
+		src := pattern(length + 5)
+
+		var m Memory
+		m.Resize(uint64(size))
+		m.Set(3, uint64(length), src[:length])
+		want := make([]byte, size)
+		copy(want[3:], src[:length])
+		if !bytes.Equal(m.store, want) {
+			t.Fatalf("Set %d bytes", length)
+		}
+
+		m.reset()
+		m.Resize(uint64(size))
+		m.SetFromData(1, uint64(length), 5, src)
+		want = make([]byte, size)
+		copy(want[1:], src[5:])
+		if !bytes.Equal(m.store, want) {
+			t.Fatalf("SetFromData %d bytes", length)
+		}
+
+		for _, shift := range []int{1, memmoveChunk + 5, -1, -(memmoveChunk + 5)} {
+			dst, from := memmoveChunk+8, memmoveChunk+8+shift
+			m.reset()
+			m.Resize(uint64(size))
+			copy(m.store, pattern(size))
+			want = pattern(size)
+			copy(want[dst:dst+length], want[from:from+length])
+			m.Copy(uint64(dst), uint64(from), uint64(length))
+			if !bytes.Equal(m.store, want) {
+				t.Fatalf("Copy %d bytes, src-dst %d", length, shift)
+			}
+		}
+	}
+}
