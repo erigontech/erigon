@@ -335,16 +335,21 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	return h
 }
 
-func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
-	if codeHash == accounts.EmptyCodeHash {
+func recordCodeWrite[T any](writes map[common.Hash]T, code accounts.Code, value T) func() {
+	if code.IsEmpty() {
 		return nil
 	}
-	hash := codeHash.Value()
-	if _, exists := s.createdCodeHashes[hash]; exists {
+	hash := code.Hash.Value()
+	// Reverting a duplicate write must keep the code from the first write.
+	if _, exists := writes[hash]; exists {
 		return nil
 	}
-	s.createdCodeHashes[hash] = struct{}{}
-	return func() { delete(s.createdCodeHashes, hash) }
+	writes[hash] = value
+	return func() { delete(writes, hash) }
+}
+
+func (s *RecordingState) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.createdCodeHashes, code, struct{}{})
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -672,7 +677,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{}, blockCtx.GetHash)
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
@@ -713,7 +718,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{}, blockCtx.GetHash)
 	}
 	ibs.SetTxContext(blockNum, len(block.Transactions()))
 
@@ -2090,6 +2095,10 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 	return nil
 }
 
+func (s *witnessStateless) OnCodeChange(code accounts.Code) func() {
+	return recordCodeWrite(s.codeUpdates, code, code.Bytes)
+}
+
 func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
 	// Keep accountUpdates CodeHash in sync so ReadAccountData returns a
@@ -2338,7 +2347,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		parent: matchingParent(result.headerByNumber[parentNumber], header.ParentHash, parentNumber),
 	}
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{}, blockCtx.GetHash)
 	}
 	if err = engine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
@@ -2373,7 +2382,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{}, blockCtx.GetHash)
 	}
 	ibs.SetTxContext(blockNum, len(block.Transactions()))
 	// Collect logs accumulated during transaction execution into a synthetic receipt

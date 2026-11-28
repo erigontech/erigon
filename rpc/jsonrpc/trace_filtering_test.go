@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -40,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -724,4 +727,93 @@ func requireFastJSONMatchesReflection(t *testing.T, name string, ts jsonstream.M
 	got, err := jsonstream.Marshal(ts)
 	require.NoError(t, err, name)
 	require.Equal(t, string(want), string(got), name)
+}
+
+func TestCallBlockRewardSystemCallHashError(t *testing.T) {
+	contract := common.HexToAddress("0xc0de")
+	code := []byte{byte(vm.PUSH1), 2, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.STOP)}
+	genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	generated, err := m.GenerateChain(3, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	api := newTraceApiForTest(m)
+	readErr := errors.New("ancestor lookup failed")
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: m.BlockReader, hash: generated.Blocks[2].ParentHash(), err: readErr}
+	called := false
+	_, _, err = api.callBlock(t.Context(), tx, generated.Blocks[2], nil, m.ChainConfig, nil, func(syscall protocolrules.SystemCall) error {
+		called = true
+		_, _ = syscall(accounts.InternAddress(contract), nil)
+		return nil
+	})
+	require.True(t, called)
+	require.ErrorIs(t, err, readErr)
+}
+
+func TestCallBlockRewardSystemCallParentHash(t *testing.T) {
+	contract := common.HexToAddress("0xc0de")
+	code := []byte{byte(vm.PUSH1), 1, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	generated, err := m.GenerateChain(3, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	api := newTraceApiForTest(m)
+	block := generated.Blocks[2]
+	api._blockReader = hideHeaderBlockReader{FullBlockReader: m.BlockReader, blockNumber: block.NumberU64() - 1}
+	var result []byte
+	_, _, err = api.callBlock(t.Context(), tx, block, nil, m.ChainConfig, nil, func(syscall protocolrules.SystemCall) error {
+		var err error
+		result, err = syscall(accounts.InternAddress(contract), nil)
+		return err
+	})
+	require.NoError(t, err)
+	require.Len(t, result, 32)
+	require.Equal(t, block.ParentHash(), common.BytesToHash(result))
+}
+
+type blockHashRewardEngine struct {
+	protocolrules.Engine
+	contract accounts.Address
+	result   []byte
+	called   bool
+}
+
+func (e *blockHashRewardEngine) CalculateRewards(_ *chain.Config, _ *types.Header, _ []*types.Header, syscall protocolrules.SystemCall) ([]protocolrules.Reward, error) {
+	e.called = true
+	e.result, _ = syscall(e.contract, nil)
+	return nil, nil
+}
+
+func TestTraceBlockRewardMissingAncestor(t *testing.T) {
+	for _, offset := range []byte{2, 3} {
+		t.Run(fmt.Sprintf("offset_%d", offset), func(t *testing.T) {
+			contract := common.HexToAddress("0xc0de")
+			code := []byte{byte(vm.PUSH1), offset, byte(vm.NUMBER), byte(vm.SUB), byte(vm.BLOCKHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+			genesis := &types.Genesis{Config: chain.TestChainBerlinConfig, Alloc: types.GenesisAlloc{contract: {Code: code, Balance: big.NewInt(0)}}}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			generated, err := m.GenerateChain(4, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			api := newTraceApiForTest(m)
+			api._blockReader = hideHeaderBlockReader{FullBlockReader: m.BlockReader, blockNumber: 2}
+			engine := &blockHashRewardEngine{Engine: m.Engine, contract: accounts.InternAddress(contract)}
+			api._engine = engine
+			_, err = api.Block(t.Context(), rpc.BlockNumber(4), nil)
+			require.True(t, engine.called)
+			if offset == 2 {
+				require.NoError(t, err)
+				require.Len(t, engine.result, 32)
+				require.Equal(t, generated.Blocks[1].Hash(), common.BytesToHash(engine.result))
+			} else {
+				require.ErrorContains(t, err, "header 2")
+			}
+		})
+	}
 }

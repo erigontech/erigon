@@ -864,7 +864,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	collateAndPrune := func() error {
 		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (uint64, error) {
-			irreversibleBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			retireToBlock, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
 			if err != nil {
 				return 0, err
 			}
@@ -872,11 +872,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err != nil {
 				return 0, err
 			}
-			pruneStage.IrreversibleBlock = irreversibleBlock
+			pruneStage.RetireToBlock = retireToBlock
 			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
 				return 0, err
 			}
-			return execfinality.IrreversibleTxNum(ctx, tx, br.TxnumReader(), irreversibleBlock)
+			return execfinality.CollateToTxNum(ctx, tx, br.TxnumReader(), retireToBlock)
 		})
 		return err
 	}
@@ -1397,7 +1397,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader(), nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }

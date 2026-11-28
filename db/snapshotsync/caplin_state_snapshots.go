@@ -160,9 +160,6 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) 
 	}
 }
 
-// caplinDownloaderPrefix: the downloader is rooted at dirs.Snap, these live in dirs.SnapCaplin.
-const caplinDownloaderPrefix = "caplin"
-
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
 
@@ -274,7 +271,7 @@ func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) e
 func downloaderKeys(names []string) []string {
 	keys := make([]string, len(names))
 	for i, name := range names {
-		keys[i] = path.Join(caplinDownloaderPrefix, filepath.ToSlash(name))
+		keys[i] = path.Join(datadir.SnapCaplinDir, filepath.ToSlash(name))
 	}
 	return keys
 }

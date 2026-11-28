@@ -80,16 +80,24 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
 	currentSlot := f.slotAtTimeMs(timeMs)
 	if currentSlot == block.Slot {
-		epoch := f.computeEpochAtSlot(currentSlot)
-		timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
-		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
-		if epoch >= f.beaconCfg.GloasForkEpoch {
-			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs()
+		timeliness[clparams.AttestationTimelinessIndex] = f.beforeAttestationDeadline(block.Slot, timeMs)
+		if f.computeEpochAtSlot(currentSlot) >= f.beaconCfg.GloasForkEpoch {
+			timeliness[clparams.PtcTimelinessIndex] = f.timeIntoSlotMs(timeMs) < f.getPayloadAttestationDueMs()
 		}
 	}
 
 	f.blockTimeliness.Store(blockRoot, timeliness)
 	return currentSlot
+}
+
+func (f *ForkChoiceStore) timeIntoSlotMs(timeMs uint64) uint64 {
+	return (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
+}
+
+// beforeAttestationDeadline reports whether timeMs is in slot and before its attestation deadline, which
+// is what makes a block of slot timely.
+func (f *ForkChoiceStore) beforeAttestationDeadline(slot, timeMs uint64) bool {
+	return f.slotAtTimeMs(timeMs) == slot && f.timeIntoSlotMs(timeMs) < f.getAttestationDueMs(f.computeEpochAtSlot(slot))
 }
 
 func (f *ForkChoiceStore) getDependentRoot(root common.Hash, currentSlot uint64) common.Hash {
@@ -118,14 +126,8 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoo
 		return
 	}
 
-	epoch := f.computeEpochAtSlot(currentSlot)
-	if f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
-		if headRoot == (common.Hash{}) {
-			return
-		}
-		if f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
-			return
-		}
+	if headRoot == (common.Hash{}) || f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
+		return
 	}
 
 	f.proposerBoostRoot.Store(blockRoot)

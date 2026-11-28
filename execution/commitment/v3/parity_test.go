@@ -415,9 +415,9 @@ func checkDifferentialRecords(t *testing.T, state commitmenttest.State, records 
 	ctx := newMockContext()
 	ctx.branches = records
 	for owner, leaves := range want {
-		plane, addrHash := planeAccount, [32]byte{}
+		plane, addrHash := PlaneAccount, [32]byte{}
 		if len(owner) != 0 {
-			plane, addrHash = planeStorage, hashAddressPath([]byte(owner))
+			plane, addrHash = PlaneStorage, hashAddressPath([]byte(owner))
 		}
 		got := make(map[string]struct{})
 		for path := range exactLeaves(t, ctx, plane, addrHash) {

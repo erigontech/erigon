@@ -38,11 +38,11 @@ func WithoutFinalisedBlock() ResolveOption {
 	}
 }
 
-// IrreversibleBlock is the highest block the chain treats as final: the block below the finalized one, whose
-// changeset stays so that a fork from that block can still be validated, or the block below the reorg window
-// without finality or on the initial cycle. Changesets kept for deep unwinds still allow an unwind below it;
-// IrreversibleTxNum accounts for them.
-func IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) uint64 {
+// RetireToBlock is the last block that files may hold: the block below the finalized one, whose changeset
+// stays so that a fork from that block can still be validated, or the block below the reorg window without
+// finality or on the initial cycle. A block that an unwind can still reach is not collated or retired;
+// changesets kept for deep unwinds still allow an unwind below it, and CollateToTxNum accounts for them.
+func RetireToBlock(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) uint64 {
 	if finalisedBlockNum > 0 && !initialCycle {
 		return finalisedBlockNum - 1
 	}
@@ -52,7 +52,7 @@ func IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, in
 	return headBlockNum - maxReorgDepth - 1
 }
 
-// Resolve reads the execution head and the finalized block from tx and returns the irreversible block.
+// Resolve reads the execution head and the finalized block from tx and returns RetireToBlock.
 func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...ResolveOption) (uint64, error) {
 	headBlockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -66,28 +66,28 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	if opts.withoutFinalisedBlock {
 		finalisedBlockNum = 0
 	}
-	return IrreversibleBlock(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
+	return RetireToBlock(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
 }
 
-// IrreversibleTxNum is the last txnum state files may hold: the end of irreversibleBlock, lowered below a
+// CollateToTxNum is the last txnum state files may hold: the end of retireToBlock, lowered below a
 // block that still has a changeset, because that block can still be unwound.
-func IrreversibleTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, irreversibleBlock uint64) (uint64, error) {
+func CollateToTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, retireToBlock uint64) (uint64, error) {
 	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil || lowest == 0 {
 		return 0, err
 	}
-	txNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, min(irreversibleBlock, lowest-1))
+	txNum, ok, err := txNumsReader.MaxExact(ctx, tx, nil, min(retireToBlock, lowest-1))
 	if err != nil || !ok {
 		return 0, err
 	}
 	return txNum, nil
 }
 
-// ResolveTxNum is Resolve followed by IrreversibleTxNum.
+// ResolveTxNum is Resolve followed by CollateToTxNum.
 func ResolveTxNum(ctx context.Context, tx kv.Tx, maxReorgDepth uint64, initialCycle bool, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	block, err := Resolve(tx, maxReorgDepth, initialCycle)
 	if err != nil {
 		return 0, err
 	}
-	return IrreversibleTxNum(ctx, tx, txNumsReader, block)
+	return CollateToTxNum(ctx, tx, txNumsReader, block)
 }

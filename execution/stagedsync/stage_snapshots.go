@@ -599,8 +599,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 		started := cfg.blockRetire.BuildFilesInBackground(
 			ctx,
-			0,
-			s.IrreversibleBlock,
+			s.RetireToBlock,
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {

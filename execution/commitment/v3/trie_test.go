@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
@@ -139,17 +140,6 @@ func assertNodeSlot(t *testing.T, n *node, child, leaf bool) {
 }
 
 func TestTrieAPI(t *testing.T) {
-	t.Run("E45/InitializeTrieAndUpdatesV3", func(t *testing.T) {
-		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantCommitmentV3
-		trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
-		t.Cleanup(trie.Release)
-		t.Cleanup(updates.Close)
-
-		require.IsType(t, &Trie{}, trie)
-		require.Equal(t, commitment.ModeCollect, updates.Mode())
-		require.Equal(t, commitment.VariantCommitmentV3, trie.Variant())
-	})
 	t.Run("E46/TrieDeferredUpdatesWaitForApply", func(t *testing.T) {
 		trie := &Trie{}
 		t.Cleanup(trie.Release)
@@ -185,7 +175,7 @@ func TestTrieAPI(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEqual(t, root, traced)
 		require.NoError(t, applyDeltas(trie.TakeDeferredDeltas(), ctx.PutBranch, nil))
-		stored, err := unfold(ctx, nil, planeAccount, nil)
+		stored, err := unfold(ctx, nil, PlaneAccount, nil)
 		require.NoError(t, err)
 		actual, err := fold(stored, 0)
 		require.NoError(t, err)
@@ -202,7 +192,7 @@ func TestTrieAPI(t *testing.T) {
 		require.EqualError(t, err, "commitment v3: deferred updates were not taken")
 	})
 	t.Run("E45/TrieProcessRejectsWrongUpdateMode", func(t *testing.T) {
-		trie, unused := NewTrie(t.TempDir(), commitment.TrieConfig{})
+		trie, unused := NewTrie(t.TempDir())
 		t.Cleanup(trie.Release)
 		t.Cleanup(unused.Close)
 		trie.ResetContext(newMockContext())
@@ -228,7 +218,7 @@ func TestTrieAPI(t *testing.T) {
 		require.EqualError(t, err, "commitment v3: TraceCollapses requires ModeCollect updates")
 	})
 	t.Run("E45/EmptyCodeTouchLeavesEmptyTrieEmpty", func(t *testing.T) {
-		trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
+		trie, updates := NewTrie(t.TempDir())
 		t.Cleanup(trie.Release)
 		t.Cleanup(updates.Close)
 		trie.ResetContext(newMockContext())
@@ -274,7 +264,7 @@ func TestTrieMutations(t *testing.T) {
 				oldPath := appendPath(prefix, 6, oldTail)
 				newPath := appendPath(prefix, 6, newTail)
 				n := fork(prefix)
-				n.setLeaf(6, packPath(oldPath[8:], nil), []byte{1})
+				n.setLeaf(6, PackPath(oldPath[8:], nil), []byte{1})
 
 				require.NoError(t, insert(n, newPath, []byte{2}))
 				branch := n.child(6)
@@ -291,15 +281,15 @@ func TestTrieMutations(t *testing.T) {
 		oldPath := appendPath(prefix, 2, bytes.Repeat([]byte{3}, 58))
 		newPath := appendPath(prefix, 2, append([]byte{3, 4}, bytes.Repeat([]byte{5}, 56)...))
 		n := fork(prefix)
-		n.setLeaf(2, packPath(oldPath[6:], nil), []byte{0xaa})
+		n.setLeaf(2, PackPath(oldPath[6:], nil), []byte{0xaa})
 
 		require.NoError(t, insert(n, newPath, []byte{0xbb}))
 		branch := n.child(2)
 		require.NotNil(t, branch)
 		oldSuffix, oldValue := branch.leafAt(int(oldPath[len(branch.path)]))
 		newSuffix, newValue := branch.leafAt(int(newPath[len(branch.path)]))
-		require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), oldSuffix)
-		require.Equal(t, packPath(newPath[len(branch.path)+1:], nil), newSuffix)
+		require.Equal(t, PackPath(oldPath[len(branch.path)+1:], nil), oldSuffix)
+		require.Equal(t, PackPath(newPath[len(branch.path)+1:], nil), newSuffix)
 		require.Equal(t, []byte{0xaa}, oldValue)
 		require.Equal(t, []byte{0xbb}, newValue)
 	})
@@ -336,7 +326,7 @@ func TestTrieMutations(t *testing.T) {
 		require.NotZero(t, parent.leafMask&(1<<0))
 		require.Nil(t, parent.child(0))
 		suffix, value := parent.leafAt(0)
-		require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), suffix)
+		require.Equal(t, PackPath(survivor[len(parent.path)+1:], nil), suffix)
 		require.Equal(t, []byte{2}, value)
 		full := append(append([]byte(nil), parent.path...), byte(0))
 		full = append(full, unpackPath(suffix, 62, nil)...)
@@ -527,13 +517,13 @@ func appendPath(prefix []byte, nib byte, suffix []byte) []byte {
 
 func eachPlane(t *testing.T, run func(*testing.T, byte)) {
 	t.Helper()
-	for _, plane := range []byte{planeAccount, planeStorage} {
+	for _, plane := range []byte{PlaneAccount, PlaneStorage} {
 		t.Run(fmtPlane(plane), func(t *testing.T) { run(t, plane) })
 	}
 }
 
 func fmtPlane(plane byte) string {
-	if plane == planeAccount {
+	if plane == PlaneAccount {
 		return "account"
 	}
 	return "storage"
@@ -555,7 +545,7 @@ func TestUnfold(t *testing.T) {
 			Leaves: [16]commitmenttest.Leaf{7: {Suffix: bytes.Repeat([]byte{0x99}, 30), Value: []byte{0x42}}},
 		})
 
-		got, err := unfold(ctx, path, planeAccount, nil)
+		got, err := unfold(ctx, path, PlaneAccount, nil)
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{AccountNodeKey(path, nil)}, ctx.branchCalls)
 		require.Equal(t, 0, ctx.accountCalls)
@@ -574,7 +564,7 @@ func TestUnfold(t *testing.T) {
 		hash := bytes.Repeat([]byte{0xcd}, 32)
 		ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1<<6 | 1<<7, Hashes: [16][]byte{6: hash, 7: hash}})
 
-		got, err := unfold(ctx, path, planeStorage, addrHash[:])
+		got, err := unfold(ctx, path, PlaneStorage, addrHash[:])
 		require.NoError(t, err)
 		require.Equal(t, [][]byte{StorageNodeKey(addrHash, path, nil)}, ctx.branchCalls)
 		require.Equal(t, path, got.path)
@@ -586,11 +576,11 @@ func TestUnfold(t *testing.T) {
 			fullPath := bytes.Repeat([]byte{3}, 64)
 			ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrIsLeafRoot, Root: append(bytes.Repeat([]byte{0x33}, 32), 2, 1, 2)})
 
-			got, err := unfold(ctx, nil, planeAccount, nil)
+			got, err := unfold(ctx, nil, PlaneAccount, nil)
 			require.NoError(t, err)
 			suffix, value := got.leafAt(3)
 			require.Equal(t, []byte{0x01, 0x02}, value)
-			require.Equal(t, packPath(fullPath[1:], nil), suffix)
+			require.Equal(t, PackPath(fullPath[1:], nil), suffix)
 		})
 
 		t.Run("extension root", func(t *testing.T) {
@@ -599,7 +589,7 @@ func TestUnfold(t *testing.T) {
 			hash := bytes.Repeat([]byte{0x55}, 32)
 			ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, SelfExtension: []byte{3, 0x12, 0x30}, ChildMask: 1 << 4, Hashes: [16][]byte{4: hash}})
 
-			got, err := unfold(ctx, nil, planeAccount, nil)
+			got, err := unfold(ctx, nil, PlaneAccount, nil)
 			require.NoError(t, err)
 			require.Equal(t, ext, got.path)
 			require.Equal(t, hash, got.childHashAt(4))
@@ -607,12 +597,12 @@ func TestUnfold(t *testing.T) {
 	})
 	t.Run("E32/UnfoldMissingAndTombstone", func(t *testing.T) {
 		ctx := newMockContext()
-		got, err := unfold(ctx, nil, planeAccount, nil)
+		got, err := unfold(ctx, nil, PlaneAccount, nil)
 		require.NoError(t, err)
 		require.Nil(t, got)
 
 		ctx.branches[string(AccountNodeKey(nil, nil))] = []byte{}
-		got, err = unfold(ctx, nil, planeAccount, nil)
+		got, err = unfold(ctx, nil, PlaneAccount, nil)
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		require.Empty(t, got.childMask)
@@ -629,12 +619,12 @@ func TestUnfold(t *testing.T) {
 		require.NotEmpty(t, stored)
 
 		for _, ctx := range []commitment.PatriciaContext{ownedBranchContext{m}, &meteredContext{ownedBranchContext{m}, new(meterCounts)}} {
-			n, err := unfold(ctx, nil, planeStorage, address[:])
+			n, err := unfold(ctx, nil, PlaneStorage, address[:])
 			require.NoError(t, err)
 			require.Same(t, &stored[0], &n.raw[0])
 		}
 
-		n, err := unfold(m, nil, planeStorage, address[:])
+		n, err := unfold(m, nil, PlaneStorage, address[:])
 		require.NoError(t, err)
 		require.NotSame(t, &m.branchBuf[0], &n.raw[0])
 	})
@@ -648,7 +638,7 @@ func (c ownedBranchContext) BranchOwned(key []byte) ([]byte, kv.Step, error) {
 
 func TestFoldParity(t *testing.T) {
 	t.Run("E29/FoldEmptyTrie", func(t *testing.T) {
-		for _, plane := range []byte{planeAccount, planeStorage} {
+		for _, plane := range []byte{PlaneAccount, PlaneStorage} {
 			n := newNode(plane)
 			got, err := fold(n, 0)
 			require.NoError(t, err)
@@ -656,7 +646,7 @@ func TestFoldParity(t *testing.T) {
 		}
 	})
 	t.Run("E29/seeded", func(t *testing.T) {
-		for _, plane := range []byte{planeAccount, planeStorage} {
+		for _, plane := range []byte{PlaneAccount, PlaneStorage} {
 			for _, tc := range []struct {
 				name        string
 				count       int
@@ -664,7 +654,7 @@ func TestFoldParity(t *testing.T) {
 				checkBranch bool
 			}{
 				{"each-plane/1", 1, 1 + int64(plane), false},
-				{"each-plane/2", 2, 2 + int64(plane), plane == planeStorage},
+				{"each-plane/2", 2, 2 + int64(plane), plane == PlaneStorage},
 				{"each-plane/16", 16, 16 + int64(plane), false},
 				{"each-plane/1000", 1000, 1000 + int64(plane), false},
 				{"mixed-planes/16", 16, 91 + int64(plane), false},
@@ -699,7 +689,7 @@ func TestFoldParity(t *testing.T) {
 		}
 	})
 	t.Run("E30-E39/FoldUsesStoredChildHashWithoutStateReads", func(t *testing.T) {
-		n := newNode(planeStorage)
+		n := newNode(PlaneStorage)
 		stored := bytes.Repeat([]byte{0x31}, 32)
 		n.setStoredChild(2, stored, []byte{3, 4})
 		path := n.addLeaf(5, 6, 7)
@@ -721,14 +711,14 @@ func TestFoldParity(t *testing.T) {
 		require.ErrorIs(t, err, errFoldPlane)
 	})
 	t.Run("E22/FoldRejectsInlinableStorageBranch", func(t *testing.T) {
-		n := newNode(planeStorage, bytes.Repeat([]byte{1}, 62)...)
+		n := newNode(PlaneStorage, bytes.Repeat([]byte{1}, 62)...)
 		n.addLeaf(0, 0, 1)
 		n.addLeaf(1, 0, 2)
 		_, err := fold(n, 1)
 		require.ErrorIs(t, err, errFoldNode)
 	})
 	t.Run("E30/FoldRejectsExtensionChildWithoutHash", func(t *testing.T) {
-		n := newNode(planeStorage)
+		n := newNode(PlaneStorage)
 		n.setStoredChild(2, bytes.Repeat([]byte{0x31}, 32), []byte{3, 4})
 		n.hashMask &^= 1 << 2
 		n.addLeaf(5, 6, 7)
@@ -743,12 +733,12 @@ func foldPlaneRoot(t *testing.T, n *node) []byte {
 	t.Helper()
 	got, err := fold(n, 0)
 	require.NoError(t, err)
-	if n.plane != planeStorage {
+	if n.plane != PlaneStorage {
 		return got[:]
 	}
-	owner := foldUpdate(planeAccount, 1)
-	account := newNode(planeAccount)
-	require.NoError(t, insert(account, commitment.KeyToHexNibbleHash(foldStorageAddr), encodeAccountLeaf(&owner, got[:], nil)))
+	owner := foldUpdate(PlaneAccount, 1)
+	account := newNode(PlaneAccount)
+	require.NoError(t, insert(account, commitment.KeyToHexNibbleHash(foldStorageAddr), EncodeAccountLeaf(&owner, got[:], nil)))
 	root, err := fold(account, 0)
 	require.NoError(t, err)
 	return root[:]
@@ -757,18 +747,18 @@ func foldPlaneRoot(t *testing.T, n *node) []byte {
 func hexPatriciaRoot(t *testing.T, plane byte, keys, paths [][]byte, updates []commitment.Update) []byte {
 	t.Helper()
 	ctx := runner.NewMemory(runner.ContextSpec{})
-	trie := commitment.NewHexPatriciaHashed(length.Addr, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
+	trie := v2.NewHexPatriciaHashed(length.Addr, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
 	defer trie.Release()
 	batch := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for i := range paths {
 		key := keys[i]
-		if plane == planeStorage {
+		if plane == PlaneStorage {
 			key = append(bytes.Clone(foldStorageAddr), key...)
 		}
 		batch.TouchPlainKeyDirect(string(key), &updates[i])
 	}
-	if plane == planeStorage {
-		owner := foldUpdate(planeAccount, 1)
+	if plane == PlaneStorage {
+		owner := foldUpdate(PlaneAccount, 1)
 		batch.TouchPlainKeyDirect(string(foldStorageAddr), &owner)
 	}
 	got, err := trie.Process(context.Background(), batch, "", nil, commitment.WarmupConfig{})
@@ -777,15 +767,15 @@ func hexPatriciaRoot(t *testing.T, plane byte, keys, paths [][]byte, updates []c
 }
 
 func foldValue(plane byte, number int) []byte {
-	if plane == planeStorage {
+	if plane == PlaneStorage {
 		return []byte{byte(number), byte(number >> 8)}
 	}
 	update := foldUpdate(plane, number)
-	return encodeAccountLeaf(&update, empty.RootHash[:], nil)
+	return EncodeAccountLeaf(&update, empty.RootHash[:], nil)
 }
 
 func foldUpdate(plane byte, number int) commitment.Update {
-	if plane == planeStorage {
+	if plane == PlaneStorage {
 		return *storageUpdate(commitmenttest.Storage(number))
 	}
 	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "plain", Number: number}))

@@ -35,11 +35,12 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
+	v2 "github.com/erigontech/erigon/execution/commitment/v2"
+	"github.com/erigontech/erigon/execution/commitment/v2/branch"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const allIrreversible = uint64(math.MaxUint64)
+const collateAll = uint64(math.MaxUint64)
 
 func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	t.Helper()
@@ -109,7 +110,7 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(db, txs, allIrreversible)
+	err = agg.BuildFiles(db, txs, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -245,7 +246,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(db, 400, allIrreversible)
+	err = agg.BuildFiles(db, 400, collateAll)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -343,10 +344,10 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 			continue
 		}
 
-		bd := commitment.BranchData(v)
-		t.Logf("Branch key=%x data=%s", k, bd.String())
+		bd := branch.BranchData(v)
+		t.Logf("Branch key=%x data=%s", k, v2.BranchDataString(bd))
 
-		err = commitment.VerifyBranchHashes(k, bd, accountValues, storageValues)
+		err = v2.VerifyBranchHashes(k, bd, accountValues, storageValues)
 		checked++
 		if err != nil {
 			t.Errorf("VerifyBranchHashes FAILED for key=%x: %v", k, err)

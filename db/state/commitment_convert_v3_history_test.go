@@ -53,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -111,7 +110,7 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, txCount, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, txCount, collateAll))
 	return db, agg, roots
 }
 
@@ -161,7 +160,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, collateAll))
 
 	ownerPath := commitment.KeyToHexNibbleHash(owner)
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -831,7 +830,7 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, collateAll))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
@@ -867,7 +866,7 @@ func TestConvertCommitmentFiles_V3HistoryRootWithOnlyDirectLeaves(t *testing.T) 
 	}
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(db, stepSize*steps, allIrreversible))
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, collateAll))
 	require.Positive(t, dropHistoryLeafOnlyRewrites(t, db, agg))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})

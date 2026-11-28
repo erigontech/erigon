@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/v2/branchcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -187,7 +188,7 @@ func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	p, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
+	p, ok := rwTx.AggTx().(branchcache.BranchCacheProvider)
 	require.True(t, ok)
 	cache := p.BranchCache()
 	require.NotNil(t, cache, "test aggregator has no branch cache, nothing to bind")

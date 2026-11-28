@@ -1258,6 +1258,59 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
 }
 
+func TestResetReaderReleasesAnOversizedJournal(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	for i := range maxKeptJournalEntries + 1 {
+		k := TransientKey(*uint256.NewInt(uint64(i)))
+		ibs.SetTransientState(addr, &k, uint256.NewInt(1))
+	}
+	ibs.Reset()
+	require.Greater(t, cap(ibs.journal.entries), maxKeptJournalEntries, "Reset keeps the journal's peak")
+
+	ibs.ResetReader(nil)
+
+	require.Zero(t, cap(ibs.journal.entries))
+	k := TransientKey(*uint256.NewInt(1))
+	ibs.SetTransientState(addr, &k, uint256.NewInt(2))
+	require.Equal(t, 1, ibs.journal.length())
+}
+
+func TestResetReaderReleasesAnOversizedTxOutput(t *testing.T) {
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.txOutput = make([]byte, 0, maxKeptTxOutput+1)
+
+	ibs.ResetReader(nil)
+
+	require.Zero(t, cap(ibs.txOutput))
+}
+
+func TestResetReaderReleasesWhatATransactionGrew(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	for i := range 64 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	vm.FlushWrites(ibs.Writes(), true)
+	ibs.readSelfDestructMemo(addr)
+	_, err := ibs.committedAccount(addr)
+	require.NoError(t, err)
+	ibs.Reset()
+	require.NotZero(t, ibs.accessList.entries(), "Reset keeps the access list's peak")
+
+	ibs.ResetReader(nil)
+
+	require.Zero(t, ibs.accessList.entries())
+	require.Nil(t, ibs.sdProbe)
+	require.Nil(t, ibs.committedBase)
+	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(1))))
+	require.True(t, ibs.AddressInAccessList(addr))
+}
+
 // sync.Pool may drop any one entry, so the reuse shows over a few round trips.
 // slotPool keeps exactly what it was handed, so the release path can be checked
 // without sync.Pool's freedom to discard.
@@ -1691,4 +1744,16 @@ func TestWriteFlushedToIncarnationDecrease(t *testing.T) {
 	require.Less(t, got.accounts[c].Incarnation, emptied.Incarnation, "the scenario lowers the incarnation")
 	require.Contains(t, got.code, c, "the new code survives the account write")
 	require.Equal(t, *uint256.NewInt(5), got.storage[c][slot], "the new storage survives the account write")
+}
+
+func TestResetReaderReplacesTransientStorageMap(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xa1"))
+	key := TransientKey(*uint256.NewInt(1))
+	ibs.SetTransientState(addr, &key, uint256.NewInt(2))
+	previousMap := ibs.transientStorage
+	ibs.ResetReader(nil)
+	ibs.SetTransientState(addr, &key, uint256.NewInt(3))
+	require.Empty(t, previousMap, "ResetReader keeps the largest tx's transient storage map")
 }
