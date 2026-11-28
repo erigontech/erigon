@@ -672,11 +672,15 @@ func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logge
 
 func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, chainConfig *chain2.Config, fromBlock uint64, logger log.Logger) error {
 	secp256k1.ContextForThread(1)
+	wrongSenders := 0
 	for i := fromBlock; ; i++ {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return err
 		}
-		h, _ := br.HeaderByNumber(ctx, tx, i)
+		h, err := br.HeaderByNumber(ctx, tx, i)
+		if err != nil {
+			return err
+		}
 		if h == nil {
 			break
 		}
@@ -701,11 +705,15 @@ func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, 
 			fromValue := from.Value()
 			if !bytes.Equal(fromValue[:], senders[j][:]) {
 				logger.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
+				wrongSenders++
 			}
 		}
 		if i%10 == 0 {
 			logger.Info("checked", "block", i)
 		}
+	}
+	if wrongSenders > 0 {
+		return fmt.Errorf("%d wrong senders", wrongSenders)
 	}
 	return nil
 }

@@ -185,10 +185,16 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
-	db := mdbx2.MustOpen(chaindata)
+	db, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
-	refDB := mdbx2.MustOpen(referenceChaindata)
+	refDB, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(referenceChaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -212,10 +218,16 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 }
 
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
-	db := mdbx2.MustOpen(chaindata)
+	db, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
-	refDB := mdbx2.MustOpen(referenceChaindata)
+	refDB, err := mdbx2.New(dbcfg.ChainDB, log.New()).Path(referenceChaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {

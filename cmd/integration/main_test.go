@@ -24,6 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func commandReturning(err error) *cobra.Command {
@@ -43,4 +45,22 @@ func TestRunIgnoresCancelOnlyAfterStop(t *testing.T) {
 	require.ErrorIs(t, run(t.Context(), commandReturning(canceled)), context.Canceled)
 	require.EqualError(t, run(stopped, commandReturning(errors.New("boom"))), "boom")
 	require.NoError(t, run(t.Context(), commandReturning(nil)))
+}
+
+func TestRunPreservesErrorJoinedWithCancellation(t *testing.T) {
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	cleanupFailure := errors.New("cleanup failed")
+
+	err := run(stopped, commandReturning(errors.Join(context.Canceled, cleanupFailure)))
+	require.ErrorIs(t, err, cleanupFailure)
+}
+
+func TestRunTreatsStoppedSentinelAsCleanShutdown(t *testing.T) {
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	require.NoError(t, run(stopped, commandReturning(fmt.Errorf("check senders: %w", common.ErrStopped))))
+
+	require.ErrorIs(t, run(t.Context(), commandReturning(common.ErrStopped)), common.ErrStopped)
+	require.Error(t, run(stopped, commandReturning(errors.Join(common.ErrStopped, errors.New("boom")))))
 }

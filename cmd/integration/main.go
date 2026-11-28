@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -28,19 +27,20 @@ import (
 
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 )
 
 func main() {
 	ctx, _ := common.RootContext()
 	if err := run(ctx, commands.RootCommand()); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, rootCmd *cobra.Command) error {
 	err := rootCmd.ExecuteContext(ctx)
-	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+	if ctx.Err() != nil && commonerrors.IsOnly(err, context.Canceled, common.ErrStopped) {
 		return nil
 	}
 	return err

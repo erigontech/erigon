@@ -17,6 +17,8 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,8 +27,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -109,4 +113,58 @@ func TestCheckSendersReturnsSendersCountMismatch(t *testing.T) {
 	require.NoError(t, rawdb.WriteBody(tx, header.Hash(), 0, &types.Body{Transactions: []types.Transaction{txn}}))
 
 	require.ErrorContains(t, checkSenders(t.Context(), tx, br, chain2.AllProtocolChanges, 0, log.New()), "not equal amount of senders")
+}
+
+type failingHeaderReader struct {
+	dbservices.FullBlockReader
+	err error
+}
+
+func (r failingHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return nil, r.err
+}
+
+func TestCheckSendersReturnsHeaderReadError(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	useTestBlockReader(t, dirs)
+	br, _ := blocksIO(db, log.New())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	readErr := errors.New("header read failed")
+	err = checkSenders(t.Context(), tx, failingHeaderReader{FullBlockReader: br, err: readErr}, chain2.AllProtocolChanges, 0, log.New())
+	require.ErrorIs(t, err, readErr)
+}
+
+func TestCheckSendersFailsForWrongSender(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	useTestBlockReader(t, dirs)
+	br, _ := blocksIO(db, log.New())
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header := &types.Header{Difficulty: *uint256.NewInt(1)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 0))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.MakeSigner(chain2.AllProtocolChanges, 0, 0)
+	txn := types.MustSignNewTx(key, *signer, types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil))
+	require.NoError(t, rawdb.WriteBody(tx, header.Hash(), 0, &types.Body{Transactions: []types.Transaction{txn}}))
+	require.NoError(t, rawdb.WriteSenders(tx, header.Hash(), 0, []common.Address{{2}}))
+
+	require.ErrorContains(t, checkSenders(t.Context(), tx, br, chain2.AllProtocolChanges, 0, log.New()), "wrong sender")
+}
+
+func TestCompareStatesReturnsDBOpenError(t *testing.T) {
+	notDir := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(notDir, []byte("x"), 0o644))
+
+	require.Error(t, compareStates(t.Context(), notDir, notDir))
+	require.Error(t, compareBucketBetweenDatabases(t.Context(), notDir, notDir, kv.TxLookup))
 }
