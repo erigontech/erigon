@@ -319,7 +319,7 @@ func TestOverrideGenesisSkipsUnsupportedRetention(t *testing.T) {
 		return
 	}
 	path := filepath.Join(t.TempDir(), "genesis.json")
-	if err := os.WriteFile(path, []byte(`{"config":{"chainId":1337},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"config":{"chainId":1337},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := buildEthConfig(t, []string{"--override.genesis=" + path, "--caplin.prune.mode=archive"})
