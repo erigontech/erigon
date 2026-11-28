@@ -344,7 +344,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 	)
 	for slot := expectedSlot; validatorSet == nil && slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
 		if slot != expectedSlot && !a.stateReader.ValidatorTableCovers(slot) {
-			if !a.stateReader.ArchiveStates() {
+			if !a.stateReader.StateHistoryEnabled() {
 				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is not yet reconstructed", epoch))
 			}
 			return nil, validatorReplayPending(slot)
