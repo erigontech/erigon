@@ -54,7 +54,12 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
-		copy(m.store[offset:offset+size], value)
+		// Small copies go first: the compiler lays out the then-branch as the fall-through.
+		if size <= memmoveChunk {
+			copy(m.store[offset:offset+size], value)
+			return
+		}
+		copyChunked(m.store[offset:offset+size], value)
 	}
 }
 
@@ -184,5 +189,22 @@ func (m *Memory) Copy(dst, src, len uint64) {
 	if len == 0 {
 		return
 	}
-	copy(m.store[dst:], m.store[src:src+len])
+	// Forward chunks would overwrite the source of an overlapping copy to a higher address.
+	if len <= memmoveChunk || (dst > src && dst-src < len) {
+		copy(m.store[dst:], m.store[src:src+len])
+		return
+	}
+	copyChunked(m.store[dst:dst+len], m.store[src:src+len])
+}
+
+// shortcut: works around https://github.com/golang/go/issues/49058 (Go's amd64 memmove uses non-temporal stores from 1 MiB on AMD); drop when Go fixes it.
+const memmoveChunk = 512 * 1024
+
+// copyChunked is copy for non-overlapping or downward-overlapping slices.
+func copyChunked(dst, src []byte) {
+	for min(len(dst), len(src)) > memmoveChunk {
+		copy(dst, src[:memmoveChunk])
+		dst, src = dst[memmoveChunk:], src[memmoveChunk:]
+	}
+	copy(dst, src)
 }
