@@ -726,6 +726,12 @@ func TestSetCommitmentV3RejectsInvalidEnv(t *testing.T) {
 	}
 }
 
+func TestCheckCommitmentV3EnvNamesTheVariableRead(t *testing.T) {
+	t.Setenv("COMMITMENT_V3", "0")
+	require.ErrorContains(t, CheckCommitmentV3Env(), `COMMITMENT_V3="0" is invalid`)
+	require.NotContains(t, CheckCommitmentV3Env().Error(), "ERIGON_COMMITMENT_V3")
+}
+
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	run := func(args ...string) (ethconfig.Config, buildercfg.BuilderConfig) {
 		txpoolDisable, proposingDisable, fakePoW := TxPoolDisableFlag, ProposingDisableFlag, FakePoWFlag

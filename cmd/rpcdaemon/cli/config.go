@@ -331,6 +331,7 @@ func EmbeddedServices(ctx context.Context,
 }
 
 func checkDatadirCompatibility(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+	// using salt files as proxy for empty directory or not
 	ok, err := dbstate.CheckSaltFilesExist(dirs)
 	if err != nil {
 		return err

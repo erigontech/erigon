@@ -2036,9 +2036,11 @@ func CheckCommitmentV3Env() error {
 }
 
 func commitmentV3Env() (v3, set bool, err error) {
-	value, set := os.LookupEnv("COMMITMENT_V3")
+	name := "COMMITMENT_V3"
+	value, set := os.LookupEnv(name)
 	if !set {
-		value, set = os.LookupEnv(dbg.ErigonEnvPrefix + "COMMITMENT_V3")
+		name = dbg.ErigonEnvPrefix + name
+		value, set = os.LookupEnv(name)
 	}
 	if !set || value == "" {
 		return false, false, nil
@@ -2049,7 +2051,7 @@ func commitmentV3Env() (v3, set bool, err error) {
 	case strings.EqualFold(value, "false"):
 		return false, true, nil
 	default:
-		return false, true, fmt.Errorf("ERIGON_COMMITMENT_V3=%q is invalid; accepted values are true or false", value)
+		return false, true, fmt.Errorf("%s=%q is invalid; accepted values are true or false", name, value)
 	}
 }
 
