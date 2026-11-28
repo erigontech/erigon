@@ -307,6 +307,9 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 				lowest := uint64(33)
 				fcu.LowestAvailableSlotVal = &lowest
 				setProgress(t, db, 31)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return beacon_indicies.MarkRootCanonical(tx, 0, common.Hash{1})
+				}))
 				return handler
 			},
 			method:      http.MethodPost,
@@ -336,7 +339,12 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 				lowest := uint64(97)
 				fcu.LowestAvailableSlotVal = &lowest
-				setProgress(t, db, 63)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					if err := beacon_indicies.MarkRootCanonical(tx, 31, common.Hash{1}); err != nil {
+						return err
+					}
+					return state_accessors.SetStateProcessingProgress(tx, 63)
+				}))
 				return handler
 			},
 			method:      http.MethodPost,
@@ -359,6 +367,24 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 			body:        `["0"]`,
 			wantStatus:  http.StatusInternalServerError,
 			wantMessage: "dependent root not found for epoch 2",
+		},
+		{
+			name: "attester historical dependent root row missing after reconstruction",
+			setup: func(t *testing.T) *ApiHandler {
+				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				lowest := uint64(129)
+				fcu.LowestAvailableSlotVal = &lowest
+				removeProposerRoots(t, db)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					return state_accessors.SetStateProcessingProgress(tx, 100)
+				}))
+				return handler
+			},
+			method:      http.MethodPost,
+			path:        "/eth/v1/validator/duties/attester/4",
+			body:        `["0"]`,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "dependent root not found for epoch 4",
 		},
 		{
 			name: "attester active indices missing after reconstruction",
@@ -486,6 +512,9 @@ func TestHistoricalAttesterDutiesSnapshotStartsAfterRequestedSlot(t *testing.T) 
 	lowest := uint64(33)
 	fcu.LowestAvailableSlotVal = &lowest
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.MarkRootCanonical(tx, 0, common.Hash{1}); err != nil {
+			return err
+		}
 		return state_accessors.SetStateProcessingProgress(tx, 31)
 	}))
 

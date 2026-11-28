@@ -115,20 +115,14 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		defer tx.Rollback()
 		view := a.caplinStateSnapshots.View()
 		defer view.Close()
-		table := kv.SlotData
 		usesLookahead := expectedSlot != a.beaconChainCfg.GenesisSlot && targetVersion >= clparams.FuluVersion && epoch > a.beaconChainCfg.FuluForkEpoch
-		if expectedSlot == a.beaconChainCfg.GenesisSlot {
-			table = kv.BlockRoot
-		} else if usesLookahead {
-			table = kv.EpochData
-		}
 		readiness, err := newHistoricalReadiness(tx, view)
 		if err != nil {
 			return nil, err
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
-		if a.stateReader.ArchiveStates() {
-			stateGetter, err = historicalDutiesStateGetter(tx, readiness, expectedSlot, table, a.beaconChainCfg)
+		if a.stateReader.StateHistoryEnabled() {
+			stateGetter, err = historicalDutiesStateGetter(tx, readiness, a.beaconChainCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -141,7 +135,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*bea
 		if err != nil {
 			return nil, err
 		}
-		if !a.stateReader.ArchiveStates() {
+		if !a.stateReader.StateHistoryEnabled() {
 			progress := readiness.progress
 			if a.caplinStateSnapshots != nil {
 				progress = max(progress, a.caplinStateSnapshots.BlocksAvailable())
@@ -262,7 +256,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -294,11 +288,11 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
-func (a *ApiHandler) historicalDutiesMissingRootStatus() int {
-	if !a.stateReader.ArchiveStates() {
+func (a *ApiHandler) historicalDutiesMissingDataStatus() int {
+	if !a.stateReader.StateHistoryEnabled() {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
@@ -330,11 +324,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 			return nil, err
 		}
 		if epochData == nil {
-			status := http.StatusInternalServerError
-			if !a.stateReader.ArchiveStates() {
-				status = http.StatusBadRequest
-			}
-			return nil, beaconhttp.NewEndpointError(status, fmt.Errorf("epoch data not found for slot %d", expectedSlot))
+			return nil, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("epoch data not found for slot %d", expectedSlot))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := range duties {

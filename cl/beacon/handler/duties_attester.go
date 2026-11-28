@@ -90,7 +90,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), errors.New("genesis block not found"))
+			return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), errors.New("genesis block not found"))
 		}
 		return root, nil
 	}
@@ -118,7 +118,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingRootStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
+	return common.Hash{}, beaconhttp.NewEndpointError(a.historicalDutiesMissingDataStatus(), fmt.Errorf("dependent root not found for epoch %d", epoch))
 }
 
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -231,8 +231,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
-	if a.stateReader.ArchiveStates() {
-		stateGetter, err = historicalDutiesStateGetter(tx, readiness, expectedSlot, kv.ActiveValidatorIndicies, a.beaconChainCfg)
+	if a.stateReader.StateHistoryEnabled() {
+		stateGetter, err = historicalDutiesStateGetter(tx, readiness, a.beaconChainCfg)
 		if err != nil {
 			return nil, err
 		}
@@ -328,10 +328,7 @@ func (r historicalReadiness) check(rowSlot, writeSlot uint64, table string) erro
 	return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("historical state for slot %d is not yet reconstructed", writeSlot))
 }
 
-func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, slot uint64, table string, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
-	if err := readiness.check(slot, slot, table); err != nil && table != kv.BlockRoot && table != kv.EpochData {
-		return nil, err
-	}
+func historicalDutiesStateGetter(tx kv.Tx, readiness historicalReadiness, cfg *clparams.BeaconChainConfig) (state_accessors.GetValFn, error) {
 	get := state_accessors.GetValFnTxAndSnapshot(tx, readiness.view)
 	return func(table string, key []byte) ([]byte, error) {
 		rowSlot := base_encoding.Decode64FromBytes4(key)

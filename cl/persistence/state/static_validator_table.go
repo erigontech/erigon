@@ -273,11 +273,11 @@ type staticValidatorField[V any] struct {
 // StaticValidatorTable is a structure to manage a collection of StaticValidators.
 // It is used for tracking multiple validators and their state changes.
 type StaticValidatorTable struct {
-	validatorTable       []*StaticValidator
-	slot                 uint64
-	replayDisabled       bool
-	stateHistoryDisabled bool
-	sync                 sync.RWMutex // Mutex for safe concurrent access.
+	validatorTable        []*StaticValidator
+	slot                  uint64
+	replayDisabled        bool
+	archiveStatesDisabled bool
+	sync                  sync.RWMutex // Mutex for safe concurrent access.
 }
 
 // NewStaticValidatorTable creates a new instance of StaticValidatorTable.
@@ -288,14 +288,10 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 }
 
 func (s *StaticValidatorTable) SetReplayEnabled(enabled bool) {
-	s.sync.Lock()
-	defer s.sync.Unlock()
 	s.replayDisabled = !enabled
 }
 
 func (s *StaticValidatorTable) ReplayEnabled() bool {
-	s.sync.RLock()
-	defer s.sync.RUnlock()
 	return !s.replayDisabled
 }
 
@@ -404,7 +400,7 @@ func (s *StaticValidatorTable) CopyValidatorsAtSlot(slot, length uint64, limit i
 	if !s.replayDisabled && slot > s.slot {
 		return nil, fmt.Errorf("static validator table does not yet cover slot %d: %w", slot, ErrValidatorTableBehind)
 	}
-	if !s.stateHistoryDisabled && uint64(len(s.validatorTable)) < length {
+	if !s.archiveStatesDisabled && uint64(len(s.validatorTable)) < length {
 		return nil, fmt.Errorf("%w at slot %d: have %d validators, want %d", ErrValidatorTableTruncated, slot, len(s.validatorTable), length)
 	}
 	out := solid.NewValidatorSetWithLength(limit, int(length))
