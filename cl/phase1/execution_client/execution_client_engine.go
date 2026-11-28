@@ -166,6 +166,12 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	attributes *engine_types.PayloadAttributes,
 	version clparams.StateVersion,
 ) ([]byte, error) {
+	if attributes == nil {
+		if _, err := cc.ForkChoiceUpdateHead(ctx, finalized, safe, head, version); err != nil {
+			return nil, err
+		}
+		return []byte{}, nil
+	}
 	resp, err := cc.forkChoiceUpdated(ctx, finalized, safe, head, attributes, version)
 	if err != nil {
 		return nil, err
@@ -174,10 +180,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
 			return nil, err
 		}
-		if attributes != nil {
-			return nil, ErrForkChoiceUpdateNoPayloadID
-		}
-		return []byte{}, nil
+		return nil, ErrForkChoiceUpdateNoPayloadID
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }

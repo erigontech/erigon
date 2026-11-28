@@ -81,9 +81,6 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			executionHead, headVersion,
 		)
-		if headValid {
-			cfg.forkChoice.OnHeadPayloadValidated(headRoot, executionHead)
-		}
 		if err != nil {
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
@@ -96,6 +93,9 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 			default:
 				return fmt.Errorf("failed to run forkchoice: %w", err)
 			}
+		}
+		if headValid {
+			cfg.forkChoice.OnHeadPayloadValidated(headRoot, executionHead)
 		}
 	}
 	if recordExecutionHead {

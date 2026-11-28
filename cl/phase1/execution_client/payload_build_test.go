@@ -266,3 +266,35 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	require.EqualValues(t, PayloadStatusNone, status)
 	require.True(t, ValidationInterrupted(ctx, status, err))
 }
+
+// The direct client reports the head valid only when the EL made it its head.
+func TestDirectForkChoiceUpdateHeadReportsValidOnlyForSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		result    execmodule.ForkChoiceResult
+		wantValid bool
+		wantErr   bool
+	}{
+		{name: "success", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, wantValid: true},
+		{name: "busy, update in progress", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true}},
+		{name: "busy, not started", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, wantErr: true},
+		{name: "missing segment", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment}},
+		{name: "too far away", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusTooFarAway}},
+		{name: "invalid forkchoice", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusInvalidForkchoice}, wantErr: true},
+		{name: "bad block", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBadBlock}, wantErr: true},
+		{name: "reorg too deep", result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusReorgTooDeep}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &payloadBuildModuleStub{forkChoiceResult: tc.result}
+			client, err := NewExecutionClientDirect(
+				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+			)
+			require.NoError(t, err)
+
+			valid, err := client.ForkChoiceUpdateHead(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, clparams.ElectraVersion)
+
+			require.Equal(t, tc.wantValid, valid)
+			require.Equal(t, tc.wantErr, err != nil, err)
+		})
+	}
+}
