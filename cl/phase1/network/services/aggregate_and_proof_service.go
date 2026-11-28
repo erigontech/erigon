@@ -70,6 +70,7 @@ type aggregateAndProofServiceImpl struct {
 	forkchoiceStore        forkchoice.ForkChoiceStorage
 	ethClock               eth_clock.EthereumClock
 	beaconCfg              *clparams.BeaconChainConfig
+	netCfg                 *clparams.NetworkConfig
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
@@ -85,6 +86,7 @@ func NewAggregateAndProofService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
+	netCfg *clparams.NetworkConfig,
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
@@ -98,6 +100,7 @@ func NewAggregateAndProofService(
 		forkchoiceStore:        forkchoiceStore,
 		ethClock:               ethClock,
 		beaconCfg:              beaconCfg,
+		netCfg:                 netCfg,
 		opPool:                 opPool,
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
@@ -111,6 +114,33 @@ func NewAggregateAndProofService(
 	}
 	go a.awaitingBlock.run(ctx)
 	return a
+}
+
+// inAttestationGossipSlotWindow applies the [IGNORE] slot window that beacon_attestation_{subnet_id} and
+// beacon_aggregate_and_proof share, with both ends widened by MAXIMUM_GOSSIP_CLOCK_DISPARITY. Before Deneb the slot
+// must be within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots. From Deneb (EIP-7045) the slot must not be in the
+// future and its epoch must be the current or the previous one. The rule follows the fork of the current epoch,
+// because the spec defines it relative to the current time.
+func inAttestationGossipSlotWindow(beaconCfg *clparams.BeaconChainConfig, netCfg *clparams.NetworkConfig, clock eth_clock.EthereumClock, slot, currentSlot uint64) bool {
+	// The disparity is shorter than a slot, so a slot after the next one is always in the future. Checking that first
+	// also keeps the slot arithmetic below from overflowing.
+	if slot > currentSlot+1 {
+		return false
+	}
+	endSlot := slot + netCfg.AttestationPropagationSlotRange + 1
+	if beaconCfg.GetCurrentStateVersion(currentSlot/beaconCfg.SlotsPerEpoch) >= clparams.DenebVersion {
+		endSlot = (slot/beaconCfg.SlotsPerEpoch + 2) * beaconCfg.SlotsPerEpoch
+	}
+	if slot <= currentSlot && currentSlot < endSlot {
+		return true
+	}
+	if currentSlot > endSlot {
+		return false
+	}
+	disparity := time.Duration(netCfg.MaximumGossipClockDisparity)
+	now := clock.Now()
+	return !now.Add(disparity).Before(clock.GetSlotTime(slot)) &&
+		!now.Add(-disparity).After(clock.GetSlotTime(endSlot))
 }
 
 func (a *aggregateAndProofServiceImpl) Names() []string {
@@ -206,10 +236,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
-	// Note: the original "future slot" check used HeadSlot() which can lag behind
-	// block production in solo-validator setups. The epoch check below (line ~218)
-	// and the finalized ancestor check (line ~234) provide sufficient validation.
-
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
 	if aggregateAndProof.TopicForkDigest != nil {
@@ -249,6 +275,11 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		committeeIndex = uint64(indices[0])
 	}
 
+	currentSlot := a.ethClock.GetCurrentSlot()
+	if !inAttestationGossipSlotWindow(a.beaconCfg, a.netCfg, a.ethClock, slot, currentSlot) {
+		return fmt.Errorf("%w: aggregate not in propagation range", ErrIgnore)
+	}
+
 	var (
 		aggregateRoot    common.Hash
 		attestingIndices []uint64
@@ -259,10 +290,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		// computations will use a stale RANDAO mix and produce wrong results.
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
 		// with wrong target.Epoch still reach the reject check below.
-		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// Use the wall-clock slot and highest seen slot to widen the accepted epoch
 		// window when the head state lags.
-		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), a.ethClock.GetCurrentSlot(), a.beaconCfg.SlotsPerEpoch)
+		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), currentSlot, a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
