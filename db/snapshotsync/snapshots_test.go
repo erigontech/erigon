@@ -2562,3 +2562,124 @@ func TestRetireFilesAboveRetiresAHiddenMergedFile(t *testing.T) {
 		}
 	}
 }
+
+func mergeUnderLargerHeadersLayout(t *testing.T, withHiddenTx bool) (string, *BaseRoSnapshots) {
+	logger := log.New()
+	d := t.TempDir()
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createTestSegmentFile(t, 0, 200_000, typ.Enum(), d, version.V1_0, logger)
+	}
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Transactions.Enum(), d, version.V1_0, logger)
+	if withHiddenTx {
+		createTestSegmentFile(t, 100_000, 200_000, snaptype2.Transactions.Enum(), d, snaptype2.Transactions.Versions().Current, logger)
+	}
+	for from := uint64(100_000); from < 200_000; from += 10_000 {
+		createTestSegmentFile(t, from, from+10_000, snaptype2.Transactions.Enum(), d, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, d, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+	return d, s
+}
+
+// A type with no file inside the range is neither seeded nor deleted, and the next pass proposes no range.
+func TestMergeSkippedTypeKeepsItsFilesAndStops(t *testing.T) {
+	for _, hidden := range []bool{true, false} {
+		t.Run(map[bool]string{true: "reuse", false: "build"}[hidden], func(t *testing.T) {
+			d, s := mergeUnderLargerHeadersLayout(t, hidden)
+			m := NewMerger(d, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, log.New())
+			m.DisableFsync()
+			ranges := m.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+			require.Equal(t, []Range{NewRange(100_000, 200_000)}, ranges)
+			var merged, deleted []string
+			onMerge := func(l []string) error { merged = append(merged, l...); return nil }
+			onDelete := func(_ context.Context, l []string) error { deleted = append(deleted, l...); return nil }
+			require.NoError(t, m.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, d, false, onMerge, onDelete))
+			for _, f := range append(merged, deleted...) {
+				require.Contains(t, filepath.Base(f), "transactions", f)
+			}
+			require.Len(t, deleted, 3*10) // 10 small transaction files: seg + 2 idx
+			for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+				if hidden { // with doIndex=false a built output is unindexed, so alignment hides every type
+					require.Equal(t, []Range{NewRange(0, 200_000)}, visibleRanges(s, typ), typ.Name())
+				}
+				ok, err := dir2.FileExist(filepath.Join(d, snaptype.SegmentFileName(version.V1_0, 0, 200_000, typ.Enum())))
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			if hidden {
+				require.Equal(t, []Range{NewRange(0, 100_000), NewRange(100_000, 200_000)}, visibleRanges(s, snaptype2.Transactions))
+				require.Empty(t, m.FindMergeRanges(s.Ranges(true), snaptype.Unknown))
+				require.NoError(t, s.OpenFolder())
+				require.Equal(t, []Range{NewRange(0, 100_000), NewRange(100_000, 200_000)}, visibleRanges(s, snaptype2.Transactions))
+			}
+		})
+	}
+}
+
+// A range with no transactions file inside it cannot be merged, so Merge reports it instead of doing nothing.
+func TestMergeFailsWhenNoBaseFileIsInsideTheRange(t *testing.T) {
+	logger := log.New()
+	d := t.TempDir()
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 100_000, typ.Enum(), d, version.V1_0, logger)
+		createTestSegmentFile(t, 100_000, 300_000, typ.Enum(), d, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, d, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	m := NewMerger(d, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	m.DisableFsync()
+	ranges := m.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.NotEmpty(t, ranges)
+	var merged []string
+	err := m.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, d, false, func(l []string) error { merged = append(merged, l...); return nil }, nil)
+	require.ErrorContains(t, err, "no transactions file inside")
+	require.Empty(t, merged)
+}
+
+// A skipped type's indexed hidden output for the range is not reused, so the type never reaches onMerge.
+func TestMergeSkippedTypeIgnoresItsHiddenOutput(t *testing.T) {
+	d, s := mergeUnderLargerHeadersLayout(t, false)
+	createTestSegmentFile(t, 100_000, 200_000, snaptype2.Headers.Enum(), d, snaptype2.Headers.Versions().Current, log.New())
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, []Range{NewRange(0, 200_000)}, visibleRanges(s, snaptype2.Headers))
+	m := NewMerger(d, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, log.New())
+	m.DisableFsync()
+	ranges := m.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(100_000, 200_000)}, ranges)
+	var merged []string
+	onMerge := func(l []string) error { merged = append(merged, l...); return nil }
+	require.NoError(t, m.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, d, false, onMerge, func(context.Context, []string) error { return nil }))
+	for _, f := range merged {
+		require.Contains(t, filepath.Base(f), "transactions", f)
+	}
+}
+
+// With indexing, the transactions output needs a bodies file of its own range, which the skip leaves out:
+// the merge fails and keeps every input file.
+func TestMergeWithIndexUnderALargerBodiesFileFailsAndKeepsInputs(t *testing.T) {
+	d, s := mergeUnderLargerHeadersLayout(t, false)
+	require.NoError(t, os.WriteFile(filepath.Join(d, "salt-blocks.txt"), []byte{0, 0, 0, 0}, 0o644))
+	before, err := os.ReadDir(d)
+	require.NoError(t, err)
+	m := NewMerger(d, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, log.New())
+	m.DisableFsync()
+	ranges := m.FindMergeRanges(s.Ranges(true), snaptype.Unknown)
+	require.Equal(t, []Range{NewRange(100_000, 200_000)}, ranges)
+	var merged, deleted []string
+	err = m.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, d, true,
+		func(l []string) error { merged = append(merged, l...); return nil },
+		func(_ context.Context, l []string) error { deleted = append(deleted, l...); return nil })
+	require.ErrorContains(t, err, "bodies")
+	require.Empty(t, merged)
+	require.Empty(t, deleted)
+	for _, e := range before {
+		require.FileExists(t, filepath.Join(d, e.Name()))
+	}
+	after, err := os.ReadDir(d)
+	require.NoError(t, err)
+	require.Len(t, after, len(before), "the failed merge leaves no output on disk")
+	require.NoError(t, s.OpenFolder())
+	require.Len(t, visibleRanges(s, snaptype2.Transactions), 11)
+}

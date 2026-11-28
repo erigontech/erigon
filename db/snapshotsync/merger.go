@@ -246,6 +246,11 @@ func (m *Merger) Merge(
 		if err != nil {
 			return err
 		}
+		base := snapshots.baseSegType
+		hasBase := slices.ContainsFunc(snapTypes, func(t snaptype.Type) bool { return t.Enum() == base.Enum() })
+		if hasBase && len(toMerge[base.Enum()]) == 0 {
+			return fmt.Errorf("merger.Merge: no %s file inside %d-%d", base.Name(), r.From(), r.To())
+		}
 		for snapType, t := range toMerge {
 			if out[snapType] == nil {
 				out[snapType] = make([]*DirtySegment, 0, len(t))
@@ -273,6 +278,9 @@ func (m *Merger) Merge(
 		reused := make(map[snaptype.Enum]struct{})
 		var reusedFiles []string
 		for _, t := range snapTypes {
+			if len(toMerge[t.Enum()]) == 0 { // a skipped type reuses nothing
+				continue
+			}
 			output := t.FileInfo(snapDir, r.From(), r.To())
 			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
 				continue
@@ -309,6 +317,9 @@ func (m *Merger) Merge(
 			if err != nil {
 				abort()
 				return err
+			}
+			if newDirtySegment == nil { // the type has no visible file inside the range
+				continue
 			}
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))

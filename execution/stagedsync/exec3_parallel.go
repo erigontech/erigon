@@ -1641,22 +1641,25 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
-	var err error
-	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
-		workersCtx, true, pe.cfg.db, nil, nil,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
-	)
-	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
-	}
-
 	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
 	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
 	// channels. Deterministic — the fault is decided here, not in a speculative worker.
 	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
+
+	if pe.execWorkers = takeWorkers(pe.cfg.workers, poolSize); pe.execWorkers != nil {
+		for _, w := range pe.execWorkers {
+			w.Rebind(workersCtx, pe.taskExecMetrics)
+		}
+	} else {
+		pe.execWorkers = make([]*exec.WorkerContext, poolSize)
+		for i := range pe.execWorkers {
+			pe.execWorkers[i] = exec.NewWorkerContext(workersCtx, true, pe.taskExecMetrics, pe.cfg.db, pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+		}
+	}
+	workers := pe.execWorkers
+	pe.stopWorkers = sync.OnceFunc(func() { putWorkers(pe.cfg.workers, workers) })
 
 	pe.pool = newTaskPool(pe, pe.execWorkers)
 	pe.execLoopGroup.Go(func() error {
@@ -3730,3 +3733,41 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 // traceAddr keeps NilAddress (no burn contract) apart from the zero address, which TRACE_ACCOUNTS may name.
 func traceAddr(a accounts.Address) bool { return !a.IsNil() && dbg.TraceAccount(a.Value()) }
+
+// takeWorkers hands out the idle workers in p when there are n of them, or nil: the
+// caller then builds its own. A nil p keeps no workers.
+func takeWorkers(p *atomic.Pointer[[]*exec.WorkerContext], n int) []*exec.WorkerContext {
+	if p == nil {
+		return nil
+	}
+	ws := p.Swap(nil)
+	if ws != nil && len(*ws) == n {
+		return *ws
+	}
+	if ws != nil {
+		closeWorkers(*ws)
+	}
+	return nil
+}
+
+// putWorkers parks workers that no task runs on and keeps them in p for the next
+// take, or closes them when p is nil or already holds a set. A set is parked before
+// it is published, so a taker never gets a worker that is still bound to a run.
+func putWorkers(p *atomic.Pointer[[]*exec.WorkerContext], workers []*exec.WorkerContext) {
+	if p == nil || p.Load() != nil {
+		closeWorkers(workers)
+		return
+	}
+	for _, w := range workers {
+		w.Park()
+	}
+	if !p.CompareAndSwap(nil, &workers) {
+		closeWorkers(workers)
+	}
+}
+
+func closeWorkers(workers []*exec.WorkerContext) {
+	for _, w := range workers {
+		w.Close()
+	}
+}

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -95,12 +96,25 @@ type ExecuteBlockCfg struct {
 	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
 	// reference instead of the header.
 	balSink func(blockNum uint64, bal types.BlockAccessList)
+
+	// workers keeps the idle exec workers between calls; see ShareWorkers.
+	workers *atomic.Pointer[[]*exec.WorkerContext]
 }
 
 // SetBALSink registers a callback receiving each executed block's derived BAL.
 // Test-only.
 func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
 	cfg.balSink = sink
+}
+
+// ShareWorkers makes cfg keep its idle exec workers in c; nil keeps cfg's own. A worker
+// keeps the db, block reader, engine, chain config, genesis, dirs and logger it was
+// built with, so configs that share c must have the same ones.
+func (cfg ExecuteBlockCfg) ShareWorkers(c *atomic.Pointer[[]*exec.WorkerContext]) ExecuteBlockCfg {
+	if c != nil {
+		cfg.workers = c
+	}
+	return cfg
 }
 
 func StageExecuteBlocksCfg(
@@ -143,6 +157,7 @@ func StageExecuteBlocksCfg(
 		experimentalBAL:   experimentalBAL,
 		readAheader:       readAheader,
 		discardCommitment: dbg.DiscardCommitment(),
+		workers:           new(atomic.Pointer[[]*exec.WorkerContext]),
 	}
 }
 
@@ -206,23 +221,15 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	defer mxState3Unwind.ObserveDuration(t)
 
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
-	// collect and merge diffsets of blocks [dropStateFromBlockNum, u.CurrentBlockNumber]
+	// Each executed block in the range needs a changeset, even if it is empty.
+	// Skipping a missing record could leave state changes from an unwound block.
 	for currentBlock := u.CurrentBlockNumber; currentBlock >= dropStateFromBlockNum; currentBlock-- {
 		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
 		if !found {
-			if changeSet == nil {
-				// this handles the edge case where we're traversing backwards from
-				// the current block and we've not found the first diff yet it just
-				// means the current block(s) has not been processed yet so has no
-				// state.  This can only happen at the start of the traversal once
-				// one processed block has been found there should be diffsets for
-				// all previous blocks
-				continue
-			}
-			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, executedHash)
+			return fmt.Errorf("missing diffset for executed block %d (%s)", currentBlock, executedHash)
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys
