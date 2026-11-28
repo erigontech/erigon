@@ -10,6 +10,24 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
+var testTransactions = snaptype.RegisterType(snaptype.MinCoreEnum+3, "transactions", version.V1_0_standart, nil,
+	[]snaptype.Index{
+		{Name: "transactions", Version: version.V1_0_standart},
+		{Name: "transactions-to-block", Version: version.Versions{Current: version.V2_0, MinSupported: version.V2_0}, Offset: 1},
+	}, nil)
+
+func TestTypedPicksTheSecondTransactionIndexWindow(t *testing.T) {
+	const toBlock = "v2.0-000000-000500-transactions-to-block.idx"
+	names := make([]string, 0, 1)
+	for _, item := range (Preverified{Items: PreverifiedItems{
+		{Name: toBlock, Hash: "to-block"},
+		{Name: "v2.0-000000-000500-transactions.idx", Hash: "outside-first-window"},
+	}}).Typed([]snaptype.Type{testTransactions}).Items {
+		names = append(names, item.Name)
+	}
+	require.Equal(t, []string{toBlock}, names)
+}
+
 func typedNames(t *testing.T, items PreverifiedItems) []string {
 	t.Helper()
 	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
@@ -72,6 +90,13 @@ func TestTypedCaplinDropsUnparseableVersion(t *testing.T) {
 		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "in-window"},
 	})
 	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
+}
+
+func TestTypedReportsUnparsableCaplinVersion(t *testing.T) {
+	const name = "caplin/archive/v1.1-000000-000100-BlockRoot.seg"
+	kept, drops := Preverified{Items: PreverifiedItems{{Name: name, Hash: "nested"}}}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, []string{name}, drops.unparsableNames)
 }
 
 func TestDroppedNamesReportsUnparseableCaplinEntry(t *testing.T) {
@@ -250,11 +275,12 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 	for _, name := range []string{
 		"v1.0-000000-000500-headers",
 		"v1.0-a.b-c-d",
+		"v1-000000-000500-beaconblocks",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var typed Preverified
 			require.NotPanics(t, func() {
-				typed = Preverified{Items: PreverifiedItems{{Name: name, Hash: "aa"}}}.Typed(nil)
+				typed = Preverified{Items: PreverifiedItems{{Name: name, Hash: "aa"}}}.Typed(snaptype.CaplinSnapshotTypes)
 			})
 			require.Empty(t, typed.Items)
 		})
@@ -303,9 +329,46 @@ func TestTypedCountsUnknownTypeWithRegisteredSuffixAsUnreadable(t *testing.T) {
 	items := PreverifiedItems{
 		{Name: "v1.1-000000-000100-future-beaconblocks.seg", Hash: "unknown"},
 		{Name: "v1.1-000000-000100-BLOCKSIDECARS.idx", Hash: "misspelled"},
+		{Name: "v1.1-000000-000100-TRANSACTIONS-TO-BLOCK.idx", Hash: "misspelled-index"},
 	}
 	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
 	require.Empty(t, kept)
 	require.Equal(t, 1, drops.unreadable)
-	require.Equal(t, []string{"v1.1-000000-000100-BLOCKSIDECARS.idx"}, drops.unparsableNames)
+	require.Equal(t, []string{
+		"v1.1-000000-000100-BLOCKSIDECARS.idx",
+		"v1.1-000000-000100-TRANSACTIONS-TO-BLOCK.idx",
+	}, drops.unparsableNames)
+}
+
+func TestTypedReportsMalformedRangeByWholeTypeName(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx", Hash: "registered-index"},
+		{Name: "caplin/v1.1-bad-000050-BlockRoot.seg", Hash: "registered-caplin"},
+		{Name: "v1.1-bad-000050-future-beaconblocks.seg", Hash: "unknown"},
+		{Name: "v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx.torrent", Hash: "registered-index-inner-extension"},
+		{Name: "v1.1-bad-000050-BlockRoot.future-kind.seg", Hash: "unknown-hyphenated-inner-extension"},
+		{Name: "caplin/v1.1-000000-000050-BlockRoot.future-kind.seg", Hash: "unknown-caplin-inner-extension"},
+		{Name: "v1.1-bad-000050-future.seg-backup", Hash: "unknown-hyphenated-extension"},
+		{Name: "v1.1-bad-000050-beaconblocks.seg-backup", Hash: "registered-hyphenated-extension"},
+		{Name: "caplin/archive-old/v1.1-bad-000050-BlockRoot.seg", Hash: "registered-caplin-hyphenated-dir"},
+		{Name: "caplin/v1.1-future.0-32.idx-beaconblocks", Hash: "unknown-caplin-state-name"},
+		{Name: "v1.1-future.0-32.idx-beaconblocks", Hash: "unknown-state-name"},
+		{Name: "v1.1-beaconblocks.0-32.idx-backup", Hash: "registered-state-name-hyphenated-extension"},
+		{Name: "caplin/v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-caplin-state-name-overflow"},
+		{Name: "v1.1-future.0-18446744073709551616.idx-beaconblocks", Hash: "unknown-state-name-overflow"},
+		{Name: "v1.1-bad-000050-beaconblocks.seg-backup/", Hash: "unknown-trailing-slash"},
+		{Name: "v1.1-000000-000050-beaconblocks.seg-backup/", Hash: "unknown-trailing-slash-valid-range"},
+	}
+	kept, drops := Preverified{Items: items}.typed(snaptype.CaplinSnapshotTypes)
+	require.Empty(t, kept)
+	require.Equal(t, 10, drops.unreadable)
+	require.Equal(t, 6, drops.unparsable)
+	require.Equal(t, []string{
+		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx",
+		"caplin/v1.1-bad-000050-BlockRoot.seg",
+		"v1.1-bad-000050-TRANSACTIONS-TO-BLOCK.idx.torrent",
+		"v1.1-bad-000050-beaconblocks.seg-backup",
+		"caplin/archive-old/v1.1-bad-000050-BlockRoot.seg",
+		"v1.1-beaconblocks.0-32.idx-backup",
+	}, drops.unparsableNames)
 }

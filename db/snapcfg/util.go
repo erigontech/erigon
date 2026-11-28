@@ -154,6 +154,30 @@ func (d *typeFilterDrops) unparsableItem(name string) {
 	}
 }
 
+func (d *typeFilterDrops) unregistered(name string, parsed snaptype.FileInfo) bool {
+	if parsed.Type != nil {
+		return false
+	}
+	if parsed.TypeString == "" && registeredTypeToken(name, parsed.Ext) {
+		d.unparsableItem(name)
+	} else {
+		d.unreadable++
+	}
+	return true
+}
+
+func registeredTypeToken(name, ext string) bool {
+	_, afterVersion, _ := strings.Cut(filepath.Base(name), "-")
+	afterVersion = strings.TrimSuffix(afterVersion, ext)
+	_, afterFrom, _ := strings.Cut(afterVersion, "-")
+	_, typeToken, _ := strings.Cut(afterFrom, "-")
+	for ext := filepath.Ext(typeToken); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(typeToken) {
+		typeToken = strings.TrimSuffix(typeToken, ext)
+	}
+	_, registered := snaptype.ParseEnum(typeToken)
+	return registered
+}
+
 // droppedNames returns the names in all that kept no longer contains, capped at
 // limit, along with the total dropped count.
 func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
@@ -231,9 +255,8 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 		}
 
 		if strings.HasPrefix(p.Name, datadir.SnapCaplinDir+"/") {
-			caplinFile, _, known := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(v+"-"+name))
-			if !known || caplinFile.Type == nil {
-				drops.unreadable++
+			caplinFile, _, _ := snaptype.ParseFileName(datadir.SnapCaplinDir, filepath.Base(p.Name))
+			if drops.unregistered(p.Name, caplinFile) {
 				continue
 			}
 
@@ -278,32 +301,20 @@ func (p Preverified) typed(types []snaptype.Type) ([]PreverifiedItem, typeFilter
 			drops.unparsableItem(p.Name)
 			continue
 		}
-		if dot < lastSep {
+		parsed, _, _ := snaptype.ParseFileName("", p.Name)
+		if drops.unregistered(p.Name, parsed) {
+			continue
+		}
+		if dot < lastSep || !strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) || !spellsRegisteredName(parsed.Type, parsed.TypeString) {
 			drops.unparsableItem(p.Name)
 			continue
 		}
 
-		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
-		typeName := name[lastSep+1 : dot]
+		typeName := parsed.Type.Name()
 		include := false
 		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
 			idxIndex = 1
-			typeName = "transactions"
-		}
-		parsed, _, parsedOK := snaptype.ParseFileName("", p.Name)
-		switch _, registered := snaptype.ParseEnum(typeName); {
-		case parsedOK && parsed.Type != nil && strings.HasSuffix(p.Name, "-"+parsed.TypeString+parsed.Ext) && spellsRegisteredName(parsed.Type, parsed.TypeString):
-			typeName = parsed.Type.Name()
-		case parsedOK && parsed.Type != nil:
-			drops.unparsableItem(p.Name)
-			continue
-		case parsed.TypeString != "":
-			drops.unreadable++
-			continue
-		case registered:
-			drops.unparsableItem(p.Name)
-			continue
 		}
 
 		for _, typ := range types {
