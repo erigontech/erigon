@@ -2767,25 +2767,25 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	if writes != nil {
 		// Self-destruct is applied before the balance writes so the EIP-7928
 		// burn (zeroing a non-zero balance written by the destroying tx) fires.
-		for addr, w := range writes.SelfDestructs() {
+		for addr, w := range writes.selfDestruct {
 			if addr.IsNil() || !w.Val {
 				continue
 			}
 			ensureAccountState(ac, addr)
 		}
-		for addr, w := range writes.Balances() {
+		for addr, w := range writes.balance {
 			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Nonces() {
+		for addr, w := range writes.nonce {
 			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, w := range writes.Codes() {
+		for addr, w := range writes.code {
 			if addr.IsNil() {
 				continue
 			}
@@ -2797,7 +2797,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			}
 			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
-		for addr, byKey := range writes.Storages() {
+		for addr, byKey := range writes.storage {
 			if addr.IsNil() {
 				continue
 			}
@@ -3037,29 +3037,26 @@ func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, init
 // the entry borrows the canonical bytecode owned by cache.StateCache; applyToCode
 // clones it into the BAL CodeChange so the consensus-visible output owns its bytes.
 type changeTracker[T any] struct {
-	entries map[uint32]T
+	entries []indexedChange[T] // sorted by idx
+}
+
+type indexedChange[T any] struct {
+	idx   uint32
+	value T
 }
 
 func (ct *changeTracker[T]) recordWrite(idx uint32, value T) {
-	if ct.entries == nil {
-		ct.entries = make(map[uint32]T)
+	i, found := slices.BinarySearchFunc(ct.entries, idx, func(e indexedChange[T], idx uint32) int { return cmp.Compare(e.idx, idx) })
+	if found {
+		ct.entries[i].value = value
+		return
 	}
-	ct.entries[idx] = value
+	ct.entries = slices.Insert(ct.entries, i, indexedChange[T]{idx, value})
 }
 
 func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
-	if len(ct.entries) == 0 {
-		return
-	}
-
-	indices := make([]uint32, 0, len(ct.entries))
-	for idx := range ct.entries {
-		indices = append(indices, idx)
-	}
-	slices.Sort(indices)
-
-	for _, idx := range indices {
-		applyFn(idx, ct.entries[idx])
+	for _, e := range ct.entries {
+		applyFn(e.idx, e.value)
 	}
 }
 
