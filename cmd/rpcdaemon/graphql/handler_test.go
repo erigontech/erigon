@@ -35,7 +35,7 @@ import (
 func TestGraphQLRequestBodyLimit(t *testing.T) {
 	t.Parallel()
 
-	h := CreateHandler(nil)
+	h := CreateHandler(nil, 0)
 	send := func(body io.Reader, contentLength int64) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, urlPath, body)
 		req.Header.Set("Content-Type", "application/json")
@@ -66,7 +66,7 @@ func (overloadedGraphQLAPI) GasPrice(context.Context) (string, error) {
 func TestGraphQLReadTxLimitIsServiceUnavailable(t *testing.T) {
 	t.Parallel()
 
-	h := CreateHandler([]rpc.API{{Service: overloadedGraphQLAPI{}}})
+	h := CreateHandler([]rpc.API{{Service: overloadedGraphQLAPI{}}}, 0)
 	query := `{"query":"{gasPrice}"}`
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, urlPath, strings.NewReader(query))
 	req.Header.Set("Content-Type", "application/json")

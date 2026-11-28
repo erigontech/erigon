@@ -27,6 +27,7 @@ import (
 
 	gqlgen "github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/extension"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -47,7 +48,7 @@ const (
 	maxRequestBodySize = 32 * 1024 * 1024
 )
 
-func CreateHandler(api []rpc.API) http.Handler {
+func CreateHandler(api []rpc.API, fieldLimit int) http.Handler {
 	var graphqlAPI jsonrpc.GraphQLAPI
 
 	for _, r := range api {
@@ -65,6 +66,9 @@ func CreateHandler(api []rpc.API) http.Handler {
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &resolver}))
 	srv.Use(depthLimit(maxQueryDepth))
+	if fieldLimit > 0 {
+		srv.Use(extension.FixedComplexityLimit(fieldLimit)) // complexity = selected fields, aliases and fragments included
+	}
 	srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
 		if errors.Is(err, kv.ErrReadTxLimitExceeded) {
 			if overloaded, _ := ctx.Value(overloadedKey{}).(*atomic.Bool); overloaded != nil {
