@@ -2015,11 +2015,13 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// account view). Every FinalizedWrites caller is covered here, so no read path needs
 	// to remember to publish separately.
 	ibs.PublishOrigins()
-	writes := ibs.writes.Finalize()
-	var replaced map[accounts.Address]struct{}
+	var replaced map[accounts.Address]bool
+	var vanished map[accounts.Address]struct{}
 	if chainRules != nil && chainRules.IsAmsterdam {
-		replaced = ibs.publishCreateDestructAsBalances(writes)
+		replaced, vanished = ibs.createDestructs(chainRules)
 	}
+	writes := ibs.writes.Finalize(vanished)
+	ibs.publishCreateDestructAsBalances(writes, replaced)
 	// Snapshot the accounts the tx really self-destructed (a SELFDESTRUCT opcode)
 	// before the removal encoders synthesize their own SelfDestruct cells, so the
 	// contract-vs-EOA removal verdict reads the genuine signal, not a synthesized one.
@@ -2034,24 +2036,29 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	}
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
 	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct, replaced)
+	for addr := range vanished {
+		if ibs.versionMap.load(addr) != nil {
+			writes.SetEmptyRemoval(addr, ibs.Version())
+		}
+	}
 	return writes, ibs.StateReadError()
 }
 
-// publishCreateDestructAsBalances replaces the writes of a contract the tx created and destroyed
-// with those of an account holding its kept balance: under EIP-8246 that balance is all the tx
-// leaves, and withholdCreatedEmptyAccounts then treats an account at an absent address like any
-// created account. At an address that existed, the creation stays, as it replaces the old storage,
-// with the zero incarnation that the destruct leaves and the dead contract's zeroed slots, which
-// readers of the state changes see; such an account that ends empty keeps the destruct, which
-// removes it. It returns the replaced addresses.
-func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) map[accounts.Address]struct{} {
-	var replaced map[accounts.Address]struct{}
-	for addr, sd := range writes.selfDestruct {
-		cc, ok := writes.createContract[addr]
+// createDestructs decides, from the raw writes, each contract the tx created and destroyed whose
+// writes become those of an account holding its kept balance: under EIP-8246 that balance is all
+// the tx leaves. At an address that existed (true), the creation stays, as it replaces the old
+// storage, with the zero incarnation that the destruct leaves and the dead contract's zeroed slots,
+// which readers of the state changes see; such an account that ends empty keeps the destruct, which
+// removes it. An absent one that ends empty vanishes: Finalize skips it, and only the EIP-161 removal
+// is kept when the version map holds cells for it. withholdCreatedEmptyAccounts settles the other
+// absent ones like any created account.
+func (ibs *IntraBlockState) createDestructs(chainRules *chain.Rules) (replaced map[accounts.Address]bool, vanished map[accounts.Address]struct{}) {
+	for addr, sd := range ibs.writes.selfDestruct {
+		cc, ok := ibs.writes.createContract[addr]
 		if !sd.Val || !ok || !cc.Val {
 			continue
 		}
-		balance, ok := writes.balance[addr]
+		balance, ok := ibs.writes.balance[addr]
 		if !ok || balance.Deletes() {
 			continue // a burning destruct leaves no balance-only account
 		}
@@ -2059,8 +2066,24 @@ func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) ma
 		if existed && balance.Val.IsZero() {
 			continue
 		}
-		slots := writes.storage[addr]
-		version := ibs.Version()
+		if !existed && balance.Val.IsZero() && EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			if vanished == nil {
+				vanished = map[accounts.Address]struct{}{}
+			}
+			vanished[addr] = struct{}{}
+			continue
+		}
+		if replaced == nil {
+			replaced = map[accounts.Address]bool{}
+		}
+		replaced[addr] = existed
+	}
+	return replaced, vanished
+}
+
+func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet, replaced map[accounts.Address]bool) {
+	for addr, existed := range replaced {
+		balance, cc, slots, version := writes.balance[addr], writes.createContract[addr], writes.storage[addr], ibs.Version()
 		writes.deleteAddr(addr)
 		created := accounts.NewAccount()
 		writes.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: version}, Val: &created})
@@ -2073,12 +2096,7 @@ func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) ma
 				writes.storage[addr] = slots
 			}
 		}
-		if replaced == nil {
-			replaced = map[accounts.Address]struct{}{}
-		}
-		replaced[addr] = struct{}{}
 	}
-	return replaced
 }
 
 // createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
@@ -2098,7 +2116,7 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 	return bal.Val.IsZero(), true
 }
 
-func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct, replaced map[accounts.Address]struct{}) {
+func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}, replaced map[accounts.Address]bool) {
 	if chainRules == nil {
 		return
 	}
@@ -2832,7 +2850,7 @@ func (ibs *IntraBlockState) ResetReads() {
 // The snapshot logic lives on the write-set itself (WriteSet.Snapshot); this is
 // the IntraBlockState accessor for it.
 func (ibs *IntraBlockState) Writes() *WriteSet {
-	return ibs.writes.Snapshot()
+	return ibs.writes.Snapshot(nil)
 }
 
 // recordStorageOrigin / recordAddressOrigin collect a cold committed base cell into the
