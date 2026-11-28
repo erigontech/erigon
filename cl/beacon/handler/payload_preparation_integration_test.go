@@ -334,7 +334,7 @@ func applyGossipIntegrationEnvelope(
 	require.NoError(t, err)
 	require.Equal(t, validator.PublicKey(), [48]byte(bls.CompressPublicKey(key.PublicKey())), "the signing key must match the fixture's proposer")
 	signExecutionPayloadEnvelope(t, blockState, block.Block.Slot, envelope, key)
-	service := services.NewExecutionPayloadService(t.Context(), store, blockState.BeaconConfig(), emitter, nil)
+	service := services.NewExecutionPayloadService(t.Context(), store, eth_clock.NewEthereumClockWithNow(0, common.Hash{}, blockState.BeaconConfig(), time.Now), blockState.BeaconConfig(), emitter, nil)
 	encoded, err := envelope.EncodeSSZ(nil)
 	require.NoError(t, err)
 	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
@@ -379,7 +379,7 @@ func prepareGossipIntegrationEnvelope(
 	key, err := bls.NewPrivateKeyFromBytes(keyBytes)
 	require.NoError(t, err)
 	signExecutionPayloadEnvelope(t, blockState, block.Block.Slot, envelope, key)
-	return services.NewExecutionPayloadService(t.Context(), fixture.store, blockState.BeaconConfig(), beaconevents.NewEventEmitter(), nil), root
+	return services.NewExecutionPayloadService(t.Context(), fixture.store, eth_clock.NewEthereumClockWithNow(0, common.Hash{}, blockState.BeaconConfig(), time.Now), blockState.BeaconConfig(), beaconevents.NewEventEmitter(), nil), root
 }
 
 func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {

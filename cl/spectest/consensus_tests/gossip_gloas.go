@@ -197,7 +197,7 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 
 	epbsPool := pool.NewEpbsPool()
 	fixtureServices := gloasGossipServices{
-		envelope:    services.NewExecutionPayloadService(ctx, store, &gossipCfg, emitters, nil),
+		envelope:    services.NewExecutionPayloadService(ctx, store, clock, &gossipCfg, emitters, nil),
 		attestation: services.NewPayloadAttestationService(ctx, store, clock, networkCfg, epbsPool, emitters, nil),
 		preferences: services.NewProposerPreferencesService(syncedData, store, clock, &gossipCfg, epbsPool, emitters),
 	}

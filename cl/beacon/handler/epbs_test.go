@@ -1351,7 +1351,7 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T)
 	}
 	serviceCtx, cancelService := context.WithCancel(t.Context())
 	cancelService()
-	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, handler.beaconChainCfg, beaconevents.NewEventEmitter(), nil)
+	p2pService := services.NewExecutionPayloadService(serviceCtx, fcu, eth_clock.NewEthereumClockWithNow(0, common.Hash{}, handler.beaconChainCfg, time.Now), handler.beaconChainCfg, beaconevents.NewEventEmitter(), nil)
 
 	err := p2pService.ProcessMessage(t.Context(), nil, envelope)
 	require.NoError(t, err)
