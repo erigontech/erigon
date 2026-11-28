@@ -204,13 +204,19 @@ func TestDutiesEndpointsAnswerSpecListedStatuses(t *testing.T) {
 				db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 				fcu.FinalizedSlotVal = 127
 				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-					return tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(96))
+					for slot := uint64(96); slot < 128; slot++ {
+						if err := tx.Delete(kv.SlotData, base_encoding.Encode64ToBytes4(slot)); err != nil {
+							return err
+						}
+					}
+					return nil
 				}))
 				return handler
 			},
-			method:     http.MethodGet,
-			path:       "/eth/v1/validator/duties/proposer/3",
-			wantStatus: http.StatusInternalServerError,
+			method:      http.MethodGet,
+			path:        "/eth/v1/validator/duties/proposer/3",
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "validators not found for slot 96",
 		},
 		{
 			name: "proposer validator table empty during replay",

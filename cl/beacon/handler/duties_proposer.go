@@ -348,9 +348,18 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return duties, nil
 	}
 
-	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, expectedSlot)
-	if err != nil {
-		return nil, err
+	var (
+		validatorSet *solid.ValidatorSet
+		err          error
+	)
+	for slot := expectedSlot; validatorSet == nil && slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
+		if slot != expectedSlot && !a.stateReader.ValidatorTableCovers(slot) {
+			return nil, validatorReplayPending(slot)
+		}
+		validatorSet, err = a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, slot)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("validators not found for slot %d", expectedSlot))
