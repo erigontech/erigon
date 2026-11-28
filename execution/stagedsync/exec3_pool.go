@@ -187,8 +187,8 @@ func (pt *poolTask) rerunAfter(named int) bool {
 // rerunAfterPredecessor re-runs the task once its predecessor commits: the predecessor's deferred sender charge
 // (pre-Amsterdam) lands only at commit, so waking on its validation could repeat the same failure.
 func (pt *poolTask) rerunAfterPredecessor() bool {
-	pt.reruns++
-	return pt.waitThen(pt.tv.index-1, psReexec)
+	t, _ := pt.rerunTarget(pt.tv.index - 1)
+	return pt.waitThen(t, psReexec)
 }
 
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
