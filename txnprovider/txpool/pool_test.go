@@ -3888,6 +3888,105 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 	}
 }
 
+// Any peer can relay a transaction that its sender signed earlier, so the sender is punished
+// only for a transaction that passes the other checks and would take a new slot.
+func TestRemoteTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		nonce       uint64 // the account nonce is 1, and nonces 1 to 17 are pooled
+		tip, feeCap uint64 // the pooled transactions have tip 1 and fee cap 2
+		want        txpoolcfg.DiscardReason
+		kept        int // of the 17 pooled transactions; the penalty evicts 8
+	}{
+		{name: "mined", nonce: 0, tip: 1, feeCap: 2, want: txpoolcfg.NonceTooLow, kept: 17},
+		{name: "unaffordable", nonce: 18, tip: 1, feeCap: common.Ether, want: txpoolcfg.InsufficientFunds, kept: 17},
+		{name: "replaced", nonce: 17, tip: 1, feeCap: 1, want: txpoolcfg.NotReplaced, kept: 17},
+		{name: "fee bump", nonce: 17, tip: 2, feeCap: 4, want: txpoolcfg.Success, kept: 17},
+		{name: "next nonce", nonce: 18, tip: 1, feeCap: 2, want: txpoolcfg.Spammer, kept: 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			require.NoError(t, pool.start(ctx))
+			pool.cfg.AccountSlots = 16
+			change := newBlockChangeForAccounts(common.Hash{1}, 1, sender)
+			change.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			var pooled TxnSlots
+			for nonce := uint64(1); nonce <= 17; nonce++ {
+				pooled.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
+			}
+			pool.AddRemoteTxns(ctx, pooled, nil, nil)
+			_, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			senderID, _ := pool.senders.getID(sender)
+			require.Equal(t, 17, pool.all.count(senderID))
+
+			replay := newTestTxnSlot(tc.nonce, 0, tc.tip, tc.feeCap, 100_000)
+			replay.Txn.SetSender(accounts.InternAddress(sender))
+			var replays TxnSlots
+			replays.Append(encodeRemoteTxn(t, replay), sender[:], false)
+			pool.AddRemoteTxns(ctx, replays, nil, nil)
+			reasons, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
+			require.Equal(t, tc.kept, pool.all.count(senderID))
+		})
+	}
+}
+
+// Blob limits and the blob fee cap are checked before the sender slot limit, so a blob transaction
+// that they reject does not count as spam.
+func TestRemoteBlobTxnPunishesSenderOnlyForNewSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		blobSlots  uint64 // 0 keeps the default
+		lowBlobFee bool
+		want       txpoolcfg.DiscardReason
+		kept       int // of the 17 pooled transactions; the penalty evicts 8
+	}{
+		{name: "over blob slots", blobSlots: 1, want: txpoolcfg.BlobSlotsOverflow, kept: 17},
+		{name: "below blob fee", lowBlobFee: true, want: txpoolcfg.FeeTooLow, kept: 17},
+		{name: "next nonce", want: txpoolcfg.Spammer, kept: 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			pool := seedBlobKZGTestPool(t, ctx)
+			require.NoError(t, pool.start(ctx))
+			pool.cfg.AccountSlots = 16
+			if tc.blobSlots > 0 {
+				pool.cfg.BlobSlots = tc.blobSlots
+			}
+			sender := common.Address{1}
+
+			var pooled TxnSlots
+			for nonce := range uint64(17) {
+				pooled.Append(newTestSenderTxnSlot(t, sender, nonce), sender[:], false)
+			}
+			pool.AddRemoteTxns(ctx, pooled, nil, nil)
+			_, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			senderID, _ := pool.senders.getID(sender)
+			require.Equal(t, 17, pool.all.count(senderID))
+
+			// Nonces 0 to 16 are pooled, so the blob transaction takes the next nonce.
+			blob := makeBlobSlot(0x80, false)
+			blob.Nonce = 17
+			blob.Txn.(*types.BlobTx).Nonce = 17
+			if tc.lowBlobFee {
+				blob.Txn.(*types.BlobTx).MaxFeePerBlobGas.SetUint64(pool.pendingBlobFee.Load() - 1)
+			}
+			var blobs TxnSlots
+			blobs.Append(&blob, sender[:], false)
+			pool.AddRemoteTxns(ctx, blobs, nil, nil)
+			reasons, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
+			require.Equal(t, tc.kept, pool.all.count(senderID))
+		})
+	}
+}
+
 func nonceRetryBlob(t testing.TB, fork string, nonce uint64) (*TxPool, *TxnSlot) {
 	t.Helper()
 	pool := seedBlobKZGTestPool(t, t.Context())
