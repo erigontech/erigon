@@ -64,8 +64,8 @@ var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
 var (
 	stubNoTxIdx = dbg.EnvBool("STUB_NO_TXIDX", false)
-	stubNoAcc   = dbg.EnvBool("STUB_NO_ACC", false)
-	stubNoRRoot = dbg.EnvBool("STUB_NO_RROOT", false)
+	stubNoAcc   = dbg.EnvBool("STUB_NO_ACC", true)
+	stubNoRRoot = dbg.EnvBool("STUB_NO_RROOT", true)
 )
 
 // commitmentIntraBlockTxs > 0 enables mid-block commitment checkpoints every N
