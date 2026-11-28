@@ -292,6 +292,131 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	}, reasons)
 }
 
+func addRemoteBlobBatch(t *testing.T, ctx context.Context, pool *TxPool, senders [][20]byte, nonces []uint64) {
+	t.Helper()
+	var slots TxnSlots
+	for i := range senders {
+		s := makeBlobSlot(0x70+byte(i), false)
+		s.Nonce = nonces[i]
+		s.Txn.(*types.BlobTx).Nonce = nonces[i]
+		slots.Append(&s, senders[i][:], false)
+	}
+	pool.AddRemoteTxns(ctx, slots, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+}
+
+func TestRemoteBlobBatchRespectsSenderBlobSlots(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.BlobSlots = 4
+	sender := [20]byte{1}
+
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender, sender, sender}, []uint64{0, 1, 2, 3})
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.LessOrEqual(t, pool.all.blobCount(pool.senders.senderIDs[sender]), pool.cfg.BlobSlots)
+}
+
+func TestRemoteBlobBatchRespectsTotalBlobPoolLimit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.TotalBlobPoolLimit = 4
+
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{{1}, {2}, {3}, {4}}, []uint64{0, 0, 0, 0})
+
+	require.LessOrEqual(t, pool.totalBlobsInPool.Load(), pool.cfg.TotalBlobPoolLimit)
+}
+
+func TestRemoteBatchOfBlobReplacementsRespectsSenderBlobSlots(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.BlobSlots = 4
+	sender := [20]byte{1}
+	nonces := []uint64{0, 1, 2}
+
+	var regular TxnSlots
+	for _, nonce := range nonces {
+		txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+		txn.IDHash[0] = 0x50 + byte(nonce)
+		regular.Append(txn, sender[:], false)
+	}
+	pool.AddRemoteTxns(ctx, regular, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	senderID := pool.senders.senderIDs[sender]
+	require.Equal(t, len(nonces), pool.all.count(senderID))
+
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender, sender}, nonces)
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.LessOrEqual(t, pool.all.blobCount(senderID), pool.cfg.BlobSlots)
+}
+
+// A batch of fee bumps replaces blobs already counted in the pool, so it must pass even when
+// the sender and the pool are at their blob limits.
+func TestRemoteBatchOfBlobFeeBumpsCountsOnlyAddedBlobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	pool.cfg.BlobSlots = 4
+	pool.cfg.TotalBlobPoolLimit = 4
+	sender := [20]byte{1}
+	nonces := []uint64{0, 1}
+	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender}, nonces)
+	senderID := pool.senders.senderIDs[sender]
+	require.Equal(t, len(nonces), pool.all.count(senderID))
+
+	var bumps TxnSlots
+	for i, nonce := range nonces {
+		s := makeBlobSlot(0x90+byte(i), false)
+		s.Nonce = nonce
+		bt := s.Txn.(*types.BlobTx)
+		bt.Nonce = nonce
+		bt.TipCap.Mul(&bt.TipCap, uint256.NewInt(2))
+		bt.FeeCap.Mul(&bt.FeeCap, uint256.NewInt(2))
+		bt.MaxFeePerBlobGas.Mul(&bt.MaxFeePerBlobGas, uint256.NewInt(2))
+		bumps.Append(&s, sender[:], false)
+	}
+	pool.AddRemoteTxns(ctx, bumps, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	for i, nonce := range nonces {
+		mt := pool.all.get(senderID, nonce)
+		require.NotNil(t, mt, "nonce %d", nonce)
+		require.Equal(t, byte(0x90+i), mt.TxnSlot.IDHash[0], "nonce %d was not replaced", nonce)
+	}
+}
+
+// The second txn has a bad proof: BlobSlotsOverflow, not UnmatchedBlobTxExt, shows it was cut before KZG.
+func TestPrepareTxnsCutsSenderBlobBatchBeforeKZG(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	sender := [20]byte{1}
+	var slots TxnSlots
+	for nonce := range uint64(2) {
+		s := makeBlobSlot(0xa0+byte(nonce), nonce == 1)
+		s.Nonce = nonce
+		s.Txn.(*types.BlobTx).Nonce = nonce
+		slots.Append(&s, sender[:], false)
+	}
+	pool.cfg.BlobSlots = uint64(len(slots.Txns[0].GetBlobHashes()))
+
+	reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet, txpoolcfg.BlobSlotsOverflow}, reasons)
+}
+
 func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -342,7 +467,7 @@ func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, false)
+		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil, nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
 		assert.Len(t, goodTxns.Txns, 1)
