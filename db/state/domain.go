@@ -760,7 +760,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	return nil
 }
 
-// DomainRoTx is for one goroutine; open one per goroutine to read the same domain from several
+// DomainRoTx is not safe for concurrent use; each goroutine opens its own
 type DomainRoTx struct {
 	probe    *mmap.Probe // set only while PrefetchLatest plans its page batches
 	files    visibleFiles
@@ -775,6 +775,7 @@ type DomainRoTx struct {
 	dataReaders []*seg.Reader
 	btReaders   []*btindex.BtIndex
 	regionHits  map[regionKey]uint32
+	regionBlock uint64
 	mapReaders  []*recsplit.IndexReader
 
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
