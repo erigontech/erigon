@@ -156,6 +156,19 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 // fileExist is replaced in tests, because Windows cannot remove a file that is still mapped.
 var fileExist = dir.FileExist
 
+func filesOnDisk(snapDir string, files []string) error {
+	for _, f := range files {
+		exists, err := fileExist(filepath.Join(snapDir, f))
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("reused output %s is missing from disk", f)
+		}
+	}
+	return nil
+}
+
 // Merge does merge segments in given ranges
 func (m *Merger) Merge(
 	ctx context.Context,
@@ -226,21 +239,24 @@ func (m *Merger) Merge(
 			return err
 		}
 
+		// A stopped merge already wrote these outputs, or an input already is one; writing over the open
+		// files would fail on Windows, and an input with the output's path must be neither deleted nor retired.
+		reused := make(map[snaptype.Enum]struct{})
+		var reusedFiles []string
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
-			if reused := snapshots.indexedDirtyFilePaths(t.Enum(), output.Path, snapDir); reused != nil {
-				// A stopped merge already wrote this output, or an input already is it; writing over the open
-				// file would fail on Windows, and an input with the output's path must be neither deleted nor retired.
-				// The other inputs are deleted next, so the output must still be on disk.
-				for _, f := range reused {
-					exists, err := fileExist(filepath.Join(snapDir, f))
-					if err == nil && !exists {
-						err = fmt.Errorf("reused output %s is missing from disk", f)
-					}
-					if err != nil {
-						return fmt.Errorf("merger.Merge: %w", err)
-					}
-				}
+			if files := snapshots.indexedDirtyFilePaths(t.Enum(), output.Path, snapDir); files != nil {
+				reused[t.Enum()] = struct{}{}
+				reusedFiles = append(reusedFiles, files...)
+			}
+		}
+		// The other inputs are deleted after the builds, so a reused output must be on disk before and after them.
+		if err := filesOnDisk(snapDir, reusedFiles); err != nil {
+			return fmt.Errorf("merger.Merge: %w", err)
+		}
+		for _, t := range snapTypes {
+			output := t.FileInfo(snapDir, r.From(), r.To())
+			if _, ok := reused[t.Enum()]; ok {
 				isOutput := func(s *DirtySegment) bool { return s.FilePath() == output.Path }
 				toMerge[t.Enum()] = slices.DeleteFunc(toMerge[t.Enum()], isOutput)
 				mergedFileNames = append(mergedFileNames, output.Path)
@@ -265,6 +281,10 @@ func (m *Merger) Merge(
 			}
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
 			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
+		}
+
+		if err := filesOnDisk(snapDir, reusedFiles); err != nil {
+			return fmt.Errorf("merger.Merge: %w", err)
 		}
 
 		snapshots.LogStat("merge")
