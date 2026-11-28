@@ -33,13 +33,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
@@ -51,8 +54,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
@@ -694,6 +700,98 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0], out.Data[0])
 	require.Equal(t, msg[1], out.Data[1])
+}
+
+func TestPoolBlsToExecutionChangesValidatesKnownChanges(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	_, st, _ := tests.GetCapellaRandom()
+	keys := make([]*bls.PrivateKey, 2)
+	pubkeys := make([]common.Bytes48, len(keys))
+	for i := range keys {
+		var err error
+		keys[i], err = bls.GenerateKey()
+		require.NoError(t, err)
+		copy(pubkeys[i][:], bls.CompressPublicKey(keys[i].PublicKey()))
+		hashed := crypto.Sha256(pubkeys[i][:])
+		credentials := common.Hash{byte(cfg.BLSWithdrawalPrefixByte)}
+		copy(credentials[1:], hashed[1:])
+		st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(i, credentials)
+	}
+	domain, err := fork.ComputeDomain(cfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)), st.GenesisValidatorsRoot())
+	require.NoError(t, err)
+	sign := func(key *bls.PrivateKey, change *cltypes.BLSToExecutionChange) common.Bytes96 {
+		root, err := fork.ComputeSigningRoot(change, domain)
+		require.NoError(t, err)
+		return common.Bytes96(key.Sign(root[:]).Bytes())
+	}
+	message := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xab}}
+	pooled := &cltypes.SignedBLSToExecutionChange{Message: message, Signature: sign(keys[0], message)}
+	pooledSSZ, err := pooled.EncodeSSZ(nil)
+	require.NoError(t, err)
+	otherAddress := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: pubkeys[0], To: common.Address{0xcd}}
+	post := func(t *testing.T, handler *ApiHandler, change *cltypes.SignedBLSToExecutionChange) int {
+		body, err := json.Marshal([]*cltypes.SignedBLSToExecutionChange{change})
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconPoolBlsToExecutionChanges(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/bls_to_execution_changes", bytes.NewReader(body)))
+		return recorder.Code
+	}
+
+	for _, tc := range []struct {
+		name       string
+		submission *cltypes.SignedBLSToExecutionChange
+		wantStatus int
+	}{
+		{
+			name:       "valid duplicate",
+			submission: pooled,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "second valid change for a pooled validator",
+			submission: &cltypes.SignedBLSToExecutionChange{Message: otherAddress, Signature: sign(keys[0], otherAddress)},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "wrong signature for a seen validator",
+			submission: &cltypes.SignedBLSToExecutionChange{Message: message, Signature: sign(keys[1], message)},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "pooled signature on another validator's change",
+			submission: &cltypes.SignedBLSToExecutionChange{
+				Message:   &cltypes.BLSToExecutionChange{ValidatorIndex: 1, From: pubkeys[1], To: message.To},
+				Signature: pooled.Signature,
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			syncedData := synced_data.NewSyncedDataManager(&cfg, true)
+			require.NoError(t, syncedData.OnHeadState(st))
+			verifier := services.NewBatchSignatureVerifier(t.Context(), nil)
+			go verifier.Start()
+			opPool := pool.NewOperationsPool(&cfg)
+			var published [][]byte
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			gossipManager.EXPECT().Publish(gomock.Any(), clgossip.TopicNameBlsToExecutionChange, gomock.Any()).DoAndReturn(func(_ context.Context, _ string, data []byte) error {
+				published = append(published, data)
+				return nil
+			}).AnyTimes()
+			handler := &ApiHandler{
+				operationsPool:              opPool,
+				blsToExecutionChangeService: services.NewBLSToExecutionChangeService(opPool, beaconevents.NewEventEmitter(), syncedData, &cfg, verifier),
+				gossipManager:               gossipManager,
+			}
+			require.Equal(t, http.StatusOK, post(t, handler, pooled))
+			require.Equal(t, [][]byte{pooledSSZ}, published)
+			published = nil
+
+			require.Equal(t, tc.wantStatus, post(t, handler, tc.submission))
+			require.Empty(t, published)
+			require.Equal(t, []*cltypes.SignedBLSToExecutionChange{pooled}, opPool.BLSToExecutionChangesPool.Raw())
+		})
+	}
 }
 
 func TestPoolAggregatesAndProofs(t *testing.T) {

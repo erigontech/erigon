@@ -507,9 +507,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 			return
 		}
 
-		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &services.SignedBLSToExecutionChangeForGossip{
+		err = a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &services.SignedBLSToExecutionChangeForGossip{
 			SignedBLSToExecutionChange: v,
-		}); err != nil && !errors.Is(err, services.ErrIgnore) {
+			ImmediateVerification:      true,
+		})
+		if errors.Is(err, services.ErrIgnore) {
+			continue
+		}
+		if err != nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}

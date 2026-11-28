@@ -103,11 +103,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	change := msg.SignedBLSToExecutionChange.Message
-	if _, ok := s.seen.Get(change.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
-		return ErrIgnore
+	if !msg.ImmediateVerification {
+		if _, seen := s.seen.Get(change.ValidatorIndex); seen || s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
+			return ErrIgnore
+		}
 	}
 
 	var wc, genesisValidatorRoot common.Hash
@@ -153,27 +152,37 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return err
 	}
 
+	stored := false
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures:  [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
 		SignRoots:   [][]byte{signedRoot[:]},
 		Pks:         [][]byte{change.From[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.storeVerifiedChange(msg.SignedBLSToExecutionChange)
+			stored = s.storeVerifiedChange(msg.SignedBLSToExecutionChange)
 		},
 	}
 
-	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	if !msg.ImmediateVerification {
+		return s.batchSignatureVerifier.VerifyBlsToExecutionChange(ctx, aggregateVerificationData)
 	}
-
-	return s.batchSignatureVerifier.VerifyBlsToExecutionChange(ctx, aggregateVerificationData)
+	if err := s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData); err != nil {
+		return err
+	}
+	// Only ImmediateVerification runs F before it returns; the batch path runs F on another goroutine.
+	if !stored {
+		return ErrIgnore
+	}
+	return nil
 }
 
-func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.SignedBLSToExecutionChange) {
+func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.SignedBLSToExecutionChange) bool {
 	if seen, _ := s.seen.ContainsOrAdd(change.Message.ValidatorIndex, struct{}{}); seen {
-		return
+		return false
+	}
+	if !s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change) {
+		return false
 	}
 	s.emitters.Operation().SendBlsToExecution(change)
-	s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change)
+	return true
 }

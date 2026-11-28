@@ -361,6 +361,26 @@ func TestOperationsPoolPruneFinalizedConcurrentInsert(t *testing.T) {
 	require.False(t, pools.VoluntaryExitsPool.Has(0))
 }
 
+func TestOperationPoolConcurrentInsert(t *testing.T) {
+	pool := NewOperationPool[uint64, *cltypes.SignedBLSToExecutionChange](128, "test")
+	const goroutines, perGoroutine = 8, 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for g := range uint64(goroutines) {
+		wg.Go(func() {
+			<-start
+			for i := range uint64(perGoroutine) {
+				index := g*perGoroutine + i
+				pool.Insert(index, blsChange(index, 0))
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	require.Equal(t, goroutines*perGoroutine, pool.Len())
+}
+
 func proposerSlashing(validatorIndex uint64, signatureByte byte) *cltypes.ProposerSlashing {
 	return &cltypes.ProposerSlashing{
 		Header1: &cltypes.SignedBeaconBlockHeader{
