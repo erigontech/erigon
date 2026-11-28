@@ -739,6 +739,9 @@ func (m *MemoryMutation) CreateTable(bucket string) error {
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
+	if dst, ok := tx.(*MemoryMutation); ok && m.copyInto(dst) {
+		return nil
+	}
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListTables()
 	if err != nil {
@@ -781,6 +784,21 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	return nil
+}
+
+// copyInto makes an empty owning overlay a copy-on-write copy of m, so the cost does not grow with m's size.
+func (m *MemoryMutation) copyInto(dst *MemoryMutation) bool {
+	src, ok := m.memTx.(*memStore)
+	to, toOk := dst.memTx.(*memStore)
+	if !ok || !toOk || src == to || dst.overlay != nil || len(m.deletionTables()) > 0 {
+		return false
+	}
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+	if len(dst.deletionTables()) > 0 {
+		return false
+	}
+	return to.copyFrom(src)
 }
 
 // flushPlainBucket copies all keys from the in-memory bucket to the destination

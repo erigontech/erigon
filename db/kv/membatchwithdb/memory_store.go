@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"maps"
 	"sort"
 	"sync"
 	"unsafe"
@@ -88,6 +89,22 @@ func newMemStore() *memStore {
 		tables:    make(map[string]*memTable),
 		sequences: make(map[string]uint64),
 	}
+}
+
+// copyFrom makes an empty s a copy of src that shares btree nodes copy-on-write.
+func (s *memStore) copyFrom(src *memStore) bool {
+	src.mu.Lock() // IsoCopy also writes to the source tree
+	defer src.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tables) > 0 || len(s.sequences) > 0 {
+		return false
+	}
+	for name, t := range src.tables {
+		s.tables[name] = &memTable{tree: t.tree.IsoCopy(), dupSort: t.dupSort}
+	}
+	maps.Copy(s.sequences, src.sequences)
+	return true
 }
 
 func memTableIsDupSort(table string) bool {

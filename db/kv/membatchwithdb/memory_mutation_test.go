@@ -1473,3 +1473,60 @@ func TestHistoryDisabledFallsThrough(t *testing.T) {
 		})
 	}
 }
+
+func TestFlushIntoEmptyOverlayDoesNotCopyEntries(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	src, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer src.Close()
+	for i := range 1000 {
+		require.NoError(t, src.Put(kv.HeaderNumber, fmt.Appendf(nil, "key%04d", i), []byte("value")))
+	}
+
+	allocs := testing.AllocsPerRun(10, func() {
+		dst, err := membatchwithdb.NewMemoryBatch(rwTx)
+		require.NoError(t, err)
+		require.NoError(t, src.Flush(t.Context(), dst))
+		dst.Close()
+	})
+	require.Less(t, allocs, 100.0, "flushing into an empty overlay must not copy the entries one by one")
+}
+
+func TestFlushIntoEmptyOverlayKeepsBothOverlaysIndependent(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	src, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer src.Close()
+	require.NoError(t, src.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value1")))
+	require.NoError(t, src.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1")))
+	require.NoError(t, src.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
+	require.NoError(t, src.ResetSequence("seq", 5))
+
+	dst, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer dst.Close()
+	require.NoError(t, src.Flush(t.Context(), dst))
+	require.NoError(t, src.Put(kv.HeaderNumber, []byte("BBBB"), []byte("src")))
+	require.NoError(t, dst.Put(kv.HeaderNumber, []byte("CCCC"), []byte("dst")))
+	require.NoError(t, dst.Put(kv.HeaderNumber, []byte("AAAA"), []byte("dst")))
+
+	get := func(tx kv.Getter, key string) []byte {
+		v, err := tx.GetOne(kv.HeaderNumber, []byte(key))
+		require.NoError(t, err)
+		return v
+	}
+	require.Equal(t, []byte("dst"), get(dst, "AAAA"))
+	require.Equal(t, []byte("value1"), get(src, "AAAA"), "a write to the destination must not reach the source")
+	require.Nil(t, get(dst, "BBBB"), "a write to the source after the flush must not reach the destination")
+	require.Nil(t, get(src, "CCCC"))
+
+	var dups []string
+	require.NoError(t, dst.ForEach(kv.TblAccountVals, nil, func(k, v []byte) error {
+		dups = append(dups, string(k)+"="+string(v))
+		return nil
+	}))
+	require.Equal(t, []string{"key1=value1.1", "key1=value1.2"}, dups)
+	seq, err := dst.ReadSequence("seq")
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), seq)
+}
