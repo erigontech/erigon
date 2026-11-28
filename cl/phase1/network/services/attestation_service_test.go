@@ -1677,3 +1677,88 @@ func TestAttestationHandsThePoolTheSignatureTheBatchVerifierDecompressed(t *test
 		t.Fatal("attestation was not added to the pool")
 	}
 }
+
+func (t *attestationTestSuite) TestAttestationGossipSlotWindow() {
+	const (
+		genesisTime = 1_000_000
+		disparity   = 500 * time.Millisecond
+		inMargin    = 400 * time.Millisecond
+		pastMargin  = 600 * time.Millisecond
+	)
+	farFuture := clparams.MainnetBeaconConfig.FarFutureEpoch
+	for _, tc := range []struct {
+		name          string
+		slotsPerEpoch uint64
+		denebEpoch    uint64
+		electra       bool
+		slot          uint64
+		nowSlot       uint64
+		nowOffset     time.Duration
+		inWindow      bool
+	}{
+		{name: "capella within range", denebEpoch: farFuture, slot: 288, nowSlot: 320, inWindow: true},
+		{name: "capella previous epoch beyond range", denebEpoch: farFuture, slot: 288, nowSlot: 351},
+		{name: "capella range end within disparity", denebEpoch: farFuture, slot: 288, nowSlot: 321, nowOffset: inMargin, inWindow: true},
+		{name: "capella range end past disparity", denebEpoch: farFuture, slot: 288, nowSlot: 321, nowOffset: pastMargin},
+		{name: "capella future slot", denebEpoch: farFuture, slot: 288, nowSlot: 287},
+		{name: "deneb previous epoch beyond range", slot: 288, nowSlot: 351, inWindow: true},
+		{name: "deneb current epoch", slot: 320, nowSlot: 351, inWindow: true},
+		{name: "deneb two epochs old within disparity", slot: 319, nowSlot: 352, nowOffset: inMargin, inWindow: true},
+		{name: "deneb two epochs old past disparity", slot: 319, nowSlot: 352, nowOffset: pastMargin},
+		{name: "deneb future slot within disparity", slot: 288, nowSlot: 288, nowOffset: -inMargin, inWindow: true},
+		{name: "deneb future slot past disparity", slot: 288, nowSlot: 288, nowOffset: -pastMargin},
+		{name: "first deneb epoch accepts previous capella epoch", denebEpoch: 10, slot: 288, nowSlot: 340, inWindow: true},
+		{name: "electra previous epoch beyond range", electra: true, slot: 288, nowSlot: 351, inWindow: true},
+		{name: "electra two epochs old past disparity", electra: true, slot: 319, nowSlot: 352, nowOffset: pastMargin},
+		{name: "16-slot epoch two epochs old within disparity", slotsPerEpoch: 16, slot: 143, nowSlot: 160, nowOffset: inMargin, inWindow: true},
+		{name: "16-slot epoch two epochs old past disparity", slotsPerEpoch: 16, slot: 143, nowSlot: 160, nowOffset: pastMargin},
+		{name: "8-slot epoch previous epoch", slotsPerEpoch: 8, slot: 8, nowSlot: 23, inWindow: true},
+		{name: "8-slot epoch two epochs old within range", slotsPerEpoch: 8, slot: 8, nowSlot: 31},
+	} {
+		t.Run(tc.name, func() {
+			cfg := clparams.MainnetBeaconConfig
+			if tc.slotsPerEpoch != 0 {
+				cfg.SlotsPerEpoch = tc.slotsPerEpoch
+			}
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = tc.denebEpoch
+			cfg.ElectraForkEpoch = farFuture
+			if tc.electra {
+				cfg.ElectraForkEpoch = 0
+			}
+			cfg.FuluForkEpoch = farFuture
+			cfg.GloasForkEpoch = farFuture
+			now := time.Unix(int64(genesisTime+cfg.SecondsPerSlot*tc.nowSlot), 0).Add(tc.nowOffset)
+			clock := eth_clock.NewEthereumClockWithNow(genesisTime, common.Hash{}, &cfg, func() time.Time { return now })
+			netCfg := &clparams.NetworkConfig{AttestationPropagationSlotRange: 32, MaximumGossipClockDisparity: clparams.ConfigDurationMSec(disparity)}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			verifier := NewBatchSignatureVerifier(ctx, nil)
+			service := NewAttestationService(ctx, t.mockForkChoice, t.aggregationPool, clock, t.syncedData, &cfg, netCfg, t.emitters, verifier)
+
+			data := *attData
+			data.Slot = tc.slot
+			data.Target.Epoch = tc.slot / cfg.SlotsPerEpoch
+			msg := &AttestationForGossip{ImmediateProcess: true}
+			if tc.electra {
+				msg.SingleAttestation = &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: 1, Data: &data}
+			} else {
+				attestation := *att
+				attestation.Data = &data
+				msg.Attestation = &attestation
+			}
+
+			err := service.ProcessMessage(ctx, common.NewUint64(1), msg)
+
+			t.Require().Error(err)
+			if tc.inWindow {
+				t.Require().NotContains(err.Error(), "not in propagation range")
+				return
+			}
+			t.Require().ErrorIs(err, ErrIgnore)
+			t.Require().ErrorContains(err, "not in propagation range")
+		})
+	}
+}

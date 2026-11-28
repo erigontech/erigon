@@ -64,6 +64,32 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	return state.PreviousEpoch(headState), currEpoch
 }
 
+// inGossipSlotWindow applies the [IGNORE] slot window of beacon_attestation_{subnet_id}, with both ends widened by
+// MAXIMUM_GOSSIP_CLOCK_DISPARITY. Before Deneb the slot must be within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots.
+// From Deneb (EIP-7045) the slot must not be in the future and its epoch must be the current or the previous one. The
+// rule follows the fork of the current epoch, because the spec defines it relative to the current time.
+func (s *attestationService) inGossipSlotWindow(slot, currentSlot uint64) bool {
+	// The disparity is shorter than a slot, so a slot after the next one is always in the future. Checking that first
+	// also keeps the slot arithmetic below from overflowing.
+	if slot > currentSlot+1 {
+		return false
+	}
+	endSlot := slot + s.netCfg.AttestationPropagationSlotRange + 1
+	if s.beaconCfg.GetCurrentStateVersion(currentSlot/s.beaconCfg.SlotsPerEpoch) >= clparams.DenebVersion {
+		endSlot = (slot/s.beaconCfg.SlotsPerEpoch + 2) * s.beaconCfg.SlotsPerEpoch
+	}
+	if slot <= currentSlot && currentSlot < endSlot {
+		return true
+	}
+	if currentSlot > endSlot {
+		return false
+	}
+	disparity := time.Duration(s.netCfg.MaximumGossipClockDisparity)
+	now := s.ethClock.Now()
+	return !now.Add(disparity).Before(s.ethClock.GetSlotTime(slot)) &&
+		!now.Add(-disparity).After(s.ethClock.GetSlotTime(endSlot))
+}
+
 func beaconCommittee(
 	fc forkchoice.ForkChoiceStorageReader,
 	syncedData synced_data.SyncedData,
@@ -304,10 +330,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		data = att.Attestation.Data
 	}
 
-	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
-	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
 	currentSlot := s.ethClock.GetCurrentSlot()
-	if currentSlot < slot || currentSlot > slot+s.netCfg.AttestationPropagationSlotRange {
+	if !s.inGossipSlotWindow(slot, currentSlot) {
 		return fmt.Errorf("not in propagation range: %w", ErrIgnore)
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
