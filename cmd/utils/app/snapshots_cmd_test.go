@@ -2040,7 +2040,7 @@ func TestDuVerboseCaplinTables(t *testing.T) {
 	os.Stdout = out
 	defer func() { os.Stdout = stdout }()
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(t.Context(), []string{"erigon", "seg", "du", "--datadir", dirs.DataDir, "-v", "--json"}))
+	require.NoError(t, app.Run(t.Context(), []string{"erigon", "seg", "du", "--log.dir.disable", "--datadir", dirs.DataDir, "-v", "--json"}))
 	data, err := os.ReadFile(out.Name())
 	require.NoError(t, err)
 	var r duResult

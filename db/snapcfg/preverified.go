@@ -14,9 +14,9 @@ import (
 func PreverifiedItemsForDatadir(dirs *datadir.Dirs, chainName string) (PreverifiedItems, error) {
 	data, err := os.ReadFile(dirs.PreverifiedPath())
 	if err == nil {
-		items, err := ParseToml(data)
-		if err != nil {
-			return nil, fmt.Errorf("parse manifest: %w", err)
+		items, parseErr := ParseToml(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse manifest: %w", parseErr)
 		}
 		return items, nil
 	}
