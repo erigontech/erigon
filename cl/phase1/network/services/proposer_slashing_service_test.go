@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -131,6 +132,14 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 			Signature: mockMsg.Header2.Signature,
 		},
 	}
+	malformedMsgFromSeenProposer := &cltypes.ProposerSlashing{
+		Header1: mockMsg.Header1,
+		Header2: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{Slot: 2, ProposerIndex: mockProposerIndex},
+			Signature: mockMsg.Header2.Signature,
+		},
+	}
+
 	tests := []struct {
 		name     string
 		mock     func()
@@ -140,13 +149,13 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		errIsNot error
 	}{
 		{
-			name: "ignore proposer slashing",
+			name: "reject malformed API slashing from a seen proposer",
 			mock: func() {
 				t.proposerSlashingService.seenProposers.Store(mockProposerIndex, struct{}{})
 			},
-			msg:     mockMsg,
-			wantErr: true,
-			errIs:   ErrIgnore,
+			msg:      malformedMsgFromSeenProposer,
+			wantErr:  true,
+			errIsNot: ErrIgnore,
 		},
 		{
 			name: "reject invalid headers with signatures already in pool",
@@ -292,17 +301,52 @@ func TestProposerSlashingServiceAcceptsSpecSignedHeaders(t *testing.T) {
 	require.True(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)))
 }
 
-func TestProposerSlashingServiceIgnoresMalformedAfterAccepted(t *testing.T) {
+func TestProposerSlashingServiceRejectsMalformedAfterAccepted(t *testing.T) {
 	service, operationsPool, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
 	valid := signedSlashing(proposerIndex, common.Hash{1}, common.Hash{2})
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, valid))
 
 	malformed := signedSlashing(proposerIndex, common.Hash{3}, common.Hash{4})
 	malformed.Header2.Header.Slot++
-	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, malformed), ErrIgnore)
+	err := service.ProcessMessage(t.Context(), nil, malformed)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
 	require.Len(t, operationsPool.ProposerSlashingsPool.Raw(), 1)
 	require.True(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(valid)))
 	require.False(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(malformed)))
+}
+
+func TestProposerSlashingServiceRejectsInvalidSignatureAfterAccepted(t *testing.T) {
+	service, operationsPool, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
+	valid := signedSlashing(proposerIndex, common.Hash{1}, common.Hash{2})
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, valid))
+
+	invalidSignature := signedSlashing(proposerIndex, common.Hash{3}, common.Hash{4})
+	invalidSignature.Header2.Signature = invalidSignature.Header1.Signature
+	err := service.ProcessMessage(t.Context(), nil, invalidSignature)
+	require.ErrorContains(t, err, "invalid signature")
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Len(t, operationsPool.ProposerSlashingsPool.Raw(), 1)
+	require.False(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(invalidSignature)))
+}
+
+func TestProposerSlashingServiceIgnoresSeenProposerOnGossip(t *testing.T) {
+	service, _, proposerIndex, signedSlashing := newSpecSignedProposerSlashingTest(t, 1)
+	ctx := serviceinterface.WithGossipPeer(t.Context(), "forwarder")
+	first := signedSlashing(proposerIndex, common.Hash{1}, common.Hash{2})
+	require.NoError(t, service.ProcessMessage(ctx, nil, first))
+
+	var head *state.CachingBeaconState
+	require.NoError(t, service.syncedDataManager.ViewHeadState(func(s *state.CachingBeaconState) error {
+		var err error
+		head, err = s.Copy()
+		return err
+	}))
+	require.NoError(t, head.SetValidatorSlashed(int(proposerIndex), true))
+	require.NoError(t, service.syncedDataManager.OnHeadState(head))
+
+	second := &cltypes.ProposerSlashing{Header1: first.Header2, Header2: first.Header1}
+	require.ErrorIs(t, service.ProcessMessage(ctx, nil, second), ErrIgnore)
 }
 
 func TestProposerSlashingServiceKeepsAcceptedProposerAfterManyOthers(t *testing.T) {

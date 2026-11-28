@@ -565,7 +565,7 @@ func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, 
 	slashing.Attestation_2.AttestingIndices.Append(0)
 	slashingDone := make(chan error, 1)
 	go func() {
-		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(slashing, true)
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(slashing, true, false)
 	}()
 	select {
 	case err := <-slashingDone:

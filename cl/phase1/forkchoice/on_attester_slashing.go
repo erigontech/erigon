@@ -33,7 +33,8 @@ import (
 
 var ErrAttesterSlashingEmptyIntersection = errors.New("attester slashing has an empty attesting indices intersection")
 
-func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
+// OnAttesterSlashing ignores an already known slashing without validating it, unless validateKnown is set.
+func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test, validateKnown bool) error {
 	if attesterSlashing == nil ||
 		attesterSlashing.Attestation_1 == nil ||
 		attesterSlashing.Attestation_2 == nil ||
@@ -44,7 +45,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if _, err := attesterSlashingIntersection(attesterSlashing); err != nil {
 		return err
 	}
-	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
+	if !validateKnown && f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
 		return ErrIgnore
 	}
 	f.mu.Lock()
@@ -56,15 +57,15 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		if err != nil {
 			log.Debug("[OnAttesterSlashing] failed to load the justified state", "err", err)
 		}
-		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
+		return f.onProcessAttesterSlashing(attesterSlashing, s, test, validateKnown)
 	}
 
 	return f.syncedDataManager.ViewHeadState(func(s *state.CachingBeaconState) error {
-		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
+		return f.onProcessAttesterSlashing(attesterSlashing, s, test, validateKnown)
 	})
 }
 
-func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, s *state.CachingBeaconState, test bool) error {
+func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, s *state.CachingBeaconState, test, validateKnown bool) error {
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
@@ -72,7 +73,8 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	if err != nil {
 		return err
 	}
-	if f.allAttesterSlashingIndicesSeen(intersection) {
+	seen := f.allAttesterSlashingIndicesSeen(intersection)
+	if seen && !validateKnown {
 		return ErrIgnore
 	}
 	if attestation1.Data == nil || attestation2.Data == nil {
@@ -134,21 +136,26 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		}
 	}
 
-	var anySlashed bool
+	var anySlashable bool
 	for _, index := range intersection {
-		f.setUnequivocating(index)
-		if !anySlashed {
+		if !seen {
+			f.setUnequivocating(index)
+		}
+		if !anySlashable {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {
 				return fmt.Errorf("unable to retrieve state: %w", err)
 			}
 			if v.IsSlashable(state.Epoch(s)) {
-				anySlashed = true
+				anySlashable = true
 			}
 		}
 	}
-	if !anySlashed {
+	if !anySlashable {
 		return errors.New("no slashable validators in intersection")
+	}
+	if seen {
+		return ErrIgnore
 	}
 	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
 	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })

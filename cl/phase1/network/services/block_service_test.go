@@ -129,7 +129,7 @@ func (c *doneObservedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
+func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool, bool) error {
 	return s.err
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -77,12 +78,19 @@ func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
 
-	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
-	pIndex := msg.Header1.Header.ProposerIndex
-	if _, ok := s.seenProposers.Load(pIndex); ok {
-		return ErrIgnore
+	if msg == nil || msg.Header1 == nil || msg.Header1.Header == nil {
+		return errors.New("proposer slashing is missing signed_header_1 or its message")
 	}
 	h1 := msg.Header1.Header
+	pIndex := h1.ProposerIndex
+	if _, fromGossip := serviceinterface.GossipPeer(ctx); fromGossip {
+		if _, seen := s.seenProposers.Load(pIndex); seen {
+			return ErrIgnore
+		}
+	}
+	if msg.Header2 == nil || msg.Header2.Header == nil {
+		return errors.New("proposer slashing is missing signed_header_2 or its message")
+	}
 	h2 := msg.Header2.Header
 
 	// Verify header slots match

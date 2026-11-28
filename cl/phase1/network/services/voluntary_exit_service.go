@@ -114,14 +114,10 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	_, seen := s.seen.Get(voluntaryExit.ValidatorIndex)
-	if seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		if msg.ImmediateVerification {
-			if err := s.syncedDataManager.ViewHeadState(checkPendingWithdrawals); err != nil {
-				return err
-			}
+	if !msg.ImmediateVerification {
+		if _, seen := s.seen.Get(voluntaryExit.ValidatorIndex); seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+			return ErrIgnore
 		}
-		return ErrIgnore
 	}
 
 	currentEpoch := uint64(0)
@@ -210,27 +206,35 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return err
 	}
 
+	stored := false
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures:  [][]byte{msg.SignedVoluntaryExit.Signature[:]},
 		SignRoots:   [][]byte{signingRoot[:]},
 		Pks:         [][]byte{pk[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.storeVerifiedExit(msg.SignedVoluntaryExit)
+			stored = s.storeVerifiedExit(msg.SignedVoluntaryExit)
 		},
 	}
 
-	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	if !msg.ImmediateVerification {
+		return s.batchSignatureVerifier.VerifyVoluntaryExit(ctx, aggregateVerificationData)
 	}
-
-	return s.batchSignatureVerifier.VerifyVoluntaryExit(ctx, aggregateVerificationData)
+	if err := s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData); err != nil {
+		return err
+	}
+	// Only ImmediateVerification runs F before it returns; the batch path runs F on another goroutine.
+	if !stored {
+		return ErrIgnore
+	}
+	return nil
 }
 
-func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {
+func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) bool {
 	if seen, _ := s.seen.ContainsOrAdd(exit.VoluntaryExit.ValidatorIndex, struct{}{}); seen {
-		return
+		return false
 	}
 	s.operationsPool.VoluntaryExitsPool.Insert(exit.VoluntaryExit.ValidatorIndex, exit)
 	s.emitters.Operation().SendVoluntaryExit(exit)
+	return true
 }

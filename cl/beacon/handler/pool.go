@@ -416,7 +416,7 @@ func (a *ApiHandler) readAttesterSlashing(w http.ResponseWriter, r *http.Request
 }
 
 func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
-	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); errors.Is(err, forkchoice.ErrIgnore) {
+	if err := a.forkchoiceStore.OnAttesterSlashing(req, false, true); errors.Is(err, forkchoice.ErrIgnore) {
 		pooled, ok := a.operationsPool.AttesterSlashingsPool.Get(pool.ComputeKeyForAttesterSlashing(req))
 		if !ok {
 			w.WriteHeader(http.StatusOK)
