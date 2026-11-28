@@ -159,6 +159,60 @@ func TestCheckSendersFailsForWrongSender(t *testing.T) {
 	require.NoError(t, rawdb.WriteSenders(tx, header.Hash(), 0, []common.Address{{2}}))
 
 	require.ErrorContains(t, checkSenders(t.Context(), tx, br, chain2.AllProtocolChanges, 0, log.New()), "wrong sender")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	err = checkSenders(ctx, tx, cancelAfterSenderRead{br, cancel}, chain2.AllProtocolChanges, 0, log.New())
+	require.ErrorContains(t, err, "wrong sender")
+	require.ErrorIs(t, err, common.ErrStopped)
+}
+
+type cancelAfterSenderRead struct {
+	dbservices.FullBlockReader
+	cancel context.CancelFunc
+}
+
+func (r cancelAfterSenderRead) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, height uint64) (*types.Block, []common.Address, error) {
+	block, senders, err := r.FullBlockReader.BlockWithSenders(ctx, tx, hash, height)
+	r.cancel()
+	return block, senders, err
+}
+
+func TestCheckSendersReturnsMissingBodyError(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	useTestBlockReader(t, dirs)
+	br, _ := blocksIO(db, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header := &types.Header{Difficulty: *uint256.NewInt(1)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 0))
+
+	require.ErrorContains(t, checkSenders(t.Context(), tx, br, chain2.AllProtocolChanges, 0, log.New()), "missing block body")
+}
+
+func TestMdbxCommandsReturnOpenErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Run("f_to_mdbx", func(t *testing.T) {
+		previous := file
+		file = missing
+		t.Cleanup(func() { file = previous })
+		require.ErrorIs(t, fToMdbx(t.Context(), log.New(), filepath.Join(t.TempDir(), "output")), os.ErrNotExist)
+	})
+	t.Run("f_to_mdbx destination", func(t *testing.T) {
+		previous := file
+		file = filepath.Join(t.TempDir(), "input")
+		t.Cleanup(func() { file = previous })
+		require.NoError(t, os.WriteFile(file, nil, 0o600))
+		notDir := filepath.Join(t.TempDir(), "not-a-dir")
+		require.NoError(t, os.WriteFile(notDir, nil, 0o600))
+		require.Error(t, fToMdbx(t.Context(), log.New(), notDir))
+	})
+	t.Run("mdbx_top_dup", func(t *testing.T) {
+		require.Error(t, mdbxTopDup(t.Context(), missing, kv.TxLookup, log.New()))
+	})
 }
 
 func TestCompareStatesReturnsDBOpenError(t *testing.T) {

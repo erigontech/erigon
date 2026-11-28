@@ -146,7 +146,10 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
-	db := dbOpts.MustOpen()
+	db, err := dbOpts.Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 
 	cnt := map[string]int{}
@@ -321,12 +324,16 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	file, err := os.Open(file)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer file.Close()
 
 	dstOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(to).WriteMap(dbWriteMap)
-	dst := dstOpts.MustOpen()
+	dst, err := dstOpts.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1

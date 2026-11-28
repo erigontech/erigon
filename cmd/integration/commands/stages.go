@@ -670,9 +670,14 @@ func resetExec(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, logge
 	return dbstate.CompleteExecReset(dirs, logger)
 }
 
-func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, chainConfig *chain2.Config, fromBlock uint64, logger log.Logger) error {
+func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, chainConfig *chain2.Config, fromBlock uint64, logger log.Logger) (err error) {
 	secp256k1.ContextForThread(1)
 	wrongSenders := 0
+	defer func() {
+		if wrongSenders > 0 {
+			err = errors.Join(err, fmt.Errorf("%d wrong senders", wrongSenders))
+		}
+	}()
 	for i := fromBlock; ; i++ {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return err
@@ -687,6 +692,9 @@ func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, 
 		withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
 		if err != nil {
 			return err
+		}
+		if withoutSenders == nil {
+			return fmt.Errorf("missing block body at block %d", i)
 		}
 		withoutSenders.Body().SendersFromTxs() // remove senders info from txs
 		txs := withoutSenders.Transactions()
@@ -711,9 +719,6 @@ func checkSenders(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, 
 		if i%10 == 0 {
 			logger.Info("checked", "block", i)
 		}
-	}
-	if wrongSenders > 0 {
-		return fmt.Errorf("%d wrong senders", wrongSenders)
 	}
 	return nil
 }
