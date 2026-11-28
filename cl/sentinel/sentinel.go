@@ -301,13 +301,14 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 			entry.Address = peerInfo.Addrs[0].String()
 		}
 		entry.Pid = peerInfo.ID.String()
-		entry.State = "connected"
-		if s.p2p.Host().Network().Connectedness(p) != network.Connected {
-			entry.State = "disconnected"
-		}
-		conns := openConns(s.p2p.Host().Network(), p)
-		if len(conns) == 0 {
-			conns = s.p2p.Host().Network().ConnsToPeer(p)
+		// One snapshot gives the state and the direction. Relay is disabled, so a peer is connected when it has
+		// an open connection. A closed connection stays listed until libp2p removes it, so the direction comes
+		// from the first open one, or from the listed ones when none is open.
+		conns := s.p2p.Host().Network().ConnsToPeer(p)
+		entry.State = "disconnected"
+		if i := slices.IndexFunc(conns, func(c network.Conn) bool { return !c.IsClosed() }); i >= 0 {
+			entry.State = "connected"
+			conns = conns[i:]
 		}
 		if peerIsInbound(conns) {
 			entry.Direction = "inbound"
